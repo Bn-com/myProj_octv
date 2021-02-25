@@ -1,0 +1,92 @@
+global proc RZPFCreateCurvePath(string $curve)
+{
+/*
+$curve = "VRAR_stern01_curv";
+
+*/
+
+
+$listS = `listRelatives -s $curve ` ;
+
+
+$list = `listConnections -d 1  $listS[0]`;
+$listByType = sort (`ls -type pointOnCurveInfo $list`);
+string $follow[];
+string $grpF[] ;
+
+
+for ($i = 0 ; $i < size( $listByType) ; $i++)
+	{
+	float $maxValue = `getAttr ($listByType[$i] + ".parameter")`;
+	$nameG = substituteAllString( $listByType[$i], "_poc","_pGrp") ;
+	$grp = `group -em -n $nameG`;
+	$nameJ = substituteAllString( $listByType[$i], "_poc","_pJnt") ;
+	$jnt = `createNode -n $nameJ joint`;
+	parent $jnt $grp;
+	$NameMoPath  = substituteAllString( $listByType[$i], "_poc","_mPath") ;
+	select $grp $curve ;
+	$test = `pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector"  -inverseUp false -inverseFront false -bank false -curve $curve -name $NameMoPath -worldUpVector 1 0 0 $grp`;
+	print $test ;
+	$moPath = `rename $test $NameMoPath`;
+	$listT = `listConnections $moPath`;
+	$listAnim = `ls -type animCurve $listT`;
+	delete $listAnim ;
+	$follow[$i] = $moPath ;
+	$grpF[$i] = $grp ;
+
+    }
+
+$last =  size( $listByType) -1 ;
+addAttr -ln "anim"  -at double  -min 0 -max 1 -dv 1 ($grpF[$last]);
+setAttr -e-keyable true ($grpF[$last] +".anim");
+$animA = ($grpF[$last] +".anim") ;
+
+	for ($i = 1 ; $i < size( $listByType) ; $i++)
+	{
+	float $maxValue = `getAttr ($listByType[$i] + ".parameter")`;
+	$clampName  = substituteAllString( $listByType[$i], "_poc","_clamp") ;
+	$clamp = `createNode -n $clampName clamp`;
+	connectAttr $animA ($clamp +".inputR") ;
+	setAttr -l 1 ($clamp +".minR");
+	setAttr -l 1 ($clamp +".maxR") $maxValue ;
+	connectAttr ($clamp +".outputR") ($follow[$i]+".uValue") ;
+
+
+
+    }
+
+for ($i = 0 ; $i < size( $listByType) ; $i++)
+	{
+
+	$setName=substituteAllString( $listByType[$i], "_poc","_animScale") ;
+	$setR = `createNode -n $setName animCurveTU  `;
+
+
+	connectAttr $animA ($setR + ".input") ;
+
+
+	$j = $i + 1 ;
+	float $minValue = `getAttr ($listByType[$i] + ".parameter")`;
+		float $maxValue ;
+
+		if ($i <  $last )
+		{
+		 $maxValue = `getAttr ($listByType[$j] + ".parameter")`;
+		}else{
+		$maxValue = 1 ;
+		}
+
+	setKeyframe -v 0 -time $minValue $setR ;
+	setKeyframe -v 1 -time $maxValue $setR ;
+	selectKey -clear ;
+	selectKey -add -k -t $minValue -t $maxValue $setR ;
+	keyTangent -itt plateau -ott plateau;
+
+	connectAttr -f ($setR +".output") ($grpF[$i] +".scaleX") ;
+	connectAttr -f ($setR +".output") ($grpF[$i] +".scaleY") ;
+	connectAttr -f ($setR +".output") ($grpF[$i] +".scaleZ") ;
+    }
+
+
+
+}

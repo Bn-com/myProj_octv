@@ -1,0 +1,190 @@
+///////////////////////////////////////////////////////////////////////////////////
+global proc string flowfieldPaintGetArray(string $surface)
+{
+	string $type = `nodeType $surface`;
+
+	if (($type == "nurbsSurface") || ($type == "mesh"))
+	{
+		// check whether surface is connected to a flowfield node
+
+		string $nodes[];
+
+		if ($type == "nurbsSurface")
+			$nodes = `listConnections -shapes true ($surface + ".worldSpace[0]")`;
+		else
+			$nodes = `listConnections -shapes true ($surface + ".worldMesh[0]")`;
+
+		int $exists = false;
+
+		for ($node in $nodes)
+			if (`nodeType $node` == "flowfield")
+			{
+				$exists = true;
+				break;
+			}
+
+		if ($exists)
+		{
+			int $uSamples = `getAttr ($node + ".uSamples")`;
+			int $vSamples = `getAttr ($node + ".vSamples")`;
+
+			// return the sample array of currently selected attribute
+
+			int $index = `optionMenuGrp -q -select FlowFieldPaintToolAttrOptionMenu`;
+			string $value = `optionMenuGrp -q -value FlowFieldPaintToolAttrOptionMenu`;
+
+			string $attr = $node + "." + $value;
+
+			string $fullAttr = "";
+
+//			if (($value == "direction") || ($value == "secDirection"))
+			if ($value == "direction")
+				$fullAttr += " -direction " + $attr + "Samples";
+
+			if ($attr != "")
+				$fullAttr += " -grid " + $uSamples + " " + $vSamples + " " + $attr + "Samples";
+			
+			//print ($fullAttr + "\n");
+			return $fullAttr;
+		}
+	}
+
+	return "";
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////
+// Create a script job to mark a sample array dirty when it has been changed.
+// This works because Artisan Paint will make a setAttr call whenever there is 
+// change effected on the active sample.
+///////////////////////////////////////////////////////////////////////////////////
+/*
+global proc flowfieldCreateAttrChangeScriptJob()
+{
+	global int $HairAttrChangeScriptJobID;
+	global string $HairPaintToolAttrOptionMenuItem[];
+
+	// delete the previous script job
+
+	scriptJob -kill $HairAttrChangeScriptJobID;
+
+	// get the attribute
+	
+	int $index = `optionMenuGrp -q -select HairPaintToolAttrOptionMenu`;
+	string $attr = `menuItem -q -docTag $HairPaintToolAttrOptionMenuItem[$index - 1]`;
+
+	if ($attr != "")
+		$HairAttrChangeScriptJobID = `scriptJob -attributeChange ($attr + "Samples") ("hairSetAttrDirty " + $attr)`;
+}
+*/
+
+///////////////////////////////////////////////////////////////////////////////////
+global proc FlowFieldAttrChangeCB()
+{
+	// force the calling of flowfieldPaintGetArray()
+
+	artUserPaintCtx -e -getArrayAttrCommand "" FlowFieldPaintToolCtx; 
+	artUserPaintCtx -e -getArrayAttrCommand "flowfieldPaintGetArray" FlowFieldPaintToolCtx;
+
+	// create a script to set flag to dirty when samples change
+
+//	flowfieldCreateAttrChangeScriptJob();
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+global proc flowfieldPaintToolSetup(string $context)
+{
+	// force the calling of flowfieldPaintGetArray() and set painttype to texture
+
+	artUserPaintCtx -e -getArrayAttrCommand "" $context; 
+	artUserPaintCtx -e -getArrayAttrCommand "flowfieldPaintGetArray" 
+//					-painttype forceTexture
+					$context;
+
+	// create the GUI
+
+	if (!`window -exists FlowFieldPaintToolGUI`)
+	{
+		// create the flow field paint tool GUI
+
+		window -resizeToFitChildren true
+			   -height 300
+			   -width 170
+			   -title "Flow Field Paint Tool"
+			   -iconName "Flow Field Paint Tool"
+			   -retain
+			   FlowFieldPaintToolGUI;
+
+		string $form = `columnLayout -rowSpacing 3 -adjustableColumn true`;
+        
+			optionMenuGrp -label "Flow Field Attr: "
+						  -columnWidth2 70 100
+						  -columnAttach2 right left
+						  -changeCommand FlowFieldAttrChangeCB 
+						  FlowFieldPaintToolAttrOptionMenu;
+
+				menuItem -label "direction";				
+				menuItem -label "secDirection";				
+				menuItem -label "magnitude";			
+
+		setParent ..;
+
+		showWindow;
+	}
+	else
+		// make window visible
+		window -edit -visible true FlowFieldPaintToolGUI;
+
+	// create a script to set flag to dirty when samples change
+
+//	flowfieldCreateAttrChangeScriptJob();
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+global proc flowfieldPaintToolCleanup(string $context)
+{
+//	global int $HairAttrChangeScriptJobID;
+
+	if (`window -exists FlowFieldPaintToolGUI`)
+		deleteUI FlowFieldPaintToolGUI;
+
+	// delete the attribute change script job
+
+//	scriptJob -kill $HairAttrChangeScriptJobID;
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+global proc flowfieldCreatePaintToolCtx()
+{
+	if (!`artUserPaintCtx -exists FlowFieldPaintToolCtx`)
+	{
+		// create a user paint context
+
+		artUserPaintCtx -i1 "flowfieldPaint.xpm" 
+					 -fullpaths true 
+//					 -sps true 		// set the flag that this is a special case for periodic surface
+					 -toolCleanupCmd "flowfieldPaintToolCleanup"
+					 -initializeCmd ""
+					 -finalizeCmd ""
+					 -setValueCommand ""
+					 -getValueCommand ""
+					 -cc ""
+					 -getSurfaceCommand ""
+					 FlowFieldPaintToolCtx;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+global proc flowfieldPaintTool(int $showToolProperties)
+{
+	flowfieldCreatePaintToolCtx();
+
+	artUserPaintCtx -edit
+				 -toolSetupCmd "flowfieldPaintToolSetup"
+				 FlowFieldPaintToolCtx;
+
+	setToolTo FlowFieldPaintToolCtx;
+
+	if ($showToolProperties)
+		toolPropertyWindow;
+}

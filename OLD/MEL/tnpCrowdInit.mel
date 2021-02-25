@@ -1,0 +1,113 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// COPYRIGHT (c) 2003 IDMT CHINA
+//
+// Author : Tran Nguyen Phuong <tran@idmt.org.cn>
+//
+// Date: 12.07.2003
+// 
+// Description:
+//
+// INPUT: 
+//		+ $boundPlane: 
+//		+ $noOfParticles: number of particles to create
+//		+ $staticPercent: % static particles (0->100)
+//		  (% moving particles = 100 - staticPercent)
+//		+ $collisionDist: the acceptable distance between any two particles
+//
+// OUTPUT:
+//		+ locators or nurbsCurves are created and placed within 
+//		  the given boundary (a plane)
+//
+// NOTE:
+//		+ $boundPlane MUST be axis-aligned and lies on X-Z plane 
+//
+proc int tnpCollided(vector $p, vector $pos[], float $dist){
+	for($i=0; $i<size($pos); $i++) 
+		if(mag($p-$pos[$i]) <= $dist) return true;
+
+	return false;		
+}
+global proc tnpCrowdInit(string $boundPlane, 
+//						 int	$noOfParticles, 
+//						 int	$staticPercent, 
+						 int	$noOfLocators,
+						 int	$collisionDist){
+
+//	if ($staticPercent < 0 || $staticPercent > 100 || $noOfParticles < 0) return;
+	if(size($boundPlane) ==0)
+		error "Plz specify a bound plane for the locators";
+
+	float $minX = `getAttr ($boundPlane + ".boundingBoxMinX")`;
+	float $maxX = `getAttr ($boundPlane + ".boundingBoxMaxX")`;
+	float $y	= `getAttr ($boundPlane + ".boundingBoxMinY")`;
+	float $minZ = `getAttr ($boundPlane + ".boundingBoxMinZ")`;
+	float $maxZ = `getAttr ($boundPlane + ".boundingBoxMaxZ")`;
+
+//	int $noOfStatics = floor($noOfParticles * $staticPercent / 100);
+//	int $noOfMovings = $noOfParticles - $noOfStatics;
+	
+	//seed(0);
+	int $cnt = 0;
+	int $noOfStatics = $noOfLocators;
+	int $maxAttempt = 500;
+	vector $pos[];
+	string $locators[]; // store newly created locators
+	// create random locators for static particles
+	while(true){
+		
+		float $rp[] = { rand($minX,$maxX),$y,rand($minZ,$maxZ)};
+		vector $vp = <<$rp[0], $rp[0], $rp[0]>>;
+
+		if(!tnpCollided($vp, $pos, $collisionDist)){
+			
+			$pos[size($pos)] = $vp;
+
+			string $locator[] = eval("spaceLocator -n crowdLocator0");
+			$locators[size($locators)] = $locator[0];
+			
+			vector $rot = <<0, rand(0,360), 0>>;
+			
+			// randomly rotate it
+			eval("xform -ws -rotation " + $rot.x + " " + $rot.y + " " + $rot.z + " " + $locator[0]);
+
+			// translate it to $rp
+			eval("xform -ws -translation " + $rp[0] + " " + $rp[1] + " " + $rp[2] + " " + $locator[0]);
+		}
+		
+		++ $cnt;	
+
+		if( size($pos) == $noOfStatics || $cnt > $maxAttempt){
+			if( $cnt > $maxAttempt){ // print error message and clean up			
+				// perform clean-up
+				for($i=0; $i<size($locators); $i++) delete $locators[$i];	
+				error("Maximum attempt reached! Small bound plane or large no of particles!");
+			}
+			break;
+		}
+	}
+
+	/*
+	for($i=0; $i<$noOfMovings; $i++){
+		int $noOfSpans = rand(3,6);
+		string $cmd = "curve";
+		for($j=0; $j<=$noOfSpans; $j++){
+			float $rp[] = {rand($minX,$maxX),$y,rand($minZ,$maxZ)};
+			$cmd += " -p " + $rp[0] + " " + $rp[1] + " " + $rp[2];
+		}
+		$cmd += " -n crowdLocator";
+		eval($cmd);
+	}*/
+
+	// GROUPING
+	string $group = eval("group -em -n GroupCrowdLocators");
+	for($item in $locators) eval("parent " + $item + " " + $group);
+}

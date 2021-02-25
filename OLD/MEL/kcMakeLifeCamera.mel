@@ -1,0 +1,266 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc kcMakeLifeCamera()
+{
+	if (`window -q -exists kcMakeLifeCameraWnd`)
+		deleteUI -window kcMakeLifeCameraWnd;
+
+	window -title "Make Life Camera" -resizeToFitChildren true kcMakeLifeCameraWnd;
+		
+		string $formLayout = `formLayout`;
+
+			string $child1 = `optionMenu -label "Camera: " kcMLCOptionMenu`;
+
+			string $cameras[] = `listCameras -perspective`;
+			for ($camera in $cameras)
+				menuItem -label $camera -parent kcMLCOptionMenu;
+
+			string $child2 = `button -label "Update Camera" -command kcMLCUpdateCameraCB`;
+
+			string $child3 = `radioButtonGrp -select 2 -numberOfRadioButtons 2 -label "Camera Control:" -label1 "Original" -label2 "Expression"`;
+
+			string $child4 = `button -label "Apply" -command ("kcMLCApplyCB " + $child1 + " " + $child3)`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$child1		top		10
+			-attachForm		$child1		left	85
+
+			-attachForm		$child2		top		10
+			-attachControl	$child2		left	5	$child1
+
+			-attachControl	$child3		top		10	$child1
+			-attachForm		$child3		left	5
+			-attachForm		$child3		right	5
+
+			-attachControl	$child4		top		10	$child3
+			-attachForm		$child4		left	5	
+			-attachForm		$child4		right	5
+		$formLayout;
+
+	showWindow kcMakeLifeCameraWnd;
+}
+
+global proc kcMLCUpdateCameraCB()
+{
+	string $menus[] = `optionMenu -q -itemListLong kcMLCOptionMenu`;
+
+	for ($menu in $menus)
+		deleteUI -menuItem $menu;
+
+	string $cameras[] = `listCameras -perspective`;
+
+	for ($camera in $cameras)
+		menuItem -label $camera -parent kcMLCOptionMenu;
+}
+
+proc string kcMLCUseExpression(string $nodeAttr)
+{
+	string $dest[] = `listConnections -source true -destination false -skipConversionNodes true $nodeAttr`;
+
+	if (size($dest) > 0)
+		if (`nodeType $dest[0]` == "expression")
+			return $dest[0];
+
+	return "";
+}
+
+proc string kcMLCGetSource(string $camera, string $attr)
+{
+	string $dest[] = `listConnections -source true -destination false -plugs true -skipConversionNodes true ($camera + "." + $attr)`;
+
+	if (size($dest) == 0)
+	{
+		// a constant value => create a dummy node to store the constant value
+
+		if (!`objExists ($camera + "Dummy")`)
+			createNode -name ($camera + "Dummy") unknown;
+
+		if (!`attributeExists $attr ($camera + "Dummy")`)
+			addAttr -keyable true -longName $attr -attributeType double ($camera + "Dummy");
+
+		float $value = `getAttr ($camera + "." + $attr)`;
+		setAttr ($camera + "Dummy." + $attr) $value;
+
+		return ($camera + "Dummy." + $attr);
+	}
+	else
+	{
+		// already connected to some other sources
+
+		disconnectAttr $dest[0] ($camera + "." + $attr);
+
+		return $dest[0];
+	}
+}
+
+global proc kcMLCApplyCB(string $cameraOptionMenu, string $controlRadioButton)
+{
+	string $camera = `optionMenu -q -value $cameraOptionMenu`;
+	string $control = `radioButtonGrp -q -select $controlRadioButton`;
+
+	if ($control == 1)
+	{
+		// want to use keyframe to control camera
+
+		if (`objExists $camera`)
+		{
+			string $expression = kcMLCUseExpression($camera + ".rx");
+
+			// revert back to keyframe control if currently controlled by expression
+
+			if ($expression != "")
+			{
+				string $dest[] = `listConnections -source true -destination false -plugs true -skipConversionNodes true ($expression + ".input[0]")`;
+
+				if (`nodeType $dest[0]` == "unknown")
+				{
+					// a constant value
+
+					disconnectAttr ($expression + ".output[0]") ($camera + ".rx");
+
+					float $value = `getAttr $dest[0]`;
+					setAttr ($camera + ".rx") $value;
+				}
+				else
+				{
+					// not a constant value
+
+					connectAttr -force $dest[0] ($camera + ".rx");
+				}
+
+				string $dest[] = `listConnections -source true -destination false -plugs true -skipConversionNodes true ($expression + ".input[1]")`;
+
+				if (`nodeType $dest[0]` == "unknown")
+				{
+					// a constant value
+
+					disconnectAttr ($expression + ".output[1]") ($camera + ".ry");
+
+					float $value = `getAttr $dest[0]`;
+					setAttr ($camera + ".ry") $value;
+				}
+				else
+				{
+					// not a constant value
+
+					connectAttr -force $dest[0] ($camera + ".ry");
+				}
+
+				string $dest[] = `listConnections -source true -destination false -plugs true -skipConversionNodes true ($expression + ".input[2]")`;
+
+				if (`nodeType $dest[0]` == "unknown")
+				{
+					// a constant value
+
+					disconnectAttr ($expression + ".output[2]") ($camera + ".rz");
+
+					float $value = `getAttr $dest[0]`;
+					setAttr ($camera + ".rz") $value;
+				}
+				else
+				{
+					// not a constant value
+
+					connectAttr -force $dest[0] ($camera + ".rz");
+				}
+
+				// delete expression and unknown node
+
+				delete $expression;		// will automatically delete the unknown node
+			}
+			else
+				warning($camera + ".rx is already controlled by original method.");
+		}
+		else
+			error($camera + " does not exist.");
+	}
+	else
+	{
+		// want to use expression to control camera
+
+		if (`objExists $camera`)
+		{
+			// add attributes "shakeAmp", "shakeFreq", "diverge" if not already added
+
+			if (!`attributeExists "shakeAmp" $camera`)
+				addAttr -keyable true -longName "shakeAmp" -shortName "sa" -attributeType double -defaultValue 0.0 $camera;
+
+			if (!`attributeExists "shakeFreq" $camera`)
+				addAttr -keyable true -longName "shakeFreq" -shortName "sf" -attributeType double -minValue 1.0 -defaultValue 10.0 $camera;
+
+			if (!`attributeExists "diverge" $camera`)
+				addAttr -keyable true -longName "diverge" -shortName "dv" -attributeType double -defaultValue 0.0 $camera;
+
+
+			// create expression if not already controlled using expression
+
+			if (kcMLCUseExpression($camera + ".rx") == "")
+			{
+				// keep original selection
+
+				string $selection[] = `ls -selection`;
+
+				// get the sources to rx, ry, rz
+
+				string $source_rx = kcMLCGetSource($camera, "rx");
+				string $source_ry = kcMLCGetSource($camera, "ry");
+				string $source_rz = kcMLCGetSource($camera, "rz");
+
+				// create the expression
+
+				string $exp;
+
+				$exp += $camera + ".rx = " + $source_rx + ";\n";
+				$exp += $camera + ".ry = " + $source_ry + ";\n";
+				$exp += $camera + ".rz = " + $source_rz + ";\n";
+
+				$exp += $camera + ".rx += " + $camera + ".shakeAmp * noise(time * " + $camera + ".shakeFreq);\n";
+				$exp += $camera + ".ry += " + $camera + ".shakeAmp * noise(time * " + $camera + ".shakeFreq);\n";
+				$exp += $camera + ".rz += " + $camera + ".shakeAmp * noise(time * " + $camera + ".shakeFreq);\n";
+
+				$exp += $camera + ".rx += " + $camera + ".diverge;\n";
+				$exp += $camera + ".ry += " + $camera + ".diverge;\n";
+				$exp += $camera + ".rz += " + $camera + ".diverge;\n";
+				 
+				expression -name ($camera + "Exp") -string $exp -object "" -alwaysEvaluate true -unitConversion all;
+
+				// restore original selection
+
+				select $selection;
+			}
+			else
+				warning($camera + ".rx is already controlled by an expression.");
+		}
+		else
+			error($camera + " does not exist.");
+	}
+}
+
+
+////////////////////////////////////////////////////////
+/* sample expression
+
+camera4.rotateX = $source_rx;
+camera4.rotateY = $source_ry;
+camera4.rotateZ = $source_rz;
+
+camera4.rotateX += camera4.shakeAmp * noise(time * camera4.shakeFreq);
+camera4.rotateY += camera4.shakeAmp * noise(time * camera4.shakeFreq);
+camera4.rotateZ += camera4.shakeAmp * noise(time * camera4.shakeFreq);
+
+camera4.rotateX += camera4.deviate; 
+camera4.rotateY += camera4.deviate; 
+camera4.rotateZ += camera4.deviate; 
+
+*/
+////////////////////////////////////////////////////////

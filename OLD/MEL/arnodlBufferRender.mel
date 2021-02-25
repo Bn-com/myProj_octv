@@ -1,0 +1,244 @@
+///////////////////////////////////////////////
+//Author: zhongming 
+//////////////////////////////////////////////
+
+global proc arnodlBufferRender(){
+    
+    string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+
+    int $all = false;
+    
+    if (size($buf) > 1)
+    {
+    	string $rs = `confirmDialog -title "Arnold Buffer Render v0.3   Õπ-Õπ" -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -button "Cancel" -defaultButton "Current Layer" -cancelButton "Cancel" -dismissString "Cancel" `;
+    	if ($rs == "dismiss" || $rs=="Cancel")
+    	{
+    		return;
+    	}
+    	$all = ($rs == "All Renderable Layers");
+    }
+    
+    global string $arnoldLayers[];
+    clear $arnoldLayers;
+    global int $currentLayerIndex;
+    $currentLayerIndex = 0;
+    
+    if ($all)
+    {
+    	for ($layer in $buf)
+    	{
+    		if (`getAttr ($layer + ".renderable")`)
+    		{
+    			$arnoldLayers[size($arnoldLayers)] = $layer;
+    		}
+    	}
+    }
+    else
+    {
+    	$arnoldLayers[size($arnoldLayers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+    }
+    
+    
+    
+    
+    string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+    if ($currentRenderLayer != $arnoldLayers[$currentLayerIndex])
+    {
+    	editRenderLayerGlobals -currentRenderLayer $arnoldLayers[$currentLayerIndex];
+    	
+    }
+
+
+    setAttr  "defaultRenderGlobals.postRenderMel" -type "string" "poseArnodlBufferRender()";
+    
+    setAttr  "defaultRenderGlobals.preRenderMel" -type "string" "";
+    setAttr  "defaultRenderGlobals.postRenderLayerMel" -type "string" "";
+    setAttr  "defaultRenderGlobals.preRenderLayerMel" -type "string" "";
+    
+        
+    RenderViewWindow;
+    
+    int $startFrame = `getAttr defaultRenderGlobals.startFrame`;
+    int $endFrame = `getAttr defaultRenderGlobals.endFrame`;
+    int $total = ($endFrame - $startFrame + 1) * size($arnoldLayers);
+    
+    
+    
+    
+    global string $arnoldBufferWindow;
+    
+    if (`window -exists $arnoldBufferWindow`){
+        deleteUI $arnoldBufferWindow;
+    }
+    
+    
+    $arnoldBufferWindow = `window -t "Arnold Buffer Render v0.3   Õπ-Õπ"`;
+     columnLayout -adj true -cal "center";
+    
+    global string $arnoldProgressControl;
+    $arnoldProgressControl = `progressBar -maxValue $total -width 300`;
+    button -label "Abort Rendering" -backgroundColor 0.8 0.3 0.3 -command "cancelArnoldBufferRender()";
+
+    showWindow $arnoldBufferWindow;
+    scriptJob -runOnce true -uiDeleted $arnoldBufferWindow cancelArnoldBufferRender;
+
+    string $imgDir = `workspace -query -fileRuleEntry "images"`;
+    string $imgDir = `workspace -expandName $imgDir` + "/";
+    string $firstImgNames[] = `renderSettings -firstImageName`;
+    
+
+    if (python(("'" + $firstImgNames[0] + "'.find(':') > -1"))){
+        confirmDialog -title "Confirm" -message "–Ú¡–√˚÷–∫¨”–   :   ,«ÎºÏ≤È "
+        -button "Yes" -button "No" -defaultButton "Yes"
+        -cancelButton "No" -dismissString "No";
+        return;
+    }
+    
+    string $buffer[];
+    int $n=`tokenize $firstImgNames[0] "." $buffer`;
+    
+    
+    string $imageName= $buffer[0];
+    string $currentLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+    int $padding = `getAttr defaultRenderGlobals.ep`;
+    
+    currentTime $startFrame;
+    
+    string $pad = `python ("'%s0%dd' % ('%'," + $padding + ") % "+$startFrame)`;
+        
+    string $path = $imgDir + $currentLayer + "/" + $imageName + "." + $pad;
+        
+        
+    sysFile -makeDir ($imgDir + $currentLayer);
+        
+    renderWindowRender redoPreviousRender renderView;    
+    sysFile -delete ($path + ".iff"); 
+    renderWindowSaveImageCallback "renderView" $path "Maya IFF";
+    catchQuiet(`progressBar -edit -step 1 $arnoldProgressControl`);
+    print ("\nRender out  " + $path + ".iff\n");
+       
+
+}
+
+
+
+	
+	
+global proc poseArnodlBufferRender(){
+    
+    string $imgDir = `workspace -query -fileRuleEntry "images"`;
+    string $imgDir = `workspace -expandName $imgDir` + "/";
+    
+    
+    
+    string $currentLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+    
+    string $firstImgNames[] = `renderSettings -firstImageName`;
+    string $buffer[];
+    int $n=`tokenize $firstImgNames[0] "." $buffer`;
+    
+    
+    string $imageName= $buffer[0];
+    
+    
+    
+    int $padding = `getAttr defaultRenderGlobals.ep`; 
+    
+    int $currentFrame = `currentTime -q` + 1;
+    currentTime $currentFrame;
+    
+    string $pad = `python ("'%s0%dd' % ('%'," + $padding + ") % "+$currentFrame)`;
+    
+    string $path = $imgDir + $currentLayer + "/" + $imageName + "." + $pad;
+
+    int $startFrame = `getAttr defaultRenderGlobals.startFrame`;
+    int $endFrame = `getAttr defaultRenderGlobals.endFrame`;
+
+    
+
+    if ($currentFrame <= $endFrame){
+       
+       renderWindowRender redoPreviousRender renderView;
+       
+       sysFile -delete ($path + ".iff"); 
+ 
+       renderWindowSaveImageCallback "renderView" $path "Maya IFF";
+       global string $arnoldProgressControl;
+       catchQuiet(`progressBar -edit -step 1 $arnoldProgressControl`);
+       print ("\nRender out  " + $path + ".iff\n");
+       
+    }else{
+        
+        global string $arnoldLayers[];
+        
+        global int $currentLayerIndex;
+        $currentLayerIndex++;
+        
+        if ( $currentLayerIndex < size($arnoldLayers)){
+            
+            editRenderLayerGlobals -currentRenderLayer $arnoldLayers[$currentLayerIndex];
+            string $currentLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+            
+            currentTime $startFrame;
+            
+            
+            string $firstImgNames[] = `renderSettings -firstImageName`;
+            string $buffer[];
+            int $n=`tokenize $firstImgNames[0] "." $buffer`;
+            
+            
+            string $imageName= $buffer[0];
+    
+
+            string $pad = `python ("'%s0%dd' % ('%'," + $padding + ") % "+$startFrame)`;
+                
+            string $path = $imgDir + $currentLayer + "/" + $imageName + "." + $pad;
+                
+                
+            
+                
+            renderWindowRender redoPreviousRender renderView;  
+              
+            sysFile -delete ($path + ".iff"); 
+            renderWindowSaveImageCallback "renderView" $path "Maya IFF";
+            global string $arnoldProgressControl;
+            catchQuiet(`progressBar -edit -step 1 $arnoldProgressControl`);
+            print ("\nRender out  " + $path + ".iff\n");
+    
+            
+        }else{
+            global string $arnoldProgressControl;
+            catchQuiet(`progressBar -edit -step 1 $arnoldProgressControl`);
+            cancelArnoldBufferRender();
+        }
+        
+        
+    }
+
+}
+
+
+
+global proc cancelArnoldBufferRender(){
+    
+    setAttr  "defaultRenderGlobals.postRenderMel" -type "string" "";
+    
+    python("import arnold;arnold.AiRenderAbort()");
+    
+
+    global string $arnoldLayers[];
+    global int $currentLayerIndex;
+    clear $arnoldLayers;
+    $currentLayerIndex = 0;
+
+    print "Finish -- ";
+    global string $arnoldBufferWindow;
+    if (`window -exists $arnoldBufferWindow`){
+        deleteUI $arnoldBufferWindow;
+    }
+    
+
+    
+}
+
+

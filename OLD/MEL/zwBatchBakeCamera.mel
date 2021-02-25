@@ -1,0 +1,42 @@
+global proc zwBatchBakeCamera()
+{
+	int $dirty = false;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (`match "^sq[^_]+_sc[^_]+" $sceneName` != "")
+	{
+		$sceneName = `substitute "sq" $sceneName ""`;
+		$sceneName = `substitute "sc" $sceneName ""`;
+		$sceneName = "wi_" + $sceneName;
+	}
+
+	int $timeLine[3] = `idmtProject -timeLine $sceneName`;
+	float $startTime = $timeLine[0];
+	float $endTime = $timeLine[1];
+
+	string $cameras[] = `ls -long -cameras`;
+	for ($shape in $cameras)
+	{
+		if (!(`camera -query -startupCamera $shape` || `reference -isNodeReferenced $shape`))
+		{
+			string $parent[] = `listRelatives -fullPath -allParents $shape`;
+			$parent[size($parent)] = $shape;
+			for ($node in $parent)
+			{
+				string $buf[] = `listAttr -keyable -locked $node`;
+				for ($attr in $buf)
+				{
+					setAttr -lock false ($node + "." + $attr);
+				}
+			}
+			bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -shape true $parent[0];
+
+			$dirty = true;
+		}
+	}
+
+	if ($dirty)
+	{
+		file -force -type "mayaAscii" -save;
+	}
+}

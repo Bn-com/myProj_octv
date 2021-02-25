@@ -1,0 +1,183 @@
+global proc yuDigitalCityToolWin()
+{
+    if(`window -exists yuDigitalCityWin`)
+        deleteUI yuDigitalCityWin;
+    string $buildingObjs[]=`listRelatives -children "building"`;   
+        
+    window -wh 291 128
+           -t "Digital City Tool"
+           -mxb off
+           yuDigitalCityWin;
+    columnLayout -adj true;
+    formLayout mainForm;
+    text -label "选择图片路径" "imageTex";
+    textField -text "" -width 190 "addressTex";
+    symbolButton -image "navButtonBrowse.xpm"  -c "fileBrowserCmd()" "filebrowserBut";
+    formLayout -e 
+    -af "imageTex" "left" 2
+    -af "imageTex" "top" 3
+    -ac "addressTex" "left" 3 "imageTex"
+    -ac "filebrowserBut" "left" 3 "addressTex"
+    mainForm;
+    setParent ..;
+    separator -h 20 -style "in";
+    text -label "模型" "objTex";
+    if(`size $buildingObjs`)
+    {
+        for($i = 0;$i<size($buildingObjs);$i+=3)
+        {            
+            columnLayout;
+            rowLayout -columnWidth3 100 100 100 -height 20 -numberOfColumns 3 -width 350;
+            checkBox -label $buildingObjs[$i] $buildingObjs[$i];
+            checkBox -label $buildingObjs[$i+1] $buildingObjs[$i+1];
+            checkBox -label $buildingObjs[$i+2] $buildingObjs[$i+2];
+            setParent ..;
+            setParent ..;
+        }
+    }
+    button -label "执行" -c "yuDigitalCityCmd()" cmdButton;
+    setParent ..;
+    showWindow yuDigitalCityWin;
+}
+
+global proc fileBrowserCmd()
+{
+    //fileBrowserDialog -m 0 -fc "importImage" -fileType "image" -an "Import_Image" -om "Import";
+    string $fileNames[]=`fileDialog2 -fileMode 1 -caption "Import Image"`;
+    textField -e -text $fileNames[0] addressTex;
+}
+
+global proc yuDigitalCityCmd()
+{
+    // create the file node and shader
+    //select -all;
+    //delete;
+    // __________ IMAGE MAPPING _________________________________
+    string $object[] = `ls -sl`;
+    if(!`size($object)`)
+        error("没有选择地形");
+    string $filenode = `createNode file`;
+    string $shader = `createNode lambert`;
+    string $path = `textField -q -text addressTex`;
+    //string $path = "E:/leo369/3dPaintTextures/digitalCity/nurbsPlaneShape1_color_1.TIF";
+    // connect the nodes
+    connectAttr ($filenode + ".outColor") ($shader + ".color");
+    // insert the image path in the file node
+    string $cropmap = $path;
+    setAttr -type "string" ($filenode + ".fileTextureName") $cropmap;
+    // assign the shader to an object
+    //string $object[] = `nurbsPlane -ax 0 1 0 -w 5 -lr 1 -name "nurbsPlane1"`;
+    //string $object[] = `sphere -name "nurbsPlane1"`;
+    // __________________________________________________________
+    select -r $object[0];
+    hyperShade -assign $shader;
+    //DisplayShadedAndTextured;
+    string $grpName="";
+    if(size(`ls -transforms "instaceBuildingGrp"`))
+    {
+        delete instaceBuildingGrp;
+        $grpName = `group  -empty -name "instaceBuildingGrp"`;
+    }
+    else
+    {
+        $grpName = `group  -empty -name "instaceBuildingGrp"`;
+    }
+    int $u, $v, 
+    $nu = 50, $nv = 50; // steps in u and v
+    float $minU = 0, $minV = 0, // u/v - start and ending
+    $maxU = 1, $maxV = 1; // the surface - slightly less than 0 to 1
+    // Grab all our texture map samples
+    float $rgb[] = `colorAtPoint -o RGBA -su $nu -sv $nv -mu $minU -mv $minV 
+    -xu $maxU -xv $maxV $filenode`;
+    float $deltaU = ($maxU - $minU)/($nu - 1); // step size in u
+    float $deltaV = ($maxV - $minV)/($nv - 1); // step size in v
+    float $currU, $currV;
+    int $index = 0;
+    $currU = $minU;
+    string $buildingObjs[] = `listRelatives -children "building"`;
+    string $choiceObjs[] = {""};
+    int $i=0;
+    for($each in $buildingObjs)
+    {
+        
+        if(`checkBox -q -value $each`)
+        {
+            $choiceObjs[$i] = $each;
+            $i+=1;
+        }
+    }
+    //sphere -r 0.05 -n sph;
+    for($n = 0; $n < $nu; $n++)
+    {
+        $currU += $deltaU;
+        $currV = $minV;
+        for($i = 0; $i < $nv; $i++)
+        {
+            float $r = $rgb[$index];
+            float $g = $rgb[$index + 1];
+            float $b = $rgb[$index + 2];
+            float $a = $rgb[$index + 3];
+            print($r + " " + $g + " " + $b + " " + $a + "\n");
+            if( ($r + $g + $b) < 2)
+            {
+                float $p[] = `pointOnSurface 
+                -u $currU
+                -v $currV
+                $object[0]`;
+                //string $listB[]={"building01", "building02", "building03"};
+                //string $listA[]={"building04", "building05", "building06"};
+                string $listC[]=$choiceObjs;
+                //-----------Red value. building A--commercial
+                string $instanceBuilding[] = {""};
+                if( $r > 0.8 )
+                {
+                    
+                    int $number = rand(0,int(`size($listC)`));
+                    string $building = $listC[$number];
+                    select $building;
+                    $instanceBuilding = `instance $building`;
+                    scale -r (rand(1, 2)) (rand(1, 2)) 1;
+                    move $p[0] $p[1] $p[2];
+                    move -r 0 (0.1*$b) 0;
+                    rotate -r 0 ((-360)*$a) 0;
+                    int $rottime = rand(0,4);
+                    rotate -r 0 (90*$rottime) 0;
+                    parent $instanceBuilding[0] instaceBuildingGrp;
+                }
+                //-----------Green value. building B--residential
+                if($g > 0.8)
+                {
+                    int $number = rand(0,int(`size($listC)`));
+                    string $building = $listC[$number];
+                    select $building;
+                    $instanceBuilding = `instance $building`;
+                    scale -r (rand(1, 3)) (rand(1, 2)) (rand(1, 2));
+                    move $p[0] $p[1] $p[2];
+                    move -r 0 (0.1*$b) 0;
+                    rotate -r 0 ((-360)*$a) 0;
+                    int $rottime = rand(0,4);
+                    rotate -r 0 (90*$rottime) 0;
+                    parent $instanceBuilding[0] instaceBuildingGrp;
+                }
+                //-----------Blue value. move building along Y axis
+                /*if($b > 0.1)
+                {
+                int $number = rand(0,6);
+                string $building = $listC[$number];
+                select $building;
+                instance $building;
+                scale -r (rand(2, 3)) (rand(1, 2)) 1;
+                move $p[0] $p[1] $p[2];
+                //move -r 0 (0.1*$a) 0;
+                int $rottime = rand(0,4);
+                rotate -r 0 (180*$a) 0;
+                //rotate -r 0 (45+(90*$rottime)) 0;
+                //rotate -r 0 45 0;
+                }
+                */
+            } 
+            $index += 4;
+            $currV += $deltaV;
+        }
+    }
+}

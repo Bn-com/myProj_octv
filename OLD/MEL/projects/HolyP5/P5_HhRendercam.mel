@@ -1,0 +1,154 @@
+global proc P5_HhImportRenderCam()
+{
+	string $longShotName=`file -q -sn `;
+	
+	string $shortShotName=`match "[^//]*$" $longShotName`;
+	string $shotName[]=stringToStringArray($shortShotName,"_");
+	string $cam_name=$shotName[0]+"_"+$shotName[1]+"_"+$shotName[2]+"_cam.ma";
+	string $bakedCam[] = `ls -type camera	"*bakedShape" "*:*bakedShape" "*:*:*bakedShape"`;
+	if (`size $bakedCam`)
+	{
+		for ($c in $bakedCam)
+		{
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				print "文件中已经存在正确的摄像机";
+				P5_HhImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+	string $root_path= "//file-cluster/gdc/Projects/DomesticProject/ChinaImage/Project/scenes/Animation/"+"episode_"+$shotName[1]+"/episode_camera/";
+	string $file_list[]=`getFileList -fld $root_path -filespec "*.ma" `;
+	
+//	print $file_list;
+
+	
+	int $if_exist_cam = 0;
+	for ($cam in $file_list)
+	{
+		if ($cam == $cam_name)
+		{
+			$if_exist_cam=1;
+			break;
+		}	
+	}
+	
+	if ($if_exist_cam ==0 )	error "没有找到相应的摄像机，请检查maya文件名";
+	
+	string $cam_path = $root_path + $cam_name;
+//	print $cam_path;
+//	file -import -type "mayaAscii" -rpr $cam_name -options "v=0"  $cam_path;
+	file -r -type "mayaAscii" -namespace "CAM"  $cam_path;
+	
+	string $bakedCam[] = `ls -type camera`;
+	for($c in $bakedCam)
+	{
+	if (`match "baked" $c`!="")
+	{
+
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-2]==$shotName[3] &&$bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				P5_HhImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+		
+}
+global proc P5_HhDelCam()
+{
+	string $cam[]=`ls -ca`;
+	for($c in $cam)
+	{
+		if(`match "persp" $c`!=""||`match "top" $c`!=""||`match "front" $c`!=""||`match "side" $c`!="")
+		{
+			string $cf[]=`listRelatives -p $c`;
+			delete $cf;
+		}
+	}
+}
+
+
+global proc P5_HhRendercam()
+{
+	string $oldcams[]=`ls -ca`;
+	for($c in $oldcams)
+	{
+		if(`match "RenderCAM" $c`!=0||`match "_baked" $c`!=0)
+		{
+			delete  $c;
+		}
+	}
+	P5_HhImportRenderCam;
+	string $cams[]=`ls -ca`;
+	for ($cshape  in $cams )
+	{
+		if (`match "_baked" $cshape`!="")
+		{
+			string $c[] =`listRelatives -p $cshape`;
+			select -r $c[0];
+			P5_HhHHCovRenderCam;
+			P5_HhHHCamSet;
+		}
+	}
+	setAttr "defaultRenderGlobals.modifyExtension" 0;
+	renderLayerEditorRenderable RenderLayerTab "defaultRenderLayer" "0";
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	setMayaSoftwareFrameExt(3, 0);
+
+}
+global proc P5_HhHHCamSet()
+{
+	string $cams[]=`ls -ca`;
+	for ($camshape in $cams)
+	{
+		string $camrenderable = $camshape+".renderable";
+
+		if (`match "stereoCamera" $camshape `=="")
+		{
+					setAttr $camrenderable 0;
+
+		}
+		else
+		{
+		    setAttr $camrenderable 1;
+
+        }
+     }
+}
+global proc P5_HhHHCovRenderCam()
+{
+
+
+	string $objselect[]=`ls -sl`;
+	string $filename=`file -q -sn -shn`;
+	string $buf[];
+	tokenize $filename "_" $buf;
+	string $fname=$buf[1]+"_"+$buf[2];
+	string $Rendercamera="RenderCAM_"+$fname;
+	rename $objselect[0] $Rendercamera;
+	string $camShape[]=`listRelatives -shapes $Rendercamera`;
+	setAttr -lock false ($camShape[0]+".sm");
+	string $cons[]=`listConnections -plugs true -connections true -destination false ($camShape[0]+".sm")`;
+	for ($i=0; $i<size($cons); $i+=2)
+	{
+		evalEcho ("disconnectAttr \"" +  $cons[$i+1] + "\" \"" +  $cons[$i] + "\"");
+
+	}
+	setAttr ($camShape[0]+".stereo") 1;
+	setAttr defaultResolution.lockDeviceAspectRatio 0;
+	setAttr "defaultResolution.width" 3072;
+	setAttr "defaultResolution.height" 1200;
+	setAttr "defaultResolution.pixelAspect" 1;
+	setAttr "defaultResolution.deviceAspectRatio" 2.56;
+}

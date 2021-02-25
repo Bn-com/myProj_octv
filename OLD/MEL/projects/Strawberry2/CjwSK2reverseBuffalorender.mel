@@ -1,0 +1,163 @@
+global proc reverseBuffalorender()
+{
+	string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+	int $all = false;
+	if (size($buf) > 1)
+	{
+		string $rs = `confirmDialog -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -defaultButton "Current Layer" -cancelButton "Current Layer"`;
+		if ($rs == "dismiss")
+		{
+			return;
+		}
+		$all = ($rs == "All Renderable Layers");
+	}
+
+	string $layers[];
+	if ($all)
+	{
+		for ($layer in $buf)
+		{
+			if (`getAttr ($layer + ".renderable")`)
+			{
+				$layers[size($layers)] = $layer;
+			}
+		}
+	}
+	else
+	{
+		$layers[size($layers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+	}
+
+	string $imgDir = `workspace -query -renderTypeEntry "images"`;
+	string $fullPath = `workspace -expandName $imgDir`;
+
+	for ($layer in $layers)
+	{
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != $layer)
+		{
+			editRenderLayerGlobals -currentRenderLayer $layer;
+			renderLayerButton -edit -select false -current false $currentRenderLayer;
+			renderLayerButton -edit -select true -current true $layer;
+		}
+
+		int $s = `getAttr defaultRenderGlobals.startFrame`;
+		int $e = `getAttr defaultRenderGlobals.endFrame`;
+		int $i;
+			
+		global string $gMainProgressBar;
+		progressBar -edit -beginProgress -isInterruptable true -status "BuffaloRender ..." -maxValue $e $gMainProgressBar;
+
+		for ($i=$e; $i>=$s; $i--)
+		{
+			if (`progressBar -query -isCancelled $gMainProgressBar`)
+			{
+				progressBar -edit -endProgress $gMainProgressBar;
+				return;
+			}
+
+			currentTime $i ;
+
+			int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+			setAttr "defaultRenderGlobals.startFrame" $i;
+			string $images[] = `renderSettings -firstImageName`;
+			setAttr "defaultRenderGlobals.startFrame" $startFrame;
+
+			string $path = $fullPath + "/" + $images[0];
+
+			progressBar -edit -step 1 $gMainProgressBar;
+
+			renderWindowRender redoPreviousRender renderView;
+			setAttr defaultRenderGlobals.imfkey -type "string" "";
+
+	//		if (`filetest -f $path`)
+	//		{
+	//			sysFile -delete $path;
+	//		}
+
+	//	//	renderWindowSaveImageCallback "renderView" $path "image";	// modified by huangzhongwei@idmt.com.cn, 20100519, due to 2011
+	//		renderWindowEditor -edit -writeImage $path "renderView";
+	
+			// modified by huangzhongwei@idmt.com.cn, 20100803
+			string $renderedImageName = `optionVar -query "renderedImageName"`;
+			sysFile -move $path $renderedImageName;
+
+			print ("\nBuffaloRender " + $path + "\n");
+		}
+
+		progressBar -edit -endProgress $gMainProgressBar;
+	}
+}
+reverseBuffalorender;
+/* modified by huangzhongwei, 20070611
+global proc Buffalorender()
+{
+	string $buf[] = `ls -type "renderLayer"`;
+
+//setAttr -type "string" defaultRenderGlobals.imageFilePrefix "";
+	string $imgDir = `workspace -q -rte "images"`;
+	string $fullPath = `workspace -expandName $imgDir`;
+	$path = "  Frame: "+ $fullPath + "/";
+
+	string $imageName = `getAttr defaultRenderGlobals.imageFilePrefix`;
+	string $imageExt = `getAttr defaultRenderGlobals.imageFormat`;
+	int $s = `getAttr defaultRenderGlobals.startFrame`;
+	int $e = `getAttr defaultRenderGlobals.endFrame`;
+	int $padding = `getAttr defaultRenderGlobals.extensionPadding`;
+	string $sceneName = `file -q -ns`;
+	int $i;
+		
+	if( $imageName == "" )
+	{	
+		// get the scene name before the process id is attached.
+		$imageName = $sceneName;
+	}
+	$imageName = substitute("%s",  $imageName, $sceneName);
+	$imageName = substitute("%/s", $imageName, ($sceneName+"/"));
+	$imageName = substitute("%-s", $imageName, ("-"+$sceneName));
+	$imageName = substitute("%_s", $imageName, ("_"+$sceneName));
+	$imageName = substitute("%\\.s", $imageName, ("."+$sceneName));
+
+	$imageName = substitute("<Scene>", $imageName, $sceneName);
+//	$imageName = substitute("<Layer>", $imageName, ("."+$sceneName));
+
+global string $gMainProgressBar;
+progressBar -edit
+ 		-beginProgress
+ 		-isInterruptable true 
+ 		-status "BuffaloRender ..." 
+		-maxValue $e
+		$gMainProgressBar;  	
+ 	for($i= $s; $i<=$e; $i++) {
+	currentTime $i ;
+
+//---------------------add by wanshoulong -----------------------------------
+	string $pad="";
+	int $bit = size(""+$i);
+	for ($j=0;$j<($padding-$bit) ;$j++ )
+	{
+		$pad += "0";
+	}
+//-----------------------------------------------------------------------
+
+	if(`progressBar -query -isCancelled $gMainProgressBar`)
+ 			break; 		
+ 		progressBar -edit
+ 			-step 1 $gMainProgressBar;
+	$frames = $path +$imageName  + $pad +$i ;
+
+	renderWindowRender redoPreviousRender renderView;
+		getAttr defaultRenderGlobals.outf;
+		getAttr "defaultRenderGlobals.imageFormat";
+		getAttr defaultRenderGlobals.imfkey;
+		setAttr defaultRenderGlobals.imfkey -type "string" "";
+
+		renderWindowSaveImageCallback "renderView" ($fullPath+"/"+$imageName+"_"+$pad+$i) "image";
+		//print ($imgDir+$imageName+$padding+$i+"\n");
+		print ("\nBuffaloRender "+$frames+"\n");
+					} 
+ 	progressBar -edit
+ 		-endProgress
+ 		$gMainProgressBar; 
+}
+*/

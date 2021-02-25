@@ -1,0 +1,166 @@
+proc ObjectAddAttr(string $object, string $attr)
+{
+	if (!`attributeExists $attr $object`)
+	{
+		addAttr -longName $attr -attributeType double3 -keyable true $object;
+		addAttr -longName ($attr + "X") -attributeType double -p $attr -keyable true $object;
+		addAttr -longName ($attr + "Y") -attributeType double -p $attr -keyable true $object;
+		addAttr -longName ($attr + "Z") -attributeType double -p $attr -keyable true $object;
+		
+		print("Add attribute \"" + $attr + "\" to " + $object + "\n");
+	}
+}
+
+global proc taBigZooterMouth()
+{
+	string $sl[] = `ls -sl "*Rig"`;
+	if (`objExists $sl[0]`)
+	{
+		if (!`objExists ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM")`)
+			error ("层级结构改变了,需要 " + $sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM");		
+
+		if (!`objExists ($sl[0] + "|Rigged_Element|mouth_displaynode")`)
+			error ("层级结构改变了,需要 " + $sl[0] + "|Rigged_Element|mouth_displaynode");		
+
+		//key at the start frame 
+		int $st = `playbackOptions -q -min`;
+		currentTime $st;
+		setKeyframe -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 {$sl[0] + "|World_ANIM"};
+		//set primaryvisibility of mouth_shapes to 0
+		string $mouthshapes[] = `listRelatives -allDescendents  -f ($sl[0] + "|Rigged_Element|mouth_displaynode")`;
+		for ($item in $mouthshapes)
+		{
+			setAttr ($item + ".primaryVisibility") 0;
+		}
+		string $mouthp3d = $sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM|Joint_Head|Mouse1";
+		if (`objExists ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM|Joint_Head|Mouse1")`)
+		{}
+		else if (`objExists ($sl[0] + "|Rigged_Element|srfGr_Cn_Zooter|srfGr_Cn_Head|Mouth_Projections|Mouse1")`)
+			parent ($sl[0] + "|Rigged_Element|srfGr_Cn_Zooter|srfGr_Cn_Head|Mouth_Projections|Mouse1") ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM|Joint_Head");
+		else error ("层级结构改变了,需要 " + $sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM|Joint_Head|Mouse1,或者" + $sl[0] + "|Rigged_Element|srfGr_Cn_Zooter|srfGr_Cn_Head|Mouth_Projections|Mouse1") ; 
+
+		string $rc[] = `listConnections -s 0 -d 1 -type projection $mouthp3d`;
+		if (size($rc) != 3)
+			error "no projection connected to mouth place3dtexture node";
+
+		string $bump = "";
+		for ($item in $rc)
+		{
+			string $bps[] = `listConnections -s 0 -d 1 -type bump3d $item`;
+			if (`objExists $bps[0]`)
+				$bump = $bps[0];
+			string $file[] = `listConnections -s 0 -d 1 -type expression $item`;
+			if (`objExists $file[0]`)
+				delete $file[0];
+			string $file[] = `listConnections -s 1 -d 0 -type file $item`;
+			if (`objExists $file[0]`)
+			{	
+				setAttr ($file[0] + ".useFrameExtension") 1;
+				string $exp = $file[0] + ".frameExtension = " + $sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MouthShape;";
+				expression -s $exp -o ""  -name "mouth_exp" -ae 1 -uc all;
+			}
+		}
+
+		string $rrc[] = `listConnections -s 0 -d 1 -type bump3d $rc[0]`;
+		if (!`objExists $rrc[0]`)
+			error "no bump3d connected to projection node";
+
+		int $lock = `getAttr -l ($sl[0] + "|World_ANIM.tx")`;
+		if ($lock)
+		{
+			error "需要先对world_Anim解锁并在起始桢key桢";
+			return;
+		}
+		currentTime -31;
+		
+		//restore zooter's original position
+		string $dirLocator[] = `spaceLocator -p 0 0 0`;
+
+
+		setAttr ($sl[0] + "|World_ANIM.tx") 0;
+		setAttr ($sl[0] + "|World_ANIM.ty") 0;
+		setAttr ($sl[0] + "|World_ANIM.tz") 0;
+		setAttr ($sl[0] + "|World_ANIM.rx") 0;
+		setAttr ($sl[0] + "|World_ANIM.ry") 0;
+		setAttr ($sl[0] + "|World_ANIM.rz") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.tx") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.ty") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.tz") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.SquashStretch") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.Tilt") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.Yaw") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM.Roll") 0;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.Turn") 0;
+		
+		pointConstraint -offset 0 0 0 -weight 1 $dirLocator ($sl[0] + "|World_ANIM");
+
+		ObjectAddAttr(($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM"), "MS2");
+		ObjectAddAttr(($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM"), "MS3");
+		ObjectAddAttr(($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM"), "MS6");
+
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS2X") 0.2;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS2Y") 0.125;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS2Z") 0.1;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS3X") 0.2;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS3Y") 0.125;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS3Z") 0.1;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS6X") 0.2;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS6Y") 0.18;
+		setAttr ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM.MS6Z") 0.14;
+
+		setAttr ($mouthp3d + ".tx") 0.8;
+		setAttr ($mouthp3d + ".ty") 0.358;
+		setAttr ($mouthp3d + ".tz") 0;
+		setAttr ($mouthp3d + ".rx") 0;
+		setAttr ($mouthp3d + ".ry") 90;
+		setAttr ($mouthp3d + ".rz") 0;
+		setAttr ($mouthp3d + ".sx") 0.32;
+		setAttr ($mouthp3d + ".sy") 0.32;
+		setAttr ($mouthp3d + ".sz") 0.32;		
+
+		delete $dirLocator;
+		string $sloc[] = `spaceLocator -p 0 0 0`;
+		string $eloc[] = `spaceLocator -p 0 0 0`;
+		string $ddim = `distanceDimension -sp 0 0 0 -ep 0 0 0`;
+		connectAttr -f ($sloc[0] + ".worldPosition[0]") ($ddim + ".startPoint");
+		connectAttr -f ($eloc[0] + ".worldPosition[0]") ($ddim + ".endPoint");
+		parent -relative $sloc[0] ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM");
+
+		
+		//create expression for mouth bump
+		string $exp =  "if("  + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==2||" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==3||" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==6){\n";
+		       $exp += "\tfloat $dis = `getAttr " + strip($ddim) + ".distance`;\n";
+		       $exp += "\tif($dis<=15){\n";
+		       $exp += "\t\tif(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==2){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS2X;\n";
+		       $exp += "\t\t}else if(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==3){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS3X;\n";
+		       $exp += "\t\t}else{\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS6X;\n";
+		       $exp += "\t\t}\n";
+		       $exp += "\t}else if($dis>15&&$dis<=25){\n";
+		       $exp += "\t\tif(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==2){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS2Y;\n";
+		       $exp += "\t\t}else if(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==3){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS3Y;\n";
+		       $exp += "\t\t}else{\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS6Y;\n";
+		       $exp += "\t\t}\n";
+		       $exp += "\t}else{\n";
+		       $exp += "\t\tif(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==2){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS2Z;\n";
+		       $exp += "\t\t}else if(" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MouthShape==3){\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS3Z;\n";
+		       $exp += "\t\t}else{\n";
+		       $exp += "\t\t\t" + $bump + ".bumpDepth=" + ($sl[0] + "|World_ANIM|Main_ANIM|Main_Y|Top_ANIM|Head_ANIM") + ".MS6Z;\n";
+		       $exp += "\t\t}\n";
+		       $exp += "\t\n}";
+		       $exp += "}else{\n";
+		       $exp += "	" + $bump + ".bumpDepth=.2;\n";
+		       $exp += "}\n";
+		      
+		expression -s $exp -o ""  -name "Mouth_Bump" -ae 1 -uc all;
+	}
+	else error "please select Zooter Rig";
+}
+

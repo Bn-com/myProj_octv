@@ -1,0 +1,658 @@
+//
+// MODIFY THIS AT YOUR OWN RISK
+//
+// Creation Date:  8 Mar. 1997
+// Author:         jason schleifer
+//
+//
+//  Procedure Name:
+//
+//      attrGoalEditor 
+//
+//  Description:
+//
+//     	Creates some UI for attributeGoal.mel in order to make attribute goals
+//     	between multiple objects.	
+//     	
+//  Input Arguments:
+//    	
+//  Return Value:
+//      
+//  REQUIRES attributeGoal.mel IN ORDER TO WORK PROPERLY
+//
+
+global proc clearCurrentGoals ()
+{
+	string $lists[3];
+	$lists = {"currentGoalOffsetAG", "currentGoalWeightAG", "currentGoalObjectAttrAG"};
+	for ($x = 0; $x < size($lists); $x++)
+	{
+			textScrollList -e 
+				-ra 
+				$lists[$x];
+	}
+
+
+	button -e -enable false createGoalButtonAG;
+	button -e
+		-enable false
+		removeSelGoalAG;
+	floatSliderGrp -e
+		-enable false
+		offsetSliderAG;
+	floatSliderGrp -e
+		-enable false
+		weightSliderAG;
+}
+global proc makeGoal ()
+{
+	// Put the object & attribute which are going to be influenced in a variable
+	// called $objAttr
+	$selectedObj = `textScrollList -q -si influencedObjListAG`;
+	$selectedAttr = `textScrollList -q -si influencedAttrListAG`;
+	$objectAttr = ($selectedObj[0] + "." + $selectedAttr[0]);
+	
+	// put the objects, attributes, weights & offsets whic hare going to be
+	// influenceing $objAttr into  arrays called $goalObjAttr[1],
+	// $goalWeight[1], and $goalOffset[1] & finally pack the list into the
+	// string $goalForObjAttr.
+	string $goalObjAttr[1];
+	string $goalOffset[1];
+	string $goalWeight[1];
+	string $goalForObjAttr;
+	
+	$goalForObjAttr = "";
+	$numberItems = `textScrollList -q -ni currentGoalObjectAttrAG`;
+	
+	$goalObjAttr = `textScrollList -q -ai currentGoalObjectAttrAG`;	
+	$goalWeight = `textScrollList -q -ai currentGoalWeightAG`;	
+	$goalOffset = `textScrollList -q -ai currentGoalOffsetAG`;	
+	for ($x = 0; $x < $numberItems; $x++)
+	{
+		$goalForObjAttr = ($goalForObjAttr + $goalObjAttr[$x] + " -w "+
+			$goalWeight[$x] + " -o " + $goalOffset[$x]);
+		if ($x != ($numberItems-1))
+			$goalForObjAttr = ($goalForObjAttr + ", ");
+		else
+			$goalForObjAttr = ($goalForObjAttr + "");
+	}
+	attributeGoal $objectAttr $goalForObjAttr;
+	print ("attributeGoal \"" + $objectAttr + "\" \""+$goalForObjAttr+"\"\n");
+	
+	//window -e -visible false attrGoalEditorWin;
+	clearCurrentGoals;
+	showAttributesInListAG ("influencedObjListAG");
+}
+
+global proc checkIfGoalValid ()
+{
+	int $influenceSelected = 0;
+	int $goalsAssigned = 0;
+
+	$size = `textScrollList -q -si influencedAttrListAG`;
+	//$size = $tmp[0];
+	if (size($size)>0)
+		$influenceSelected = 1;
+	
+	$numberItems = `textScrollList -q -ni currentGoalObjectAttrAG`;
+	if ($numberItems > 0)
+		$goalsAssigned = 1;
+
+	if ($influenceSelected == 1 && $goalsAssigned == 1)
+		button -e -enable true createGoalButtonAG;
+	else
+		button -e -enable false createGoalButtonAG;
+
+}
+
+global proc replaceObjAttrTextAG ()
+{
+	$selectedObj = `textScrollList -q -si influencedObjListAG`;
+	$selectedAttr = `textScrollList -q -si influencedAttrListAG`;
+	$objectAttr = ($selectedObj[0] + "." + $selectedAttr[0]);
+	frameLayout -e 
+		-l ("Current Goal for: "+$objectAttr)
+		currentGoalFrameLayoutAG;
+	
+	checkIfGoalValid;
+}
+
+global proc addObjAttrToCurrentList ()
+{
+	$selectedObj = `textScrollList -q -si goalObjListAG`;
+	$selectedAttr = `textScrollList -q -si goalAttrListAG`;
+	$objectAttr = ($selectedObj[0] + "." + $selectedAttr[0]);
+	
+	textScrollList -e
+		-a $objectAttr
+		currentGoalObjectAttrAG;
+	textScrollList -e
+		-a 0.5
+		currentGoalWeightAG;
+	textScrollList -e
+		-a 0
+		currentGoalOffsetAG;
+
+	string $lists[3];
+	$lists = {"currentGoalOffsetAG", "currentGoalWeightAG", "currentGoalObjectAttrAG"};
+	$numberItems = `textScrollList -q -ni $lists[0]`;
+	{
+		for ($x = 0; $x < size($lists); $x++)
+		{
+			textScrollList -e 
+				-sii $numberItems
+				$lists[$x];
+		}
+
+	}
+	checkIfGoalValid;
+	//  display the weight & goal for each selected item
+	float $weight;
+	float $offset;
+	$tmp = `textScrollList -q -si currentGoalWeightAG`;
+	$weight = $tmp[0];
+	$tmp = `textScrollList -q -si currentGoalOffsetAG`;
+	$offset = $tmp[0];
+	floatSliderGrp -e
+		-enable true
+		-v $offset
+		offsetSliderAG;
+	floatSliderGrp -e
+		-enable true
+		-v $weight
+		weightSliderAG;
+	button -e
+		-enable true
+		removeSelGoalAG;
+}
+
+global proc selectRelatedItems ( string $type )
+{
+	if ($type == "objAttr")
+	{
+		$selectedItem = `textScrollList -q -sii currentGoalObjectAttrAG`;
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalWeightAG;
+
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalOffsetAG;
+	
+	}
+	if ($type == "weight")
+	{
+		$selectedItem = `textScrollList -q -sii currentGoalWeightAG`;
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalObjectAttrAG;
+
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalOffsetAG;
+	
+	}
+	if ($type == "offset")
+	{
+		$selectedItem = `textScrollList -q -sii currentGoalOffsetAG`;
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalWeightAG;
+
+		textScrollList -e 
+			-da
+			-sii $selectedItem[0]
+			currentGoalObjectAttrAG;
+	
+	}
+
+	//  display the weight & goal for each selected item
+	float $weight;
+	float $offset;
+	$tmp = `textScrollList -q -si currentGoalWeightAG`;
+	$weight = $tmp[0];
+	$tmp = `textScrollList -q -si currentGoalOffsetAG`;
+	$offset = $tmp[0];
+	floatSliderGrp -e
+		-enable true
+		-v $offset
+		offsetSliderAG;
+	floatSliderGrp -e
+		-enable true
+		-v $weight
+		weightSliderAG;
+	
+	button -e
+		-enable true
+		removeSelGoalAG;
+	
+	checkIfGoalValid;
+}
+global proc updateValue ( string $list, string $slider )
+{
+	int $tmp[1];
+	$tmp = `textScrollList -q -sii currentGoalOffsetAG`;
+	$position = $tmp[0];
+	$newValue  = `floatSliderGrp -q -v $slider`;
+	textScrollList -e 
+		-rii $position
+		$list;
+	textScrollList -e 
+		-ap $position $newValue
+	$list;
+	textScrollList -e -sii $position $list;
+
+}
+global proc removeSelectedItemAG ()
+{
+	// get selected item
+	$tmp = `textScrollList -q -sii currentGoalOffsetAG`;
+	$position = $tmp[0];
+	
+	//remove selected item from the three lists
+	string $lists[3];
+	$lists = {"currentGoalOffsetAG", "currentGoalWeightAG", "currentGoalObjectAttrAG"};
+	
+	for ($x = 0; $x < size($lists); $x++)
+	{
+		textScrollList -e
+			-rii $position
+			$lists[$x];
+	
+	}
+	$numberItems = `textScrollList -q -ni $lists[0]`;
+	if ($numberItems == 0)
+	{
+		button -e
+			-enable false
+			removeSelGoalAG;
+		button -e
+			-enable false
+			createGoalButtonAG;
+			
+		floatSliderGrp -e
+			-enable false
+			offsetSliderAG;
+		floatSliderGrp -e
+			-enable false
+			weightSliderAG;
+	}
+	else
+	{
+		for ($x = 0; $x < size($lists); $x++)
+		{
+			textScrollList -e 
+				-sii $numberItems
+				$lists[$x];
+		}
+
+		//  display the weight & goal for each selected item
+		float $weight;
+		float $offset;
+		$tmp2 = `textScrollList -q -si currentGoalWeightAG`;
+		$weight = $tmp2[0];
+		$tmp2 = `textScrollList -q -si currentGoalOffsetAG`;
+		$offset = $tmp2[0];
+		floatSliderGrp -e
+			-enable true
+			-v $offset
+			offsetSliderAG;
+		floatSliderGrp -e
+			-enable true
+			-v $weight
+			weightSliderAG;
+	}
+}
+global proc addSelectedToList (string $list)
+{
+	$objects = `ls -sl`;
+	for ($x = 0; $x < size($objects); $x++)
+	{
+		textScrollList -e
+			-a $objects[$x]
+			$list;
+	}
+	$numberItems = `textScrollList -q -ni $list`;
+	
+	textScrollList -e 
+		-sii $numberItems
+		$list;
+
+}
+proc setUpSelectActions( )
+{
+	// Influenced Object/Attr lists
+	textScrollList -e
+		-sc "showAttributesInListAG \"influencedObjListAG\""	
+		influencedObjListAG;
+	textScrollList -e
+		-sc "showAttributesInListAG \"goalObjListAG\""	
+		goalObjListAG;
+	
+	// Goal Obj/Attr lists
+	textScrollList -e
+		-sc "replaceObjAttrTextAG"
+		influencedAttrListAG;
+	textScrollList -e
+		-sc "addObjAttrToCurrentList"
+		goalAttrListAG;
+
+	// Current Goal Obj/Attr Lists
+	textScrollList -e
+		-sc "selectRelatedItems \"objAttr\""
+		currentGoalObjectAttrAG;
+	textScrollList -e
+		-sc "selectRelatedItems \"weight\""
+		currentGoalWeightAG;
+	textScrollList -e
+		-sc "selectRelatedItems \"offset\""
+		currentGoalOffsetAG;
+
+	// What to do when weight & offset are modified.
+	floatSliderGrp -e
+		-dc "updateValue \"currentGoalOffsetAG\" \"offsetSliderAG\""
+		offsetSliderAG;
+	floatSliderGrp -e
+		-dc "updateValue \"currentGoalWeightAG\" \"weightSliderAG\""
+		weightSliderAG;
+
+	// Set up button interaction
+
+	button -e 
+		-c "removeSelectedItemAG"
+		removeSelGoalAG;
+	button -e
+		-c "window -e -visible false attrGoalEditorWin"
+		cancelGoalAG;
+	button -e
+		-c "makeGoal"
+		createGoalButtonAG;
+	
+	// Set up RMB menus
+	menuItem -p popupSelectionAG
+		-l "Add selected to influences"
+		-c "addSelectedToList \"influencedObjListAG\""
+		addSelToInfluenceMenuAG;
+	menuItem -p popupSelectionAG
+		-l "Add selected to goals"
+		-c "addSelectedToList \"goalObjListAG\""
+		addSelToGoalMenuAG;
+}
+
+global proc showAttributesInListAG ( string   $list )
+{
+	if ($list == "influencedObjListAG")
+		$attrList = "influencedAttrListAG";
+	else
+		$attrList = "goalAttrListAG";
+
+	$selectedObject = `textScrollList -q -si $list`;
+	//$objectAttrs = `listAttr -k $selectedObject[0]`;
+	
+	// try and make it so in influencedAttrListAG only attributes which have no
+	// keyframes or expressions already on them show up
+
+	$tmpAttrs = `listAttr -k $selectedObject[0]`;
+	string $objectAttrs[1];
+	if ($list == "influencedObjListAG")
+	{
+		$count = 0;
+		for ($x = 0; $x < size($tmpAttrs); $x++)
+		{
+			$connected = `listConnections -d false ($selectedObject[0]+"."+$tmpAttrs[$x])`;
+			if (size($connected) <= 0)
+			{
+				$objectAttrs[$count] = $tmpAttrs[$x];
+				$count++;
+			}
+		}
+	}
+	else
+	{
+		$objectAttrs = $tmpAttrs;
+	}
+	// show attributes
+	textScrollList -e -ra $attrList;
+	for ($i = 0; $i < size($objectAttrs); $i++)
+	{
+		textScrollList -e -a $objectAttrs[$i] $attrList;	
+	
+	}
+
+}
+proc getDefaultSelectionAG ()
+{
+	$objList = `ls -sl`;
+	if (size($objList) > 0)
+	{
+	// Put the first item in the selection list into the influenced Object
+	// scroll list & select it.
+	textScrollList -e
+		-a $objList[0]
+		influencedObjListAG;
+	textScrollList -e
+		-si $objList[0]
+		influencedObjListAG;
+	
+	// Put the attributes of the selectedInfluencedItem into the
+	// influencedAttributes list.
+	showAttributesInListAG ("influencedObjListAG");
+	}
+	else
+	{
+	// put something in there so the object will resize properly
+		textScrollList -e
+			-a blah
+			influencedObjListAG;
+		textScrollList -e
+			-ra
+			influencedObjListAG;
+	
+	}
+	if (size($objList)>1)
+	{
+		// Put the rest of the selection list into the goal object attribute list
+		// & select the first item
+		for ($i = 1; $i < size($objList); $i++)
+		{
+			textScrollList -e
+				-a $objList[$i]
+				goalObjListAG;
+		}
+		textScrollList -e
+			-sii 1 
+			goalObjListAG;
+		showAttributesInListAG ("goalObjListAG");
+	}
+	else
+	{
+		// put something in there so the object will resize properly
+		textScrollList -e
+			-a blah
+			goalObjListAG;
+		textScrollList -e
+			-ra
+			goalObjListAG;
+	
+	
+	}
+}
+
+proc makeWindowAG (string $win)
+{
+	window 
+		-title "Attribute Goal Window"
+		$win;
+
+	columnLayout 
+		mainColLayoutAG;
+		
+		frameLayout
+			-cll true
+			-l Selection
+			-fn "obliqueLabelFont"
+			-lv true
+			-la bottom
+			-bv true
+			-w 400
+			-h 280
+			-bs "etchedIn"
+	
+			selectionFrameLayoutAG;
+	
+			columnLayout blah;		
+				popupMenu -p blah
+					-b 3
+					popupSelectionAG;
+				rowColumnLayout 
+					-nc 2 
+					-cw 2 195
+					-cw 1 195
+					objectSelFormLayoutAG;
+				
+					text -al "left" -l "Influenced Object";	
+					text -al "left" -l "Influenced Attribute";
+					textScrollList
+						-nr 4
+						-w 195
+						-h 100
+						-ams false
+						influencedObjListAG;
+					textScrollList
+						-nr 5
+						-w 195
+						-ams false
+						influencedAttrListAG;
+				
+					setParent ..;
+					separator sep;
+					text -l "";
+					text -l "";
+				rowColumnLayout
+					-nc 2 
+					-cw 2 195
+					-cw 1 195
+					goalRowLayoutAG;
+					
+					text -al "left" -l "Goal Object";	
+					text -al "left" -l "Goal Attribute";
+					textScrollList
+						-nr 5
+						-w 195
+						-ams false
+						goalObjListAG;
+					textScrollList
+						-nr 5
+						-w 195
+						-ams false
+						goalAttrListAG;
+				
+					setParent ..;
+				setParent ..;
+			setParent ..;
+		frameLayout
+			-cll false
+			-l "Current Goal for: ... "
+			-fn "obliqueLabelFont"
+			-lv true
+			-la bottom
+			-bv true
+			-w 400
+			-h 220
+			-bs "etchedOut"
+			currentGoalFrameLayoutAG;
+			
+			columnLayout blah2;		
+				rowColumnLayout 
+					-nc 3 
+					-cw 1 240
+					-cw 2 75	
+					-cw 3 75
+					currentGoalObjLayout;
+				
+					text -al "left" -l "Object.Attribute";	
+					text -al "center" -l "Weight";
+					text -al "center" -l "Offset";
+
+					textScrollList
+						-nr 6
+						-w 245
+						-ams false
+						currentGoalObjectAttrAG;
+					textScrollList
+						-nr 6
+						-w 50
+						-ams false
+						currentGoalWeightAG;
+					textScrollList
+						-nr 6
+						-w 50
+						-ams false
+						currentGoalOffsetAG;
+					setParent ..;
+				floatSliderGrp
+					-l "Weight"
+					-min 0
+					-max 1
+					-field true
+					-enable false
+					weightSliderAG;
+				floatSliderGrp
+					-l "Offset"
+					-min 0
+					-max 10
+					-field true
+					-enable false
+					offsetSliderAG;
+				setParent ..;
+			setParent ..;
+		separator -style "double" -h 20;
+		rowColumnLayout
+			-nc 3
+			-cw 1 100
+			-cw 2 160
+			-cw 3 100
+			buttonColumnLayoutAG;
+			button
+				-enable false
+				-l "Create Goals"
+				createGoalButtonAG;
+			button
+				-enable false
+				-l "Remove Selected Goal"
+				removeSelGoalAG;
+			button
+				-l "Cancel"
+				cancelGoalAG;
+
+	//add fake item to make the textScrollList resize properly
+	textScrollList -e
+		-a 0	
+		currentGoalOffsetAG;
+	textScrollList -e
+		-ra
+		currentGoalOffsetAG;
+}
+
+global proc attrGoalEditor ()
+{
+
+	$win = "attrGoalEditorWin";
+	
+	if (!`window -exists $win`)
+	{
+		makeWindowAG ($win);
+		getDefaultSelectionAG;
+		setUpSelectActions ();
+	}
+	
+
+
+	showWindow $win;
+
+}

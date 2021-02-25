@@ -1,0 +1,589 @@
+// PointCachePreExport.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Determines what point caching, if any, is needed on a given shot, builds playlist, and submits PointCacheExport process to the farm.
+Use:
+	PointCachePreExport argList
+Options:
+	type (string)	- What type of scene - ani, lay, or lit
+	
+Dependancies:
+
+	parseXML
+	xml_parser plug-in
+	fileIO
+	php
+	getPath
+	getFileSize
+	assetListFromMa
+	stringArrayFindIndex
+	buildExportPlaylist
+
+	php language
+	
+	swapAssets.php
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	09/09/05
+Revisions:	02/06/06	Rev 1.0
+		- Making it os insensitive
+		
+		03/24/06	Rev 1.1
+		- Added ability to set the qube priority of the export process
+		
+		04/08/06	Rev 1.2
+		- Added better distribution criteria
+		
+		04/09/06	Rev 1.3
+		- Hooked up selective pointCache export
+
+		08/21/06	Rev 1.4
+		- Replacing hard coded paths with calls to getPath
+		- Read farm.xml from projectGlobals to determine process cluster to submit to.
+
+		09/11/06	Rev 1.5
+		- Added code to capture qube job data
+
+		09/15/06	Rev 1.6
+		- Replaced build_playList with a call to the generalized procedure buildExportPlaylist (works for all types of export jobs)
+		- Substantial code cleanup.
+		- Made more aware of calling context (LayoutSubmission or PostLayout may be calling this, as well as PreAnimationSubmission)
+		- Switch to new naming convention for global variables.
+		- Implemented config file for reading defaults. Distribution criteria is also read from here.
+
+		01/09/07	Rev 1.7
+		- Switched to submitMaya for maya process submission
+	
+		01/26/07	Rev 1.8
+		- Added support for updated rfxmaya, which allows specification of plug-in script/shader/plug-in paths per seq/shot
+
+		03/05/07	Rev 1.9
+		- Adding support for versioning
+
+		04/01/07	Rev 2.0
+		- Added support for per shot or per sequence PointCache.xml file
+		
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// current dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/PointCachePreExport.2.0.mel";
+
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+// find the PointCachePreExport globals file. 
+// ---------------------------------------------------------------------------------------------------
+proc string getConfig ()
+{
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	
+	// look in shotGroupInfo first. 
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/PointCachePreExport.xml";
+	if (`filetest -f $file`)
+		return $file;
+	// look in projectGlobals next
+	$file = getPath ("ProjectGlobals",{})+"/PointCachePreExport.xml";
+
+	if (`filetest -f $file`)
+		return $file;
+	
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+// getPointCachingData - get a list of assets for the show that are to be pointCache exporters
+// ---------------------------------------------------------------------------------------------------
+proc string [] getPointCachingData ()
+{
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+
+	// get the point caching assets for the show
+	// 04/01/07 - now configurable per sequence and per shot
+	string $namesAndExporters[];
+
+
+	string $file = getPath ("ShotBase",{$gSequence,$gShot})+"/projectGlobals/PointCache.xml";
+	if (!`filetest -f $file`)
+	{
+		$file = getPath ("SeqBase",{$gSequence})+"/projectGlobals/PointCache.xml";
+	}
+	if (!`filetest -f $file`)
+	{
+		$file = getPath ("ProjectGlobals",{})+"/PointCache.xml";
+	}
+	
+	if (!`filetest -f $file`)
+	{
+		warning ("PointCachePreExport: "+$file+" not found. No point cache will be exported.");
+		return {};
+	}
+
+	print ("PointCachePreExport: Reading pointCache globals from "+$file+"\n");
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $filename = xml_getVar ($nodes[$i],"filename");
+		string $assetName = getPath ("AssetNameFromFilename",{$filename});
+		$namesAndExporters[size($namesAndExporters)] = $assetName;
+		$namesAndExporters[size($namesAndExporters)] = getPath ("ConformPath",{$filename});
+	}
+
+	return $namesAndExporters;
+}
+// -----------------------------------------------------------------------------------------------
+// Filter the full membership of the shot down to assets are point caching, and are not eliminated by a selective export filter. Asset existence is also checked.
+// -----------------------------------------------------------------------------------------------
+global proc int filterAssetList(
+	string $namespaces[], 
+	string $refNodes[], 
+	int $deferred[], 
+	string $assets[],
+	string $pointCachingData[]
+)
+{
+	global int $gPointCacheMode;
+	global string $gPointCacheList;
+	string $selectivePointCacheList[];
+	if ($gPointCacheMode == 2)
+	{
+		tokenize ($gPointCacheList,",",$selectivePointCacheList);	
+	}
+
+	string $outNamespaces[];
+	string $outRefNodes[];
+	string $outAssets[];
+	int $outDeferred[];
+
+	
+	for ($i=0;$i<size($assets) && size ($pointCachingData); $i ++)
+	{
+		string $assetName = getPath ("AssetNameFromFilename",{$assets[$i]});
+		int $index = stringArrayFindIndex ($assetName,$pointCachingData);
+		if ($index == -1)
+		{
+			print ("PointCachePreExport: "+$assetName+" is not designated as a point caching asset. Removing from export list.\n");
+			continue;
+		}
+		// run it through the selective filter if required
+		if ($gPointCacheMode == 2)
+		{
+			if (stringArrayFindIndex ($assetName,$selectivePointCacheList) == -1)
+			{
+				print ("PointCachePreExport: Selective mode - "+$assetName+" removed from export list.\n");
+				continue;
+			}
+		}
+		// check file list
+		if (!`filetest -f $pointCachingData[$index+1]`)
+		{
+			print ("PointCachePreExport: "+$pointCachingData[$index+1]+" doesn't exist. Removing from export list.\n");
+			continue;
+		}
+		
+		// add to the output lists
+		int $c = size ($outNamespaces);
+		$outNamespaces[$c] = $namespaces[$i];
+		$outRefNodes[$c] = $refNodes[$i];
+		$outAssets[$c] = getPath ("ConformPath",{$assets[$i]});
+		$outDeferred[$c] = $deferred[$i];
+	}
+	$namespaces = $outNamespaces;
+	$refNodes = $outRefNodes;
+	$deferred = $outDeferred;
+	$assets = $outAssets;
+
+	return size ($namespaces);	
+}
+// -----------------------------------------------------------------------------------------------
+// buildLookupTable - create an xml for swapAssets to swap the assets in the ani/lay to the ones needed for point cache export
+// -----------------------------------------------------------------------------------------------
+proc string buildLookupTable (
+	string $allAssets[],
+	string $pointCachingData[]
+)
+{
+	string $xml = "<swapTable>\n";
+	for ($i=0;$i<size($allAssets);$i++)
+	{
+		string $assetName = getPath ("AssetNameFromFilename",{$allAssets[$i]});
+		int $index = stringArrayFindIndex ($assetName,$pointCachingData);
+		if ($index == -1)
+			continue;
+		string $search = $allAssets[$i];
+		string $replace = $pointCachingData[$index+1];
+		if ($search != $replace)
+			$xml += "\t<custom search=\""+$search+"\" replace=\""+$replace+"\" />\n";	
+	}
+	$xml += "</swapTable>\n";
+	return $xml;
+}
+// -----------------------------------------------------------------------------------------------
+// submit_pointCacheExport - submits the pointCacheExport process through qube
+// -----------------------------------------------------------------------------------------------
+proc int submit_pointCacheExport (string $playlist, int $playlistNumItems, string $argList, string $pointCacheTempFile)
+{
+	global string $gHost;
+	global string $gSequence;
+	global string $gShot;
+	global string $gCluster;
+	global int $gPriority;
+	
+	int $jobNumber;
+	string $proj = `workspace -q -act`;
+	$proj = getPath ("LinuxPath",{$proj});
+	
+	string $args = $argList;
+	$args = editArgList ($args,"playlist",$playlist);
+	if ($playlistNumItems > 1)
+		$args = editArgList ($args,"playlistItem","QB_FRAME_NUMBER");
+	else
+		$args = editArgList ($args,"playlistItem","0");
+		
+	$args = editArgList ($args,"usePlaylist","1");
+	$args = editArgList ($args,"pointCacheTempFile",$pointCacheTempFile);	
+	
+	
+		
+	//string $melCmd = "PointCacheExport (\\\\\\\"";
+	//$melCmd += $args;
+	//$melCmd += "\\\\\\\")";
+
+	string $melCmd = "PointCacheExport (\\\\\\\\\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\\\\\\\\\")";
+
+	string $mayaCmd = "-command \""+$melCmd+"\"";
+	string $jobName = $gHost+"_PointCacheExport_"+$gSequence+"_"+$gShot;
+	int $priority = $gPriority;
+
+	// call submitMaya
+	string $range = ($playlistNumItems > 1)?("0-"+($playlistNumItems-1)):"";
+	// specify sequence and shot for rfxmaya
+	string $extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+		
+	int $jobNumber = submitMaya (
+		$jobName,		// name of the job 
+		$playlistNumItems,	// number of cpus to use - only meaningful if range is set to something
+		$priority,		// priority to submit at
+		$range,			// range for jobs which have sub-jobs, e.g. Point Cache export
+		$gCluster,		// cluster to submit to
+		"",			// qube pre-exec callback
+		"",			// qube post-exec callback
+		"",			// any extra qube args to add
+		true,			// use rfxmaya?
+		false,			// use the maya Render command
+		$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+		$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+	);
+	/*
+	submitMaya args:
+	string $jobName,	// name of the job
+	int $numCpus,		// number of cpus to use - only meaningful if range is set to something
+	int $priority,		// priority to submit at
+	string $range,		// range for jobs which have sub-jobs, e.g. Point Cache export
+	string $cluster,	// cluster to submit to
+	string $preCallback,	// qube pre-exec callback
+	string $postCallback,	// qube post-exec callback
+	string $extraQubeArgs,	// any extra qube args to add
+	int $useRfxMaya,	// use rfxmaya?
+	int $mayaRender,	// use the maya Render command
+	string $extraRfxMayaArgs,// any extra args to send to rfxmaya
+	string $mayaArgs	// maya arg string including command, scene, but not including project, or -batch
+	*/
+	
+	print ($jobNumber+"\n");
+	return $jobNumber;	
+
+
+	/*
+	string $mayaCmd = "maya \"-batch\" ";
+	$mayaCmd +=	"\"-proj\" \"";
+	$mayaCmd += 	$proj+"\" ";
+	$mayaCmd += 	"\"-command\" \"";
+	$mayaCmd += 	$melCmd;
+	$mayaCmd += 	"\"";
+	
+	string $jobName = $gHost+"_PointCacheExport_"+$gSequence+"_"+$gShot;
+	int $priority = $gPriority;
+	string $range = "0-"+($playlistNumItems-1);
+	int $num_cpus = $playlistNumItems;
+	
+	string $qbsubCmd = "qbsub ";
+	$qbsubCmd += "--name "+$jobName+" ";
+	$qbsubCmd += "--priority "+$priority+" ";
+	$qbsubCmd += "--user render ";
+	if ($playlistNumItems > 1)
+	{
+		$qbsubCmd += "--range "+$range+" ";
+		$qbsubCmd += "--cpus "+$num_cpus+" ";
+	}
+	if ($gCluster != "/")
+	{
+		$qbsubCmd += "--requirements host."+$gCluster+"=1 --cluster /"+$gCluster+ " ";
+	}
+	$qbsubCmd += $mayaCmd;
+	
+	print ($qbsubCmd+"\n");
+	string $jobNumberStr = system ($qbsubCmd);
+	$jobNumber = (int)match ("[0-9]+",$jobNumberStr);
+	print ($jobNumber+"\n");
+			
+	return $jobNumber;
+	*/
+}
+// -----------------------------------------------------------------------------------------------
+proc int do_PointCachePreExport(string $args, int $jobData[])
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gHost;
+	global int $gUseLayoutFile;
+	global int $gPointCacheMode; // pointCache mode. 0 = none, 1 = all, 2 = selective
+	global string $gPointCacheList; // if pointCache mode is selective, comma delimited list of what to export
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskConfig;		// Config file for this task	
+	global string $gTaskType;
+	
+	if ($gPointCacheMode == 0)
+	{
+		print ("PointCachePreExport: exportPointCache is set to OFF. Skipping.\n");
+		return true;	
+	}
+	
+	string $selectivePointCacheList[];
+	if ($gPointCacheMode == 2)
+	{
+		tokenize ($gPointCacheList,",",$selectivePointCacheList);	
+	}
+	
+	
+	string $aniFile;
+	string $sgRoot;
+	string $shotInfoDir;
+	string $projectGlobals;
+	string $namespaces[],$refNodes[],$assets[];
+	int $deferred[];
+	string $pointCacheAssets[], $origPointCacheAssets[];
+	int $pointCacheMaxPerExport[];
+	int $playlistNumitems;
+	
+	$sgRoot = getPath ("ShotBase",{$gSequence,$gShot});
+	$shotInfoDir = getPath ("ShotInfoDir",{$gSequence,$gShot});
+	string $php_dir = getPath ("ProjectPHPDir",{});
+	string $suffix = ($gParentTaskType == "AnimationSubmission")?"ani":"lay";
+	$aniFile = $sgRoot +"/"+$gSequence+"_"+$gShot+"_"+$suffix+".ma";
+
+	string $swap_table = $shotInfoDir+"/PointCache_SwapTable.xml";
+	string $pointCacheTempFile = $shotInfoDir+"/"+$gSequence+"_"+$gShot+"_"+$suffix+"Exp.ma";
+	string $pointCachePlaylist = $shotInfoDir+"/PointCache_playlist.xml";
+
+	// -------------------------------------------------
+	/*
+		Read the project wide point cache list (list defining what assets get point cached)
+	*/
+	// -------------------------------------------------
+	print ("PointCachePreExport: Reading project globals.\n\n");
+	string $pointCachingData[] = getPointCachingData();
+	
+
+	// -------------------------------------------------
+	/*
+		Get asset list from ani file directly
+	*/
+	// -------------------------------------------------
+	print ("PointCachePreExport: Reading asset list from "+$aniFile+".\n\n");
+	assetListFromMa( $aniFile,$namespaces, $refNodes, $deferred, $assets ); 	
+
+	// -------------------------------------------------
+	/*
+		Find out if anything should be point cached for this shot
+	*/
+	// -------------------------------------------------
+	print ("PointCachePreExport: Searching for assets requiring Point Cache export for shot "+$gSequence+"_"+$gShot+".\n\n");
+
+	string $allAssets[] = $assets;	// back this up - it will be needed later in building the lookup table
+
+	int $numAssets = filterAssetList(
+		$namespaces, 
+		$refNodes, 
+		$deferred, 
+		$assets,
+		$pointCachingData);
+
+	
+	if (!$numAssets)
+	{
+		print ("PointCachePreExport: No assets need point caching for shot "+$gSequence+"_"+$gShot+".\n\n");
+		return true;	
+	}
+
+	
+	print ("\nPointCachePreExport: Found the following assets for point cache export.\n\n");
+	print $assets;
+	print ("\n");
+	
+	
+	// -------------------------------------------------
+	/*
+		We will be creating a temporary ani file, with the references swapped to the version appropriate for point caching.
+	*/
+	// -------------------------------------------------
+	// Create a swap table so that we can use swapAssets.php
+	print ("PointCachePreExport: Building lookup table for reference re-point.... \n\n");
+	string $swap_table_xml = buildLookupTable ($allAssets,$pointCachingData);
+	writeFile ($swap_table,$swap_table_xml);
+	
+	if (`filetest -f $pointCacheTempFile`)
+		sysFile -del $pointCacheTempFile;
+	string $res = "";
+	
+	if (1)
+	{
+		print ("PointCachePreExport: Building temp export file "+$pointCacheTempFile+"... \n\n");
+		// assemble the call to swap assets
+		string $cmd = php()+" "+$php_dir+"/swapAssets.php ";
+		$cmd += "-proj "+`workspace -q -act`+" ";
+		$cmd += "-sequence "+$gSequence+" ";
+		$cmd += "-shotgroup "+$gShot+" ";
+		$cmd += "-swaptable "+$swap_table+" ";
+		$cmd += "-infile "+$aniFile+" ";
+		$cmd += "-outfile "+$pointCacheTempFile;
+		
+		$res = system ($cmd);
+	}
+	else
+	{
+		print ("cp "+$aniFile+" "+$pointCacheTempFile+"\n");
+		system ("cp "+$aniFile+" "+$pointCacheTempFile);
+	}
+	// check that the temp file made it.
+	if (!`filetest -f $pointCacheTempFile`)
+	{
+		print ("PointCachePreExport: Couldn't create temp export file "+$pointCacheTempFile+". \n\n");
+		print ("Output from swapAssets: \n");
+		print ($res+"\n");
+		return false; 
+	}
+	
+	// -------------------------------------------------
+	/*
+		Create a playlist for the pointCacheExport process.
+	*/
+	// -------------------------------------------------
+	print ("PointCachePreExport: Building playlist... \n\n");
+	string $playlist_xml[];
+	$playlistNumitems = buildExportPlaylist(
+		$gSequence,
+		$gShot,
+		$gTaskType,
+		$gTaskConfig,
+		$assets,
+		$namespaces,
+		$refNodes,
+		$deferred,
+		$playlist_xml
+	);
+		
+	writeFile ($pointCachePlaylist,$playlist_xml[0]);
+	
+	
+	// -------------------------------------------------
+	/*
+		Submit the point cache export process.
+	*/
+	// -------------------------------------------------
+	
+	print ("PointCachePreExport: Submitting Point Cache Export process(es) \n\n");
+	int $jobNum = submit_pointCacheExport ($pointCachePlaylist, $playlistNumitems, $args, $pointCacheTempFile);
+
+	// populate passed job data array
+	$jobData[0] = $jobNum;
+	$jobData[1] = 	$playlistNumitems;
+
+	return true;
+} 
+// ---------------------------------------------------------------------------------------------------
+global proc int[] PointCachePreExport (string $args)
+{
+	// load plugins and source scripts
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+	loadPlugins;
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;		// The sequence
+	global string $gShot;		// The shot
+	global string $gCluster;		// The cluster to send point cache export processes to
+	global int $gPriority;		// Priority to submit point cache export processes at
+	global int $gPointCacheMode;	// Point Cache Export mode - 0 = none, 1 = all, 2 = selective
+	global string $gPointCacheList;	// List of assets to export point cache for (if mode is selective)
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global int $gIncrementPointCacheVersion;	// Increment point cache version?
+
+	global string $gTaskType;
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskConfig;		// Config file for this task	
+
+	// ------------------------------------------------------
+	// get farm defaults
+	// ------------------------------------------------------
+	string $defaultCluster[];
+	int $defaultPriority[];
+
+	getFarmClusters ($defaultCluster,$defaultPriority);
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gTaskType = "PointCachePreExport";
+	$gParentTaskType = getArgValue ($args,"parentTaskType");
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gTaskConfig = getArgValueDefault ($args,"taskConfig",getConfig());
+
+	$args = argListMergeWithConfig ($args,$gTaskConfig);	// embed default arg values in config into args
+
+	
+	$gCluster = getArgValueDefault($args,"cluster",$defaultCluster[0]);
+	$gPriority = (int)getArgValueDefault ($args,"priority",(string)$defaultPriority[0]);
+	$gPointCacheMode = (int)getArgValue ($args,"exportPointCache");
+	$gPointCacheList = getArgValue ($args,"pointCacheList");
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gIncrementPointCacheVersion = (int)getArgValueDefault($args,"incrementpointcacheversion","1");
+	
+	int $jobData[];	// job data to return to calling process - job number and number of sub-jobs
+	
+	do_PointCachePreExport($args, $jobData);
+
+	return $jobData;
+}
+

@@ -1,0 +1,86 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwCustomIntensity()
+{
+	$tmp = `ls -sl`;
+	string $selected = $tmp[0];
+	string $light[] = `listRelatives -type light -pa $selected`;
+	print ("CREATING CUSTOM DECAY AND INTENSITY FOR: "+$light[0]+"\n");
+	float $intensity = `getAttr ($light[0]+".intensity")`;
+
+	//CREATE DECAY SPHERES AND PARENT TO LIGHT
+	print ("CREATE DECAY SPHERES\n");
+	string $sphere[] = `sphere -p 0 0 0 -ax 0 1 0 -ssw 0 -esw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 4 -nsp 2 -ch 0`;
+	string $shape[] = `listRelatives -type nurbsSurface $sphere[0]`;
+	setAttr ($shape[0]+".template") 1;
+	setAttr ($shape[0]+".visibility") 0;
+	setAttr ($shape[0]+".visibility") 1;
+	setAttr ($shape[0]+".castsShadows") 0;
+	setAttr ($shape[0]+".receiveShadows") 0;
+	setAttr ($shape[0]+".motionBlur") 0;
+	setAttr ($shape[0]+".primaryVisibility") 0;
+	setAttr ($shape[0]+".smoothShading") 0;
+	setAttr ($shape[0]+".visibleInReflections") 0;
+	setAttr ($shape[0]+".visibleInRefractions") 0;
+	setAttr ($shape[0]+".doubleSided") 0;
+	setAttr -k 0 ($sphere[0]+".tx");
+	setAttr -k 0 ($sphere[0]+".ty");
+	setAttr -k 0 ($sphere[0]+".tz");
+	setAttr -k 0 ($sphere[0]+".rx");
+	setAttr -k 0 ($sphere[0]+".ry");
+	setAttr -k 0 ($sphere[0]+".rz");
+	setAttr -k 0 ($sphere[0]+".sx");
+	setAttr -k 0 ($sphere[0]+".sy");
+	setAttr -k 0 ($sphere[0]+".sz");
+	setAttr -k 0 ($sphere[0]+".visibility");
+
+	print ("PARENT DECAY SPHERE TO LIGHT\n");
+	parent -r $sphere[0] $selected ;
+	string $inst[] = `instance $sphere[0]`;
+	$sphere[0] = `rename $sphere[0] "decayStart0"`;
+	$inst[0] = `rename $inst[0] "decayEnd0"`;
+
+	print ("ADD DECAY ATTRIBUTES TO LIGHT\n");
+	addAttr -ln customIntensity0 -at double $light[0];
+	setAttr -e -keyable true ($light[0]+".customIntensity0");
+	addAttr -ln decayStart0 -at double $light[0];
+	setAttr -e -keyable true ($light[0]+".decayStart0");
+	addAttr -ln decayEnd0 -at double  $light[0];
+	setAttr -e -keyable true ($light[0]+".decayEnd0");
+	setAttr ($light[0]+".customIntensity0") $intensity;
+	setAttr ($light[0]+".decayStart0") 1;
+	setAttr ($light[0]+".decayEnd0") 2;
+
+	print ("CONNECT ATTRIBUTES TO SPHERES\n");
+	connectAttr -f ($light[0]+".decayStart0") ($sphere[0]+".scaleX");
+	connectAttr -f ($light[0]+".decayStart0") ($sphere[0]+".scaleY");
+	connectAttr -f ($light[0]+".decayStart0") ($sphere[0]+".scaleZ");
+	connectAttr -f ($light[0]+".decayEnd0") ($inst[0]+".scaleX");
+	connectAttr -f ($light[0]+".decayEnd0") ($inst[0]+".scaleY");
+	connectAttr -f ($light[0]+".decayEnd0") ($inst[0]+".scaleZ");
+
+	print "CREATE LIGHT INFO NODE\n";
+	string $lightInfo = `createNode lightInfo`;
+	connectAttr -f ($light[0]+".worldMatrix[0]") ($lightInfo+".worldMatrix");
+
+	string $x_string = ("if\("+$lightInfo+".sampleDistance>\("+$light[0]+".decayStart0*"+$selected+".scaleX\)&&"+
+		$lightInfo+".sampleDistance<=\("+$light[0]+".decayEnd0*"+$selected+".scaleX\)\)\n{\n\t"+
+		"float \$decayFactor = \(\("+$light[0]+".decayEnd0*"+$selected+".scaleX\)-"+$lightInfo+".sampleDistance\)/\(\("+$light[0]+".decayEnd0-"+$light[0]+".decayStart0\)*"+$selected+".scaleX\);\n\t"+
+		$light[0]+".intensity = "+$light[0]+".customIntensity0*\$decayFactor;\n}\n"+
+		"else if\("+$lightInfo+".sampleDistance>\("+$light[0]+".decayEnd0*"+$selected+".scaleX\)\)\n{\n\t"+
+		$light[0]+".intensity = 0;\n}\n"+
+		"else\n{\n\t"+$light[0]+".intensity = "+$light[0]+".customIntensity0;\n}\n");
+
+	print "CREATE EXPRESSION\n";
+	expression -name ($light[0]+"_CUSTOM_INTENSITY") -s $x_string -o $light[0] -ae 1 -uc all ;
+
+	select -r $light;
+}

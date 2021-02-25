@@ -1,0 +1,280 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwScaleTexture2(string $destfolder)
+{
+	int $convertToIff = 0;
+
+	string $buf[], $buf1[], $buf2[], $file[];
+
+	string $fileNode[] = `ls -type file`;
+	for ($node in $fileNode)
+	{
+		string $image = `getAttr ($node + ".fileTextureName")`;
+		if (!`stringArrayCount $image $file`)
+		{
+			waitCursor -state on;
+
+			tokenize $image "/" $buf;
+
+			string $filename = $buf[size($buf) - 1];
+			string $serial = $filename;
+			string $folder = `substring $image 1 (size($image) - size($filename))`;
+
+			tokenize $filename "." $buf;
+			
+			string $from = $buf[size($buf)-1];
+			string $to = `substring $filename (size($buf[0]) + 2) (size($filename))`;
+			if($convertToIff)
+				$to = `substitute $from $to "iff"`;
+			
+			$filename = $buf[0];
+
+			string $ms;
+/*
+			if (`gmatch $filename "*_h"`)
+				$ms = `substring $filename 1 (size($filename) - 2)` + "_m";
+			else if (`gmatch $filename "*_m"`)
+				$ms = `substring $filename 1 (size($filename) - 2)` + "_l";
+			else if (`gmatch $filename "*_l"`)
+				$ms = `substring $filename 1 (size($filename) - 2)` + "_s";
+			else if (`gmatch $filename "*_s"`)
+				$ms = `substring $filename 1 (size($filename) - 2)` + "_v";
+			else
+				$ms = $filename + "_m";
+*/
+			$ms = $filename + "." + $to;
+
+			if (`tokenize $serial "." $buf` > 2)
+			{
+				string $index = $buf[size($buf)-2];
+				if (`match "[0-9]+" $index` == $index)
+				{
+					string $filespec = $folder + `substitute ("." + $index + ".") $serial ".*."`;
+					$buf1 = `getFileList -filespec $filespec`;
+					for ($i=0; $i<size($buf1); $i++)
+					{
+						if (`tokenize $buf1[$i] "." $buf2` > 2)
+						{
+							string $index1 = $buf2[size($buf2)-2];
+							if (`match "[0-9]+" $index1` == $index1)
+							{
+								string $source = $folder + $buf1[$i];
+								string $dest = $destfolder + `substitute ("." + $index + ".") $ms ("." + $index1 + ".")`;
+								zwScaleImage $source $dest 2;
+								print ($buf1[$i] + "\t\t=>\t" + `substitute ("." + $index + ".") $ms ("." + $index1 + ".")` + "\n");
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				string $source = $image;
+				string $dest = $destfolder + $ms;
+				zwScaleImage $source $dest 2;
+				print ($folder + $serial + "\t\t=>\t" + $dest + "\n");
+			}
+
+			setAttr -type "string" ($node + ".fileTextureName") ($destfolder + $ms);
+
+			waitCursor -state off;
+		}
+	}
+}
+
+global proc zwScaleTexture2CB()
+{
+	string $destFolder = `textFieldGrp -query -text textureCollectorBrowse`;
+//	int $modifyPath = `checkBoxGrp -query -value1 checkBoxGrp1`;
+//	int $convertToIff = `checkBoxGrp -query -value1 checkBoxGrp2`;
+	$modifyPath = `checkBox -q -value checkOfMdfTexPth`;
+	$objApplyto = `radioButtonGrp -q -select radioOfApl`; 
+
+	string $tokens[];
+	if (`tokenize $destFolder " " $tokens` > 1)
+		// path contains space
+		error "Target path has space in it.";
+	
+	if (`gmatch (toupper($destFolder)) "*THRU_THE_MOEBIUS_STRIP\\PRODUCTION\\DIRECTOR_FINAL*"` || `gmatch (toupper($destFolder)) "*THRU_THE_MOEBIUS_STRIP\\PRODUCTION\\WORKING*"`)
+		error "This tool can not scale textures from the DIRECTOR_FINAL or WORKING folder.";
+
+	if(`filetest -d $destFolder`)
+	{
+		$destFolder += "\\";
+		$destFolder = `substituteAllString $destFolder "\\" "/"`;
+
+		
+		zwScaleTextureOnly($destFolder,$modifyPath,$objApplyto);
+		
+	}
+	else
+		error "Illegal target textures directory!";
+}
+
+global proc textureCollectorBrowse()
+{
+	string $workspace = `textFieldGrp -query -fileName textureCollectorBrowse`;
+	$workspace = `idmtFolderDialog -initialDir $workspace`;
+	if(`filetest -d $workspace`)
+		textFieldGrp -edit -fileName $workspace textureCollectorBrowse;
+}
+
+global proc zwScaleTexture2GUI()
+{
+	if(!`window -exists zwScaleTexture2Wnd`)
+	{
+		window -menuBar true -title "Scale Texture" -width 500 -height 200 zwScaleTexture2Wnd;
+//			menu -label "Help";
+//				menuItem -label "Help on Scale Texture ..." -command "zjHelpCallback zwTextureScale";
+			formLayout formLayout1;
+				text -label "WARNING: Destination path must not contain space in it. If the destination path is the same as the source path, the texture will be overwritten." text1;
+				textFieldButtonGrp -label "Textures Folder:" -buttonLabel "Browse" -buttonCommand "textureCollectorBrowse" -adjustableColumn 2 textureCollectorBrowse;
+//				checkBoxGrp -label "Modify Texture Path" -value1 true checkBoxGrp1;
+//				checkBoxGrp -label "Convert to iff" checkBoxGrp2;
+				
+				string $button1 = `button -label "Scale" -command "zwScaleTexture2CB;\ndeleteUI zwScaleTexture2Wnd;"`;
+				string $button2 = `button -label "Apply" -command "zwScaleTexture2CB"`;
+				string $button3 = `button -label "Close" -command "deleteUI zwScaleTexture2Wnd"`;
+
+				radioButtonGrp -numberOfRadioButtons 2 -label "Apply to" -labelArray2 "All texture" "selected texture" -select 1 radioOfApl;
+				checkBox -label "Modify Texture Path" -value on checkOfMdfTexPth;
+
+			formLayout -edit
+				-attachForm	text1			"top"		10
+				-attachForm	text1			"left"		10
+
+				-attachControl radioOfApl	"top"		10	text1
+				-attachForm    radioOfApl	"left"		5
+				-attachForm	radioOfApl	"right"		5
+
+				-attachControl  checkOfMdfTexPth	"top"	5	radioOfApl
+				-attachForm     checkOfMdfTexPth	"left"	145
+				-attachPosition	 checkOfMdfTexPth	"right"	0	100
+
+				-attachControl	textureCollectorBrowse	"top"		10	checkOfMdfTexPth
+				-attachForm	textureCollectorBrowse	"left"		5
+				-attachForm	textureCollectorBrowse	"right"		5
+
+//				-attachControl	checkBoxGrp1		"top"		5	textureCollectorBrowse
+//				-attachForm	checkBoxGrp1		"left"		5
+
+//				-attachControl	checkBoxGrp2		"top"		5	checkBoxGrp1
+//				-attachForm	checkBoxGrp2		"left"		5
+
+				-attachControl	$button1	"top"		5	textureCollectorBrowse
+				-attachForm	$button1	"left"		5
+				-attachPosition	$button1	"right"		0	33
+
+				-attachControl	$button2	"top"		5	textureCollectorBrowse
+				-attachControl	$button2	"left"		0	$button1
+				-attachPosition	$button2	"right"		0	66
+
+				-attachControl	$button3	"top"		5	textureCollectorBrowse
+				-attachControl	$button3	"left"		0	$button2
+				-attachForm	$button3	"right"		5
+
+
+
+
+			formLayout1;
+	}
+	showWindow zwScaleTexture2Wnd;
+}
+
+
+global proc zwScaleTextureOnly(string $destfolder,int $modifyTexturePath,int $objApplied)
+{
+	source zwPublishSystem.mel;
+
+	int $convertToIff = 0;
+
+	string $fileNode[], $buf[], $buf1[], $buf2[], $file[];
+	switch ($objApplied)
+	{
+	case 1:
+		$fileNode = `ls -type file`; break;
+
+	case 2:
+		$fileNode = `zwTextureNetwork`;
+		break;
+	
+	}
+
+	
+	for ($node in $fileNode)
+	{
+		string $image = `getAttr ($node + ".fileTextureName")`;
+		if (!`stringArrayCount $image $file`)
+		{
+			waitCursor -state on;
+
+			tokenize $image "/" $buf;
+
+			string $filename = $buf[size($buf) - 1];
+			string $serial = $filename;
+			string $folder = `substring $image 1 (size($image) - size($filename))`;
+
+			tokenize $filename "." $buf;
+			
+			string $from = $buf[size($buf)-1];
+			string $to = `substring $filename (size($buf[0]) + 2) (size($filename))`;
+			if($convertToIff)
+				$to = `substitute $from $to "iff"`;
+			
+			$filename = $buf[0];
+
+			string $ms;
+
+			$ms = $filename + "." + $to;
+
+			if (`tokenize $serial "." $buf` > 2)
+			{
+				string $index = $buf[size($buf)-2];
+				if (`match "[0-9]+" $index` == $index)
+				{
+					string $filespec = $folder + `substitute ("." + $index + ".") $serial ".*."`;
+					$buf1 = `getFileList -filespec $filespec`;
+					for ($i=0; $i<size($buf1); $i++)
+					{
+						if (`tokenize $buf1[$i] "." $buf2` > 2)
+						{
+							string $index1 = $buf2[size($buf2)-2];
+							if (`match "[0-9]+" $index1` == $index1)
+							{
+								string $source = $folder + $buf1[$i];
+								string $dest = $destfolder + `substitute ("." + $index + ".") $ms ("." + $index1 + ".")`;
+								zwScaleImage $source $dest 2;
+								print ($buf1[$i] + "\t\t=>\t" + `substitute ("." + $index + ".") $ms ("." + $index1 + ".")` + "\n");
+							}
+						}
+					}
+				}
+			}
+			else
+			{
+				string $source = $image;
+				string $dest = $destfolder + $ms;
+				zwScaleImage $source $dest 2;
+				print ($folder + $serial + "\t\t=>\t" + $dest + "\n");
+			}
+
+			switch ($modifyTexturePath)
+			{
+			case 1:
+				setAttr -type "string" ($node + ".fileTextureName") ($destfolder + $ms); break;
+			case 0:
+				print "Don't Modify Texture Path"; break;
+			}
+
+			waitCursor -state off;
+		}
+	}
+}

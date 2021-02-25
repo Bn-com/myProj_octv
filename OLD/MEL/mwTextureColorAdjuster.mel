@@ -1,0 +1,140 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwTextureColorAdjuster()
+{
+	$tmp = `ls -sl`;			//SELECT A TEXTURE FILE
+	string $file = $tmp[0];
+
+	//GET DESTINATION PLUG
+	string $dPlug[] = `listConnections -s 0 -d 1 -p 1 ($file+".outColor")`;
+
+	//ADD ATTRIBUTES TO FILE
+	addAttr -ln hueShift -at double -min -360 -max 360 -dv 0 $file;
+	setAttr -e -keyable true ($file+".hueShift");
+	addAttr -ln hueMin -at double -min 0 -max 360 -dv 0 $file;
+	setAttr -e -keyable true ($file+".hueMin");
+	addAttr -ln hueMax -at double -min 0 -max 360 -dv 360 $file;
+	setAttr -e -keyable true ($file+".hueMax");
+
+	addAttr -ln satShift -at double -min -10 -max 10 -dv 0 $file;
+	setAttr -e -keyable true ($file+".satShift");
+	addAttr -ln satMult -at double -min 0 -max 10 -dv 1 $file;
+	setAttr -e -keyable true ($file+".satMult");
+
+	addAttr -ln valMult -at double -min 0 -max 10 -dv 1 $file;
+	setAttr -e -keyable true ($file+".valMult");
+
+	addAttr -ln contrastR -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".contrastR");
+	addAttr -ln contrastG -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".contrastG");
+	addAttr -ln contrastB -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".contrastB");
+	addAttr -ln contrastBiasR -at double -min 0 -max 1 -dv 0.5 $file;
+	setAttr -e -keyable true ($file+".contrastBiasR");
+	addAttr -ln contrastBiasG -at double -min 0 -max 1 -dv 0.5 $file;
+	setAttr -e -keyable true ($file+".contrastBiasG");
+	addAttr -ln contrastBiasB -at double -min 0 -max 1 -dv 0.5 $file;
+	setAttr -e -keyable true ($file+".contrastBiasB");
+
+	addAttr -ln gammaR -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".gammaR");
+	addAttr -ln gammaG -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".gammaG");
+	addAttr -ln gammaB -at double -min -5 -max 5 -dv 1 $file;
+	setAttr -e -keyable true ($file+".gammaB");
+
+	//CREATE HSV NETWORK NODES
+	string $hsv = `createNode rgbToHsv`;
+	$hsv = `rename $hsv ($file+"_rgb2hsv")`;
+	string $clamp = `createNode clamp`;
+	$clamp = `rename $clamp ($file+"_clamp")`;
+	setAttr ($clamp+".maxG") 1;
+	setAttr ($clamp+".maxB") 1;
+	string $hueShift = `createNode plusMinusAverage`;
+	$hueShift = `rename $hueShift ($file+"_hueShift")`;
+	string $loopHueP = `createNode plusMinusAverage`;
+	$loopHueP = `rename $loopHueP ($file+"_loopHuePos")`;
+	setAttr ($loopHueP+".operation") 2;				//ADD
+	string $loopHueN = `createNode plusMinusAverage`;
+	$loopHueN = `rename $loopHueN ($file+"_loopHueNeg")`;
+	setAttr ($loopHueN+".operation") 2;				//SUBTRACT
+	string $satMD = `createNode multiplyDivide`;
+	$satMD = `rename $satMD ($file+"_satMD")`;
+	string $valMD = `createNode multiplyDivide`;
+	$valMD = `rename $valMD ($file+"_valMD")`;
+	string $condP = `createNode condition`;
+	$condP = `rename $condP ($file+"_hueCondPos")`;
+	setAttr ($condP+".operation") 3;				//GREATER OR EQUAL
+	setAttr ($condP+".secondTerm") 360;
+	string $condN = `createNode condition`;
+	$condN = `rename $condN ($file+"_hueCondNeg")`;
+	setAttr ($condN+".operation") 5;				//LESSER OR EQUAL
+	setAttr ($condN+".secondTerm") 0;
+	string $rgb = `createNode hsvToRgb`;
+	$rgb = `rename $rgb ($file+"_hsv2rgb")`;
+
+	//MAKE HUE NETWORK CONNECTIONS
+	connectAttr -f ($file+".outColor") ($hsv+".inRgb");
+	connectAttr -f ($hsv+".outHsv") ($clamp+".input");
+	connectAttr -f ($clamp+".output") ($hueShift+".input3D[0]");
+	connectAttr -f ($hueShift+".output3Dx") ($loopHueP+".input1D[0]");
+	setAttr ($loopHueP+".input1D[1]") 360;
+	connectAttr -f ($loopHueP+".output1D") ($condP+".color1R");
+	connectAttr -f ($hueShift+".output3Dx") ($condP+".color2R");
+	connectAttr -f ($hueShift+".output3Dx") ($condP+".firstTerm");
+	connectAttr -f ($condP+".outColorR") ($condN+".firstTerm");
+	connectAttr -f ($condP+".outColorR") ($condN+".color2R");
+	connectAttr -f ($condP+".outColorR") ($loopHueN+".input1D[0]");
+	connectAttr -f ($loopHueN+".output1D") ($condN+".color1R");
+	connectAttr -f ($condN+".outColorR") ($rgb+".inHsvR");
+	setAttr ($loopHueN+".input1D[1]") (-360);
+	connectAttr -f ($file+".hueMin") ($clamp+".minR");
+	connectAttr -f ($file+".hueMax") ($clamp+".maxR");
+	connectAttr -f ($file+".hueShift") ($hueShift+".input3D[1].input3Dx");
+
+	//MAKE SATURATION NETWORK CONNECTIONS
+	connectAttr -f ($hueShift+".output3Dy") ($satMD+".input2X");
+	connectAttr -f ($satMD+".outputX") ($rgb+".inHsvG");
+	connectAttr -f ($file+".satMult") ($satMD+".input1X");
+	connectAttr -f ($file+".satShift") ($hueShift+".input3D[1].input3Dy");
+
+	//MAKE VALUE NETWORK CONNECTIONS
+	connectAttr -f ($hueShift+".output3Dz") ($valMD+".input2X");
+	connectAttr -f ($valMD+".outputX") ($rgb+".inHsvB");
+	connectAttr -f ($file+".valMult") ($valMD+".input1X");
+
+	//ADD CONTRAST AND GAMMA CONTROLS
+	string $contrast = `createNode contrast`;
+	$contrast = `rename $contrast ($file+"_contrast")`;
+	setAttr ($contrast+".contrastX") 1.0;
+	setAttr ($contrast+".contrastY") 1.0;
+	setAttr ($contrast+".contrastZ") 1.0;
+	connectAttr -f ($rgb+".outRgb") ($contrast+".value");
+	string $gamma = `createNode gammaCorrect`;
+	$gamma = `rename $gamma ($file+"_gamma")`;
+	connectAttr -f ($contrast+".outValue") ($gamma+".value");
+
+	connectAttr -f ($file+".contrastR") ($contrast+".contrastX");
+	connectAttr -f ($file+".contrastG") ($contrast+".contrastY");
+	connectAttr -f ($file+".contrastB") ($contrast+".contrastZ");
+	connectAttr -f ($file+".contrastBiasR") ($contrast+".biasX");
+	connectAttr -f ($file+".contrastBiasG") ($contrast+".biasY");
+	connectAttr -f ($file+".contrastBiasB") ($contrast+".biasZ");
+	connectAttr -f ($file+".gammaR") ($gamma+".gammaX");
+	connectAttr -f ($file+".gammaG") ($gamma+".gammaY");
+	connectAttr -f ($file+".gammaB") ($gamma+".gammaZ");
+
+	//CONNECT TO SHADER
+	connectAttr -f ($gamma+".outValue") $dPlug;
+	select -r $file;
+	print "ALL DONE\n";
+}

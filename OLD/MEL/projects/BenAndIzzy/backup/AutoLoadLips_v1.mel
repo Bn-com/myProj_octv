@@ -1,0 +1,439 @@
+//Auto set keyframes for character lip sync according to a data .txt file .
+//For Bratz project.
+//Update 11-11-2006.
+
+proc string[] ALLGetFilename()
+{
+	string $fileName = `file -q -sceneName`;
+	string $buffer[];
+	int $num = `tokenize $fileName "\/" $buffer`;
+	int $num2 = `tokenize $buffer[$num-1] "_" $buffer`;
+	int $sFrame = `playbackOptions -q -min`;
+	int $eFrame = `playbackOptions -q -max`;
+	int $tFrame = $eFrame - $sFrame + 1;
+	string $char[] = {$buffer[1],$buffer[2],$sFrame,$eFrame,$tFrame};
+	return $char;
+}
+
+proc string[] ALLGetCharName()
+{
+	string $charName[] = {};
+	string $sets[] = `ls -type objectSet "*_facial_set" "*:*_facial_set" "*:*:*_facial_set"`;
+	string $buffer1[],$buffer2[];
+	for ($item in $sets )
+	{
+		$charName[size($charName)] = `substring $item 1 (size($item) - 11)`;
+	}	
+	return $charName;
+}
+
+global proc AutoLoadLips_v1()
+{
+	string $sceneShot[] = ALLGetFilename();
+	string $sceneNum = $sceneShot[0];
+	string  $shotNum = $sceneShot[1];
+	int $startFrame = $sceneShot[2];
+	int $endFrame = $sceneShot[3];
+	string $lipFilePath = "\\\\File-cluster\\GDC\\Projects\\BenAndIzzy\\BenAndIzzy_Scratch\\td\\lipsync\\"+$sceneNum;
+	string $sceneChars[] = ALLGetCharName();
+
+	if(`window -exists w_ta_ALL_win`)
+		deleteUI w_ta_ALL_win;
+	window -title "Auto Load Character Lips" -mb true  -s true -resizeToFitChildren true w_ta_ALL_win;
+		
+		menu -label "Help";
+			menuItem -label "Help on AutoLoadlips..." -command "zjHelpCallback slBrAutoloadlips";
+
+		string $form = `formLayout`;
+				
+			string $columnLayout = `columnLayout -adjustableColumn true -rs 10`;
+							
+				string $sceneFrLayout = `frameLayout -label "Scenes Informations" -labelAlign "top" -cll false -borderStyle "etchedIn"`;
+					string $sceneFoLayout = `formLayout`;
+						textFieldGrp -label "Episode" -text $sceneNum -cw2 100 40   _Value_ALL_Shot_Input;
+						textFieldGrp -label "Scene" -text $shotNum -cw2 50 40 _Value_All_Scene_Input;
+						intFieldGrp -numberOfFields 2 -label "startFrame" -extraLabel "endFrame" -value1 $startFrame -value2  $endFrame -cw4 80  40 40 100 _Value_ALL_Start_Input;
+						setParent ..;
+					setParent ..;
+						formLayout -edit
+							-attachForm  _Value_ALL_Shot_Input         			"top" 5
+							-attachForm  _Value_ALL_Shot_Input				"left" 5	
+							-attachForm  _Value_ALL_Shot_Input				"bottom" 5				
+							-attachForm  _Value_ALL_Start_Input         			"top" 5
+							-attachForm  _Value_ALL_Start_Input				"right" 5
+							-attachForm _Value_All_Scene_Input				"top" 5
+							-attachControl _Value_All_Scene_Input			"left" 5 _Value_ALL_Shot_Input 
+						$sceneFoLayout;
+
+				string $charFrLayout = `frameLayout -label "Charactor Informations" -labelAlign "top" -cll false -borderStyle "etchedIn"`;
+					string $charFoLayout = `formLayout`;
+						textScrollList  -numberOfRows 6 -allowMultiSelection true   _List_ALL_Char_Input;
+						textScrollList -e -removeAll _List_ALL_Char_Input;
+						for($i=0;$i<`size $sceneChars`;$i++)
+							textScrollList -e -append ($sceneChars[$i]) _List_ALL_Char_Input;
+						setParent ..;
+					setParent ..;
+						formLayout -edit
+							-attachForm	_List_ALL_Char_Input			"top"		10
+							-attachForm	_List_ALL_Char_Input			"left"		10
+							-attachForm	_List_ALL_Char_Input			"right"		10
+							-attachForm	_List_ALL_Char_Input			"bottom"    10
+						$charFoLayout;
+				setParent ..;
+
+			string $form1 = `formLayout`;
+				floatSliderGrp -field true -l "amplitude"  -columnWidth 1 110 -columnWidth 2 60 -min 0 -max 2 -step 0.01 -v 1 _amplitude;
+				intSliderGrp -field true -l "Offset"  -columnWidth 1 110 -columnWidth 2 60 -min -100 -max 100  -v 0 _offset;
+				radioButtonGrp -numberOfRadioButtons 2 -label "Load LipSync To" -labelArray2 "selected" "all" -sl 2 _Value_ALL_Object_Input;
+				textFieldButtonGrp -label "sync file path" -text $lipFilePath -buttonLabel "Browse" -cw3 90 450 100 -buttonCommand "findFilePath" _syncListPath;
+				string $loadButton = `button -l "Load" -w 80 -command "loadLipSyncButton"`;
+				string $cleanButton = `button -l "Clean sync" -w 80 -command "deleteSyncKeys"`;
+				string $loadSound = `button -l "Sound" -w 80 -command "loadSoundTrack"`;
+				string $abortButton = `button -l "Edit txt file" -w 80 -command "editSyncTxt"`;
+				formLayout -edit
+					-attachForm $loadButton                                                 "bottom" 10
+					-attachForm  $loadButton 						"left" 10
+					-attachPosition $loadButton						"right" 0  25
+					
+					-attachForm $cleanButton                                                "bottom" 10
+					-attachControl  $cleanButton 						"left" 5 $loadButton
+					-attachPosition $cleanButton						"right" 0  50
+					
+					-attachForm $loadSound                                                  "bottom" 10
+					-attachControl  $loadSound 						"left" 5 $cleanButton
+					-attachPosition $loadSound						"right" 0  75
+					
+					-attachForm $abortButton                                                "bottom" 10
+					-attachControl  $abortButton 						"left" 5 $loadSound
+					-attachPosition $abortButton						"right" 0  100
+					
+					-attachForm _syncListPath						"left" 50 
+					-attachControl _syncListPath						"bottom" 10 $loadButton
+					-attachControl  _Value_ALL_Object_Input					"bottom" 10 _syncListPath
+					-attachForm  _Value_ALL_Object_Input					"left" 100 
+					
+					-attachControl  _offset							"bottom" 10 _Value_ALL_Object_Input
+					-attachForm  _offset							"left" 75
+
+					-attachControl  _amplitude						"bottom" 10 _offset
+					-attachForm  _amplitude							"left" 75
+				$form1;
+
+			
+			formLayout -edit
+				-attachForm $columnLayout                                                 "top" 5
+				-attachForm  $columnLayout 						"left" 10
+				-attachForm $columnLayout						"right" 10
+				-attachControl $columnLayout                                                "bottom" 5 $form1
+
+				-attachForm  $form1 						"left" 10
+				-attachForm $form1						"right" 10
+				-attachForm $form1                                                "bottom" 10
+			$form;
+		window -e -w 750 -h 420 w_ta_ALL_win;
+	showWindow w_ta_ALL_win;
+
+}
+
+global proc loadSyncFile(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _syncListPath;
+}
+
+
+global proc string findFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "loadSyncFile"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+
+global proc string loadLipsync(string $char)
+{
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	string $charSyncFile =$getSyncFolder + "\\" + $getEpisodeNum+"_"+$getSceneNum +  ".anno";
+	int $offsetFrame=`intSliderGrp -q -v _offset`;
+	
+	
+	string $buff[];
+	int $key=0;
+	string $warning;
+	string $charKey;
+	int $sFrame,$eFrame;
+	int $value;
+	float $weight[];
+	string $data[];
+	int $start;
+	if(`file -q -ex $charSyncFile`)
+	{
+		$fileId = `fopen $charSyncFile "r"`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			if (startsWith($nextLine,"xml"))
+			{
+				tokenize $nextLine "\"\"" $buff;
+				$charKey = $buff[1];
+				$nextLine = `fgetline $fileId`;
+				$start = 0;
+			}
+			if (`gmatch $char ("*:*"+$charKey)` || `gmatch $char ("*"+$charKey)`)
+			{
+				tokenize $nextLine " \n" $buff;
+				if ($buff[0] == "phn")
+				{
+					$sFrame = trunc((int)$buff[1]/1000.0*24.0+0.5)+$getStartFrame;
+					//$eFrame = trunc((int)$buff[2]/1000.0*24.0+0.5)+$getStartFrame;
+					$value = (int)$buff[3];
+					clear $data;
+					$data = phonemeLipsTranslate($buff[4]);
+					if (!$start)
+					{
+						phonemeSetKey($char,{"0.4*M"},($sFrame-2),{1.0},18);
+					}
+					phonemeSetKey($char,$data,$sFrame,{1.0},$value);
+					$start++;
+				}
+				/*if ($buff[0] == "phn_vis")
+				{
+					$sFrame = trunc((int)$buff[1]/1000.0*24.0+0.5)+$getStartFrame-1;
+					$eFrame = trunc((int)$buff[2]/1000.0*24.0+0.5)+$getStartFrame-1;
+					clear $data;
+					clear $weight;
+					for ($i=1;$i<=(int)$buff[3];$i++)
+					{
+						$weight[size($weight)] = (float)$buff[$i*2+3];
+						$data[size($data)] = phonemeLipsTranslate($buff[$i*2+2]);
+					}
+					if (!$start)
+					{
+						phonemeSetKey($char,{"M"},($sFrame-3),($sFrame-3),{1},18);
+					}
+					phonemeSetKey($char,$data,$sFrame,$eFrame,$weight,$value);
+					$start++;
+					for ($i=0;$i<size($data);$i++)
+					{
+						print ($data[$i] + "    " + $weight[$i] + "\n");
+					}
+				}*/
+				$key=1;
+			}
+			$nextLine = `fgetline $fileId`;
+		}	
+		fclose $fileId;
+		/*string $phonemeConNew[] = {($char+"_a"),($char+"_b"),($char+"_c"),($char+"_d"),($char+"_e"),($char+"_f"),($char+"_g"),($char+"_h"),($char+"_i")};
+		for ($temp in $phonemeConNew )
+		{
+			string $charCurve[] = `keyframe -q -name ($temp + ".ty")`;
+			keyTangent -e -ott clamped $charCurve;
+		}*/
+		
+		
+		if ($key==1)
+			print ("Successfully load lip file to:"+$char+"\n");
+		else
+			print ("No lip file match the character:"+$char+"\n");
+	}
+	else	print ("No lip file match the scene:"+$getEpisodeNum + "_" +$getSceneNum+"\n");
+	return $warning;
+}
+
+global proc loadLipSyncButton()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+
+
+	for($char in $getChar)
+	{	
+		loadLipsync($char);
+	}
+}
+
+
+
+global proc editSyncTxt()
+{
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	string $charSyncFile = $getSyncFolder + "/" + $getEpisodeNum+"_"+$getSceneNum +  ".anno";
+	system ("start C:\\PROGRA~1\\WINDOW~1\\ACCESS~1\\wordpad.exe " +$charSyncFile);
+}
+
+global proc deleteSyncKeys()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+
+	for ($char in $getChar)
+	{
+		string $phonemeConNew[] = {($char+"_M"),($char+"_eetC"),($char+"_I"),($char+"_Eo"),($char+"_OOO"),($char+"_U"),($char+"_FV"),($char+"_ch"),($char+"_sC"),
+					   ($char+"_S"),($char+"_L"),($char+"_Jaw_Rot"),($char+"_Lip_In_Kiss")};
+		for ($temp in $phonemeConNew )
+		{
+			if (`objExists $temp`)
+			{
+				string $charCurve[] = `keyframe -q -name ($temp+".ty")`;
+				if (`objExists $charCurve[0]`)
+					delete $charCurve;
+				setAttr ($temp+".ty") 0;
+			}
+		}
+	}
+
+}
+
+global proc loadSoundTrack()
+{
+	string $audioTrack[] = `ls -type audio`;
+	if(`size $audioTrack` != 0)
+		delete $audioTrack;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	string $sceneFolder = "\\\\File-cluster\\GDC\\Projects\\BenAndIzzy\\Reference\\Episode_"+$getEpisodeNum+"\\layout\\";
+	string $soundFolder;
+
+	string $catchFolder[] = `getFileList -folder $sceneFolder`;
+	for ($folder in $catchFolder)
+	{
+		string $child[] = `getFileList -folder ($sceneFolder+"\\"+$folder+"\\")`;
+		for ($childFolder in $child)
+		{
+			if (endsWith($childFolder,$getSceneNum))
+			{
+				$soundFolder = $sceneFolder + $folder + "\\" + $childFolder+"\\";
+				break;
+			}
+		}
+		if ($soundFolder != "")
+			break;
+	}
+	string $soundFile = $soundFolder +"BI_*"+$getSceneNum+"_sound.wav";
+	string $catchAudioFiles[] = `getFileList -filespec $soundFile`;
+	string $buffer[];
+	if(`size $catchAudioFiles` != 0)
+	{
+		$soundFile = $soundFolder + $catchAudioFiles[0];
+		if (`size $catchAudioFiles` >1)
+		{
+			for ($temp in $catchAudioFiles )
+			{
+				tokenize $temp "_" $buffer;
+				if (`size $buffer`==3)
+					$soundFile = $soundFolder +$temp;
+			}
+		}
+		timeControl -e -ds true -s `sound -o $getStartFrame -file $soundFile` timeControl1;		
+	}
+	else
+		print ("Sorry,not wav file found.\n");
+
+}
+
+
+global proc phonemeSetKey(string $char,string $data[],int $sFrame,float $weight[],int $value)
+{
+	string $phonemeConNew[] = {($char+"_M"),($char+"_eetC"),($char+"_I"),($char+"_Eo"),($char+"_OOO"),($char+"_U"),($char+"_FV"),($char+"_ch"),($char+"_sC"),
+				   ($char+"_S"),($char+"_L"),($char+"_Jaw_Rot"),($char+"_Lip_In_Kiss")};
+	float $amplitude = `floatSliderGrp -q -value _amplitude`;
+	
+	for ($temp in $phonemeConNew)
+	{
+		if (`objExists $temp`)
+			setKeyframe -itt "clamped" -ott "clamped" -t $sFrame -v 0 ($temp+".ty");
+	}
+	
+	string $buff[];
+	for ($i=0;$i<size($data);$i++)
+	{
+		tokenize $data[$i] "*" $buff;
+
+		//print $buff;
+
+		if ($buff[1] == "sC")
+		{
+			if (`objExists ($char+"_S")`)
+				setKeyframe -itt "clamped" -ott "clamped" -t $sFrame  -v ($value/100.0*$weight[$i]*$amplitude*(float)$buff[0]) ($char+"_"+"S"+".ty");
+			else if (`objExists ($char+"_sC")`)
+				setKeyframe -itt "clamped" -ott "clamped" -t $sFrame  -v ($value/100.0*$weight[$i]*$amplitude*(float)$buff[0]) ($char+"_"+"sC"+".ty");
+			else 
+				setKeyframe -itt "clamped" -ott "clamped" -t $sFrame  -v ($value/100.0*$weight[$i]*$amplitude*0.386) ($char+"_"+"ch"+".ty");
+		}
+		else 
+			setKeyframe -itt "clamped" -ott "clamped" -t $sFrame  -v ($value/100.0*$weight[$i]*$amplitude*(float)$buff[0]) ($char+"_"+$buff[1]+".ty");
+		
+
+		/*
+		if ($data[$i] == "extr1")
+		{
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.5*0.4) ($char+"_OOO"+".ty");
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.5*0.2) ($char+"_Jaw_Rot"+".ty");
+		}
+		else if ($data[$i] == "extr2")
+		{
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.06) ($char+"_Lip_In_Kiss"+".ty");
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.1) ($char+"_Jaw_Rot"+".ty");
+		}
+		else if ($data[$i] == "OOO" || $data[$i] == "eetC" || $data[$i] == "I" || $data[$i] == "L" || $data[$i] == "Eo")
+		{
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.4) ($char+"_"+$data[$i]+".ty");
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.2) ($char+"_"+$data[$i]+".ty");
+		}
+		else if ($data[$i] == "sC")
+		{
+			if (`objExists ($char+"_S")`)
+				setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.4) ($char+"_"+"S"+".ty");
+			else if (`objExists ($char+"_sC")`)
+				setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.4) ($char+"_"+"sC"+".ty");
+		}
+		else 
+			setKeyframe -ott "clamped" -t $sFrame -t $eFrame -v ($value/100.0*$weight[$i]*$amplitude*0.4) ($char+"_"+$data[$i]+".ty");
+		*/
+	}
+}
+
+global proc string[] phonemeLipsTranslate(string $data)
+{
+	string $M[] = {"m","b","p","x"};
+	string $eetC[] = {"IY","EH","y"};
+	string $I[] = {"IH","AE","AH","EY","AY","h"};
+	string $Eo[] = {"AA","AO","OW","AW"};
+	string $ch[] = {"UW","UH","OY"};
+	string $U[] = {"w"};
+	string $FV[] = {"f","v"};
+	string $s[] = {"n","NG","CH","j","DH","d","g","t","k","z","ZH","TH","s","SH"};
+	string $L[] = {"l","el"};
+	string $OOO[] = {"r","ER"};
+	string $extr1[] = {"AA","AO","OW"};
+	string $extr2[] = {"AW"};
+
+	string $ret[];
+
+	if (stringArrayCount($data,$M))		$ret = {"0.4*M"};
+	if (stringArrayCount($data,$eetC))	$ret = {"0.4*eetC"};
+	if (stringArrayCount($data,$I))		$ret = {"0.303*I"};
+	if (stringArrayCount($data,$Eo))	$ret = {"0.4*Eo"};
+	if (stringArrayCount($data,$OOO))	$ret = {"0.275*OOO","0.157*Lip_In_Kiss"};
+	if (stringArrayCount($data,$U))		$ret = {"0.351*U","0.068*Lip_In_Kiss"};
+	if (stringArrayCount($data,$FV))	$ret = {"0.338*FV"};
+	if (stringArrayCount($data,$s))		$ret = {"0.4*sC"};
+	if (stringArrayCount($data,$L))		$ret = {"0.279*L"};
+	if (stringArrayCount($data,$ch))	$ret = {"0.4*ch"};
+	if (stringArrayCount($data,$extr1))	$ret = {"0.2*OOO","0.1*Jaw_Rot"};
+	if (stringArrayCount($data,$extr2))	$ret = {"0.06*Lip_In_Kiss","0.1*Jaw_Rot"};
+
+	return $ret;
+}

@@ -1,0 +1,183 @@
+global proc nj_Rnd_GeoCacheBuilder()
+{
+
+	if (`window -exists NinjagoRenderTools`) deleteUI NinjagoRenderTools;
+	string $window=`loadUI -uiFile "//file-cluster/gdc/Resource/Support/Maya/projects/Ninjago/nj_RenderToolsUI.ui"`;
+	windowPref  -topLeftCorner 100 80 $window;
+	showWindow $window;
+
+}
+
+
+global proc nj_Rnd_GeoCacheBuilderx()
+{
+	int $start_Frame = `playbackOptions -q -min`;
+	string $selectObjs[] = `ls -sl -l`;
+	string $nParticleGroup[]={};
+	int $indexOfParticle =0;
+	string $geoGroup[]={};
+	int $indexOfGeo =0;
+	if (`objExists "zzjGeoCacheNucleus"`)	
+	{
+		delete 	"zzjGeoCacheNucleus";
+	}
+	string $nucleus=`createNode nucleus`;
+	rename $nucleus "zzjGeoCacheNucleus";
+	connectAttr -f time1.outTime "zzjGeoCacheNucleus.currentTime";
+	
+	
+	for ($obj in $selectObjs)
+	{
+		string $objTypes[]=`getShapes($obj)`;
+		if (`nodeType $objTypes[0]`!="mesh" && `nodeType $objTypes[0]`!="nurbsSurface")	continue;
+		currentTime $start_Frame;
+		
+		string $newObj[]=`duplicate $obj`;
+		$geoGroup[$indexOfGeo++] = $newObj[0];
+		
+		string $softParticle[] = `soft -c $obj`;
+		setAttr ($softParticle[0]+".startFrame") $start_Frame;
+		
+		string $nParticleName =`nj_Rnd_GeoCacheBuilder_CreateNparticle($obj)`;
+	
+		setAttr ($nParticleName+".particleRenderType") 3;
+	
+		$nParticleGroup[$indexOfParticle++] = $nParticleName;
+		
+		assignNSolver "zzjGeoCacheNucleus";
+		setAttr "zzjGeoCacheNucleus.startFrame" $start_Frame;
+		setAttr "zzjGeoCacheNucleus.maxCollisionIterations" 0;
+		setAttr "zzjGeoCacheNucleus.airDensity" 0;
+		setAttr "zzjGeoCacheNucleus.gravity" 0;
+		setAttr "zzjGeoCacheNucleus.windDirectionX" 0;
+		setAttr "zzjGeoCacheNucleus.windDirectionY" 0;
+		setAttr "zzjGeoCacheNucleus.windDirectionZ" 0;
+		setAttr "zzjGeoCacheNucleus.windSpeed" 0;
+	
+	
+		connectAttr -f ($softParticle[0]+".targetGeometry")  ($nParticleName+".inputGeometry") ;
+	
+source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjReturnMatList.mel";
+		zzjGetMatList;		//记录所有材质
+		
+
+//		获得shape节点
+		string $newObjShape[]={};
+		string $newObjShapes[]=`getShapes($newObj[0])`;
+
+		int $i =0;
+		for ($newShape in $newObjShapes)
+		{
+			if (`getAttr($newShape+".intermediateObject")`==0)
+			{
+				$newObjShape[$i++]= $newShape;
+			}	
+		}
+		
+//		打断和所有proupId 或者 SG节点的链接
+		string $connectionsList[]=`listConnections -d 0 -s 1 -c 1 -p 1 $newObjShape[0]`;
+		for ($con=0;$con<`size($connectionsList)`;$con+=2 )
+		{
+			disconnectAttr $connectionsList[$con+1] $connectionsList[$con] ;
+		}
+
+		string $connectionsList[]=`listConnections -d 1 -s 0 -c 1 -p 1 $newObjShape[0]`;
+		for ($con=0;$con<`size($connectionsList)`;$con+=2 )
+		{
+			disconnectAttr $connectionsList[$con] $connectionsList[$con+1] ;
+		}		
+		
+		
+//		error "";
+//		链接nParticle到模型		
+		
+		if (`nodeType $newObjShape[0]` == "mesh")
+		{
+			connectAttr -f ($nParticleName+".targetGeometry")  ($newObjShape[0]+".inMesh");
+		}
+		else if(`nodeType $newObjShape[0]` == "nurbsSurface")
+		{
+			connectAttr -f ($nParticleName+".targetGeometry")  ($newObjShape[0]+".create");
+		}
+//		恢复材质		
+		zzjSetMatList;
+		
+		disconnectAttr  ($softParticle[0]+".targetGeometry")  ($nParticleName+".inputGeometry") ;
+		delete $softParticle[0];
+	
+		$goalCMD = "goal -w 1 -utr 0   -g "+$obj+" "+ $nParticleName;
+	
+		eval($goalCMD);
+		
+		string $newObjParent[]=`listRelatives -p $newObj[0]`;
+		if (`size $newObjParent` !=0) parent -w $newObj[0];
+	
+	
+		source "channelBoxCommand.mel";
+		CBunlockAttr ($newObj[0]+".tx");
+		CBunlockAttr ($newObj[0]+".ty");
+		CBunlockAttr ($newObj[0]+".tz");
+		CBunlockAttr ($newObj[0]+".rx");
+		CBunlockAttr ($newObj[0]+".ry");
+		CBunlockAttr ($newObj[0]+".rz");
+		CBunlockAttr ($newObj[0]+".sx");
+		CBunlockAttr ($newObj[0]+".sy");
+		CBunlockAttr ($newObj[0]+".sz");
+	
+		setAttr ($newObj[0]+".tx") 0;
+		setAttr ($newObj[0]+".ty") 0;
+		setAttr ($newObj[0]+".tz") 0;
+		setAttr ($newObj[0]+".rx") 0;
+		setAttr ($newObj[0]+".ry") 0;
+		setAttr ($newObj[0]+".rz") 0;
+		setAttr ($newObj[0]+".sx") 1;
+		setAttr ($newObj[0]+".sy") 1;
+		setAttr ($newObj[0]+".sz") 1;
+		
+//		bake所有表情贴图
+		source "zzjUtilityTools.mel";
+		pre_BakeFileNode_ImageNumber();
+		
+	}
+
+
+	if (`size $nParticleGroup`)
+	{
+		group -n zzjGeoCache_Geo $geoGroup;
+		
+		string $nParticleGroupName =`group -n zzjGeoCache_Particle $nParticleGroup`;
+		select  $nParticleGroup  ;
+		
+		doCreateNclothCache 4 { "2", "1", "10", "OneFilePerFrame", "1", "","0","","0", "add", "0", "1", "1","0","1" } ;
+		setAttr ($nParticleGroupName+".v") 0;
+		select -cl  ;	
+		
+	}
+
+}
+
+
+global proc string nj_Rnd_GeoCacheBuilder_CreateNparticle(string $obj)
+{
+	string $cmd="";
+	string $vtxs[]=`ls -fl ($obj+".vtx[*]")`;
+	
+	if (!`size $vtxs`)
+	{
+		$vtxs = `ls -fl ($obj+".cv[*]")`;
+	}
+	
+	float $worldSpace[]=`xform -q -ws -t $vtxs`;
+	int $ss= `size $worldSpace`;
+	for ($i=0;$i<$ss;$i+=3)
+	{
+	    $cmd+="-p ";
+	    $cmd+=$worldSpace[$i]+" ";
+	    $cmd+=$worldSpace[$i+1]+" ";
+	    $cmd+=$worldSpace[$i+2]+" ";    
+	}
+	
+	$cmd = "nParticle "+ $cmd;
+	string $nParticleNames[] = `eval($cmd)`;	
+	return $nParticleNames[0];
+}

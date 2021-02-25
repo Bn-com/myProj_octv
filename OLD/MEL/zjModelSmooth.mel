@@ -1,0 +1,191 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjModelSmooth() 
+{
+	if (`window -q -exists modelSmoothWin`)
+		return;
+
+	window -title "Model Smooth" modelSmoothWin;
+    		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Model Smooth..." -command "zjHelpCallback zjModelSmooth";
+				setParent ..;
+				
+				string $form2 = `formLayout`;
+				string $b1 = `radioButtonGrp  -numberOfRadioButtons 2 -select 1 -label "Apply to:" -labelArray2 "Selected" "All" 
+						-columnWidth 1 50 -columnWidth 2 100 
+						-columnAlign 1 "left"`;
+				string $b2 = `button -label "Apply Smooth"     -w 125 -command  ("modelSmooth_app "+$b1)`;
+				string $b3 = `button -label "Remove Smooth"  -w 125 -command  ("modelSmooth_rem "+$b1)`;
+				formLayout -edit
+					-attachForm	$b1	"top"	10
+					-attachForm	$b1	"left"	22
+
+					-attachControl	$b2	"top"	5	$b1
+					-attachForm	$b2	"left"	0
+					-attachPosition	$b2	"right"	0	50
+
+					-attachControl	$b3	"top"	5	$b1
+					-attachControl	$b3	"left"	0	$b2
+					-attachPosition	$b3	"right"	0	100
+
+				$form2;
+				setParent ..;
+
+
+	showWindow modelSmoothWin;
+
+}
+
+proc string[] getDescendents()
+{
+	string $allsel[];
+	string $sel[] = `ls -long -selection -type "transform"`;
+	string $children[];
+	int $count = 0;
+	for ($shp in $sel)
+	{
+		string $des[] = `listRelatives -allDescendents -fullPath -noIntermediate -type "transform"`;
+		for ($item in $des)
+		{
+			if (kcIsType($item, "mesh"))
+				$children[$count++] = $item;
+		}
+	}
+	$children = stringArrayRemoveDuplicates($children);
+	if (size($children)>0)
+		$allsel = $children;
+	else
+		$allsel = $sel;
+	return $allsel;
+}
+
+//test whether there is a PolySmoothFace node on given object
+proc string getsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if (`gmatch $his[$i] "modelSmooth*"`) 
+			return $his[$i];
+	}
+	return "";
+}
+
+proc int getmdsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if ((`gmatch $his[$i] "modelSmooth*"`) && (`nodeType $his[$i]` == "polySmoothFace"))
+		{
+			return `getAttr ($his[$i] + ".divisions")`;
+		}
+	}
+	return 0;
+}
+
+proc addSmoothNode(string $obj, int $val)
+{
+	string $shapes[] = `listRelatives -fullPath -shapes -type "mesh" $obj`;
+	if (size($shapes)>0)
+	{
+		$plyname = `polySmooth -divisions $val -continuity 1 -keepBorder 0 -keepSelectionBorder 1 -keepTessellation 1 -constructionHistory 1 $shapes[0]`;
+		rename $plyname "modelSmooth";
+	}
+}
+//apply attribute's value to polySmooth's divisions
+proc appSm(string $list[])
+{
+
+	for ($obj in $list)
+	{
+		$poly = getsmooth($obj); 
+		if ($poly!= "")
+		{
+			string $lS[] = `listAttr -ud -st MaxSmooth $obj`;
+			if (size($lS)>0)
+			{
+				int $val = `getAttr ($obj+".MaxSmooth")`;
+				int $mS = getmdsmooth($obj);
+				if ($val != $mS)
+					setAttr ($poly+".divisions") $val $obj;
+			}
+		}
+		else
+		{
+			string $lS[] = `listAttr -ud -st MaxSmooth $obj`;
+			if (size($lS)>0)
+			{
+				int $val = `getAttr ($obj+".MaxSmooth")`;
+				if ($val != 0)
+					addSmoothNode($obj, $val);
+			}
+		}
+	}
+
+}
+
+proc remSm(string $list[])
+{
+	for ($object in $list)
+	{
+		string $shapes[] = getShapes($object);
+		for ($shp in $shapes)
+		{
+			$poly = getsmooth($shp); 
+			if ($poly!= "")
+				delete $poly;
+		}
+	}
+	print "Remove Model Smooth";
+}
+
+//apply smooth
+global proc modelSmooth_app(string $control)
+{
+	string $nodes[] = `selectedNodes -dagObjects`;
+
+	int $towhom = `radioButtonGrp -q -select $control`;
+	if ($towhom == 1 )
+	{
+		string $list[] = getDescendents();
+		appSm($list);
+	}
+	else
+	{
+		string $list[] = `ls -long -type "transform"`;
+		appSm($list);
+	}
+	select -r $nodes;
+	print "Model Smooth";
+}
+
+//remove smooth
+global proc modelSmooth_rem(string $control)
+{
+	string $nodes[] = `selectedNodes -dagObjects`;
+	int $towhom = `radioButtonGrp -q -select $control`;
+	if ($towhom == 1 )
+	{
+		string $list[] = getDescendents();
+		remSm($list);
+	}
+	else
+	{
+		string $list[] = `ls -long -type "transform"`;
+		remSm($list);
+	}
+	select -r $nodes;
+}
+
+

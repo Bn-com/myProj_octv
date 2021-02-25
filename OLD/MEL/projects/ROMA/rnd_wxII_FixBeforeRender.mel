@@ -1,0 +1,400 @@
+global proc wxII_FixBeforeRender(string $place)
+{
+	$isBatchMode=`about -batch`;
+//	set Render Globals
+	setAttr "defaultRenderGlobals.byFrameStep" 1;
+	setAttr "defaultRenderGlobals.animation" 1;
+	setAttr "defaultRenderGlobals.extensionPadding" 4;
+	setAttr "defaultRenderGlobals.outFormatControl" 0;
+	setAttr "defaultRenderGlobals.putFrameBeforeExt" 1;
+	setAttr "defaultRenderGlobals.imageFormat" 4;
+
+//	set simulation method "All Follicles"			@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+	string $hairSystem[]=`ls -type hairSystem`;
+	for ($a in $hairSystem)
+	{
+		setAttr -l false ($a+".simulationMethod");
+		setAttr ($a+".simulationMethod") 3;
+	}
+
+//	根据是否有diskCache节点判断，设置hairSystem是静态还是动态
+	string $hairs[]=`ls -type "hairSystem"`;
+	for ($a in $hairs)
+	{
+		string $tmp[]=`listConnections -d 0 -s 1 -type "diskCache" $a`;
+		if (`size $tmp`)
+		{
+			setAttr ($a+".simulationMethod") 3;
+		}
+		else
+		{
+			setAttr ($a+".simulationMethod") 1;
+		}
+	}
+
+
+
+	zjSetHaircache;		//	set all hairs cache path into "data/xxxx.mchp":
+	wxII_FixFurExtraAttributes();
+	if ($isBatchMode==0)
+	{
+		evalEcho("rmFileFix();");
+		multiLayerFix();
+	}
+	vegetationFix();
+	fixSigmablur();
+
+
+
+	if (`objExists "MayaManNugget"`)
+	{
+		string $ImageOutputDir = `zwGetPath "ImageOutputDir" ""`;
+		string $pathOld = `getAttr "MayaManNugget.ImageOutputDir"`;
+		string $pathNew = "";
+		if ($place == "online")
+		{
+			$pathNew = `substitute ".*/footage_" $pathOld ($ImageOutputDir + "/footage_")`;
+		}
+		else if ($place == "project")
+		{
+			$pathNew = `substitute ".*/Even/" $pathOld "$(PROJECTDIR)/images/"`;
+			$pathNew = `substitute ".*/Odd/" $pathNew "$(PROJECTDIR)/images/"`;
+		}
+		if ($pathOld != $pathNew)
+		{
+			evalEcho("setAttr -type \"string\" \"MayaManNugget.ImageOutputDir\" \"" + $pathNew + "\"");
+		}
+
+		int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+		for ($i=0; $i<$noOfElements; $i++)
+		{
+			string $pathOld = `MayaManInfo -getrawstring "EOPath" $i`;
+			string $pathNew = "";
+			if ($place == "online")
+			{
+				$pathNew = `substitute ".*/footage_" $pathOld ($ImageOutputDir + "/footage_")`;
+			}
+			else if ($place == "project")
+			{
+				$pathNew = `substitute ".*/Even/" $pathOld "$(PROJECTDIR)/images/"`;
+				$pathNew = `substitute ".*/Odd/" $pathNew "$(PROJECTDIR)/images/"`;
+			}
+			if ($pathOld != $pathNew)
+			{
+				evalEcho("MayaManSetData -setstring \"EOPath\" \"" + $pathNew + "\"" + $i);
+			}
+		}
+		if (!`about -batch`)
+		{
+			if (`scriptTable -exists chansList`)
+			{
+				mayaManExtraChannelsRefreshList;
+			}
+		}
+	}
+	return;
+
+
+
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/ROMA/rnd_wxII_setMayamanOutputPath.mel";
+	string $sceneName=`file -q -sn -shn`;
+//	******************************hairs*******************************
+	if (`gmatch $sceneName "lighting_*_hairs*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"hairs_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"hairs_project";
+	}
+//	******************************hairsmblur*******************************
+	if (`gmatch $sceneName "lighting_*_hairsmblur*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"hairsmblur_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"hairsmblur_project";
+	}
+
+//	******************************SSS*******************************
+	if (`gmatch $sceneName "lighting_*_sss*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"sss_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"sss_project";
+	}
+//	******************************ZDEPTH*******************************
+	if (`gmatch $sceneName "lighting_*_zdepth*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"zdepth_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"zdepth_project";
+		setAttr "MayaManNugget.DisplayChannels" 1;
+		setAttr "MayaManNugget.QuantizePlanes" 1;
+
+	}
+//	******************************MBLUR*******************************
+	if (`gmatch $sceneName "lighting_*_mblur*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"mblur_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"mblur_project";
+	}
+
+//	******************************hairsrfl*******************************
+	if (`gmatch $sceneName "lighting_*_hairsrfl*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"hairsrfl_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"hairsrfl_project";
+	}
+//	******************************noTX*******************************
+	if (`gmatch $sceneName "lighting_*_noTX*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"noTX_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"noTX_project";
+	}
+//	******************************occ*******************************
+	if (`gmatch $sceneName "lighting_*_occlusionNormal*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"occ_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"occ_project";
+	}
+//	******************************lights*******************************
+	if (`gmatch $sceneName "lighting_*_lights*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"lights_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"lights_project";
+		if ($isBatchMode==0)
+		{
+//			source "czMayaManAssistant.mel";czMayaManMultiRenderLayerRendering();
+			eval "source \"czMayaManAssistant.mel\"";
+
+			MayaManOptions;
+			textScrollList -e -selectItem "Extra Pass" theOptionsList;
+			optionListSelected;
+			czDeleteAllExtraPasses;
+		}
+		setAttr "MayaManNugget.EPDuringPreview" 0;
+		setAttr "MayaManNugget.EPSkipMain" 1;
+	}
+//	******************************idpass*******************************
+	if (`gmatch $sceneName "lighting_*_idpass*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"idpass_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"idpass_project";
+		if ($isBatchMode==0)
+		{
+			eval "source \"czMayaManAssistant.mel\";czMayaManMultiRenderLayerRendering()";
+//			source "czMayaManAssistant.mel";czMayaManMultiRenderLayerRendering();
+			eval "source \"czMayaManAssistant.mel\"";
+
+			MayaManOptions;
+			textScrollList -e -selectItem "Extra Pass" theOptionsList;
+			optionListSelected;
+			czDeleteAllExtraPasses;
+
+		}
+		setAttr "MayaManNugget.EPDuringPreview" 0;
+		setAttr "MayaManNugget.EPSkipMain" 1;
+	}
+//	******************************UV*******************************
+	if (`gmatch $sceneName "lighting_*_UV*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"UV_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"UV_project";
+	}
+//	******************************ambient*******************************
+	if (`gmatch $sceneName "lighting_*_ambient*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"ambient_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"ambient_project";
+	}
+//	******************************specular*******************************
+	if (`gmatch $sceneName "lighting_*_specular*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"specular_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"specular_project";
+	}
+//	******************************reflection*******************************
+	if (`gmatch $sceneName "lighting_*_reflections*"`)
+	{
+		setAttr "MayaManNugget.ExternalTextureCache" 2;
+		if ($place=="online")	rnd_wxII_setMayamanOutputPath"reflection_online";
+		if ($place=="project")	rnd_wxII_setMayamanOutputPath"reflection_project";
+	}
+}
+
+
+
+global proc wxII_FixFurExtraAttributes()
+{
+//	fix fur extra attributes
+	string $furDes[]={};
+	if (`pluginInfo -query -l "Fur"`)	$furDes=`ls -et "FurDescription"`;
+
+	for ($a in $furDes)
+	{
+		setAttr ($a+".Scraggle") 0;
+		if (	getAttr($a+".BaseCurlMapOffset")==0&&
+			getAttr($a+".BaseCurlMapMult")==1&&
+			getAttr($a+".BaseCurlNoise")==0&&
+			getAttr($a+".BaseCurlNoiseFreq")==10&&
+			getAttr($a+".TipCurlMapOffset")==0&&
+			getAttr($a+".TipCurlMapMult")==1&&
+			getAttr($a+".TipCurlNoise")==0&&
+			getAttr($a+".TipCurlNoiseFreq")==10)
+		{
+			if (`gmatch $a "*furDesc_tippet*"`)	//BLOOM
+				{
+					setAttr ($a+".BaseCurlMapOffset") 	0;
+					setAttr($a+".BaseCurlMapMult")	1;
+					setAttr($a+".BaseCurlNoise")		0.1;
+					setAttr($a+".BaseCurlNoiseFreq")	10;
+					setAttr ($a+".TipCurlMapOffset") 	0;
+					setAttr($a+".TipCurlMapMult")		1;
+					setAttr($a+".TipCurlNoise")		0.1;
+					setAttr($a+".TipCurlNoiseFreq")	20;
+				}
+			if (`gmatch $a "*furDesc_cloak*"`)	//MARION
+				{
+					setAttr ($a+".BaseCurlMapOffset") 	0;
+					setAttr($a+".BaseCurlMapMult")	1;
+					setAttr($a+".BaseCurlNoise")		0.2;
+					setAttr($a+".BaseCurlNoiseFreq")	20;
+					setAttr ($a+".TipCurlMapOffset") 	0;
+					setAttr($a+".TipCurlMapMult")		1;
+					setAttr($a+".TipCurlNoise")		0.2;
+					setAttr($a+".TipCurlNoiseFreq")	20;
+				}
+		}
+		if (`attributeExists "MapDir" $a`) 	setAttr -type "string" ($a+".MapDir") 		"$(PROJECTDIR)/mayaman/$(SCENENAME)/furFiles";
+		if (`attributeExists "WigUVNDir" $a`)	setAttr -type "string" ($a+".WigUVNDir") 	"$(PROJECTDIR)/mayaman/$(SCENENAME)/furFiles";
+		if (`attributeExists "WigDir" $a`)		setAttr -type "string" ($a+".WigDir") 		"$(PROJECTDIR)/mayaman/$(SCENENAME)/furFiles";
+	}
+//	fix fur rendered different from 1.2.64	 to 2.0
+	if (`objExists MayaManNugget`)
+	{
+		setAttr "MayaManNugget.PreScript" -type "string" "set MMFUR_OLD_CLUMP=1";
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.5]" ;
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"hidden\" \"int samplemotion\" [0]\nHider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.5]" ;
+
+	}
+}
+
+global proc rmFileFix()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $str = tolower($sceneName);
+//	if (`gmatch $str "*_rm.mb*"` )
+	{
+		eval "source \"zzjMayaManSettings.mel\"";
+		zzjMayaManSettings();
+		if (`gmatch $str "*mblur*"` )
+		{
+			setAttr "MayaManNugget.MotionBlurOn" 1;
+			setAttr "MayaManNugget.VertexBlurOn" 1;
+			setAttr "MayaManNugget.CameraBlurOn" 1;
+		}
+	}
+
+}
+
+
+global proc multiLayerFix()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $str = tolower($sceneName);
+//	if (`gmatch $str "*_rm.mb*"` )
+	{
+		string $renderLayers[]= `listConnections "renderLayerManager.renderLayerId"`;
+//		evalEcho("source \"D:/Alias/MAYA8.5/scripts/startup/layerEditor.mel\";");
+		for ($rl in $renderLayers)
+		{
+			editRenderLayerGlobals  -currentRenderLayer ($rl);
+
+			layerEditorLayerButtonSelect 0 ($rl);
+			setAttr -type "string" defaultRenderGlobals.imageFilePrefix "";
+		}
+
+	}
+}
+
+global proc vegetationFix()
+{
+	string $sceneName=`file -q -sn -shn`;
+
+	if (`gmatch $sceneName "lighting_*_vegetation*"`)
+	{
+	//	setAttr "MayaManNugget.ShadingRate" 5;
+		setAttr "MayaManNugget.PixelSamplesX" 2;
+		setAttr "MayaManNugget.PixelSamplesY" 2;
+		setAttr "MayaManNugget.PixelFilter" 3;
+		setAttr "MayaManNugget.PixelFilterX" 2;
+		setAttr "MayaManNugget.PixelFilterY" 2;
+
+		setAttr "MayaManNugget.RenderPriority" 1;
+		setAttr "MayaManNugget.NumCpus" 4;
+		setAttr "MayaManNugget.NumProcs" 1;
+		setAttr "MayaManNugget.NumRenders" 1;
+
+	}
+
+	if (`gmatch $sceneName "lighting_*_vegetation*_MR*.mb"`)
+	{
+		setAttr "defaultRenderGlobals.currentRenderer" -type "string" "mentalRay";
+		evalDeferred -lowestPriority "vegetationFixCMD";
+	}
+
+
+}
+
+global proc vegetationFixCMD()
+{
+	setAttr "miDefaultOptions.minSamples" 0;
+	setAttr "miDefaultOptions.maxSamples" 2;
+	setAttr "miDefaultOptions.contrastR" 0.02;
+	setAttr "miDefaultOptions.contrastG" 0.02;
+	setAttr "miDefaultOptions.contrastB" 0.02;
+	setAttr "miDefaultOptions.contrastA" 0.02;
+
+	setAttr "miDefaultOptions.filter" 2;
+	setAttr "miDefaultOptions.filterWidth" 1;
+	setAttr "miDefaultOptions.filterHeight" 1;
+}
+
+global proc fixSigmablur()
+{
+//	string $sceneName=`file -q -sn -shn`;
+////	******************************ALL*******************************
+//	if (`gmatch $sceneName "lighting_*"`)
+//	{
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "";
+//	}
+////	******************************hairs*******************************
+//	if (`gmatch $sceneName "lighting_*_hairs*"`)
+//	{
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"hidden\" \"int samplemotion\" [0]\nHider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.8]" ;
+//	}
+//
+////	******************************hairsmblur*******************************
+//	if (`gmatch $sceneName "lighting_*_hairsmblur*"`)
+//	{
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"hidden\" \"int samplemotion\" [0]\nHider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.8]" ;
+//	}
+//
+////	******************************mblur*******************************
+//	if (`gmatch $sceneName "lighting_*_mblur*"`)
+//	{
+//		setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"hidden\" \"int samplemotion\" [0]" ;
+//	}
+
+}

@@ -1,0 +1,2056 @@
+// MirrorVtx version 1.0
+
+global proc float[] mirrorVtx_getVtxCoordDiff(){
+
+   float $firstF[];
+   string $sel[] = `filterExpand -sm 31 -ex 1 `;
+   string $s;
+   string $buf[];
+   float $diff[];
+   int $i;
+   for( $i ; $i < size($sel) ; $i++ ){
+   
+      print($sel[$i]+"\n");
+      float $f[];
+      tokenize $sel[$i] "." $buf;
+      string $vid = `match "\\[[0-9]*\\]" $buf[1]`;
+      $f[0] = `getAttr ($buf[0]+".cp"+$vid+".xv")`;
+      $f[1] = `getAttr ($buf[0]+".cp"+$vid+".yv")`;
+      $f[2] = `getAttr ($buf[0]+".cp"+$vid+".zv")`;
+
+      if( $i == 0 ){
+	  $firstF = $f;
+          print( $sel[$i] + " x "+ $f[0]+"\n");
+	  print( $sel[$i] + " y "+ $f[1]+"\n");
+          print( $sel[$i] + " z "+ $f[2]+"\n");
+          print("================\n");
+
+      }
+      else{
+	  $diff[size($diff)] = $f[0] + $firstF[0];
+          $diff[size($diff)] = $f[1] - $firstF[1];
+          $diff[size($diff)] = $f[2] - $firstF[2];
+
+	  print( $sel[$i] + " x "+ $f[0]+" ===> diff to "+$sel[0]+"  "+$diff[size($diff)-3]+"\n");
+          print( $sel[$i] + " y "+ $f[1]+" ===> diff to "+$sel[0]+"  "+$diff[size($diff)-2]+"\n");
+          print( $sel[$i] + " z "+ $f[2]+" ===> diff to "+$sel[0]+"  "+$diff[size($diff)-1]+"\n");
+
+	  print("================\n");
+      }
+   }
+   return $diff;
+}
+
+
+
+global proc float[] getUVFromObj( string $s , string $prefix ){
+  int $cv;
+  string $buffer[];
+  string $str;
+  string $str2;
+  string $tempStr;
+  string $tempStr2;
+  string $temp[];
+
+  tokenize( $s , "." , $buffer );
+
+  //gmatch group727|nurbsToPoly1.vtx[1046]  "*nurbsToPoly1*"
+  //if( $buffer[0] != $prefix ){
+
+  $temp = `listRelatives -p -pa -s $s`;
+  //listRelatives -p -ap -s pPlane1.vtx[0:1]
+  // Result: pPlaneShape1 //
+
+  $temp = `listRelatives -p -pa -type transform $temp[0]`;
+  //listRelatives -p -ap -type transform pPlaneShape1
+  // Result: pPlane1 //
+
+  if(  `gmatch $temp[0] ("*"+$prefix+"*")` == 0 ){
+    return {-1,-1};
+  }
+  //if( `gmatch $s ("*"+$prefix+"*")` == 0 ){
+  //  return -1;
+  //}
+
+
+
+
+  $str = $buffer[1];
+  ////print($str+"\n");
+  $str2 = substitute("cv",$str,"");
+  ////print($str2+"\n");
+
+  tokenize( $str2  ,"][" ,  $buffer);
+
+  return( { (float) $buffer[0] , (float) $buffer[1] } );
+
+}
+
+// group727|nurbsToPoly1.vtx[1046] , nurbsToPoly1 == This case is valid
+// ** group727|nurbsToPolyShape1.vtx[1046] , nurbsToPoly1 == This case is valid too **
+global proc int getVtxFromObj(string $s , string $prefix){
+  int $cv;
+  string $buffer[];
+  string $str;
+  string $str2;
+  string $tempStr;
+  string $tempStr2;
+  string $temp[];
+
+  tokenize( $s , "." , $buffer );
+
+  //gmatch group727|nurbsToPoly1.vtx[1046]  "*nurbsToPoly1*"
+  //if( $buffer[0] != $prefix ){
+
+  $temp = `listRelatives -p -pa -s $s`;
+  //listRelatives -p -ap -s pPlane1.vtx[0:1]
+  // Result: pPlaneShape1 //
+
+  $temp = `listRelatives -p -pa -type transform $temp[0]`;
+  //listRelatives -p -ap -type transform pPlaneShape1
+  // Result: pPlane1 //
+
+  if(  `gmatch $temp[0] ("*"+$prefix+"*")` == 0 ){
+    return -1;
+  }
+  //if( `gmatch $s ("*"+$prefix+"*")` == 0 ){
+  //  return -1;
+  //}
+
+
+
+
+  $str = $buffer[1];
+  ////print($str+"\n");
+  $str1 = substitute("vtx",$str,"");  
+  ////print($str1+"\n");
+  $str2 = substitute("map",$str1,""); // v3.3
+  ////print($str2+"\n");
+  $tempStr = substitute( "]", $str2, "");
+  ////print($tempStr+"\n");
+  $tempStr2 = substituteAllString( $tempStr,"[" ,"");
+  ////print($tempStr2+"\n");
+  $cv = (int)$tempStr2;
+  return $cv;
+}
+
+/*
+      Description : get CV index from it full string presentation
+                    e.g. curve1.cv[1] --> 1
+ Input Parameters : $s -- CVs index in full named string form
+           Return : integer index
+    Prerequisites : none
+      Side Effect : none
+*/
+global proc int getVtx(string $s){
+  int $cv;
+  string $buffer[];
+  string $str;
+  string $str2;
+  string $tempStr;
+  string $tempStr2;
+  tokenize( $s , "." , $buffer );
+  $str = $buffer[1];
+  ////print($str+"\n");
+  $str2 = substitute("vtx",$str,"");
+  ////print($str2+"\n");
+  $tempStr = substitute( "]", $str2, "");
+  ////print($tempStr+"\n");
+  $tempStr2 = substituteAllString( $tempStr,"[" ,"");
+  ////print($tempStr2+"\n");
+  $cv = (int)$tempStr2;
+  return $cv;
+}
+
+
+global proc setAllWeightList(string $clu,float $value){
+  int $wlCount = `getAttr -s ($clu+".weightList[0].weights")`;
+  int $i;
+  float $wg[] = `getAttr ($clu+".weightList[0].weights")`;
+  
+  for( $i = 0 ; $i < $wlCount ; $i++ ){
+    $wg[$i] = $value;
+    setAttr ($clu+".weightList[0].weights["+$i+"]")  $value;
+  }
+  
+  ////print("setAttr -size "+$wlCount+" ("+$clu+".weightList[0].weights[0:"+($wlCount-1)+"]) $wg;\n");
+//setAttr  cluster1.weightList[0].weights[1] 1 
+  //setAttr -size $wlCount ("(\""+$clu+".weightList[0].weights[0:"+($wlCount-1)+"]\")") $wg;
+
+}
+//setAllWeightList( "cluster1" , 0.9 );
+
+global proc int isSourceVtx( float $f[] , int $mirrorVtx_symAlongFactor[] , int $sourcePosNeg ){
+  float $f[];
+  int $i;
+  for( $i = 0 ; $i < 3 ; $i++ ){
+    if( $mirrorVtx_symAlongFactor[$i] == 1 ){
+      if( $f[$i] == 0 ){
+        warning "isSourceVtx return 0 , since source have translate 0\n";
+        return 1;
+      }
+      else if( sign( $f[$i] ) == $sourcePosNeg ) {
+        return 1;
+      }
+      else{
+        return 0;
+      }
+    }
+  }
+}
+
+global proc mirrorVtx_makeMirror(){
+  string $objStr = `textFieldButtonGrp -q -tx mirrorVtx_assignObjTextGrp2`;       // mesh/nurbs transform
+  string $tarObjStr = `textFieldButtonGrp -q -tx mirrorVtx_assignTarObjTextGrp2`; // mesh/nurbs transform
+  int $direction = `radioButtonGrp -q -sl mirrorVtxSymAlong_copyDirtectionRadioButtonGrp`;
+
+  if( !size( $objStr ) ){
+    error "Please add an object in \"source obj\" field first!!";
+  }
+
+  //3.5
+  if ($direction == 3)
+    $tarObjStr = $objStr;
+  
+  string $temp[] = `listRelatives -c -ni -pa -s  $objStr`;
+  int $isNurbs = 0;
+  string $surfaceInfo;
+  string $objShape = $temp[0];
+  string $tarObjShape;
+  int $onDiffObj = 0;
+
+  if( size( $tarObjStr ) ){
+    $temp = `listRelatives -c -ni -pa -s  $tarObjStr`;
+    $tarObjShape = $temp[0];
+    $onDiffObj = 1;
+  }
+
+
+  if( `nodeType $objShape` == "nurbsSurface" ){
+    $isNurbs = 1;
+    //$surfaceInfo = `createNode surfaceInfo`;
+    //connectAttr -f ($objShape+".worldSpace") ($surfaceInfo+".inputSurface");
+  }
+  
+  // direction Value                             Mode
+  //          1             Copy from negative position to positive position
+  //          2             Copy from positive position to negative position
+  //          3                                  swap
+
+
+  print($objStr+"\n");
+  print($direction+"\n"); 
+  print($objShape+"\n");
+  //if( $direction == 
+
+  $temp = `textScrollList -q -si mapperUI`;
+  if( !size( $temp ) ){
+    error "No Vertice Mapper Node Found !! Please create a mapping first !!";
+  }
+
+  string $node = $temp[0]; // VerticeMapper node
+  int $i,$j;
+  int $vAttrCount; // count of attribute "v*" in VerticeMapper node
+  string $allvAttr[]; // "v*" attribute in VerticeMapper node
+  int $curPos; // current positive vtx
+  int $curNeg; // current negative vtx
+  float $posf[]; // local position of vtx in positive side
+  float $negf[]; // local position of vtx in negative side
+  //global string $mirrorVtx_symAlong;
+  int $mirrorVtx_symAlongFactor[] = {-1,-1,-1};
+  int $matchedVtx[];
+
+
+  clear( $matchedVtx );
+
+  $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp`;
+  if( $i == 0 ){
+       $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp2`;
+       $sourcePosNeg = -1;
+  }
+  $mirrorVtx_symAlongFactor[$i-1] = 1;
+
+/* //commented on 13 - 9 - 2003
+  $temp = `ls -tr "*VerticeMapper"`;
+
+  if( !size( $temp) ){
+    error "Please create a mapping first !!";
+  }
+  else if ( size( $temp) != 1 ){
+    warning "More than one Vertice Mapper node existing in current scene, calculation may not correct!!";
+  }
+  
+  $node = $temp[0];
+*/
+
+  $temp = `listAttr -st "v*" $node`;
+  // Result: visibility v690 . . . //
+
+  //print("all attributes start with v :\n");
+  //print( $temp );
+  $allvAttr = stringArrayRemove( {"visibility"} , $temp);
+
+  $vAttrCount = size( $allvAttr );
+
+   // add version 3.0
+  float $offsetX = `floatField -q -v mirrorVtx_offsetX`;
+   // add version 3.0
+  float $offsetY = `floatField -q -v mirrorVtx_offsetY`;
+   // add version 3.0
+  float $offsetZ = `floatField -q -v mirrorVtx_offsetZ`;
+
+//abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold
+  for( $i = 0 ; $i < $vAttrCount ; $i++ ){
+//    print( $allvAttr[$i] +"\n" );
+    $curPos = substring( $allvAttr[$i] , 2 , size( $allvAttr[$i] ) );
+//    print($curPos+"\n");
+    $curNeg = `getAttr ($node+"."+$allvAttr[$i])`;
+//    print($curNeg+"\n");
+
+    $posf[0] = `getAttr ($objShape+".cp["+$curPos+"].xv")`;
+    $posf[1] = `getAttr ($objShape+".cp["+$curPos+"].yv")`;
+    $posf[2] = `getAttr ($objShape+".cp["+$curPos+"].zv")`;
+
+    if( $onDiffObj /*&& $isNurbs*/ ){
+      $negf[0] = `getAttr ($tarObjShape+".cp["+$curNeg+"].xv")`;
+      $negf[1] = `getAttr ($tarObjShape+".cp["+$curNeg+"].yv")`;
+      $negf[2] = `getAttr ($tarObjShape+".cp["+$curNeg+"].zv")`;
+    }
+    else{
+      $negf[0] = `getAttr ($objShape+".cp["+$curNeg+"].xv")`;
+      $negf[1] = `getAttr ($objShape+".cp["+$curNeg+"].yv")`;
+      $negf[2] = `getAttr ($objShape+".cp["+$curNeg+"].zv")`;
+    }
+
+
+
+    if( $direction == 1 || $direction == 3 ){ // target to source : neg to pos
+      // modify from version 3.0
+      setAttr ($objShape+".cp["+$curPos+"].xv") ($negf[0] * $mirrorVtx_symAlongFactor[0] * -1 + $offsetX) ;
+      setAttr ($objShape+".cp["+$curPos+"].yv") ($negf[1] * $mirrorVtx_symAlongFactor[1] * -1 + $offsetY) ;
+      setAttr ($objShape+".cp["+$curPos+"].zv") ($negf[2] * $mirrorVtx_symAlongFactor[2] * -1 + $offsetZ) ;
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].xv from "+$posf[0]+" to "+($negf[0] * $mirrorVtx_symAlongFactor[0] * -1)+"\n");
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].yv from "+$posf[1]+"  to "+($negf[1] * $mirrorVtx_symAlongFactor[1] * -1)+"\n");
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].zv from "+$posf[2]+"  to "+($negf[2] * $mirrorVtx_symAlongFactor[2] * -1)+"\n");
+    }
+
+    if( ($direction == 2 || $direction == 3) ){ // source to target : pos to neg
+      if( $onDiffObj ){
+        setAttr ($tarObjShape+".cp["+$curNeg+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1) ;
+        setAttr ($tarObjShape+".cp["+$curNeg+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1) ;
+        setAttr ($tarObjShape+".cp["+$curNeg+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1) ;
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].xv from "+$negf[0]+"  to "+($posf[0] * $mirrorVtx_symAlongFactor[0] * -1)+"\n");
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].yv from "+$negf[1]+"  to "+($posf[1] * $mirrorVtx_symAlongFactor[1] * -1)+"\n");
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].zv from "+$negf[2]+"  to "+($posf[2] * $mirrorVtx_symAlongFactor[2] * -1)+"\n");
+
+      }
+      else{
+	 // modify from version 3.0
+        setAttr ($objShape+".cp["+$curNeg+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1 + $offsetX) ;
+        setAttr ($objShape+".cp["+$curNeg+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1 + $offsetY) ;
+        setAttr ($objShape+".cp["+$curNeg+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1 + $offsetZ) ;
+      }
+    }
+
+
+
+    if( $direction == 3 && !$onDiffObj && !$isNurbs ){
+//      print( " direction = 3 and on Same Object\n");
+      $matchedVtx[ size($matchedVtx) ] = $curPos;
+      $matchedVtx[ size($matchedVtx) ] = $curNeg;
+    }
+  }
+
+  // mirror local position of vtx that located in middle of body when swaping
+  if( $direction == 3 && !$onDiffObj && !$isNurbs){
+    $matchedVtx = sort( $matchedVtx );
+    int $vtxCount = `getAttr -s ($objShape+".cp")`;
+    int $isMiddleVtx;
+    for( $i = 0 ; $i < $vtxCount ; $i++ ){
+      $isMiddleVtx = 1;
+      for( $j = 0 ; $j < size( $matchedVtx ) ; $j++ ){
+        if( $i == $matchedVtx[$j] ){
+          $isMiddleVtx = 0;
+          break;
+        }
+//        else if( $i > $matchedVtx[$j] ){
+//          break;
+//        }
+      }
+      if( $isMiddleVtx ){
+        //print("fix middle vtx ["+$i+"]\n");
+        $posf[0] = `getAttr ($objShape+".cp["+$i+"].xv")`;
+        $posf[1] = `getAttr ($objShape+".cp["+$i+"].yv")`;
+        $posf[2] = `getAttr ($objShape+".cp["+$i+"].zv")`;
+
+        //int $signX = sign( $offsetX );
+        //int $signY = sign( $offsetY );
+        //int $signZ = sign( $offsetZ );
+
+	 // modified from version 3.1
+	 setAttr ($objShape+".cp["+$i+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1 + $offsetX ) ;
+	 setAttr ($objShape+".cp["+$i+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1 + $offsetY ) ;
+	 setAttr ($objShape+".cp["+$i+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1 + $offsetZ );
+      }
+    }
+  }
+}
+
+global proc mirrorVtx_createMapping(int $tabIndex){
+  string $sel[] = `ls -sl`;
+  string $orgSel[] = $sel;
+  string $s; // shape
+  string $tran; // transform
+  int $i,$j,$k,$tempInt,$count;
+  string $temp[];
+  string $temp2[];
+  int $c;
+  float $f[],$f1[],$f2[],$fBase[],$fBase2[];
+  float $curWt; // current weight
+  int $curVtx;
+  float $precision = 0.0001;
+  global string $mirrorVtx_symAlong;
+  global float $mirrorVtx_threshold;
+  int $mirrorVtx_symAlongFactor[] = {-1,-1,-1};
+  float $wt;
+  int $sourcePosNeg = 1;
+  string $tempStr;
+  string $s2;    // target shape
+  string $tran2; // target transform
+  
+  int $tryCount;
+  int $connectionFound;
+  int $exeMode = 0;
+
+  string $objStr = `textFieldButtonGrp -q -tx mirrorVtx_assignObjTextGrp`; // mesh/nurbs transform
+  string $tarObjStr = `textFieldButtonGrp -q -tx mirrorVtx_assignTarObjTextGrp`; // mesh/nurbs transform
+  string $vtxStr = `textFieldButtonGrp -q -tx mirrorVtx_assignRangeTextGrp`; // vtx
+
+  string $objStrArr[];
+  string $tarObjStrArr[];
+  string $vtxStrArr[];
+  string $objShapeArr[];
+
+  int $tVtxIp[]; // source geometry's vertice index ( apply in two different polygon mode )
+  int $tVtxI[]; // target geometry's vertice index
+  int $tVtxI2[]; // identify vertice is located in source direction or target direction OR exactly lies on axis
+  int $u[];
+  int $v[];
+
+  int $vI;
+  int $vI2;
+
+  string $myIntersector; // string intersector
+  int $matchCount = 0;
+  global string $unmatchPair[];
+  int $proAmount = 0; // progress amount in progress bar
+  string $dummyNode;
+  int $isNurbs = 0;
+  int $onDiffObj = 0;
+  string $surfaceInfo;
+  string $surfaceInfo2;
+  string $mapperPosfix = "VerticeMapper";
+
+
+  scriptEditorInfo  -ch;
+  print(" $mirrorVtx_symAlong : "+$mirrorVtx_symAlong+"\n");
+  print(" tabIndex : "+$tabIndex+"\n");
+  print(" $mirrorVtx_threshold : "+$mirrorVtx_threshold+"\n");
+  if( `checkBox -q -v mirrorVtx_childCheck` ){
+    print(" check child node\n");
+  }
+
+    $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp`;
+    if( $i == 0 ){
+       $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp2`;
+       $sourcePosNeg = -1;
+    }
+  $mirrorVtx_symAlongFactor[$i-1] = 1;
+
+  tokenize $objStr ";" $objStrArr; 
+  tokenize $vtxStr ";" $vtxStrArr;
+  tokenize $tarObjStr ";" $tarObjStrArr;
+
+
+  if( size( $objStrArr[0] ) == 0 ){ // no dedicated object from user
+      error "Please give information on object!";
+      return;
+  }
+
+  if( size( $tarObjStrArr[0] ) != 0 ){ // no dedicated object from user
+    $onDiffObj = 1;
+  }
+
+  $temp = `listRelatives -c -ni -pa -s  $objStrArr[0]`;
+  $s = $temp[0]; // mesh/nurbs shape
+  if( `nodeType $s` == "nurbsSurface" ){
+    $isNurbs = 1;
+    $surfaceInfo = `createNode surfaceInfo`;
+    connectAttr -f ($s+".worldSpace") ($surfaceInfo+".inputSurface");
+    //print( "connectAttr -f ("+$s+".worldSpace) ("+$surfaceInfo+".inputSurface)\n");
+  }
+
+  if( $onDiffObj ){
+    $mapperPosfix = "_OnDiffObj" + $mapperPosfix;
+    $temp = `listRelatives -c -ni -pa -s $tarObjStrArr[0]`;
+    $s2 = $temp[0]; // mesh/nurbs shape
+
+    if( $isNurbs ){
+      $surfaceInfo2 = `createNode surfaceInfo`;
+      connectAttr -f ($s2+".worldSpace") ($surfaceInfo2+".inputSurface");
+      //print( "connectAttr -f ("+$s2+".worldSpace) ("+$surfaceInfo2+".inputSurface)\n");
+    }
+    else{ // polygon
+      clear( $tVtxIp);
+      getTargetRange($s,$vtxStrArr,$tVtxIp, $u, $v);
+    }
+  }
+  else{
+    $s2 = $s;
+    $surfaceInfo2 = $surfaceInfo;
+    //print("make surfaceInfo2 = surfaceInfo1 && $s2 = $s\n");
+  }
+
+
+
+
+  //print( " source u count : "+(`getAttr ($s+".spansU")`)+"\n");
+  //print( " source v count : "+(`getAttr ($s+".spansV")`)+"\n");
+  getTargetRange($s2,$vtxStrArr,$tVtxI, $u, $v);
+
+  // ** size( $vtxStrArr ) always = 1 even it's empty
+
+/*
+  print( " objStrArr\n");
+  print( size( $objStrArr[0] ) +"\n");
+  print($objStrArr);
+
+
+  print("vtxStrArr\n");
+  print( size( $vtxStrArr[0] ) +"\n");
+  print($vtxStrArr);
+  print(" $s2 : "+$s2+"\n");
+  //print("$tVtxI\n");
+  //print($tVtxI);
+*/
+  if( size( $tVtxI ) % 2 == 1 ){
+    print "Selected Verteces not Balance !\n";
+  }
+
+  clear( $tVtxI2 );
+
+
+  if( $onDiffObj && !$isNurbs ){
+    for( $i == 0 ; $i < size( $tVtxIp ) ; $i++ ){
+      $tVtxI2[$i] = -1; // un-classicify it is source or destination
+    }
+  }
+  else{
+    for( $i == 0 ; $i < size( $tVtxI ) ; $i++ ){
+      $tVtxI2[$i] = -1; // un-classicify it is source or destination
+    }
+  }
+  $tVtxI2[0] = -1;
+
+  progressWindow
+          -title "Vertices Mapping in Processing"
+          -progress $proAmount
+          -status "Perform Mapping: 0%"
+          -isInterruptable true;
+
+  print("tVtxI\n");
+  print($tVtxI);
+
+
+  print("tVtxI2\n");
+  print($tVtxI2);
+
+  for( $vI = 0 ; $vI < size( $tVtxI ) ; $vI++ ){
+     if( $isNurbs ){
+       $f1 = `getAttr ($surfaceInfo+".cp["+$tVtxI[$vI]+"]")`; // worldSpace
+       //$f1 = `pointPosition -w ($s+".cp["+$tVtxI[$vI]+"]")`; // worldSpace
+     }
+     else{
+       
+       $f1[0] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].xv")`; // localSpace
+       $f1[1] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].yv")`;
+       $f1[2] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].zv")`;
+       
+       //$f1 = `pointPosition ($s2+".map["+$tVtxI[$vI]+"]")`; // v3.3
+     }
+
+
+
+     if( (isSourceVtx( $f1 , $mirrorVtx_symAlongFactor ,  $sourcePosNeg ) && !$onDiffObj)  || ( $onDiffObj && $isNurbs ) ){
+//print("vtx["+$tVtxI[$vI]+"] is source vertex\n");
+           $tVtxI2[$vI] = 1; // source vertex
+
+//print(" $mirrorVtx_symAlongFactor \n" );
+//print( $mirrorVtx_symAlongFactor );
+//print("$sourcePosNeg "+$sourcePosNeg+"\n");
+  
+
+//  spliteVtxLR( $mirrorVtx_symAlongFactor , $s2 , $tVtxI , $VtxI1 , $VtxI2 );
+           for( $vI2 = 0 ; $vI2 < size( $tVtxI2 ) ; $vI2++ ){
+              //print("test tVtx2 "+$tVtxI2[$vI2]+"\n");
+              //print("vtx  "+$tVtxI[$vI2]+"'s status : "+$tVtxI2[$vI2]+"\n");
+              //if( $tVtxI2[$vI2] != -1 ){
+              if( $tVtxI2[$vI2] != -1 && !$onDiffObj ){
+
+                continue;
+              }
+              if( $onDiffObj && $tVtxI2[$vI2] == 2 ){
+//print("continue\n");
+                continue;
+              }
+
+
+              if( $isNurbs ){
+                $f2 = `getAttr ($surfaceInfo2+".cp["+$tVtxI[$vI2]+"]")`; // worldSpace
+                //$f2 = `pointPosition -w ($s2+".cp["+$tVtxI[$vI2]+"]")`; // worldSpace
+                if( $onDiffObj ){
+                  //$f2[0] = $f2[0] * $mirrorVtx_symAlongFactor[0] * -1;
+                  //$f2[1] = $f2[1] * $mirrorVtx_symAlongFactor[1] * -1;
+                  //$f2[2] = $f2[2] * $mirrorVtx_symAlongFactor[2] * -1;
+                }
+              }
+              else{
+                
+		$f2[0] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].xv")`;
+                $f2[1] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].yv")`;
+                $f2[2] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].zv")`;
+		
+		//$f2 = `pointPosition ($s2+".map["+$tVtxI[$vI]+"]")`; // v3.3
+              }
+// --------
+
+              if( abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold  &&
+                  abs($f1[1] + $mirrorVtx_symAlongFactor[1] * $f2[1]) < $mirrorVtx_threshold  &&
+                  abs($f1[2] + $mirrorVtx_symAlongFactor[2] * $f2[2]) < $mirrorVtx_threshold  ){
+//              print("position of "+$s+".cp["+$tVtxI[$vI]+"] match to "+$s2+".cp["+$tVtxI[$vI2]+"] ");
+//              print(" : COORD : " +$f1[0]+" "+$f1[1]+" "+$f1[2]+" , "+$f2[0]+" "+$f2[1]+" "+$f2[2]+ "\n");
+              //print("("+$f1[0]+" , "+ $f1[1]+" , "+$f1[2]+") match ("+$f2[0]+" , "+$f2[1]+" , "+$f2[2]+")\n");
+              //   print($tVtxI[$vI]+" match with "+$tVtxI[$vI2]+"\n");
+
+//                 tokenize ($s2+"VerticeMapper") "|" $temp;
+                 tokenize ($s2+$mapperPosfix) "|" $temp;
+                 $dummyNode = $temp[ size($temp) - 1 ];
+
+                 if( $matchCount == 0 ){
+                   if( `objExists ($dummyNode)` ){
+                     warning ("VerticeMapper node ["+$dummyNode+"] already exists!!\n");
+                     delete $dummyNode;
+                   }
+
+
+                   $dummyNode = `createNode -name $dummyNode transform`;
+                 }
+                 $matchCount++;
+                 addAttr -ln ("v"+$tVtxI[$vI]) /*-h 1*/ -at long -dv $tVtxI[$vI2] $dummyNode;
+                 $tVtxI2[$vI2] = 2; // target vertex
+                 break;
+// listAttr -ud -st "m*" abc
+              } // position match
+              else{
+//                print($tVtxI[$vI]+" NOT match with "+$tVtxI[$vI2]+" : COORD : " +$f1[0]+" "+$f1[1]+" "+$f1[2]+" , "+$f2[0]+" "+$f2[1]+" "+$f2[2]+ "\n");
+              }
+           } // each target vtx
+      }// is source vtx
+      else{ // two polygon mode
+
+//-------
+        // each target vtx compare with every source vertices
+           //$tVtxI2[$vI] = 1; // source vertex
+
+//print(" $mirrorVtx_symAlongFactor \n" );
+//print( $mirrorVtx_symAlongFactor );
+//print("$sourcePosNeg "+$sourcePosNeg+"\n");
+  
+           for( $vI2 = 0 ; $vI2 < size( $tVtxIp ) ; $vI2++ ){ // each source vtx in 2 poly
+              //print("test tVtx2 "+$tVtxIp[$vI2]+"\n");
+              //print("vtx  "+$tVtxI[$vI2]+"'s status : "+$tVtxIp[$vI2]+"\n");
+              //if( $tVtxIp[$vI2] != -1 ){
+              if( $tVtxI2[$vI2] == 2 ){
+//print("continue\n");
+                continue;
+              }
+
+		$f2[0] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].xv")`;
+                $f2[1] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].yv")`;
+                $f2[2] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].zv")`;
+		
+		//$f2 = `pointPosition ($s+".map["+$tVtxI[$vI]+"]")`; // v3.3
+
+
+              if( abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold  &&
+                  abs($f1[1] + $mirrorVtx_symAlongFactor[1] * $f2[1]) < $mirrorVtx_threshold  &&
+                  abs($f1[2] + $mirrorVtx_symAlongFactor[2] * $f2[2]) < $mirrorVtx_threshold  ){
+//              print("position of "+$s2+".cp["+$tVtxI[$vI]+"] match to "+$s+".cp["+$tVtxIp[$vI2]+"] ");
+//              print(" : COORD : " +$f1[0]+" "+$f1[1]+" "+$f1[2]+" , "+$f2[0]+" "+$f2[1]+" "+$f2[2]+ "\n");
+              //print("("+$f1[0]+" , "+ $f1[1]+" , "+$f1[2]+") match ("+$f2[0]+" , "+$f2[1]+" , "+$f2[2]+")\n");
+              //   print($tVtxI[$vI]+" match with "+$tVtxI[$vI2]+"\n");
+
+//                 tokenize ($s2+"VerticeMapper") "|" $temp;
+                 tokenize ($s+$mapperPosfix) "|" $temp;
+                 $dummyNode = $temp[ size($temp) - 1 ];
+
+                 if( $matchCount == 0 ){
+                   if( `objExists ($dummyNode)` ){
+                     warning ("VerticeMapper node ["+$dummyNode+"] already exists!! Delete it and create a new one!!\n");
+                     delete $dummyNode;
+                   }
+
+                   $dummyNode = `createNode -name $dummyNode transform`;
+                 }
+                 $matchCount++;
+                 addAttr -ln ("v"+$tVtxIp[$vI2]) /*-h 1*/ -at long -dv $tVtxI[$vI] $dummyNode;
+                 $tVtxI2[$vI2] = 2; // target vertex
+                 break;
+// listAttr -ud -st "m*" abc
+              } // position match
+              else{
+//                print($tVtxI[$vI]+" NOT match with "+$tVtxI[$vI2]+" : COORD : " +$f1[0]+" "+$f1[1]+" "+$f1[2]+" , "+$f2[0]+" "+$f2[1]+" "+$f2[2]+ "\n");
+              }
+           } // each source vtx in 2 poly
+
+//-------
+      }
+      $proAmount = (1.0 * $vI / size( $tVtxI )) * 100.0; 
+      if ( `progressWindow -query -isCancelled` ){
+        break;
+      }
+      progressWindow -edit
+              -progress $proAmount
+              -status ("Perform Mapping: "+$proAmount+"%");
+
+  } // each source vtx
+  progressWindow -endProgress;
+
+  if( $isNurbs ){
+    //delete $surfaceInfo;
+    if( $onDiffObj ){
+      //delete $surfaceInfo2;
+    }
+  }
+
+  clear( $unmatchPair );
+  print("match count = "+$matchCount+"\n");
+  if( $matchCount == 0 ){
+    error ("No matched pair found !!");
+  }
+  if(  ($matchCount == (size( $tVtxI ) / 2.0 ) && !$onDiffObj)     ||  
+       ($matchCount == (size( $tVtxI ) ) && $onDiffObj) ){
+    print("VerticeMapper Node ["+$dummyNode+"] Created Successfully\n");
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+
+    confirmDialog -title "" -message ("VerticeMapper Node ["+$dummyNode+"] Created Successfully")
+    	-button "OK"  -defaultButton "OK"
+    	-cancelButton "OK" -dismissString "OK";
+  }
+  else if( $onDiffObj && !$isNurbs ) {
+
+    print("The following vtx could not found mirror pair\n");
+    for( $i = 0 ; $i < size( $tVtxIp ) ; $i++ ){
+              //print("test tVtx2 "+$tVtxI2[$i]+"\n");
+      if( $tVtxI2[$i] <= 0 ){ // un-classicify it is source or destination
+        $unmatchPair[size($unmatchPair)] = ($s+".cp["+$tVtxIp[$i]+"]");
+        print($s+".cp["+$tVtxIp[$i]+"]\n");
+      }
+    }
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+
+
+    string $response = `confirmDialog -title "" 
+        -message ("VerticeMapper Node ["+$dummyNode+"] Success Created\nBut vertices in \"Consider Vertices\" are not completely matched!!")
+    	-button "OK"  -button "Select UnMatched" -defaultButton "OK"
+    	-cancelButton "OK" -dismissString "OK"`;
+    if( $response == "Select UnMatched" ){
+       select $unmatchPair;
+       return;
+    }
+  }
+  else{
+    print("The following vtx could not found mirror pair\n");
+    for( $i = 0 ; $i < size( $tVtxI ) ; $i++ ){
+              //print("test tVtx2 "+$tVtxI2[$i]+"\n");
+      if( $tVtxI2[$i] <= 0 ){ // un-classicify it is source or destination
+          $unmatchPair[size($unmatchPair)] = ($s2+".cp["+$tVtxI[$i]+"]");
+          print($s2+".cp["+$tVtxI[$i]+"]\n");
+      }
+      else if( $tVtxI2[$i] == 1 ){  // in case source vtx is a very small positive and trend to zero, actually sym pair not found and attribute not added
+        if( !`attributeExists ("v"+$tVtxI[$i]) ($dummyNode)` ){
+          print($s2+".cp["+$tVtxI[$i]+"]\n");
+          $unmatchPair[size($unmatchPair)] = ($s2+".cp["+$tVtxI[$i]+"]");
+        }
+      }
+    }
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+
+
+    string $response = `confirmDialog -title "" 
+        -message ("VerticeMapper Node ["+$dummyNode+"] Success Created\nBut vertices in \"Consider Vertices\" are not completely matched!!")
+    	-button "OK"  -button "Select UnMatched" -defaultButton "OK"
+    	-cancelButton "OK" -dismissString "OK"`;
+    if( $response == "Select UnMatched" ){
+       select $unmatchPair;
+       return;
+    }
+  }
+
+  select $orgSel;
+}
+
+global proc mirrorVtx_createMappingNew(int $tabIndex){
+  string $sel[] = `ls -sl`;
+  string $orgSel[] = $sel;
+  string $s; // shape
+  string $tran; // transform
+  int $i,$j,$k,$tempInt,$count;
+  string $temp[];
+  string $temp2[];
+  int $c;
+  float $f[],$f1[],$f2[],$fBase[],$fBase2[];
+  float $curWt; // current weight
+  int $curVtx;
+  float $precision = 0.0001;
+  global string $mirrorVtx_symAlong;
+  global float $mirrorVtx_threshold;
+  int $mirrorVtx_symAlongFactor[] = {-1,-1,-1};
+  float $wt;
+  int $sourcePosNeg = 1;
+  string $tempStr;
+  string $s2;    // target shape
+  string $tran2; // target transform
+  
+  int $tryCount;
+  int $connectionFound;
+  int $exeMode = 0;
+
+  string $objStr = `textFieldButtonGrp -q -tx mirrorVtx_assignObjTextGrp`; // mesh/nurbs transform
+  string $tarObjStr = `textFieldButtonGrp -q -tx mirrorVtx_assignTarObjTextGrp`; // mesh/nurbs transform
+  string $vtxStr = `textFieldButtonGrp -q -tx mirrorVtx_assignRangeTextGrp`; // vtx
+
+  string $objStrArr[];
+  string $tarObjStrArr[];
+  string $vtxStrArr[];
+  string $objShapeArr[];
+
+  int $tVtxIp[]; // source geometry's vertice index ( apply in two different polygon mode )
+  int $tVtxI[]; // target geometry's vertice index
+  int $tVtxI2[]; // identify vertice is located in source direction or target direction OR exactly lies on axis
+  int $u[];
+  int $v[];
+
+  int $vI;
+  int $vI2;
+
+  string $myIntersector; // string intersector
+  int $matchCount = 0;
+  global string $unmatchPair[];
+  int $proAmount = 0; // progress amount in progress bar
+  string $dummyNode;
+  int $isNurbs = 0;
+  int $onDiffObj = 0;
+  string $surfaceInfo;
+  string $surfaceInfo2;
+  string $mapperPosfix = "VerticeMapper";
+
+
+  scriptEditorInfo  -ch;
+  print(" $mirrorVtx_symAlong : "+$mirrorVtx_symAlong+"\n");
+  print(" tabIndex : "+$tabIndex+"\n");
+  print(" $mirrorVtx_threshold : "+$mirrorVtx_threshold+"\n");
+  if( `checkBox -q -v mirrorVtx_childCheck` ){
+    //print(" check child node\n");
+  }
+
+  $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp`;
+  if( $i == 0 ){
+    $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp2`;
+    $sourcePosNeg = -1;
+  }
+  $mirrorVtx_symAlongFactor[$i-1] = 1;
+
+  tokenize $objStr ";" $objStrArr; 
+  tokenize $vtxStr ";" $vtxStrArr;
+  tokenize $tarObjStr ";" $tarObjStrArr;
+
+
+  if( size( $objStrArr[0] ) == 0 ){ // no dedicated object from user
+    error "Please give information on object!";
+    return;
+  }
+
+  if( size( $tarObjStrArr[0] ) != 0 ){ // no dedicated object from user
+    $onDiffObj = 1;
+  }
+
+  $temp = `listRelatives -c -ni -pa -s  $objStrArr[0]`;
+  $s = $temp[0]; // mesh/nurbs shape
+  if( `nodeType $s` == "nurbsSurface" ){
+    $isNurbs = 1;
+    $surfaceInfo = `createNode surfaceInfo`;
+    connectAttr -f ($s+".worldSpace") ($surfaceInfo+".inputSurface");
+    //print( "connectAttr -f ("+$s+".worldSpace) ("+$surfaceInfo+".inputSurface)\n");
+  }
+
+  if( $onDiffObj ){
+    $mapperPosfix = "_OnDiffObj" + $mapperPosfix;
+    $temp = `listRelatives -c -ni -pa -s $tarObjStrArr[0]`;
+    $s2 = $temp[0]; // mesh/nurbs shape
+
+    if( $isNurbs ){
+      $surfaceInfo2 = `createNode surfaceInfo`;
+      connectAttr -f ($s2+".worldSpace") ($surfaceInfo2+".inputSurface");
+      //print( "connectAttr -f ("+$s2+".worldSpace) ("+$surfaceInfo2+".inputSurface)\n");
+    } else { // polygon
+      clear($tVtxIp);
+      getTargetRange($s,$vtxStrArr,$tVtxIp, $u, $v);
+    }
+  } else {
+    $s2 = $s;
+    $surfaceInfo2 = $surfaceInfo;
+    //print("make surfaceInfo2 = surfaceInfo1 && $s2 = $s\n");
+  }
+
+  //print( " source u count : "+(`getAttr ($s+".spansU")`)+"\n");
+  //print( " source v count : "+(`getAttr ($s+".spansV")`)+"\n");
+  getTargetRange($s2,$vtxStrArr,$tVtxI, $u, $v);
+
+  if( size( $tVtxI ) % 2 == 1 ){
+    //print "Selected Verteces not Balance !\n";
+  }
+
+  clear( $tVtxI2 );
+
+  if( $onDiffObj && !$isNurbs ){
+    for( $i == 0 ; $i < size( $tVtxIp ) ; $i++ ){
+      $tVtxI2[$i] = -1; // un-classicify it is source or destination
+    }
+  } else {
+    for( $i == 0 ; $i < size( $tVtxI ) ; $i++ ){
+      $tVtxI2[$i] = -1; // un-classicify it is source or destination
+    }
+  }
+  $tVtxI2[0] = -1;
+
+  progressWindow
+          -title "Vertices Mapping in Processing"
+          -progress $proAmount
+          -status "Perform Mapping: 0%"
+          -isInterruptable true;
+
+  //print("tVtxI\n");
+  //print($tVtxI);
+
+  //print("tVtxI2\n");
+  //print($tVtxI2);
+
+  for( $vI = 0 ; $vI < size( $tVtxI ) ; $vI++ ){
+    if( $isNurbs ){
+      $f1 = `getAttr ($surfaceInfo+".cp["+$tVtxI[$vI]+"]")`; // worldSpace
+    } else {
+      $f1[0] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].xv")`; // localSpace
+      $f1[1] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].yv")`;
+      $f1[2] = `getAttr ($s2+".cp["+$tVtxI[$vI]+"].zv")`;
+    }
+
+    if((isSourceVtx($f1, $mirrorVtx_symAlongFactor,  $sourcePosNeg) && !$onDiffObj)  || ($onDiffObj && $isNurbs)){
+      $tVtxI2[$vI] = 1; // source vertex
+      // 3.4
+      if( `nodeType $s` == "mesh" ){  
+        if( (abs($f1[0]) > $mirrorVtx_threshold)&&($mirrorVtx_symAlongFactor[0]==1) ||
+            (abs($f1[1]) > $mirrorVtx_threshold)&&($mirrorVtx_symAlongFactor[1]==1) ||
+            (abs($f1[2]) > $mirrorVtx_threshold)&&($mirrorVtx_symAlongFactor[2]==1) ){
+          tokenize ($s2 + $mapperPosfix) "|" $temp;
+          $dummyNode = $temp[ size($temp) - 1 ];
+
+          if( $matchCount == 0 ){
+            if( `objExists ($dummyNode)` ){
+               warning ("VerticeMapper node ["+$dummyNode+"] already exists!!\n");
+               delete $dummyNode;
+            }
+            $dummyNode = `createNode -name $dummyNode transform`;
+          }
+
+          select -r $s2;
+          selectType -pv true;
+          float $origin[] =`xform -q -ws -t $objStr`;
+          polySelectConstraint -m 3 -t 1 -d 1 -db 0 $mirrorVtx_threshold -dp 
+            ($origin[0] - $f1[0]*$mirrorVtx_symAlongFactor[0]) 
+            ($origin[1] - $f1[1]*$mirrorVtx_symAlongFactor[1])
+            ($origin[2] - $f1[2]*$mirrorVtx_symAlongFactor[2]);
+          string $vertex[] = `ls -sl`;
+          if( size($vertex) > 0 ){
+            string $buf[];
+            tokenize $vertex[0] "." $buf;
+            string $vid = `match "[0-9]+" $buf[1]`;
+            int $stringToInt = $vid;
+
+            if( $onDiffObj && $tVtxI2[$stringToInt] == 2 ){
+              continue;
+            } else {
+              $matchCount++;
+              addAttr -ln ("v"+$tVtxI[$vI]) -at long -dv $stringToInt $dummyNode;
+              $tVtxI2[$stringToInt] = 2; // target vertex
+            }
+          }
+          polySelectConstraint -d 0;
+        }
+      } else {
+        for( $vI2 = 0 ; $vI2 < size( $tVtxI2 ) ; $vI2++ ){
+          if( $tVtxI2[$vI2] != -1 && !$onDiffObj ){
+            continue;
+          }
+          if( $onDiffObj && $tVtxI2[$vI2] == 2 ){
+            continue;
+          }
+          
+          if( $isNurbs ){
+            $f2 = `getAttr ($surfaceInfo2+".cp["+$tVtxI[$vI2]+"]")`; // worldSpace
+          } else {
+            $f2[0] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].xv")`;
+            $f2[1] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].yv")`;
+            $f2[2] = `getAttr ($s2+".cp["+$tVtxI[$vI2]+"].zv")`;
+          }
+
+          if( abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold  &&
+	      abs($f1[1] + $mirrorVtx_symAlongFactor[1] * $f2[1]) < $mirrorVtx_threshold  &&
+	      abs($f1[2] + $mirrorVtx_symAlongFactor[2] * $f2[2]) < $mirrorVtx_threshold  ){
+            tokenize ($s2+$mapperPosfix) "|" $temp;
+            $dummyNode = $temp[ size($temp) - 1 ];
+
+            if( $matchCount == 0 ){
+              if( `objExists ($dummyNode)` ){
+                warning ("VerticeMapper node ["+$dummyNode+"] already exists!!\n");
+                delete $dummyNode;
+              }
+              $dummyNode = `createNode -name $dummyNode transform`;
+            }
+            
+            $matchCount++;
+            addAttr -ln ("v"+$tVtxI[$vI]) -at long -dv $tVtxI[$vI2] $dummyNode;
+            $tVtxI2[$vI2] = 2; // target vertex
+            break;
+          }  
+        } // each target vtx     
+      }
+    } else { // two polygon mode
+
+      for( $vI2 = 0 ; $vI2 < size( $tVtxIp ) ; $vI2++ ){ // each source vtx in 2 poly
+        if( $tVtxI2[$vI2] == 2 ){
+          continue;
+        }
+
+        $f2[0] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].xv")`;
+        $f2[1] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].yv")`;
+        $f2[2] = `getAttr ($s+".cp["+$tVtxIp[$vI2]+"].zv")`;
+
+        if( abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold  &&
+            abs($f1[1] + $mirrorVtx_symAlongFactor[1] * $f2[1]) < $mirrorVtx_threshold  &&
+            abs($f1[2] + $mirrorVtx_symAlongFactor[2] * $f2[2]) < $mirrorVtx_threshold  ){
+          tokenize ($s+$mapperPosfix) "|" $temp;
+          $dummyNode = $temp[ size($temp) - 1 ];
+
+          if( $matchCount == 0 ){
+            if( `objExists ($dummyNode)` ){
+              warning ("VerticeMapper node ["+$dummyNode+"] already exists!! Delete it and create a new one!!\n");
+              delete $dummyNode;
+            }
+            $dummyNode = `createNode -name $dummyNode transform`;
+          }
+          $matchCount++;
+          addAttr -ln ("v"+$tVtxIp[$vI2]) /*-h 1*/ -at long -dv $tVtxI[$vI] $dummyNode;
+          $tVtxI2[$vI2] = 2; // target vertex
+          break;
+        } else {
+        }
+      } // each source vtx in 2 poly
+    }
+  
+    $proAmount = (1.0 * $vI / size( $tVtxI )) * 100.0; 
+    if ( `progressWindow -query -isCancelled` ){
+      break;
+    }
+    progressWindow -edit -progress $proAmount -status ("Perform Mapping: "+$proAmount+"%");
+
+  } // each source vtx
+  progressWindow -endProgress;
+
+  if( $isNurbs ){
+    if( $onDiffObj ){
+    }
+  }
+
+  clear( $unmatchPair );
+  print("match count = "+$matchCount+"\n");
+  if( $matchCount == 0 ){
+    error ("No matched pair found !!");
+  }
+    
+  if(  ($matchCount == (size( $tVtxI ) / 2.0 ) && !$onDiffObj)     ||  
+       ($matchCount == (size( $tVtxI ) ) && $onDiffObj) ){
+    print("VerticeMapper Node ["+$dummyNode+"] Created Successfully\n");
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+
+    confirmDialog -title "" -message ("VerticeMapper Node ["+$dummyNode+"] Created Successfully") -button "OK"  -defaultButton "OK" -cancelButton "OK" -dismissString "OK";
+  } else if ( $onDiffObj && !$isNurbs ) {
+
+    //print("The following vtx could not found mirror pair\n");
+    for( $i = 0 ; $i < size( $tVtxIp ) ; $i++ ){
+      if( $tVtxI2[$i] <= 0 ){ // un-classicify it is source or destination
+        $unmatchPair[size($unmatchPair)] = ($s+".cp["+$tVtxIp[$i]+"]");
+        //print($s+".cp["+$tVtxIp[$i]+"]\n");
+      }
+    }
+
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+
+    string $response = `confirmDialog -title "" 
+      -message ("VerticeMapper Node ["+$dummyNode+"] Success Created\nBut vertices in \"Consider Vertices\" are not completely matched!!")
+      -button "OK"  -button "Select UnMatched" -defaultButton "OK"
+      -cancelButton "OK" -dismissString "OK"`;
+    if( $response == "Select UnMatched" ){
+       select $unmatchPair;
+       return;
+    }
+  } else {
+
+    //print("The following vtx could not found mirror pair\n");
+    for( $i = 0 ; $i < size( $tVtxI ) ; $i++ ){
+      if( $tVtxI2[$i] <= 0 ){ // un-classicify it is source or destination
+        $unmatchPair[size($unmatchPair)] = ($s2+".cp["+$tVtxI[$i]+"]");
+        //print($s2+".cp["+$tVtxI[$i]+"]\n");
+      } else if ( $tVtxI2[$i] == 1 ){  // in case source vtx is a very small positive and trend to zero, actually sym pair not found and attribute not added
+        if( !`attributeExists ("v"+$tVtxI[$i]) ($dummyNode)` ){
+          //print($s2+".cp["+$tVtxI[$i]+"]\n");
+          $unmatchPair[size($unmatchPair)] = ($s2+".cp["+$tVtxI[$i]+"]");
+        }
+      }
+    }
+
+    textScrollList -e -ri $dummyNode mapperUI;
+    textScrollList -e -append $dummyNode mapperUI;
+    textScrollList -e -si $dummyNode mapperUI;
+    
+    string $response = `confirmDialog -title "" 
+          -message ("VerticeMapper Node ["+$dummyNode+"] Success Created\nBut vertices in \"Consider Vertices\" are not completely matched!!")
+          -button "OK"  -button "Select UnMatched" -defaultButton "OK"
+          -cancelButton "OK" -dismissString "OK"`;
+    if( $response == "Select UnMatched" ){
+      select $unmatchPair;
+      return;
+    }
+  }
+  select $orgSel;
+}
+
+global proc mirrorVtxCreateUI( ){
+  global string $mirrorVtx_symAlong;
+  global float $mirrorVtx_threshold;
+  int $i;
+  $mirrorVtx_symAlong = "X";
+  if( `window -ex mirrorVtx_Win` ){
+    deleteUI -window mirrorVtx_Win;
+  }
+
+  window
+    //-t ("Duplicate Symmetric Cluster with Weight")
+    -t ("Mirror Vertices v1.0")
+    //-tlc 200 200
+    -wh 400 500 //469 172
+  mirrorVtx_Win;
+
+  scrollLayout;
+  columnLayout;
+  columnLayout;
+  columnLayout;
+  string $tabs = `tabLayout -innerMarginWidth 2 -innerMarginHeight 2`;
+
+
+  string $frame = `frameLayout -l "Vertices Mapping" -la top -fn boldLabelFont -cll 0 -bv true -bs "in" -li 5`;
+  //frameLayout -l ("smooth cluster weight") smoothClusterWeight_frame1;
+  columnLayout -cat both 30 -adj 1 -rs 5;
+
+//  setParent ..;
+//  setParent ..;
+//  columnLayout;
+
+
+  radioButtonGrp 
+			//-l "Move Vtx Manually in " 
+                        -l "Direction " 
+			-la3 "  X " "  Y " "  Z "
+			-nrb 3 
+			-select 1 
+			-cl4 right left left left
+			-cw4 150 50 50 50
+                        -on1 "$mirrorVtx_symAlong = \"X\";//print(\"X\\n\");"
+                        -on2 "$mirrorVtx_symAlong = \"Y\";//print(\"Y\\n\");"
+                        -on3 "$mirrorVtx_symAlong = \"Z\";//print(\"Z\\n\");"
+                        -ann "2 Objects Align Symmetrically About"
+			mirrorVtxSymAlong_radioButtonGrp;
+
+  radioButtonGrp        -vis 0
+			-l "                         " 
+			-la3 "- X" "- Y" "- Z"
+			-nrb 3 
+			//-select 1 
+			-cl4 right left left left
+			-cw4 150 50 50 50
+                        -on1 "$mirrorVtx_symAlong = \"-X\";//print(\"- X\\n\");"
+                        -on2 "$mirrorVtx_symAlong = \"-Y\";//print(\"- Y\\n\");"
+                        -on3 "$mirrorVtx_symAlong = \"-Z\";//print(\"- Z\\n\");"
+                        -shareCollection mirrorVtxSymAlong_radioButtonGrp
+			mirrorVtxSymAlong_radioButtonGrp2;
+
+  separator -style "in" -h 5;
+
+//  rowLayout -numberOfColumns 2
+//            -columnWidth2 200 200 ;
+
+//setParent ..;
+//  setParent $frame;
+//  columnLayout ;
+
+  $mirrorVtx_threshold = 0.0001;
+  string $ui_threshold = `floatSliderGrp -field 1 -v 0.0001 -l "Threshold"  -ann "Error Value to Determine Symmetric Vertices" -min 0.0000001 -max 0.1 -fmn 0.00000000001 -fmx 1 -cw3 90 80 50  /*-w 400 */ -pre 8 -ss 0.00001 -fs 0.00001 /*-bgc 0.579105 0.688777 0.757*/ /*-cc ""*/`;
+
+  floatSliderGrp -e -cc ("$mirrorVtx_threshold = `floatSliderGrp -q -v "+$ui_threshold+"`") $ui_threshold;
+
+// floatSliderGrp -field 1 /*-cw 2 300*/ -l "ABC" -v 20 -min 10 -max 50;
+
+//  setParent ..;
+
+  // all clusters on obj
+  textFieldButtonGrp -label "From Object" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Source Object for vtx mirroring" mirrorVtx_assignObjTextGrp;
+
+
+  textFieldButtonGrp -label "To Object" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Target Object for vtx mirroring" mirrorVtx_assignTarObjTextGrp;
+
+  // specified cluster
+//  textFieldButtonGrp -label "Cluster Handle" -text "" -buttonLabel " Add " -cw3 90 220 50  -ed 0 -bc "" -ann "Cluster Handle of Culster" mirrorVtx_assignCluTextGrp;
+
+  // target object // different object mode only
+//  textFieldButtonGrp -label "Target Obj" -text "" -buttonLabel " Add " -cw3 90 220 50  -ed 0 -bc "" -ann "Target Object to Create Cluster" mirrorVtx_assignTargetTextGrp;
+
+  // set range to target vertex
+  textFieldButtonGrp -label "Vertices/UVs" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Only Consider these Dedicated Vtx for Create Cluster" mirrorVtx_assignRangeTextGrp;
+
+  textFieldButtonGrp -e -bc "mirrorVtx_assignObj(\"mirrorVtx_assignObjTextGrp\");" mirrorVtx_assignObjTextGrp;
+  textFieldButtonGrp -e -bc "mirrorVtx_assignObj(\"mirrorVtx_assignTarObjTextGrp\");" mirrorVtx_assignTarObjTextGrp;
+  //textFieldButtonGrp -e -bc "mirrorVtx_assignTargetObj();" assignTargetTextGrp;
+  //textFieldButtonGrp -e -bc "mirrorVtx_assignClu();" assignCluTextGrp;
+  textFieldButtonGrp -e -bc "mirrorVtx_assignVtx();" mirrorVtx_assignRangeTextGrp;
+
+  checkBox -en 0 -l " Mirror Children" -w 50 -align left mirrorVtx_childCheck;
+
+
+
+  separator -style "none" -h 2;
+
+  string $mapButton = `button -l "Create Mapping" -h 28 -w 195 -c ("mirrorVtx_createMappingNew(`tabLayout -q -sti "+$tabs+"`);")`; // 3.4
+  
+  separator -style "in" -h 5;
+
+  setParent ..;
+  setParent ..;
+/*
+string $frame2 = `frameLayout -l "Object's Alignment" -la top -fn boldLabelFont -cll 0 -bv true -bs "in" -li 5 `;
+//  separator -style "in" -h 5;
+
+//setParent .. ;
+
+  columnLayout -cat both 30 -adj 1 -rs 5;
+
+//  setParent ..;
+//  setParent ..;
+//  columnLayout;
+
+
+  radioButtonGrp 
+//			-l "Located in " 
+//			-la3 "  X" "  Y" "  Z"
+			-l "Plane of Symmetrical " 
+			-la3 "Y - Z " "X - Z " "X - Y "
+			-nrb 3 
+			-select 1 
+			-cl4 right left left left
+			-cw4 150 50 50 50
+                        -on1 "$mirrorVtx_symAlong = \"X\";//print(\"X\\n\");"
+                        -on2 "$mirrorVtx_symAlong = \"Y\";//print(\"Y\\n\");"
+                        -on3 "$mirrorVtx_symAlong = \"Z\";//print(\"Z\\n\");"
+                        -ann "Single Object Aligns Symmetrically About"
+                        mirrorVtxSymAlong2_radioButtonGrp;
+
+
+
+  radioButtonGrp        -vis 0
+			-l "                         " 
+			-la3 "- X" "- Y" "- Z"
+			-nrb 3 
+			//-select 1 
+			-cl4 right left left left
+			-cw4 150 50 50 50
+                        -on1 "$mirrorVtx_symAlong = \"-X\";//print(\"- X\\n\");"
+                        -on2 "$mirrorVtx_symAlong = \"-Y\";//print(\"- Y\\n\");"
+                        -on3 "$mirrorVtx_symAlong = \"-Z\";//print(\"- Z\\n\");"
+                        -shareCollection mirrorVtxSymAlong2_radioButtonGrp
+			mirrorVtxSymAlong2_radioButtonGrp2;
+
+
+
+
+  separator -style "in" -h 5;
+
+//  rowLayout -numberOfColumns 2
+//            -columnWidth2 200 200 ;
+
+//setParent ..;
+//  setParent $frame;
+//  columnLayout ;
+
+  //$mirrorVtx_threshold = 0.001;
+  string $ui_threshold2 = `floatSliderGrp -field 1 -v 0.001 -l "Threshold"  -ann "Error Value to Determine Symmetric Vertices" -min 0.0000001 -max 0.1 -fmn 0.00000000001 -fmx 1 -cw3 90 70 50  -pre 8 -ss 0.00001 -fs 0.00001 `;
+
+  floatSliderGrp -e -cc ("$mirrorVtx_threshold = `floatSliderGrp -q -v "+$ui_threshold2+"`") $ui_threshold2;
+
+// floatSliderGrp -field 1  -l "ABC" -v 20 -min 10 -max 50;
+
+//  setParent ..;
+
+  separator -style "in" -h 5;
+
+*/
+
+
+  tabLayout -edit
+ 			-tabLabel $frame "Object(s)" /*-tabLabel $frame2 "not used"*/
+                        -selectTabIndex 1
+                        //-image "C:\\dirA\\a\\a2\\a3\\USERMENUICONCONNECT.BMP" 
+                        //-cc ("print (\"tab change \"+`tabLayout -q -sti "+$tabs+"`);")
+                        -cc (" if( `tabLayout -q -sti "+$tabs+"` == 1 ){"+
+                             //"   textFieldButtonGrp -e -en 1 assignTargetTextGrp;"+
+                             //"   textFieldButtonGrp -e -ed 0 assignTargetTextGrp;"+
+                             " }else{"+
+                             //"   textFieldButtonGrp -e -en 0 assignTargetTextGrp;"+
+                             "}")
+ 			$tabs;
+
+  //frameLayout -e -en 0 $frame2;
+
+  setParent ..;
+  setParent ..;
+  setParent ..;
+
+
+  columnLayout -cat both 30 -adj 1 -rs 5;
+
+  separator -style "none" -h 5;
+  text -l "Make Mirror" -fn boldLabelFont ;
+
+
+
+  textFieldButtonGrp -label "Obj 1" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Object(s) that have same topology with the mapped object" mirrorVtx_assignObjTextGrp2;
+
+  textFieldButtonGrp -label "Obj 2" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Object(s) that have same topology with the mapped object" mirrorVtx_assignTarObjTextGrp2;
+
+  // specified cluster
+  //textFieldButtonGrp -label "Cluster Handle" -text "" -buttonLabel " Add " -cw3 90 220 50  -ed 0 -bc "" -ann "Cluster Handle of Culster" assignCluTextGrp;
+
+  // target object // different object mode only
+  //textFieldButtonGrp -label "Target Obj" -text "" -buttonLabel " Add " -cw3 90 220 50  -ed 0 -bc "" -ann "Target Object to Create Cluster" assignTargetTextGrp;
+
+  // set range to target vertex
+  //textFieldButtonGrp -label "Target Vertices" -text "" -buttonLabel " Add " -cw3 90 220 50 -ed 0 -bc "" -ann "Only Consider these Dedicated Vtx for Create Cluster" assignRangeTextGrp;
+
+
+  textFieldButtonGrp -e -bc "mirrorVtx_assignObj(\"mirrorVtx_assignObjTextGrp2\");" mirrorVtx_assignObjTextGrp2;
+  textFieldButtonGrp -e -bc "mirrorVtx_assignObj(\"mirrorVtx_assignTarObjTextGrp2\");" mirrorVtx_assignTarObjTextGrp2;
+  //textFieldButtonGrp -e -bc "mirrorCluster_assignTargetObj();" assignTargetTextGrp;
+  //textFieldButtonGrp -e -bc "mirrorCluster_assignClu();" assignCluTextGrp;
+  //textFieldButtonGrp -e -bc "mirrorCluster_assignVtx();" assignRangeTextGrp;
+  radioButtonGrp 
+			//-l "Move Vtx Manually in " 
+                        -l "Copy Direction " 
+			-la3 "Neg -> Pos" "Pos -> Neg" "Swap"
+			-nrb 3 
+			-select 1 
+			-cl4 right left left left
+			-cw4 100 90 90 90
+                        //-on1 "$mirrorVtx_symAlong = \"X\";//print(\"X\\n\");"
+                        //-on2 "$mirrorVtx_symAlong = \"Y\";//print(\"Y\\n\");"
+                        //-on3 "$mirrorVtx_symAlong = \"Z\";//print(\"Z\\n\");"
+                        -ann "Direction to copy vertex e.g. vtx in negative position copy to that in positive positive"
+			mirrorVtxSymAlong_copyDirtectionRadioButtonGrp;
+
+
+  rowLayout -nc 6 -cw 1 50 -cw 2 100 -cw 3 20 -cw 4 120 -cw 5 20 -cw 6 40 ;
+  text -w 50 -al "right" -l "  x offset : ";
+   // modify from version 3.0
+   floatField  -w 100 -v 0.0 /*0.010324478*/ -pre 10 mirrorVtx_offsetX;
+   text -l " ";
+   button -w 120 -l "  get From selected vtx" -c "float $fa[];clear( $fa ); $fa = mirrorVtx_getVtxCoordDiff(); if( size( $fa ) != 3 ){ error \"please select two vertices first!!\"; }else{ floatField -e -v $fa[0] mirrorVtx_offsetX; }";
+   text -l " ";
+   button -w 40 -al "center" -l " X  -1 " -c "float $f = `floatField -q -v mirrorVtx_offsetX`; $f = $f * -1; floatField -e -v $f mirrorVtx_offsetX";
+   setParent ..;
+
+
+
+  rowLayout -nc 6 -cw 1 50 -cw 2 100 -cw 3 20 -cw 4 120 -cw 5 20 -cw 6 40 ;
+  text -w 50 -al "right" -l "  y offset : ";
+   // modify from version 3.0
+   floatField  -w 100 -v 0.0 -pre 10 mirrorVtx_offsetY;
+   text -l " ";
+   button -w 120 -l "  get From selected vtx" -c "float $fa[];clear( $fa ); $fa = mirrorVtx_getVtxCoordDiff(); if( size( $fa ) != 3 ){ error \"please select two vertices first!!\"; }else{ floatField -e -v $fa[1] mirrorVtx_offsetY; }";
+   text -l " ";
+   button -w 40 -al "center" -l " X  -1 " -c "float $f = `floatField -q -v mirrorVtx_offsetY`; $f = $f * -1; floatField -e -v $f mirrorVtx_offsetY";
+   setParent ..;
+
+
+
+  rowLayout -nc 6 -cw 1 50 -cw 2 100 -cw 3 20 -cw 4 120 -cw 5 20 -cw 6 40 ;
+  text -w 50 -al "right" -l "  z offset : ";
+   // modify from version 3.0
+   floatField  -w 100 -v 0.0 -pre 10 mirrorVtx_offsetZ;
+   text -l " ";
+   button -w 120 -l "  get From selected vtx" -c "float $fa[];clear( $fa ); $fa = mirrorVtx_getVtxCoordDiff(); if( size( $fa ) != 3 ){ error \"please select two vertices first!!\"; }else{ floatField -e -v $fa[2] mirrorVtx_offsetZ; }";
+   text -l " ";
+   button -w 40 -al "center" -l " X  -1 " -c "float $f = `floatField -q -v mirrorVtx_offsetZ`; $f = $f * -1; floatField -e -v $f mirrorVtx_offsetZ";
+   setParent ..;
+
+
+  // ---- Add ui for vertice mapper selection
+  text -l "" -h 10;
+  text -l "Vertice Mapper Node :" -al "left" ;
+  string $allMappers[] = `ls -tr "*VerticeMapper"`;
+
+  //if( !size( $allMappers ) ){
+  //  error "Please create a mapping first !!";
+  //}
+
+  string $mapperUI = `textScrollList -numberOfRows (size($allMappers)+2) -allowMultiSelection 0 mapperUI`;
+  for( $i = 0; $i < size( $allMappers ); $i++ ){
+    textScrollList  -e -append $allMappers[$i] $mapperUI;
+  }
+  textScrollList -e -h 100 $mapperUI;
+  if( size( $allMappers ) ){
+    textScrollList -e -showIndexedItem 1 -selectItem $allMappers[0] $mapperUI;
+  }
+
+  text -l " " -h 10;
+
+  // ---- end ui for vertice mapper
+
+  setParent ..;
+
+		string $buttomForm = `formLayout`;// -p $FTM_UnknownOSMainForm`;
+			string $applyButton = `button -l "Apply" -h 30 -w 195 
+ //-c ("mirrorVtx_makeMirror(`tabLayout -q -sti "+$tabs+"`);")`;
+-c ("mirrorVtx_makeMirror();")`;
+
+// added from version 2.0
+			string $makeRealTimeBtn = `button -en 0 -l "Apply Real Time"  -h 30 -w 195 -c  ("mirrorVtx_makeRealTimeMirror();")`;
+
+			string $exitButton = `button -l "Exit" -h 30 -w 195 -c "deleteUI mirrorVtx_Win"`;
+
+
+
+		formLayout -e
+			//-af $exitButton right 0
+			//-an $exitButton left
+
+			-af $makeRealTimeBtn right 0
+			-an $makeRealTimeBtn left
+			-an $makeRealTimeBtn bottom
+
+			-ac $applyButton right 5 $makeRealTimeBtn
+			-af $applyButton left 15
+			-an $applyButton bottom
+
+			-af $exitButton left 15
+			-af $exitButton right 0
+			-ac $exitButton top 5 $applyButton
+
+			$buttomForm;
+
+
+//  columnLayout -adjustableColumn true;
+  
+
+  showWindow mirrorVtx_Win;
+  window -e
+    -wh 460 760
+  mirrorVtx_Win;
+
+
+}
+
+//pSphereShape1.pnts[295].pntx = pSphereShape1.pnts[293].pntx * -1;
+//pSphereShape1.pnts[295].pnty = pSphereShape1.pnts[293].pnty;
+//pSphereShape1.pnts[295].pntz = pSphereShape1.pnts[293].pntz;
+
+global proc mirrorVtx_makeRealTimeMirror(){
+  string $objStr = `textFieldButtonGrp -q -tx mirrorVtx_assignObjTextGrp2`;       // mesh/nurbs transform
+  string $tarObjStr = `textFieldButtonGrp -q -tx mirrorVtx_assignTarObjTextGrp2`; // mesh/nurbs transform
+  int $direction = `radioButtonGrp -q -sl mirrorVtxSymAlong_copyDirtectionRadioButtonGrp`;
+
+
+  if( !size( $objStr ) ){
+    error "Please add an object in \"source obj\" field first!!";
+  }
+
+  string $temp[] = `listRelatives -c -ni -pa -s  $objStr`;
+  int $isNurbs = 0;
+  string $surfaceInfo;
+  string $objShape = $temp[0];
+  string $tarObjShape;
+  int $onDiffObj = 0;
+
+  if( size( $tarObjStr ) ){
+    $temp = `listRelatives -c -ni -pa -s  $tarObjStr`;
+    $tarObjShape = $temp[0];
+    $onDiffObj = 1;
+  }
+  else{
+    $tarObjShape = $objShape;
+    $tarObjStr = $objStr;
+  }
+
+
+  if( `nodeType $objShape` == "nurbsSurface" ){
+    $isNurbs = 1;
+    //$surfaceInfo = `createNode surfaceInfo`;
+    //connectAttr -f ($objShape+".worldSpace") ($surfaceInfo+".inputSurface");
+  }
+  
+  // direction Value                             Mode
+  //          1             Copy from negative position to positive position
+  //          2             Copy from positive position to negative position
+  //          3                                  swap
+
+
+  print($objStr+"\n");
+  print($direction+"\n"); 
+  print($objShape+"\n");
+  //if( $direction == 
+
+  $temp = `textScrollList -q -si mapperUI`;
+  if( !size( $temp ) ){
+    error "No Vertice Mapper Node Found !! Please create a mapping first !!";
+  }
+
+  string $node = $temp[0]; // VerticeMapper node
+  int $i,$j;
+  int $vAttrCount; // count of attribute "v*" in VerticeMapper node
+  string $allvAttr[]; // "v*" attribute in VerticeMapper node
+  int $curPos; // current positive vtx
+  int $curNeg; // current negative vtx
+  float $posf[]; // local position of vtx in positive side
+  float $negf[]; // local position of vtx in negative side
+  //global string $mirrorVtx_symAlong;
+  int $mirrorVtx_symAlongFactor[] = {-1,-1,-1};
+  int $matchedVtx[];
+
+
+  clear( $matchedVtx );
+
+  $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp`;
+  if( $i == 0 ){
+       $i = `radioButtonGrp -q -sl mirrorVtxSymAlong_radioButtonGrp2`;
+       $sourcePosNeg = -1;
+  }
+  $mirrorVtx_symAlongFactor[$i-1] = 1;
+
+/* //commented on 13 - 9 - 2003
+  $temp = `ls -tr "*VerticeMapper"`;
+
+  if( !size( $temp) ){
+    error "Please create a mapping first !!";
+  }
+  else if ( size( $temp) != 1 ){
+    warning "More than one Vertice Mapper node existing in current scene, calculation may not correct!!";
+  }
+  
+  $node = $temp[0];
+*/
+
+  string $exp = ("//Real Time Mirror Vtx Expression from "+$objStr+" to "+$tarObjStr+"\n");
+
+  $temp = `listAttr -st "v*" $node`;
+  // Result: visibility v690 . . . //
+
+  //print("all attributes start with v :\n");
+  //print( $temp );
+  $allvAttr = stringArrayRemove( {"visibility"} , $temp);
+
+  $vAttrCount = size( $allvAttr );
+
+//abs($f1[0] + $mirrorVtx_symAlongFactor[0] * $f2[0]) < $mirrorVtx_threshold
+  for( $i = 0 ; $i < $vAttrCount ; $i++ ){
+//    print( $allvAttr[$i] +"\n" );
+    $curPos = substring( $allvAttr[$i] , 2 , size( $allvAttr[$i] ) );
+//    print($curPos+"\n");
+    $curNeg = `getAttr ($node+"."+$allvAttr[$i])`;
+//    print($curNeg+"\n");
+
+
+
+
+
+
+    $posf[0] = `getAttr ($objShape+".cp["+$curPos+"].xv")`;
+    $posf[1] = `getAttr ($objShape+".cp["+$curPos+"].yv")`;
+    $posf[2] = `getAttr ($objShape+".cp["+$curPos+"].zv")`;
+
+    if( $onDiffObj /*&& $isNurbs*/ ){
+      $negf[0] = `getAttr ($tarObjShape+".cp["+$curNeg+"].xv")`;
+      $negf[1] = `getAttr ($tarObjShape+".cp["+$curNeg+"].yv")`;
+      $negf[2] = `getAttr ($tarObjShape+".cp["+$curNeg+"].zv")`;
+    }
+    else{
+      $negf[0] = `getAttr ($objShape+".cp["+$curNeg+"].xv")`;
+      $negf[1] = `getAttr ($objShape+".cp["+$curNeg+"].yv")`;
+      $negf[2] = `getAttr ($objShape+".cp["+$curNeg+"].zv")`;
+    }
+
+
+
+    if( $direction == 1 || $direction == 3 ){ // target to source : neg to pos
+      setAttr ($objShape+".cp["+$curPos+"].xv") ($negf[0] * $mirrorVtx_symAlongFactor[0] * -1) ;
+      setAttr ($objShape+".cp["+$curPos+"].yv") ($negf[1] * $mirrorVtx_symAlongFactor[1] * -1) ;
+      setAttr ($objShape+".cp["+$curPos+"].zv") ($negf[2] * $mirrorVtx_symAlongFactor[2] * -1) ;
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].xv from "+$posf[0]+" to "+($negf[0] * $mirrorVtx_symAlongFactor[0] * -1)+"\n");
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].yv from "+$posf[1]+"  to "+($negf[1] * $mirrorVtx_symAlongFactor[1] * -1)+"\n");
+//print(" dir = 1/3 set "+$objShape+".cp["+$curPos+"].zv from "+$posf[2]+"  to "+($negf[2] * $mirrorVtx_symAlongFactor[2] * -1)+"\n");
+
+//pSphereShape1.pnts[295].pntx = pSphereShape1.pnts[293].pntx * -1;
+//pSphereShape1.pnts[295].pnty = pSphereShape1.pnts[293].pnty;
+//pSphereShape1.pnts[295].pntz = pSphereShape1.pnts[293].pntz;
+    $exp += ($objShape+".pnts["+$curPos+"].pntx = "+$tarObjShape+".pnts["+$curNeg+"].pntx * "+($mirrorVtx_symAlongFactor[0] * -1)+";\n");
+    $exp += ($objShape+".pnts["+$curPos+"].pnty = "+$tarObjShape+".pnts["+$curNeg+"].pnty * "+($mirrorVtx_symAlongFactor[1] * -1)+";\n");
+    $exp += ($objShape+".pnts["+$curPos+"].pntz = "+$tarObjShape+".pnts["+$curNeg+"].pntz * "+($mirrorVtx_symAlongFactor[2] * -1)+";\n");
+    //$exp += ";\n";
+    //$exp += ";\n";
+    //$exp += ";\n";
+
+
+    }
+
+    if( ($direction == 2 || $direction == 3) ){ // source to target : pos to neg
+      if( $onDiffObj ){
+        setAttr ($tarObjShape+".cp["+$curNeg+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1) ;
+        setAttr ($tarObjShape+".cp["+$curNeg+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1) ;
+        setAttr ($tarObjShape+".cp["+$curNeg+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1) ;
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].xv from "+$negf[0]+"  to "+($posf[0] * $mirrorVtx_symAlongFactor[0] * -1)+"\n");
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].yv from "+$negf[1]+"  to "+($posf[1] * $mirrorVtx_symAlongFactor[1] * -1)+"\n");
+//print(" dir = 2/3 set "+$tarObjShape+".cp["+$curNeg+"].zv from "+$negf[2]+"  to "+($posf[2] * $mirrorVtx_symAlongFactor[2] * -1)+"\n");
+
+	 $exp += ($tarObjShape+".pnts["+$curNeg+"].pntx = "+$objShape+".pnts["+$curPos+"].pntx * "+($mirrorVtx_symAlongFactor[0] * -1)+";\n");
+	 $exp += ($tarObjShape+".pnts["+$curNeg+"].pnty = "+$objShape+".pnts["+$curPos+"].pnty * "+($mirrorVtx_symAlongFactor[1] * -1)+";\n");
+	 $exp += ($tarObjShape+".pnts["+$curNeg+"].pntz = "+$objShape+".pnts["+$curPos+"].pntz * "+($mirrorVtx_symAlongFactor[2] * -1)+";\n");
+
+
+      }
+      else{
+        setAttr ($objShape+".cp["+$curNeg+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1) ;
+        setAttr ($objShape+".cp["+$curNeg+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1) ;
+        setAttr ($objShape+".cp["+$curNeg+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1) ;
+
+	 $exp += ($objShape+".pnts["+$curNeg+"].pntx = "+$tarObjShape+".pnts["+$curPos+"].pntx * "+($mirrorVtx_symAlongFactor[0] * -1)+";\n");
+	 $exp += ($objShape+".pnts["+$curNeg+"].pnty = "+$tarObjShape+".pnts["+$curPos+"].pnty * "+($mirrorVtx_symAlongFactor[1] * -1)+";\n");
+	 $exp += ($objShape+".pnts["+$curNeg+"].pntz = "+$tarObjShape+".pnts["+$curPos+"].pntz * "+($mirrorVtx_symAlongFactor[2] * -1)+";\n");
+
+      }
+    }
+
+
+
+    if( $direction == 3 && !$onDiffObj && !$isNurbs ){
+//      print( " direction = 3 and on Same Object\n");
+      $matchedVtx[ size($matchedVtx) ] = $curPos;
+      $matchedVtx[ size($matchedVtx) ] = $curNeg;
+    }
+  }
+
+  // mirror local position of vtx that located in middle of body when swaping
+  if( $direction == 3 && !$onDiffObj && !$isNurbs){
+    $matchedVtx = sort( $matchedVtx );
+    int $vtxCount = `getAttr -s ($objShape+".cp")`;
+    int $isMiddleVtx;
+    for( $i = 0 ; $i < $vtxCount ; $i++ ){
+      $isMiddleVtx = 1;
+      for( $j = 0 ; $j < size( $matchedVtx ) ; $j++ ){
+        if( $i == $matchedVtx[$j] ){
+          $isMiddleVtx = 0;
+          break;
+        }
+//        else if( $i > $matchedVtx[$j] ){
+//          break;
+//        }
+      }
+      if( $isMiddleVtx ){
+        //print("fix middle vtx ["+$i+"]\n");
+        $posf[0] = `getAttr ($objShape+".cp["+$i+"].xv")`;
+        $posf[1] = `getAttr ($objShape+".cp["+$i+"].yv")`;
+        $posf[2] = `getAttr ($objShape+".cp["+$i+"].zv")`;
+
+        setAttr ($objShape+".cp["+$i+"].xv") ($posf[0] * $mirrorVtx_symAlongFactor[0] * -1) ;
+        setAttr ($objShape+".cp["+$i+"].yv") ($posf[1] * $mirrorVtx_symAlongFactor[1] * -1) ;
+        setAttr ($objShape+".cp["+$i+"].zv") ($posf[2] * $mirrorVtx_symAlongFactor[2] * -1) ;
+      }
+    }
+  }
+
+   expression -s $exp -n "realTimeBlendShapeExp";
+
+}
+
+global proc mirrorVtx_assignObj(string $uiobj){
+  string $sel[] = `ls -sl`;
+  string $temp[];
+  if( size($sel) == 0 ){
+     textFieldButtonGrp -e -tx "" $uiobj;
+     if( $uiobj == "mirrorVtx_assignTarObjTextGrp" ){
+        // enable consider vertice
+        textFieldButtonGrp -e -en 1 mirrorVtx_assignRangeTextGrp;
+        textFieldButtonGrp -e -ed 0 mirrorVtx_assignRangeTextGrp;
+        print("enable consider vertice\n");
+     }
+     if( $uiobj == "mirrorVtx_assignTarObjTextGrp2" ){ 
+        radioButtonGrp -e -la3 "Neg -> Pos" "Pos -> Neg" "Swap" mirrorVtxSymAlong_copyDirtectionRadioButtonGrp;
+     }
+     return;
+  }
+
+  if( size($sel) != 1 ){
+     error "Please select a polygon/nurbs object !!\n";
+  }
+
+  $temp = `listRelatives -pa -s -c -ni $sel[0]`;
+  if( size( $temp ) > 0 ){
+    if( `nodeType $temp[0]` == "mesh" ){
+      textFieldButtonGrp -e -tx $sel[0] $uiobj;
+       if( $uiobj == "mirrorVtx_assignTarObjTextGrp" ){
+          // enable consider vertice
+          textFieldButtonGrp -e -en 1 mirrorVtx_assignRangeTextGrp;
+          textFieldButtonGrp -e -ed 0 mirrorVtx_assignRangeTextGrp;
+          print("enable consider vertice\n");
+       }
+    }
+    else if( `nodeType $temp[0]` == "nurbsSurface" ){
+      textFieldButtonGrp -e -tx $sel[0] $uiobj;
+      if( $uiobj == "mirrorVtx_assignTarObjTextGrp" ){
+        textFieldButtonGrp -e -en 0 mirrorVtx_assignRangeTextGrp; 
+        print("dim consider vertice\n");
+      }
+    }
+    else if ( `nodeType $temp[0]` == "lattice" ){
+      textFieldButtonGrp -e -tx $sel[0] $uiobj;
+       if( $uiobj == "mirrorVtx_assignTarObjTextGrp" ){
+          // enable consider vertice
+          textFieldButtonGrp -e -en 1 mirrorVtx_assignRangeTextGrp;
+          textFieldButtonGrp -e -ed 0 mirrorVtx_assignRangeTextGrp;
+          print("enable consider lattice\n");
+       }
+    }
+
+    else{
+      error "Please select a polygon/nurbs/lattice object !!\n";
+    }
+    
+
+    if( $uiobj == "mirrorVtx_assignTarObjTextGrp2" ){
+       radioButtonGrp -e -la3 "Obj2 -> Obj1" "Obj1 -> Obj2" "Swap" mirrorVtxSymAlong_copyDirtectionRadioButtonGrp;
+    }
+
+  }
+  else{
+     error "Please select a polygon/nurbs object !!\n";
+  }
+}
+
+
+global proc mirrorVtx_assignMultObj(){
+  string $sel[] = `ls -sl`;
+  string $temp[];
+  int $i;
+  int $objCount = 0;
+  string $objStr;
+  if( size($sel) == 0 ){
+     textFieldButtonGrp -e -tx "" mirrorVtx_assignObjTextGrp;
+     return;
+  }
+
+//  else if( size( $sel ) != 1 ){
+//    error "Please select a transform of polygon object \n";
+//  }
+
+//  if( `nodeType $sel[0]` != "transform" /*|| `nodeType $sel[1]` != "transform"*/ ){
+//      error "Please select a transform of polygon object \n";
+    
+//  }
+
+  for( $i = 0 ; $i < size( $sel ) ; $i++ ){
+    if( `nodeType $sel[$i]` != "transform" /*|| `nodeType $sel[1]` != "transform"*/ ){
+      continue;
+    }
+
+        $temp = `listRelatives -pa -s -c -ni $sel[$i]`;
+        // Result: pPlaneShape5 pPlaneShape5Orig //
+        //$tran = $sel[0];
+        if( `nodeType $temp[0]` == "mesh" || `nodeType $temp[0]` == "nurbsSurface"){
+          $objStr += $sel[$i]+";";
+          $objCount++;
+        }
+  }
+
+  if( $objCount == 0 ){
+          error "Please select polygon/nurbs object(s) \n";
+  }else{
+          textFieldButtonGrp -e -tx $objStr mirrorVtx_assignObjTextGrp;
+  }
+}
+
+
+global proc mirrorVtx_assignVtx(){
+  string $sel[] = `ls -sl -o`; 
+   // Result: pCylinderShape1 pCubeShape1 //  vtx on two obj
+  int $i;
+  string $temp[];
+  int $cluCount = 0;
+  string $vtxStr;
+  if( size( $sel ) == 0 ){
+    textFieldButtonGrp -e -tx "" mirrorVtx_assignRangeTextGrp;
+    return;
+  }
+
+  $temp = `filterExpand -sm 28 -sm 31`;
+
+  if( size( $temp ) == 0 ){
+
+    $temp = `filterExpand -sm 28 -sm 35`; // v3.3
+
+    if( size( $temp ) == 0 ){
+      
+      error "Please select vertices/UVs on target obj \n";
+    
+    }
+    
+  }
+
+
+  for( $i = 0 ; $i < size( $temp ) ; $i++ ){
+
+    $vtxStr += $temp[$i]+";";
+
+  }
+
+  textFieldButtonGrp -e -tx $vtxStr mirrorVtx_assignRangeTextGrp;
+
+}
+
+
+global proc getTargetRange(string $objShape, string $vtxStrArr[],int $tVtxI[], int $u[], int $v[]){
+  int $i,$j;
+  int $count;
+  int $uCount;
+  int $vCount;
+  int $tempInt;
+  float $f[];
+  int $tempIntArr[];
+
+  string $temp[] = `listRelatives -pa -type transform -p $objShape`;
+  string $tran = $temp[0];
+  int $cpCount;
+  int $degreeU;
+  int $degreeV;
+  int $maxU;
+  int $maxV;
+  int $curU;
+  int $curV;
+  int $formU;
+  int $formV;
+  int $formU_minusFactor;
+  int $formV_minusFactor;
+
+
+  if( `nodeType $objShape` == "mesh" ){
+    if( size( $vtxStrArr[0] ) == 0 ){ // target range not specified
+      $count = `getAttr -s ($objShape+".cp")`;
+      for( $i = 0 ; $i < $count ; $i++ ){
+        $tVtxI[size($tVtxI)] = $i;
+      }
+    }
+
+    else{
+      $count = size($vtxStrArr);
+      for( $i = 0 ; $i < $count ; $i++ ){
+        $tempInt = getVtxFromObj($vtxStrArr[$i] , $tran);
+        if( $tempInt >= 0 ){
+          $tVtxI[size($tVtxI)] = $tempInt;
+        }
+      }
+    }
+  }
+  else if( `nodeType $objShape` == "lattice" ){
+    if( size( $vtxStrArr[0] ) == 0 ){ // target range not specified
+      $count = `getAttr -s ($objShape+".cp")`;
+      for( $i = 0 ; $i < $count ; $i++ ){
+        $tVtxI[size($tVtxI)] = $i;
+      }
+    }
+    else{
+      $count = size($vtxStrArr);
+      for( $i = 0 ; $i < $count ; $i++ ){
+        $tempInt = getVtxFromObj($vtxStrArr[$i] , $tran);
+        if( $tempInt >= 0 ){
+          $tVtxI[size($tVtxI)] = $tempInt;
+        }
+      }
+    }
+  }
+
+  else{ // nurbsSurface
+/*
+  e.g.
+  spanU = 4 , spanV = 8
+  degreeU = 3, degreeV = 3
+  total cp = ( 4+3 )*( 8+3 )
+  uv[2][5] = 2 * ( 8+3 )  +  5  = cp 27
+
+  cp 27 to uv
+  u = 27 / ( 8+3 ) = 2
+  v = 27 % ( 8+3 ) = 5
+
+
+*/
+
+    $formU = `getAttr ($objShape+".formU")`; // sphere = 0
+    $formV = `getAttr ($objShape+".formV")`; // sphere = 2
+
+print( "from U : "+$formU+"\n");
+print( "from V : "+$formV+"\n");
+
+
+    //$tempIntArr = `getAttr -s ($objShape+".cv[*][0]")`;
+    $uCount = `getAttr ($objShape+".spansU")`;// size($tempIntArr);
+    //$tempIntArr = `getAttr -s ($objShape+".cv[0][*]")`;
+    //$vCount = size($tempIntArr);
+    $vCount = `getAttr ($objShape+".spansV")`;
+
+print("spans U : "+$uCount+"\n");
+print("spans V : "+$vCount+"\n");
+
+    $degreeU = `getAttr ($objShape+".degreeU")`;
+    $degreeV = `getAttr ($objShape+".degreeV")`;
+
+print("degree U : "+$degreeU+"\n");
+print("degree V : "+$degreeV+"\n");
+
+ 
+    $maxU = $uCount + $degreeU; // 1-base
+    $maxV = $vCount + $degreeV; // 1-base
+
+    print( "max u count : "+$maxU+"\n");
+    print( "max v count : "+$maxV+"\n");
+
+    $cpCount = `getAttr -s ($objShape+".cp")`;
+    // $cp count == $maxU * $maxV too
+
+print("cp count : "+$cpCount+"\n");
+
+    if( $formU == 0 ){
+      $formU_minusFactor = 0;
+    }
+    else if( $formU == 1 ){
+    }
+    else{
+      $formU_minusFactor = $degreeU;
+    }
+
+    if( $formV == 0 ){
+      $formV_minusFactor = 0;
+    }
+    else if( $formV == 1 ){
+    }
+    else{
+      $formV_minusFactor = $degreeV;
+    }
+
+
+
+    if( size( $vtxStrArr[0] ) == 0 ){
+      print("target $tVtxI count = "+($maxU)+" * "+$maxV+"\n");
+      //for( $i = 0 ; $i < ( ($uCount+1) * $vCount ) ; $i++ ){
+      for( $i = 0 ; $i < ( $cpCount ) ; $i++ ){
+        $curU = $i / $maxV;
+        $curV = $i % $maxV;
+        //if( $curU < ($maxU) && $curV < ($vCount) ){ -- forn nurbs sphere
+        //if( $curU < ($maxU-$fromU) && $curV < ($maxV-$formV) ){ -- for nurbs plane
+        if( $curU < ($maxU-$formU_minusFactor) && $curV < ($maxV-$formV_minusFactor) ){
+          $tVtxI[size($tVtxI)] = $i;
+        }
+      }
+    }
+    else{
+      for( $i = 0 ; $i < size( $vtxStrArr ) ; $i++ ){
+        $f = getUVFromObj( $vtxStrArr[$i] , $tran );
+        $tVtxI[size($tVtxI)] = ($f[0]+1) * $vCount  + $f[1] + 1;
+      }
+    }
+  }
+}
+
+
+
+global proc mirrorVtx(){
+
+  mirrorVtxCreateUI();
+
+}
+//mirrorVtx();
+/*
+getAttr  nurbsSphereShape1.cv[0]["*"]
+createNode surfaceInfo;
+ connectAttr -f nurbsSphereShape1.worldSpace surfaceInfo1.inputSurface;
+ getAttr surfaceInfo1.controlPoints["*"];
+
+
+for( $i = 0 ; $i < (7*8) ; $i++ ){
+  $f = `getAttr  nurbsSphereShape1.cp[$i]`;
+  
+  print($i+" " +$f[0]+" " +$f[1]+" "+$f[2] +"\n");
+
+}
+
+setAttr nurbsSphereShape1.cp[34] 0 0 0
+setAttr nurbsSphereShape1.cp[34].xv 0 
+*/
+/*
+global proc printCp(){
+  string $sel[] = `ls -sl`;
+  int $i;
+  string $temp[];
+  $temp = `listRelatives -c -ni -pa -s $sel[0]`;
+  $s = $temp[0]; // mesh/nurbs shape
+
+  int $c = `getAttr -s ($s+".cp");
+
+  for( $i = 0 ; $i < $c; $i++ ){
+    float $f[] = `getAttr ($s+".cp["+$i+"]")`;
+    print($s+".cp["+$i+"] "+$f[0]+" , "+$f[1]+" , "+$f[2]+"\n");
+  }
+}
+printCp();
+*/

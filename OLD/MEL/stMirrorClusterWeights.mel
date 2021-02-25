@@ -1,0 +1,98 @@
+global proc stMirrorWeightRadioCB()
+{
+	int $flag =`radioButtonGrp -q -sl radGrp`;
+
+	if ($flag == 1)
+	{
+		// "Self"
+
+		textFieldGrp -e -enable false stTextFieldName;
+	}
+	else
+	{
+		// "Other obj
+
+		textFieldGrp -e -enable true stTextFieldName;
+	}
+}
+
+global proc stMirrorClusterWeights ()
+{
+	  $win=`window -menuBar true -t "Mirror Cluster Weights" mCW`;
+
+		menu -label "Help";
+			menuItem -label "Help on Mirror Cluster Weights..." -command "zjHelpCallback stMirrorClusterWeight";
+
+		columnLayout -adjustableColumn true;
+			string $radioGroup = `radioButtonGrp -changeCommand stMirrorWeightRadioCB -select 2 -numberOfRadioButtons 2 -label "Mirror to" -labelArray2 "Self" "Other Object" radGrp`;
+
+//			text -label "targetObject";
+//			string $stTextFieldName=`textField -w 200 stTextFieldName`;	
+
+			string $stTextFieldName = `textFieldGrp -label "Object Name" -text "" stTextFieldName`;
+			button  -al "center" -rs 1 -label "Mirror" -c stMirrorClusterWeightsMain;
+	showWindow $win;			
+}
+
+global proc stMirrorClusterWeightsMain ()
+{
+	string $clus[] = `ls -sl`;
+	float $pivots[] = `xform -q -ws -t ($clus[0] + ".rotatePivot")`;
+	string $conneT[] = `listConnections($clus[0] + ".worldMatrix")`;
+	string $connects[] = `listConnections -d 1 -scn 1 $conneT[0]`;
+	for ($connect in $connects)
+	{	
+		if (`gmatch $connect "*Set*"`)
+		{
+			select -r $connect;
+		}
+	}
+	
+	string $cvss[] = `ls -sl`;   
+	string $buff[];
+	string $tarObj=`textFieldGrp -q  -tx stTextFieldName`;
+	int $count = `tokenize $cvss[0] "." $buff`;
+	//print $buff[0];
+	string $cvs[] = `filterExpand -ex 1 -sm 31 $cvss`;
+	select -cl;  string $vtxs[]; int $condition =`radioButtonGrp -q -sl radGrp`;
+	if ($condition==0) error  "想想忘了什么？"; 
+	if ($condition==1) 
+	{
+		  $vtxs = `polyListComponentConversion -tv $buff[0]`;
+	}
+	else if ($condition==2)
+	{
+		 $vtxs = `polyListComponentConversion -tv $tarObj`;
+	}
+	string $openvtxs[] = `filterExpand -ex true -sm 31 $vtxs[0]`;
+	$jj = size ($openvtxs);
+	$j = size ($cvs);
+	//int $index = 0;
+	string $newArray[];
+	float $weights[];
+	float $Tempweights[];
+	waitCursor -st on;
+	for ($i=0;$i<$j;$i++)
+	{
+		float $p[] = `pointPosition -w $cvs[$i]`;	
+		$Tempweights = `percent -q -v $conneT[0] $cvs[$i]`;
+		$weights[$i] = $Tempweights[0];
+		for ($ii=0;$ii<$jj;$ii++)
+		{
+			float $np[] = `pointPosition -w $openvtxs[$ii]`;
+			if ((abs($np[0] + $p[0])<0.001) && (abs($np[1] - $p[1])<0.001) && (abs($np[2] - $p[2])<0.001))
+			{
+				select -add $openvtxs[$ii];
+				$newArray[$i] = $openvtxs[$ii];
+				//$index++;
+			}
+		}
+	}
+	string $Ncluster[] = `cluster -foc -rel`;
+	move -a (-$pivots[0]) $pivots[1] $pivots[2] ($Ncluster[1] + ".rotatePivot");
+	for ($i=0;$i<$j;$i++)
+	{
+		percent -v $weights[$i] $Ncluster[0] $newArray[$i];
+	}
+	waitCursor -st off;
+}

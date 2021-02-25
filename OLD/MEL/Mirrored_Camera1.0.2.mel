@@ -1,0 +1,390 @@
+///////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////
+/*
+GenerateMirroredCamera1.0
+
+Updated :    May 8th, 2014
+
+Author :    James Coore
+Contact :   jcoore77@googlemail.com
+
+History :    version 1.0.0
+        
+Description :   Creates a camera (or object) mirrored in a user defined plane. So it is effectively a mirror constraint. 
+		The created object has a live connection to the original object. 
+		Good solution to the problem of rendering render elements (motion vector and DOF etc) in a ray-trace reflection. 
+		Bear in mind you need to laterally invert (flop) the resultant image when compositing.
+
+How to use :	
+
+		1) Execute the script from script editor or add as a shelf button.
+		2) Select a camera and add to the "Currently selected camera" in the "Camera Section".
+		3) Select the plane you intend to reflect through, and add it to the "Currently selected reflection plane" in the "Reflection Plane Section".
+		4) Select a face on the reflection plane and add it to the vertex list section.
+		5) Check the instance  checkbox to preserve shape data. (Not recommended for cameras, can lead to problems when rendering.)
+		6) Create
+
+	
+Inputs :    Camera and Reflection Plane.
+
+Return :    Reflected camera and reflection network.
+
+All Rights Reserved */
+///////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////
+
+// Routine to check how many times the application has run, provides a unique id for adding to strings or creating uniquely named nodes.
+						if( !`optionVar -exists "TM_execute_iter"` )
+						{
+						// Add a integer option called "TM_execute_iteration" and set its
+						// value to 1
+						optionVar -intValue "TM_execute_iter" 1;
+						}
+						else 
+						{
+						// This isn't the first run    
+						// appends an integer value to "TM_execute_iter" so if the script has run 10 times it will be "1111111111"
+						optionVar -intValueAppend "TM_execute_iter" 1; 
+						}    
+						// Extract the binaryish data into an integer value "$exec_num" of how many times has this script ran, by checking the array size.
+						int $exec_num=( `optionVar -arraySize "TM_execute_iter"` + "\n" );
+						print ($exec_num+"\n");
+						
+						
+global proc rc_create_gui ()
+{
+    // Define global UI elements.
+    global string $selected_reflec_plane_name;
+	global string $selected_camera_name;
+	global string $selected_vertices;
+	global string $startFrameField;
+    global string $endFrameField;
+	global string $instancer_checkButtonGrp;
+
+    // If the window exists already, delete it.
+    if (`window -exists pphWindow`)
+    {
+        deleteUI pphWindow;
+    }
+
+
+    // Build the window.
+    window -title "Mirrored Camera Tool" -width 440 -sizeable 0 pphWindow;
+	
+	// Camera or tranform object section.
+        columnLayout -rowSpacing 2;
+            frameLayout -label "Camera Section";
+                text -label "Currently selected camera (or any tranform) " -width 440;
+                    $selected_camera_name = `textScrollList -width 440 -h 40`;
+                    rowLayout -width 440 -nc 2 -cw2 120 120;
+                        button -label "Add selected" -command "add_camera ();" -width 120;
+						button -label "Clear" -command "bp_remove_camera ();" -width 120;
+                        setParent ..;
+
+        // Reflection plane section.
+        columnLayout -rowSpacing 10;
+            frameLayout -label "Reflection Plane Section";
+                text -label "Currently selected reflection plane" -width 440;
+                    $selected_reflec_plane_name = `textScrollList -width 440`;
+                    rowLayout -width 440 -nc 2 -cw2 120 120;
+                        button -label "Add selected" -command "add_Reflec_Plane ();" -width 120;
+						button -label "Clear" -command "bp_remove_Reflec_Plane ();" -width 120;
+                        setParent ..;
+						
+		// Vertex list section
+        columnLayout -rowSpacing 10;
+            frameLayout -label "Select a face on the reflection plane";
+                text -label "Currently selected vertices" -width 440;
+                    $selected_vertices = `textScrollList -width 440`;
+                    rowLayout -width 440 -nc 2 -cw2 120 120;
+                        button -label "Add selected face" -command "add_vertex ();" -width 120;
+						button -label "Clear" -command "remove_vertex();" -width 120;
+                        setParent ..;
+						
+		// Checkbox preserve shape data section.
+            frameLayout -label "Instance Shape (Not recommended for cameras)";
+                    $instancer_checkButtonGrp  = `checkBox -label "instance" -width 440 -onCommand "on_func_inst" -offCommand "off_func_inst"`;
+                setParent ..;
+										
+			//Frame range section
+            frameLayout -label "";    
+                columnLayout;
+                    rowLayout -width 440 -nc 4 -cw4 60 60 60 60;
+                    button -label "Create" -command "Generate_Ref_Cam ()" -width 440;
+                    setParent ..;
+                setParent ..;
+        setParent ..;
+    // Show the window.
+    showWindow pphWindow;
+}						
+						
+// Add selected camera
+proc add_camera  ()
+{
+    	global string $selected_camera_name;
+    	string $selection[] = `ls -selection`;
+		int $num_items = `textScrollList -query -ni $selected_camera_name`;
+		if ($selection[0] != "")
+		{
+				string $selected_shape[] = `listRelatives -s $selection[0]`;
+				if (size($selected_shape) != 0) // As it may not have a shape.
+				{		string $node_type = `nodeType $selected_shape[0]`;
+						if ($node_type != "camera") print ("Selected object " + $selection[0] + " is not a camera, but the constraint will work on any tranform." + "\n");
+						else print ($selection[0] + " selected" + "\n");
+				}
+				textScrollList -e -ra $selected_camera_name;
+				textScrollList -edit -append $selection[0] $selected_camera_name;
+		}
+		else print ("No items currently selected to add." + "\n");
+		clear ($selection);
+}
+
+// Remove selected camera
+proc bp_remove_camera ()
+{
+    global string $selected_camera_name;
+	textScrollList -e -ra $selected_camera_name;
+}						
+	
+// Add selected reflection plane.
+proc add_Reflec_Plane ()
+{
+    	global string $selected_reflec_plane_name;
+    	string $selection[] = `ls -selection`;
+		if ($selection[0] != "")
+		{
+				string $selected_shape[] = `listRelatives -s $selection[0]`;
+				string $node_type = `nodeType $selected_shape[0]`;
+				if ($node_type != "mesh") print ("Selected object " + $selection[0] + " is not polygon. Please select a polygon surface." + "\n");
+				else 
+				{
+					print ($selection[0] + " selected" + "\n");
+					textScrollList -e -ra $selected_reflec_plane_name;
+					textScrollList -edit -append $selection[0] $selected_reflec_plane_name;
+				}
+		}
+		clear ($selection);
+}
+
+// Remove selected reflection plane.
+proc bp_remove_Reflec_Plane ()
+{
+    global string $selected_reflec_plane_name;
+	textScrollList -e -ra $selected_reflec_plane_name;
+}	
+
+// Procedure to detemine polygon component type.
+proc string getSubType(string $buffer) 
+{
+	switch($buffer) 
+	{
+		case "e":
+		return("edge");
+		break;
+		case "f":
+		return("face");
+		break;
+		case "vtx":
+		return("vertex");
+		break;
+		case "map":
+		return("UV");
+		break;
+		case "vtxFace":
+		return("vtxFace");
+		break;
+		default:
+		return(0);
+	}
+};						
+
+// Add vertex.
+proc add_vertex ()
+{
+    	global string $selected_vertices;
+		global string $selected_reflec_plane;
+		global string $selected_reflec_plane_name;
+		string $cur_selectedplane_array [] = `textScrollList -query -allItems $selected_reflec_plane_name`;
+		$selected_reflec_plane = $cur_selectedplane_array [0];
+		string $selected[] = `ls -sl`;
+		// Make sure the user has seleted a face.
+		string $buffer[];
+		tokenize $selected[0] "[]." $buffer;
+		string $comp_type = getSubType($buffer[1]);
+		string $object_from_comp = $buffer[0];
+		
+			// Check it's a face on the plane selected above and not some other plane.
+			if ($object_from_comp != $selected_reflec_plane) print ("Undefined plane! Select a face on the reflection plane selected above." + "\n");
+			else
+			{
+				// Make sure the user has selected a face.
+				if ($comp_type != "face") print ("Select a face component on the reflection plane." + "\n");
+				else
+				{
+				string $ftv[] = `polyInfo -faceToVertex $selected[0]`;
+				string $tokens[];
+				tokenize $ftv[0] " :\n\r" $tokens;
+				int $vertexNumber[];
+				clear $vertexNumber;
+				int $t;
+				textScrollList -e -ra $selected_vertices;	
+			
+					for ( $t = 2; $t < `size $tokens`; $t++ )
+					{
+					$vertexNumber[`size $vertexNumber`] = $tokens[$t];
+					}
+					
+					for ( $t = 0; $t <=2; $t++ )
+					{
+					$selected[$t] = ($selected_reflec_plane + ".vtx[" + $vertexNumber[$t] + "]");
+					textScrollList -edit -append $selected[$t] $selected_vertices;
+					}
+				}
+			}
+}
+
+// Remove vertex.
+proc remove_vertex ()
+{
+    global string $selected_vertices;
+    textScrollList -e -ra $selected_vertices;	
+}	
+
+// a function to be called when the instance checkbox gets checked.
+proc on_func_inst() 
+{
+        global int $instancer_checkbox_status;
+        $instancer_checkbox_status = 1;
+        print("Preserve shape data checkbox on!" + "\n");
+}
+
+// a function to be called when the instance checkbox gets unchecked.
+proc off_func_inst() 
+{
+        global int $instancer_checkbox_status;
+        $instancer_checkbox_status = 0;
+        print("Preserve shape data checkbox off" + "\n");
+}
+
+// Main Function				
+global proc Generate_Ref_Cam ()
+{
+	global string $selected_reflec_plane_name;
+	global string $selected_camera_name;
+	global string $selected_vertices;
+	global string $cur_selectedplane_array [];
+	global string $instancer_checkButtonGrp;
+	global int $instancer_checkbox_status;
+	string $selected_camera;
+	string $selected_reflec_plane;
+	// Read global integer for how many times the script has run in this session of Maya.
+	global int $exec_num;
+	global int $ui_process_num = 0;
+	vector $Mplane_pos;
+	vector $Mplane_rot;
+	int $turnoff_renderable = 0;
+	string $cur_selectedcam_array [] = `textScrollList -query -allItems $selected_camera_name`;
+	$selected_camera = $cur_selectedcam_array [0];
+	string $cur_selectedplane_array [] = `textScrollList -query -allItems $selected_reflec_plane_name`;
+	$selected_reflec_plane = $cur_selectedplane_array [0];
+	string $selected_vertices_array[] = `textScrollList -query -allItems $selected_vertices`;
+	
+	if ($selected_camera  != "")
+	{
+			if ($selected_reflec_plane  != "")
+			{
+					if (size($selected_vertices_array)  != 0)	
+					{
+									string $selected_camera_shape[] = `listRelatives -s $selected_camera`;
+									if (size($selected_camera_shape) != 0) // As it may not have a shape.
+									{		
+											string $node_type = `nodeType $selected_camera_shape`;
+											if ($node_type == "camera") 
+											{
+											$turnoff_renderable = 1;
+											}
+									}
+									else $turnoff_renderable = 0;
+								
+
+							print $turnoff_renderable;
+							// Determine the status of the checkbox
+								$instancer_checkbox_status = `checkBox -query -value $instancer_checkButtonGrp `;
+							
+							// Create rotation reference plane
+							polyPlane -w 1 -h 1 -sx 1 -sy 1 -ax 0 0 1 -cuv 2 -ch 1 -n ("rc_reference_plane_rot_" + $exec_num + "_"+  $ui_process_num);
+							// Select 3 vertices on the plane to align with.
+							select -r ("rc_reference_plane_rot_" + $exec_num + "_"+  $ui_process_num + " .vtx[1:3]");
+							// Add the 3 vertices from the list.
+							for ($vertz in $selected_vertices_array)  select -add  $vertz;
+							Snap3PointsTo3Points;
+							// Create master reference plane.
+							polyPlane -w 1 -h 1 -sx 1 -sy 1 -ax 0 0 1 -cuv 2 -ch 1 -n ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num);
+							// Orientate Master plane to rotation reference plane.
+							// Duplicate user selected Reflection Plane and modify CP.
+							// To make sure we reference from the centre of the plane.
+							select -r $selected_reflec_plane;
+							duplicate -rr -n ("rc_Duplicated_Reflection_Plane_" + $exec_num + "_"+  $ui_process_num) $selected_reflec_plane;
+							xform -cp;
+							vector $Mplane_pos = `xform -q -ws -rp ("rc_Duplicated_Reflection_Plane_" + $exec_num + "_"+  $ui_process_num)`; 
+							vector $Mplane_rot = `xform -q -ws -ro ("rc_reference_plane_rot_" + $exec_num + "_"+  $ui_process_num)`; 
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num + ".translate") -type "double3"  ($Mplane_pos.x) ($Mplane_pos.y) ($Mplane_pos.z);
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num + ".rotate") -type "double3"  ($Mplane_rot.x) ($Mplane_rot.y) ($Mplane_rot.z);
+							delete ("rc_reference_plane_rot_" + $exec_num + "_"+  $ui_process_num);
+							delete ("rc_Duplicated_Reflection_Plane_" + $exec_num + "_"+  $ui_process_num);
+							// Duplicate the camera and parent to the Master plane.
+							select -r $selected_camera;
+									if ($instancer_checkbox_status == 1) instance -n ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num); 
+									else if ($instancer_checkbox_status == 0) duplicate -rr -n ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num); 
+							if ($turnoff_renderable == 1) setAttr ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num + ".renderable") 0;
+							setAttr ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num + ".visibility") 0;
+							parent ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num) ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num);
+							// Set the master plane to zero. This straightens everything out to the Z axis.
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num +  ".translate") -type "double3"  0 0 0;
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num +  ".rotate") -type "double3"  0 0 0;
+							// Duplicate original camera copy. 
+							select -r ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num) ;
+							duplicate -rr -n ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num); 
+							if ($turnoff_renderable == 1)setAttr ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num+ ".renderable") 0;
+							setAttr ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num+ ".visibility") 0;
+							// Group the camera about the origin.
+							group -n ("rc_Neg_reflec_cam_group" + $exec_num + "_"+  $ui_process_num); 
+							xform -os -piv 0 0 0;
+							// Mirror the camera in Z.
+							setAttr ("rc_Neg_reflec_cam_group" + $exec_num + "_"+  $ui_process_num +  ".scaleZ") -1;
+							// Select the users camera and duplicate and rename to the final reflection camera.
+							// Create proper orientation nodes.
+							spaceLocator -n ("rc_Proper_Orientation_group_" + $exec_num + "_"+  $ui_process_num) -p 0 0 0; 
+							duplicate -rr -n ("rc_Proper_Orientation_node_"+ $exec_num + "_"+  $ui_process_num);
+							parent ("rc_Proper_Orientation_node_"+ $exec_num + "_"+  $ui_process_num) ("rc_Proper_Orientation_group_" + $exec_num + "_"+  $ui_process_num) ;
+							// Parent constrain proper orientation group with negative camera.
+							select -r $selected_camera ;
+									if ($instancer_checkbox_status == 1) instance -n  ("rc_Reflected_" + $selected_camera + "_" + $exec_num + "_"+  $ui_process_num);
+									else if ($instancer_checkbox_status == 0) duplicate -rr -n  ("rc_Reflected_" + $selected_camera + "_" + $exec_num + "_"+  $ui_process_num);
+							
+							parentConstraint ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num) ("rc_Proper_Orientation_group_" + $exec_num + "_"+  $ui_process_num) ;
+							// Flip the orientation node 180 in Z and Y.
+							setAttr ("rc_Proper_Orientation_node_"+ $exec_num + "_"+  $ui_process_num + ".rotateY") 180;
+							setAttr ("rc_Proper_Orientation_node_"+ $exec_num + "_"+  $ui_process_num + ".rotateZ") 180;
+							
+							// Parent constrain the orientation node to the reflection camera.
+							parentConstraint ("rc_Proper_Orientation_node_"+ $exec_num + "_"+  $ui_process_num) ("rc_Reflected_" + $selected_camera + "_" + $exec_num + "_"+  $ui_process_num);
+								
+							// Reset the Master reference plane to its original position.
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num + ".translate") -type "double3"  ($Mplane_pos.x) ($Mplane_pos.y) ($Mplane_pos.z);
+							setAttr ("rc_Master_reference_plane_" + $exec_num + "_"+  $ui_process_num +  ".rotate") -type "double3"  ($Mplane_rot.x) ($Mplane_rot.y) ($Mplane_rot.z);
+							// Make network live.
+							parentConstraint -w 1 $selected_camera ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num);
+							connectAttr -f ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num + ".translate") ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num + ".translate");
+							connectAttr -f ("rc_original_" + $selected_camera + "_copy" + $exec_num + "_"+  $ui_process_num + ".rotate") ("rc_Neg_reflec_cam" + $exec_num + "_"+  $ui_process_num + ".rotate");
+					}
+					else print ("Please select and add a face to the vertex list." + "\n");
+			}
+			else print ("Please select a reflection plane." + "\n");
+	}
+	else print ("Please select a camera." + "\n");
+	$ui_process_num = $ui_process_num + 1;
+}
+
+// Call process_proxies_houdini () when the script is run.
+rc_create_gui ();

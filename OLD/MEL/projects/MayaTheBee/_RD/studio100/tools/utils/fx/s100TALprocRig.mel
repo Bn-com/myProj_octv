@@ -1,0 +1,419 @@
+
+global proc s100TALprocRig(string $UI)
+{
+	s100CRTprogressBarProc(0);
+	string $char[];
+	$char = `textScrollList -q -selectItem $UI`;
+	$way = `s100TALexistRigInfo($UI)`;
+	string $lo[] = `s100TALcheckGeoExist($UI)`;
+
+	$prod = `s100TALgetprefixProd`;
+
+	if(`filetest -d $lo[0]`){
+		string $testGeo[];
+		print ($lo);
+		$testGeo = `getFileList -folder $lo[0] -filespec "*.ma"`;
+		//$testRig = `getFileList -folder $lo[1] -filespec "*.ma"`;
+		print ($testGeo);
+		if(`filetest -d $lo[1]`)
+			{
+				if($way != "none")
+				{
+					s100CRTprogressBarProc(1);
+					$file = `getFileList -folder $way -filespec "*.ma"`;
+						if(size($file)>0)
+							{
+							file -f -open ($way + $file[0]);
+							string $trs[];
+							$trs = `s100TALtransferRig`;
+							s100CRTprogressBarProc(3);
+							file -import -type "mayaAscii" -ra true -namespace "lo" -options "v=0;p=17"  -pr -loadReferenceDepth "all" ($lo[0] + $testGeo[0]);
+							s100CRTprogressBarProc(4);
+							string $nmsh = `s100TALcopySkin`;
+							$walkAxeGrp = `createNode "transform" -n "msh_grp"`;
+							$walkGrp = `createNode "transform" -n "walk_grp"`;
+							$flyAxeGrp = `createNode "transform" -n "axeFly_grp"`;
+							$flyGrp = `createNode "transform" -n "fly_grp"`;
+							parent $walkGrp $walkAxeGrp;
+							parent $flyGrp $flyAxeGrp;
+							s100CRTprogressBarProc(5);
+							if(`objExists "Root_M"`)
+										{
+										$pc = `pointConstraint "Root_M" $flyAxeGrp`;
+										delete $pc;
+										}
+
+							parent $flyAxeGrp $walkGrp;
+
+								parent $nmsh $flyGrp ;
+								parent $walkAxeGrp $trs[1];
+								delete $trs[0];
+
+							s100CRTprogressBarProc(6);
+
+								//$lnsp = `namespaceInfo -listOnlyNamespaces`;
+								//for($obj in $lnsp)
+									namespace -f -moveNamespace "lo" ":";
+									namespace -f -removeNamespace "lo";
+							s100CRTprogressBarProc(7);
+								$nameFile = `file -q -sn -shortName`;
+								$nameArray = stringToStringArray($nameFile,".");
+								$nameFile = ($prod + "_F_" + $char[0]  +"CrowdOriginal_Rig" + "." + $nameArray[1]);
+									file -rename ($lo[1] + $nameFile); file -f -s;
+							s100CRTprogressBarProc(8);
+								string $nameRefTab[];
+								$nameRefTab = stringToStringArray($nameArray[0],"_");
+								int $end = (size($nameRefTab) - 1);
+								stringArrayRemoveAtIndex($end,$nameRefTab);
+							s100CRTprogressBarProc(9);
+								$nameRef = stringArrayToString($nameRefTab,"_");
+									$nameRef = ($prod + "_F_" + $char[0]  +"CrowdOriginal" + "." + $nameArray[1]);
+
+								file -rename ($lo[3] + $nameRef); file -f -s;
+								s100TALgetRig($UI);
+							s100CRTprogressBarProc(10);
+							s100CRTprogressBarProc(0);
+
+							}
+						else
+							warning "no base rig exist";
+				}
+
+		}
+		else
+		warning "hi rig file do not exist";
+	    }
+	else
+	warning "low geometry file do not exist";
+}
+
+global  proc string s100TALgetprefixProd()
+{
+	$prod = `optionMenu -q -value s100TALoptionProdMenu`;
+	$prodName = startString($prod,2);
+	$prodname = capitalizeString($prodName);
+	$endString = endString($prodName,1);
+	$endString = capitalizeString($endString);
+	$startSrring = startString($prodName,1);
+
+	$return = ($startSrring + $endString);
+
+
+return $return;
+}
+
+global proc string s100TALexistRigInfo(string $UI)
+{
+$return = "none";
+string $file[];
+string $pathBase[];
+$pathBase = `s100TALgetProdInfo`;
+
+		string $charFolder[];
+		$charFolder = `textScrollList -q -selectItem $UI`;
+
+		$way = ($pathBase[0]+ "/"+$pathBase[1]+ "/");
+
+		$getFileList = `getFileList -folder $way`;
+		for($obj in $getFileList )
+			{
+			string $u[];
+			$u = stringToStringArray($obj,"_");
+			$contain = stringArrayContains("Characters",$u);
+			if($contain == 1)
+				{
+				$wayRig = ($pathBase[0] + "/"+$pathBase[1]+ "/" + $obj + "/" + $charFolder[0] + "/");
+
+				if(`filetest -d $wayRig`)
+					{
+					$file = `getFileList -folder $wayRig`;
+					for($fld in $file)
+						{
+							$nameArray = stringToStringArray($fld,"_");
+							string $nm;
+							for($nm in $nameArray)
+							{
+								if(`gmatch $nm "*Original*"`)
+									{
+									$fldStep = `getFileList -folder ($wayRig + $fld + "/")`;
+									for($stp in $fldStep)
+										{
+											$stpArray = stringToStringArray($stp,"_");
+											for($stpn in $stpArray)
+											{
+
+												if($stpn == "Rig")
+													if(`filetest -d ($wayRig + $fld + "/" + $stp +"/")`)
+													{
+													$return = ($wayRig + $fld + "/" + $stp +"/");
+
+													break;
+                                                    }
+
+											}
+                                        }
+                                    }
+							}
+                        }
+
+                    }
+
+				}
+
+			}
+
+return $return;
+}
+
+global proc string[] s100TALcheckGeoExist(string $UI)
+{
+string $return[];
+$return = {"none","none"};
+string $file[];
+string $pathBase[];
+$pathBase = `s100TALgetProdInfo`;
+
+		string $charFolder[];
+		$charFolder = `textScrollList -q -selectItem $UI`;
+
+		$way = ($pathBase[0]+ "/"+$pathBase[1]+ "/");
+
+		$getFileList = `getFileList -folder $way`;
+		for($obj in $getFileList )
+			{
+			string $u[];
+			$u = stringToStringArray($obj,"_");
+			$contain = stringArrayContains("FX",$u);
+			if($contain == 1)
+				{
+				$wayRig = ($pathBase[0] + "/"+$pathBase[1]+ "/" + $obj + "/" + $charFolder[0] + "/");
+				if(`filetest -d $wayRig`)
+					{
+					$file = `getFileList -folder $wayRig`;
+					for($fld in $file)
+						{
+							if($fld == "_crowd")
+							{
+								$return[3] = ($wayRig + $fld + "/");
+								$fldStep = `getFileList -folder ($wayRig + $fld + "/")`;
+								for($stp in $fldStep)
+									{
+										$stpArray = stringToStringArray($stp,"_");
+										for($stpR in $stpArray)
+										{
+											if($stpR == "Geo")
+												if(`filetest -d ($wayRig + $fld + "/" + $stp +"/")`)
+												{
+												$return[0] = ($wayRig + $fld + "/" + $stp +"/");
+												}
+											else
+											$return[0] = "noGeo";
+											if($stpR == "Rig")
+												if(`filetest -d ($wayRig + $fld + "/" + $stp +"/")`)
+												{
+												$return[1] = ($wayRig + $fld + "/" + $stp +"/");
+												}
+											else
+											$return[1] = "noRig";
+
+
+
+										}
+								}
+
+
+                    		}
+							else
+							$return[3] = "noCrowd";
+                        }
+                    }
+				}
+			}
+
+
+
+
+
+return $return;
+}
+
+
+global proc string[] s100TALtransferRig(){
+	$skinCluster = `ls -exactType "skinCluster"`;
+	$mesh = `ls -exactType "mesh"`;
+
+	string $msh[];
+
+	$grpJnt = `createNode "transform" -n "deform_grp"`;
+	$grpMsh = `createNode "transform" -n "mesh_grp"`;
+	//print ($grpMsh + "\n");
+
+	string $obj;
+
+		for($obj in $skinCluster){
+			$skin = `skinCluster -q -geometry $obj`;
+			string $in;
+			for($in in $skin){
+				if(`objectType -isType "mesh" $in`){
+					$p = `listRelatives -p $in`;
+					$msh[size($msh)] = $p[0];
+					}
+				}
+			$msh = stringArrayRemoveDuplicates($msh);
+			}
+
+		string $root[];
+		$root = s100TALgetRootBones();
+
+		parent $root $grpJnt;
+
+		for($objR in $root){
+			$jntList = `listRelatives -ad -typ "joint" $objR`;
+			$jntList[size($jntList)] = $objR;
+			$rootDesc = `listRelatives -ad $objR`;
+
+			for($obj in $jntList){
+					string $attr[];
+					$attr = `listAttr -keyable -v`	;
+					channelBoxCommand -break;
+					for($at in $attr){
+						CBdeleteConnection  ($obj + "." + $at);
+						}
+				}
+			$rootDesc = stringArrayRemove($jntList,$rootDesc);
+			}
+	parent $msh $grpMsh;
+
+
+
+	if(`objExists "full_grp"`)
+		delete "full_grp";
+	if(`objExists "AllSet"`)
+		delete "AllSet";
+
+	$fullGrp = `createNode "transform" -n "full_grp"`;
+	parent $grpMsh $grpJnt $fullGrp;
+
+	for($obj in $msh)
+		{
+			string $bs[];
+			$bsValid = `listHistory $obj`;
+			for($bsh in $bsValid)
+						{
+							if(`objectType -isType "blendShape" $bsh`)
+							{
+								setAttr ($bsh + ".envelope") 0;
+								//blendShape -remove $bsh;
+							}
+
+						}
+		}
+	s100TALcleanSceneNode;
+
+	string $tab[];
+
+	$tab[0] = $grpMsh;
+	$tab[1]= $fullGrp;
+	return $tab;
+	}
+
+global proc s100TALcleanSceneNode()
+{
+	$nde = `ls`;
+	for($obj in $nde)
+		{
+		$con = `listConnections -c 1 -d 1 -s 1 $obj`;
+		$d = `listRelatives -ad $obj`;
+			if(size($con) == 0 && size($d) == 0)
+			{
+			delete $obj;
+			}
+		}
+}
+
+
+global proc string s100TALcopySkin()
+{
+string $root = "none";
+
+	$skinCluster = `ls -exactType "skinCluster"`;
+	string $objTab[];
+	$sel = `ls -s`;
+
+				for($obj in $sel)
+			{
+				string $name[];
+				$name = stringToStringArray($obj, ":");
+				if($name[0] == "lo")
+					$objTab[size($objTab)] = $obj;
+			}
+
+
+	for($obj in $skinCluster)
+		{
+			$objName = `skinCluster -q -geometry $obj`;
+			for($sk in $objName)
+			{
+				for($np in $objTab)
+				{
+				$name = stringToStringArray($np, ":");
+				if($name[1] == $sk)
+					{
+						$skin = `skinCluster -q -inf $sk`;
+						skinCluster -n ("SkinCluster" + $sk) -tsb $skin $np;
+						select -r $sk $np;
+						copySkinWeights -noMirror -surfaceAssociation closestPoint -influenceAssociation closestJoint;
+						select $np;
+						removeUnusedInfluences;
+						select -clear;
+                    }
+				$root = `rootOf $np`;
+                }
+            }
+        }
+
+return $root;
+}
+
+
+global proc string[] s100TALgetRootBones(/*string $skinCluster[]*/)
+{
+	int $int = 0;
+	string $root[];
+
+	$skinCluster = `ls -type "skinCluster"`;
+	for($skin in $skinCluster)
+		{
+			$bones = `skinCluster -q -inf $skin`;
+			//print $bones;
+			for($b in $bones)
+				{
+					//$first = `firstParentOf $b`;
+					//$arrayFirst = stringToStringArray($first,"|");
+					$rootN = `s100TALgetParentJoint($b)`;
+					if(size($rootN) >0)
+						$root[size($root)] = $rootN;
+                }
+        }
+	$root = stringArrayRemoveDuplicates($root);
+	//print $root;
+return $root;
+}
+
+global proc string s100TALgetParentJoint(string $bones)
+{
+
+string $return;
+$p = `listRelatives -p $bones`;
+while(`objectType -isType "joint" $p[0]`)
+{
+	$bones = $p[0];
+	$p = `listRelatives -p $bones`;
+
+}
+$return = $p[0];
+return $return;
+}
+
+
+

@@ -1,0 +1,357 @@
+// s100Shp_* library:
+//
+// 	MEL procedures to deal with shapes/transforms : cleaning, finding, renamming...
+//
+// Getting shapes :
+// 		s100Shp_getEveryNonIntermediateShapes
+// 		s100Shp_getFirstNonIntermediateShape
+// 		s100Shp_getFirstTransform
+// 		s100Shp_getFirstShape
+//
+// Shape cleaning :
+// 		s100Shp_DeleteUnusedShapesVerboseOnSel
+// 		s100Shp_DeleteUnusedShapesVerboseInScene
+// 		s100Shp_DeleteUnusedShapesVerboseOnList
+//
+// Shape name conformation :
+// 		s100Shp_renameShapesWithNamesFromTransformOnSel
+// 		s100Shp_renameShapesWithNamesFromTransformInScene
+// 		s100Shp_renameAndConformShapesWithNamesFromTransform
+
+// Name utils :
+// 		s100ShpNm_returnLongName
+// 		s100ShpNm_returnShortName
+// 		s100ShpNm_returnShortNameWithoutNameSpace
+//
+// ------------------------------------------------------------------------------------------
+
+
+
+// ------------------------------------------------------------------------------------------
+//
+//		Getting Shapes
+//
+// ------------------------------------------------------------------------------------------
+
+
+			// Returns the long names of EVERY Non intermediate shapes :
+			//
+			global proc string[] s100Shp_getEveryNonIntermediateShapes(string $srcObj) {
+				string $longName = s100ShpNm_returnLongName( $srcObj);
+				string $niShps[] = {};
+				if (size(`ls -l -g {$longName}`))   {	 // if is a geom => then it is a shape..
+					if (`attributeExists "intermediateObject" $longName`) {
+						if ( !`getAttr ($longName+".intermediateObject")` )
+							return {$longName};
+					}
+				}
+				else
+					$niShps = `listRelatives -f -s -ni $srcObj`;
+				return $niShps;
+			}
+
+
+			// Returns the long name of the first Non intermediate shape :
+			//
+			global proc string s100Shp_getFirstNonIntermediateShape(string $srcObj) {
+				string $shp = "";
+				if (size(`ls -l -g {$srcObj}`))   {	 // if is a geom => then it is a shape..
+					if (`attributeExists "intermediateObject" $srcObj`) {
+						int $ni = !(`getAttr ($srcObj+".intermediateObject")`) ;
+						if ($ni)
+							$shp =  $srcObj;
+					}
+				}
+				else {
+					string $shps[] = `listRelatives -f -s -ni $srcObj`;
+					$shp =  $shps[0];
+				}
+				return $shp;
+			}
+
+			// Returns the full path name of the first transform of the passed obj, i-e itself if $obj IS NOT a shape,
+			// or its transform if it is a shape,
+			// AND is considered as a transform by `ls -transforms`
+			//
+			//
+			global proc string s100Shp_getFirstTransform(string $obj) {
+				string $xform = s100ShpNm_returnLongName( $obj);
+				string $shp = s100Shp_getFirstShape($obj);
+				if ( $shp == $xform )
+					$xform = firstParentOf ($shp);
+				int $valid = true;
+				$valid *= size(`ls -transforms $xform`);
+				if ($valid)
+					return $xform;
+				else
+					return "";
+			}
+
+			// Returns the long name of the first shape (intermediate or not):
+			//
+			global proc string s100Shp_getFirstShape(string $obj) {
+				string $shp = s100ShpNm_returnLongName( $obj);
+				string $longNames[] = `ls -l -g {$obj}`;
+				if (size($longNames))   // if is a geom or an annotation => then it is a shape..
+					$shp =  $longNames[0];
+				else if (objectType($obj)!="annotationShape")
+				{
+					string $shps[] = `listRelatives -f -s -ni $obj`;
+					$shp =  $shps[0];
+				}
+				return $shp;
+			}
+
+
+
+// ------------------------------------------------------------------------------------------
+//
+//		Shapes Cleaning
+//
+// ------------------------------------------------------------------------------------------
+
+
+	// Lists and delete non connected or unused intermediate shapes of every mesh or nurbs members of the current selection :
+	// "unused" meaning directly connected to another shape or nothing.
+	//
+	//		- also find multishaped objects (with non-intermediate sh.) and switch to intermediate the ones who are connected to somthg.
+	//
+	// Verbose State :
+	//	-1 : no prompt at all
+	// 	0 = no prompt apart from errors and final diagnostic
+	//	1 = prompts only for actual action (change of shape status or deletion)
+	// 	>1 = prompts for every test, check and action
+	//
+	//
+			global proc int s100Shp_DeleteUnusedShapesVerboseOnSel( int $verbozState  )
+			{
+				//scriptEditorInfo -ch ; 		//int $verbozState = 1;
+				string $listObjectSelected[] = `ls -sl -l` ;
+				int $count = s100Shp_DeleteUnusedShapesVerboseOnList( $listObjectSelected, $verbozState  );
+				return $count;
+			} //end global proc s100Shp_DeleteUnusedShapesVerboseOnSel()
+
+			global proc int s100Shp_DeleteUnusedShapesVerboseInScene( int $verbozState  )
+			{
+				//scriptEditorInfo -ch ; 		//int $verbozState = 1;
+				string $listObjectSelected[] = `ls -tr` ;
+				int $count = s100Shp_DeleteUnusedShapesVerboseOnList( $listObjectSelected, $verbozState  );
+				return $count;
+			}
+
+		global proc int s100Shp_DeleteUnusedShapesVerboseOnList( string $listObjectSelected[], int $verbozState  )
+		{
+			//scriptEditorInfo -ch ;
+			//int $verbozState = 1;
+
+			if ($verbozState>=0)
+				print "\n------------ Shape cleaning ------------\n";
+
+			int $compteur = 0 ;
+			int $compteurAllIntermShapes = 0 ;
+			int $compteurInterm = 0 ;
+			int $compteurMultiShapedObj= 0 ;
+
+			if (size($listObjectSelected))
+			{
+				for ( $j = 0 ; $j < size($listObjectSelected) ; $j++  ) // int $j = 0;
+				{
+					string $lesShap[] =` listRelatives -s -f $listObjectSelected[$j] ` ; //print $lesShap ;
+					if (size($lesShap) > 1)
+					{
+						if ($verbozState>1) {
+							print ("\n- Working on shapes found under \""+ $listObjectSelected[$j] + "\"... \n") ;  //print $lesShap ;
+							print "\n";
+						}
+						string $niLocalShapes[] =` listRelatives -s -ni $listObjectSelected[$j] ` ; //print $nishapes ;
+                        if (size($niLocalShapes)>1 && ($verbozState>0) ) {
+                            print ("\n   \""+shortNameOf($listObjectSelected[$j])+"\" has several Non Intermediate Shapes :\n");
+                            print $niLocalShapes ;
+                        }
+
+						int $io ;
+
+						for ($i = 0 ; $i < size($lesShap) ; $i++) // int $i = 0 ;
+						{
+							$io = `getAttr ($lesShap[$i]+".io")` ;
+
+							// if it's an intermediate object Shape :
+							if ($io) {
+								$compteurAllIntermShapes+=1;
+
+								if ($verbozState>1)
+									print ("\n  \""+ $lesShap[$i] +"\" IS an Intermediate Object.\n");
+
+								// check the outgoing connections:
+								string $lesConec[] = `listConnections -d 1 -s 0 -sh 1 $lesShap[$i] `;
+								if (size($lesConec) == 0 ) {
+									int $localDel = !catch(`delete $lesShap[$i] `);
+									if ($verbozState>0 && $localDel==1)
+										print ("   interm. shape \""+ $lesShap[$i] +"\" is NOT connected to anything => it's DELETED.\n") ;
+									else if ( $localDel==0 ) // not conditionned to verbose because it is important...
+										print ("   interm. shape \""+ $lesShap[$i] +"\" is NOT connected to anything => must be Deleted but COULDN'T do that ! (reference?)\n") ;
+									$compteur += $localDel;
+								}
+								else // if (size($lesConec) != 0 )
+								{
+									for ($conec in $lesConec) {
+										string $typeConnec = `objectType($conec)` ;
+										if ( ($typeConnec == "mesh") || ($typeConnec == "nurbsSurface")  || ($typeConnec == "nurbsCurve")  ) {
+
+											//deleting those shapes :
+											if ( `objExists $lesShap[$i]` ) {
+												int $deleteOK = !catch (`delete $lesShap[$i]`) ;
+												$compteur += $deleteOK ;
+												if ($verbozState>0) {
+														print ("  \""+ $lesShap[$i] +"\" connected to \""+$conec+"\" which is a \""+$typeConnec+"\" type node: incoming object's DELETED.\n") ;
+														//print ("      => \""+$lesShap[$i]+"\" is DELETED.\n") ;
+												}
+											}
+										}
+										else if ($verbozState>1)
+												print ("    \""+ $lesShap[$i] +"\" connected to \""+$conec+"\" which is NOT another Shape, so it's OK :-) \n") ;
+									}
+									if ($verbozState>1)
+										print ("\n      ... end of \""+$lesShap[$i]+"\"'s treatment. \n");
+								}
+							}
+							else
+							{
+								if ($verbozState>1)
+									print ("  \""+ $lesShap[$i] +"\" is NOT an intermediate object.");
+								string $nishapes[] =` listRelatives -s -ni $listObjectSelected[$j] ` ; //print $nishapes ;
+								if (size($nishapes)>1)
+								{
+									$compteurMultiShapedObj +=1;
+
+									if (`objExists ($lesShap[$i]+".worldMesh[0]")`)
+									{
+									    print ("// Trying then to see if its '.worldMesh[0]' is out-connected into another shape...\n");
+                                        string $lesConec[] = `listConnections -d 1 -s 0 -sh 1 -scn 1 ($lesShap[$i]+".worldMesh[0]") `;
+                                        if (size($lesConec) > 0 ) {
+                                            int $intermOK = !catch (`setAttr ($lesShap[$i]+".intermediateObject") 1`) ;
+                                            $compteurInterm += $intermOK ;
+                                            warning (" \""+ shortNameOf($lesShap[$i]) +".worldMesh[0]\" is connected (to \""+$lesConec[0]+"\"...) => is switched to INTERMEDIATE (as it behaves like an intermediate one)") ;
+                                        }
+									}
+									else
+									    print ("// No attribute \""+shortNameOf($lesShap[$i])+".worldMesh[0]\" to check and see if that shape behaves like an intermediate one... Skipped then.\n");
+								}
+								else if ($verbozState>1)
+									print (" And is a single shape (not deleted). \n");
+							}
+							// end if ($io)
+						} //end for ($i = 1 ; $i < size($lesShap) ; $i++)
+					} //end if (size($lesShap)
+					else
+						if ($verbozState>1)
+							print ("\n- The object \""+$listObjectSelected[$j]+"\" has no Intermediate Object shape.\n") ;
+				} // end for ( $j = 0 ; $j < size($listObjectSelected) ; $j++  )
+			} //end if (size($sel))
+			else
+				warning " s100Shp_DeleteUnusedShapesVerboseOnList: No object passed. You must select a mesh or surface..." ;
+
+			if ($verbozState!= (-1) ) {
+				print ("\n// Cleaned Shapes: "+$compteur+" / "+$compteurInterm+" / "+$compteurMultiShapedObj+" (out of "+size($listObjectSelected)+" obj./ "+$compteurAllIntermShapes+" interm.shapes) \n");
+				print (  "// => "+$compteur+" unused Intermediate shape(s) deleted / "+$compteurInterm+" non-intermediate switched to Intermediate / "+$compteurMultiShapedObj+" multi-shaped object(s) found.\n") ;
+			}
+
+			return ($compteur +  $compteurInterm + $compteurMultiShapedObj );
+
+		} //end s100Shp_DeleteUnusedShapesVerboseOnList
+
+
+
+	// -------------------------------------------------------------------------------------
+	// s100Shp_renameAndConformShapesWithNamesFromTransform
+	//
+		global proc int s100Shp_renameShapesWithNamesFromTransformOnSel( int $verbozState, string $method  )
+		{
+			//scriptEditorInfo -ch ; 		//int $verbozState = 1;
+			string $listObjectSelected[] = `ls -sl -l` ;
+			int $count = 0;
+			for ($obj in $listObjectSelected) {
+				string $newShapes[] = s100Shp_renameAndConformShapesWithNamesFromTransform( $obj, $method, $verbozState  );
+				$count += size($newShapes);
+			}
+			print ("// "+$count+" shapes renamed \n");
+			return $count;
+		}
+
+		global proc int s100Shp_renameShapesWithNamesFromTransformInScene( int $verbozState, string $method  )
+		{
+			//scriptEditorInfo -ch ; 		//int $verbozState = 1;
+			string $listObjectSelected[] = `ls -tr` ;
+			int $count = 0;
+			for ($obj in $listObjectSelected) {
+				string $newShapes[] = s100Shp_renameAndConformShapesWithNamesFromTransform( $obj, $method, $verbozState  );
+				$count += size($newShapes);
+			}
+			print ("// "+$count+" shapes renamed \n");
+			return $count;
+		}
+
+		global proc string[] s100Shp_renameAndConformShapesWithNamesFromTransform(string $transform, string $method, int $verbose)
+		// $method = "endWithNum" (default) or "endWithShape"
+		{
+			string $shpsNewNames[]={};
+				string $shortName = s100ShpNm_returnShortName($transform);
+				string $noSuffix = `match ".*[^0-9]" $shortName`;
+				string $numericSuffix = `match "[0-9]+$" $transform`;
+
+			string $shapeProperName = ($noSuffix+"Shape"+$numericSuffix);
+				if ($method == "endWithShape" )
+				$shapeProperName = ($noSuffix+$numericSuffix+"Shape");
+
+			string $shps[] = `listRelatives -s -f -ni $transform`;
+			for ($shp in $shps) {
+				string $shapeShortName = s100ShpNm_returnShortName($shp);
+				if ($shapeShortName != $shapeProperName) {
+						print ("// Renaming shape \""+$shp+"\" with \""+$shapeProperName+"\" - ");
+					int $ok =!catch($shpsNewNames[size($shpsNewNames)]= `rename $shp $shapeProperName`);
+					if ($ok && $verbose)
+						print ("Done : \""+$shpsNewNames[size($shpsNewNames)-1]+"\" now is its name.\n");
+					else if ($verbose)
+						print "Failed.\n";
+				}
+			}
+			return $shpsNewNames;
+		}
+
+
+
+// ------------------------------------------------------------------------------------------
+//
+//		names utils (s100ShpNm_*) :
+//
+// ------------------------------------------------------------------------------------------
+
+			// s100ShpNm_returnLongName "leftGlove";
+			global proc string s100ShpNm_returnLongName(string $shortName)
+			{
+				string $long="";
+				string $list[] = `ls -l $shortName`;
+				if (size($list)>1)
+					warning (">> s100ShpNm_returnLongName : More than one object called \""+$shortName+"\"");
+				else if (size($list)==0)
+					warning (">> s100ShpNm_returnLongName : No object here is called \""+$shortName+"\"");
+				else
+					$long=$list[0];
+				return $long;
+			}
+
+			// s100ShpNm_returnShortName ( "toto:rr|toto:uu" ) ;
+			//// Result: toto:uu //
+			global proc string s100ShpNm_returnShortName(string $longName)
+			{
+					string $shortName = `match "[^|]*$" $longName`;
+					return $shortName;
+			}
+
+			// s100ShpNm_returnShortNameWithoutNameSpace ( "toto:rr|toto:uu" ) ;
+			//// Result: uu //
+			global proc string s100ShpNm_returnShortNameWithoutNameSpace(string $longName)
+			{
+					string $shortName = `match "[^|:]*$" $longName`;
+					return $shortName;
+			}

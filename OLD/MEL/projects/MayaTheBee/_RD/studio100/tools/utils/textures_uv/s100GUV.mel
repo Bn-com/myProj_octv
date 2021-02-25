@@ -1,0 +1,240 @@
+global proc s100getUVUI()
+{
+
+	if(`window -ex 	s100GUVUI`)
+			deleteUI s100GUVUI;
+
+		window -title "Lightning and rendering Manager" s100GUVUI;
+		columnLayout -adjustableColumn true s100GUVUICLMain;
+
+
+	menuBarLayout s100GUVUIMLMain;
+
+
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100GUVUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+
+		setParent ..;
+
+
+		columnLayout -adjustableColumn 1 ;
+		$text = "open a scene than you want to transfert the uv in then use button to choose the file that you want to get back the uv from. ";
+
+
+
+	scrollField -h 100 -en 0 -wordWrap 1 -text $text ;
+	checkBox -v 1 -label "ignore error" s100getUVUICheck;
+	button -l "choose the incoming file " -c "s100gGUVproc" ;
+
+
+window -e -resizeToFitChildren 1 s100GUVUI;
+showWindow ;
+}
+
+global proc s100gGUVproc()
+{
+			$chF = 0 ;
+$i = 0 ;
+	if(`objExists "msh_grp"`)
+	{
+	$file = ` fileDialog -title "choose a file where the UV are good!" -directoryMask  "*.ma"`;
+
+	string $allMeshShape[] = `listRelatives  -ad -noIntermediate  -fullPath  -type "mesh" "msh_grp"`;
+	string $allMesh[] = `listRelatives -p  -fullPath $allMeshShape`;
+
+	string $allMeshS[] = `listRelatives -p $allMeshShape`;
+
+	print "\n\n s100GUV Checker\n\n";
+
+
+
+	$nameSpace = "s100getUVOnThis";
+
+	file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace $nameSpace -options "v=0" $file;
+	$fileR = `s100findReferenceNodeForRefPath($file)`;
+	$nameSpace = substituteAllString($fileR, "RN" , "") ;
+
+		if(`objExists ($nameSpace +":msh_grp")`)
+		{
+		string $allMeshNewShape[]  = `listRelatives -ad  -fullPath  -type "mesh" ($nameSpace +":msh_grp")`;
+		string $allMeshNew[] = `listRelatives -p  -fullPath $allMeshNewShape`;
+
+		string $allMeshNewsS[] =  `listRelatives -p $allMeshNewShape`;
+
+		$ch = 1 ;
+			if(`checkBox -q -v s100getUVUICheck` == 0 )
+			{
+				if(size($allMeshNew) == size($allMesh))
+				{
+				$ch = 1 ;
+           		}else{
+				$ch = 0 ;
+				print "\n\n not the same number object in both file\n\n";
+                }
+
+
+			}
+			string $toTransfert[] ;
+
+			if($ch)
+			{
+
+			int $check[];
+			print "\n\nCheck Same object\n\n";
+			$progressMax = size($allMesh) ;
+
+	       progressBar -edit -beginProgress -isInterruptable true -status "Checking Files ..." -maxValue $progressMax mainProgressBar;
+
+				for($i = 0 ; $i < size($allMesh) ; $i++)
+				{
+  				progressBar -edit -step 1 mainProgressBar;
+
+			 	$check[$i] = 0 ;
+
+					for($j = 0 ; $j < size($allMeshNew) ; $j++)
+					{
+						if(($nameSpace + ":" + $allMeshS[$i]) == $allMeshNewsS[$j])
+						{
+						$check[$i] = 1 ;
+						$toTransfert[$i] = $allMeshNew[$j] ;
+						//print "find" ;
+						break;
+                        }
+
+					}
+                }
+
+				for($i = 0 ; $i < size($allMesh) ; $i++)
+				{
+					if(	$check[$i] == 0 )
+					{
+						print ("\nobj : " + $allMeshS[$i] + " don't exist in the reference scene\n");
+						$chF = 1 ;
+                    }
+                }
+			   progressBar -edit -endProgress mainProgressBar;
+			   $nC = 1 ;
+				if(`checkBox -q -v s100getUVUICheck` != 1 )
+				{
+					if( $chF == 0 )
+					{
+			   			$nC =0  ;
+
+                    }
+
+                }else{
+
+                }
+			print $nC ;
+				if($nC)
+				{
+				print "\nno critical error, continues transfering\n";
+				$progressMax = size($allMesh) ;
+
+	       		progressBar -edit -beginProgress -isInterruptable true -status "Transferring UV ..." -maxValue $progressMax mainProgressBar;
+					for($i = 0 ; $i < size($allMesh) ; $i++)
+					{
+					/*
+					print $allMesh[5205]
+					$i = 7    ;
+					*/
+	  				progressBar -edit -step 1 mainProgressBar;
+
+      					if($check[$i])
+						{
+							if(`objExists  ($allMesh[$i] + ".vtx[*]")` )
+							{
+								if(`objExists  ($toTransfert[$i] + ".vtx[*]")` )
+								{
+						select $allMesh[$i]  ;
+						$listI  = `listRelatives -s -fullPath $allMesh[$i] `;
+
+							print ("\n $i:" + $i +" - transferring "+$toTransfert[$i] + " on " + $allMesh[$i] +" array " + $i + " \n") ;
+
+int $get ;
+							print $toTransfert[$i] ;
+							select  $allMesh[$i] ;
+
+									if(size($listI) > 1)
+									{
+										for($tmpS in $listI)
+										{
+										 $get = `getAttr($tmpS + ".intermediateObject")`;
+										$get = abs($get -1) ;
+										setAttr($tmpS + ".intermediateObject") $get ;
+
+										}
+									}
+
+
+							transferAttributes -transferPositions 0 -transferNormals 0 -transferUVs 2 -transferColors 2 -sampleSpace 4 -searchMethod 3-flipUVs 0 -colorBorders 1 $toTransfert[$i] $allMesh[$i];
+							select $allMesh[$i] ;
+							DeleteHistory;
+
+
+									if(size($listI) > 1)
+									{
+										for($tmpS in $listI)
+										{
+										 $get = `getAttr($tmpS + ".intermediateObject")`;
+										$get = abs($get - 1) ;
+										setAttr($tmpS + ".intermediateObject") $get ;
+
+										}
+
+                                    }
+
+                                }else{
+															print ("\nSkip obj : "	 +$allMesh[$i]);
+
+                                }
+
+
+                            }else{
+							print ("\nSkip obj : "	 +$allMesh[$i]);
+                            }
+
+
+
+                        }
+                    }
+			   progressBar -edit -endProgress mainProgressBar;
+
+
+                }else{
+				warning "critical error, refer to script editor for futher information";
+                }
+
+
+            }
+
+
+
+
+
+
+        }else{
+		warning "no grp named \"msh_grp\" in reference scene, create one and put the geometry inside";
+
+        }
+
+		file -removeReference -referenceNode $fileR ;
+
+
+    }else{
+	warning "no grp named \"msh_grp\" in scene, create one and put the geometry inside";
+    }
+
+
+
+
+
+
+
+}
+
+/*
+
+s100getUVUI ;

@@ -1,0 +1,320 @@
+//zjsRendering.mel
+
+global proc zjsRendering()
+{	;	}	//do nothing
+
+//zjsDblSidedShader()	////////////////////////////////////////////////////////////////////////////////////////
+//usage:  if you want to create a default Double-sided Shader,select nothing,simply click the menuItem
+//	  if you want to create Double-sided Shader from existing shaders,select the 2 shaders in HyperShade,
+//	  then click the menuItem	
+
+global proc zjsDblSidedShader()
+{
+	string $selection[]=`ls -sl -fl`;	//get current selections
+	int $i,$j,$k,$m,$n,$p,$q,$size;
+	string $selShaders[];
+	$size=size($selection);
+	for($i=0;$i<$size;$i++)
+	{	string $type;
+		$type=`objectType $selection[$i]`;
+		if(	$type=="anisotropic" 	||
+			$type=="blinn"		||
+			$type=="lambert"	||
+			$type=="layeredShader"	||
+			$type=="phong"		||
+			$type=="phongE"		||
+			$type=="shadingMap"	||
+			$type=="surfaceShader"		)
+		{	$selShaders[$j]=$selection[$i];
+			$j++;
+			if($j>1) break;
+		}
+	}
+
+	$size=size($selShaders);
+	if($size==0)		//selections contains no shader
+	{	string $faceShader=`shadingNode -asShader blinn -n faceBlinn`;
+		string $backShader=`shadingNode -asShader blinn -n backBlinn`;
+		string $guDblSidedShader=`shadingNode -asShader blinn -n guDblSidedShader`;
+		string $guDblSidedShaderSG=`sets -renderable 1 -noSurfaceShader 1 -empty -n guDblSidedShaderSG`;
+		eval("connectAttr -f "+$guDblSidedShader+".outColor "+$guDblSidedShaderSG+".surfaceShader");
+		string $condition=`shadingNode -asUtility condition`;
+		string $sampleInfo=`shadingNode -asUtility samplerInfo`;
+		eval("connectAttr -f "+$condition+".outColor "+$guDblSidedShader+".color");
+		eval("connectAttr -f "+$faceShader+".outColor "+$condition+".color1");
+		eval("connectAttr -f "+$backShader+".outColor "+$condition+".color2");
+		eval("connectAttr -f "+$sampleInfo+".flippedNormal "+$condition+".firstTerm");
+		select -r $guDblSidedShader;
+	}
+	if($size==2)		//selection contains 2 shaders
+	{	string $guDblSidedShader=`shadingNode -asShader blinn -n guDblSidedShader`;
+		string $guDblSidedShaderSG=`sets -renderable 1 -noSurfaceShader 1 -empty -n guDblSidedShaderSG`;
+		eval("connectAttr -f "+$guDblSidedShader+".outColor "+$guDblSidedShaderSG+".surfaceShader");
+		string $condition=`shadingNode -asUtility condition`;
+		string $sampleInfo=`shadingNode -asUtility samplerInfo`;
+		eval("connectAttr -f "+$condition+".outColor "+$guDblSidedShader+".color");
+		eval("connectAttr -f "+$selShaders[0]+".outColor "+$condition+".color1");
+		eval("connectAttr -f "+$selShaders[1]+".outColor "+$condition+".color2");
+		eval("connectAttr -f "+$sampleInfo+".flippedNormal "+$condition+".firstTerm");
+		select -r $guDblSidedShader;
+	}
+}
+
+
+//zjsCreateToonShader()	///////////////////////////////////////////////////////////////////////////
+//use this proc to create Cartoon-style shaders.
+global proc zjsCreateToonShaderUI()
+{	if(`window -ex zjsCreateToonShaderWindow`) deleteUI zjsCreateToonShaderWindow;
+	window -t "ToonShader" zjsCreateToonShaderWindow;	columnLayout -adj 1;
+	colorSliderGrp -l "Color 1" -rgb 1.000 0.868 0.460 colorC;
+	colorSliderGrp -l "Color 2" -rgb 0.917 0.647 0.182 colorB;
+	colorSliderGrp -l "Color 3" -rgb 0.840 0.531 0.000 colorA;
+	colorSliderGrp -l "Edge Color" -rgb 0.382 0.228 0.015 edgeColor;
+	floatSliderGrp -l "Edge Width" -f 1 -min 0.0 -max 1.0 -v 0.2 edgeWidth;
+	button -l "Create Toon Shader" -c "	float $colorA[]=`colorSliderGrp -q -rgb colorA`;float $colorB[]=`colorSliderGrp -q -rgb colorB`;float $colorC[]=`colorSliderGrp -q -rgb colorC`;float $edgeColor[]=`colorSliderGrp -q -rgb edgeColor`;float $edgeWidth=`floatSliderGrp -q -v edgeWidth`;zjsCreateToonShader($colorA,$colorB,$colorC,$edgeColor,$edgeWidth);";showWindow zjsCreateToonShaderWindow;
+}
+global proc zjsCreateToonShader(float $colorA[],float $colorB[],float $colorC[],float $edgeColor[],float $edgeWidth)
+{	string $toonShader=`shadingNode -asShader shadingMap -n guToonShader`;	//shadingMap with SG
+	string $toonShaderSG=`sets -r 1 -nss 1 -em -n guToonShaderSG`;
+	eval("connectAttr -f "+$toonShader+".outColor "+$toonShaderSG+".surfaceShader");
+	
+	string $lambert=`shadingNode -asShader lambert`;	//lambert
+	string $condition=`shadingNode -asUtility condition -n edgeThickness`;	//condition
+	string $samplerInfo=`shadingNode -asUtility samplerInfo`;	//samplerInfo	
+
+	string $rampColor=`shadingNode -asTexture ramp -n colors`;	//ramp color
+	string $placeRampColor=`shadingNode -asUtility place2dTexture -n placeRampColor`;
+	eval("connectAttr "+$placeRampColor+".outUV "+$rampColor+".uv");
+	eval("connectAttr "+$placeRampColor+".outUvFilterSize "+$rampColor+".uvFilterSize");
+
+	string $edgeColorRamp=`shadingNode -asTexture ramp -n edgeColor`;	//ramp edgeColor
+	string $placeEdgeColor=`shadingNode -asUtility place2dTexture -n placeEdgeColor`;
+	eval("connectAttr "+$placeEdgeColor+".outUV "+$edgeColorRamp+".uv");
+	eval("connectAttr "+$placeEdgeColor+".outUvFilterSize "+$edgeColorRamp+".uvFilterSize");
+
+	eval("connectAttr -f "+$lambert+".outColor "+$toonShader+".color");	//connect Attributes
+	eval("connectAttr -f "+$condition+".outColor "+$toonShader+".shadingMapColor");
+	eval("connectAttr -f "+$samplerInfo+".facingRatio "+$condition+".firstTerm");
+	eval("connectAttr -f "+$rampColor+".outColor "+$condition+".color1");
+	eval("connectAttr -f "+$edgeColorRamp+".outColor "+$condition+".color2");
+
+	//edit rampColor
+	eval("setAttr "+$rampColor+".colorEntryList[0].color -type double3 "+$colorA[0]+" "+$colorA[1]+" " +$colorA[2]);
+	eval("setAttr "+$rampColor+".colorEntryList[1].position 0.145");
+	eval("setAttr "+$rampColor+".colorEntryList[1].color -type double3 "+$colorB[0]+" "+$colorB[1]+" " +$colorB[2]);
+	eval("setAttr "+$rampColor+".colorEntryList[2].position 0.380");
+	eval("setAttr "+$rampColor+".colorEntryList[2].color -type double3 "+$colorC[0]+" "+$colorC[1]+" " +$colorC[2]);
+	eval("setAttr "+$rampColor+".interpolation 0");
+
+	//edit rampEdgeColor
+	eval("removeMultiInstance -break true "+$edgeColorRamp+".colorEntryList[1]");
+	eval("removeMultiInstance -break true "+$edgeColorRamp+".colorEntryList[2]");
+	eval("setAttr "+$edgeColorRamp+".colorEntryList[0].color -type double3 "+$edgeColor[0]+" "+$edgeColor[1]+" " +$edgeColor[2]);
+	eval("setAttr "+$edgeColorRamp+".interpolation 0");
+
+	eval("setAttr "+$condition+".secondTerm "+$edgeWidth);
+	eval("setAttr "+$condition+".operation 2");
+
+	eval("addAttr -ln edgeColor -sn ec -usedAsColor -at float3 "+$toonShader);	//addAttribute edgeColor
+	eval("addAttr -ln edgeColorR -sn ecr -at \"float\" -p edgeColor -dv "+$edgeColor[0]+" "+$toonShader);
+	eval("addAttr -ln edgeColorG -sn ecg -at \"float\" -p edgeColor -dv "+$edgeColor[1]+" "+$toonShader);
+	eval("addAttr -ln edgeColorB -sn ecb -at \"float\" -p edgeColor -dv "+$edgeColor[2]+" "+$toonShader);
+	eval("addAttr -ln edgeWidth -sn ew -at \"double\" -dv 0.2 "+$toonShader);	//addAttribute edgeWidth
+
+	eval("connectAttr -f "+$toonShader+".edgeColor "+$edgeColorRamp+".colorEntryList[0].color");
+	eval("connectAttr -f "+$toonShader+".edgeWidth "+$condition+".secondTerm");
+
+	select -r $toonShader;
+
+}
+
+
+//zjsObjectLightUI()//////////////////////////////////////////////////////////////
+//This feature creates a set of pointLights on the selected nurbs surface,
+//and connect their major attributes to the surface-shape's extra attributes 
+//to control them centrally.
+
+global proc zjsObjectLightUI()
+{	zjsObjectLight(4,4);
+	if(`window -ex zjsObjectLightWindow`) deleteUI zjsObjectLightWindow;
+	window -t "Object Light" zjsObjectLightWindow;  columnLayout -adj 1;
+	intSliderGrp -l "U_num" -f 1 -min 2 -max 8 -fmx 32767 -v 4 u_num;
+	intSliderGrp -l "V_num" -f 1 -min 2 -max 8 -fmx 32767 -v 4 v_num;
+	string $commands="undo;int $u_num=`intSliderGrp -q -v u_num`;int $v_num=`intSliderGrp -q -v v_num`;zjsObjectLight($u_num,$v_num);";intSliderGrp -e -cc $commands u_num;intSliderGrp -e -cc $commands v_num;showWindow zjsObjectLightWindow;
+}
+
+global proc zjsObjectLight(int $num_u,int $num_v)
+{	
+	string $surfaces[]=`filterExpand -sm 10`;
+	if(size($surfaces)==0) 
+		error "Please select surface first.";
+	string $surf=$surfaces[0];
+	string $surfShape[]=`listRelatives -s $surf`;
+	float $minMaxU[]=`eval("getAttr "+$surfShape[0]+".minMaxRangeU")`;
+	float $minMaxV[]=`eval("getAttr "+$surfShape[0]+".minMaxRangeV")`;
+	float $uInc=($minMaxU[1]-$minMaxU[0])/(float)($num_u-1);
+	float $vInc=($minMaxV[1]-$minMaxV[0])/(float)($num_v-1);
+	string $lights[];
+	int $i,$j,$k,$size;	$k=0;
+	float $u,$v;
+	$u=$minMaxU[0];	$v=$minMaxV[0];
+	for($i=0;$i<$num_u;$i++)
+	{	for($j=0;$j<$num_v;$j++)
+		{	print($u);
+			float $pos[]=`pointOnSurface -u $u -v $v -p $surf`;
+			string $lightName="gu_"+$surf+"_light";
+			pointLight -n $lightName;
+			move -a $pos[0] $pos[1] $pos[2];
+			string $tmpLight[]=`ls -sl`;
+			$lights[$k]=$tmpLight[0];	$k++;
+			$v+=$vInc;
+		}
+		$v=$minMaxV[0];
+		$u+=$uInc;
+
+	}
+	select -r $lights;
+	string $lightsGrp=`group -n ("gu_"+$surf+"_lights")`;
+	select -r $lightsGrp $surf;
+	parent;
+
+	//eval("setAttr "+$surfShape[0]+".overrideEnabled 1");
+	//eval("setAttr "+$surfShape[0]+".overrideShading 0");
+	eval("setAttr "+$surfShape[0]+".castsShadows 0");
+	eval("setAttr "+$surfShape[0]+".primaryVisibility 0");
+
+	//add attributes
+	select -r $surfShape[0];
+	addAttr -ln intensity -sn i -at double -min 0.1 -max 300 -dv 1.0;
+	addAttr -ln lightColor -sn lc -at float3 -uac;
+		addAttr -ln lightColorR -sn lcr -at "float" -p lightColor -dv 1.0;
+		addAttr -ln lightColorG -sn lcg -at "float" -p lightColor -dv 1.0;
+		addAttr -ln lightColorB -sn lcb -at "float" -p lightColor -dv 1.0;
+	addAttr -ln shadowColor -sn sc -at float3 -uac;
+		addAttr -ln shadowColorR -sn scr -at "float" -p shadowColor;
+		addAttr -ln shadowColorG -sn scg -at "float" -p shadowColor;
+		addAttr -ln shadowColorB -sn scb -at "float" -p shadowColor;
+	addAttr -ln lightType -sn lt -at "enum" -en "Ambient Light:Area Light:Directional Light:Point Light:Spot Light:" -dv 3;
+	addAttr -ln decayType -sn dt -at "enum" -en "No Decay:Linear:Quadratic:Cube:";
+	addAttr -ln useDepthMapShadows -sn udms -at bool;
+	addAttr -ln useRayTraceShadows -sn urts -at bool;
+	addAttr -ln dmapResolution -sn dr -at long -min 16 -max 1024 -dv 512;
+	addAttr -ln dmapFilterSize -sn dfs -at long -min 0 -max 10 -dv 1;
+	addAttr -ln dmapBias -sn db -at double -min 0.0 -max 1.0 -dv 0.001;
+	addAttr -ln rayDepthLimit -sn rdl -at long -min 0 -max 10 -dv 1;
+
+	//connect attributes
+	$size=size($lights);
+	for($i=0;$i<$size;$i++)
+	{	
+		string $shape[]=`listRelatives -s $lights[$i]`;
+		eval("connectAttr -f "+$surfShape[0]+".intensity "+$shape[0]+".intensity");
+		eval("connectAttr -f "+$surfShape[0]+".lightColor "+$shape[0]+".color");
+		eval("connectAttr -f "+$surfShape[0]+".shadowColor "+$shape[0]+".shadowColor");
+		eval("connectAttr -f "+$surfShape[0]+".lightType "+$shape[0]+".objectType");
+		eval("connectAttr -f "+$surfShape[0]+".decayType "+$shape[0]+".decayRate");
+		eval("connectAttr -f "+$surfShape[0]+".useDepthMapShadows "+$shape[0]+".useDepthMapShadows");
+		eval("connectAttr -f "+$surfShape[0]+".useRayTraceShadows "+$shape[0]+".useRayTraceShadows");
+		eval("connectAttr -f "+$surfShape[0]+".dmapResolution "+$shape[0]+".dmapResolution");
+		eval("connectAttr -f "+$surfShape[0]+".dmapFilterSize "+$shape[0]+".dmapFilterSize");
+		eval("connectAttr -f "+$surfShape[0]+".dmapBias "+$shape[0]+".dmapBias");
+		eval("connectAttr -f "+$surfShape[0]+".rayDepthLimit "+$shape[0]+".rayDepthLimit");
+	}
+
+}
+
+global proc zjsDelObjLights()
+{	string $surfaces[]=`filterExpand -sm 10`;
+	if($surfaces[0]=="")
+		error "Select the surface contains lights first.";
+	string $surf[]=`listRelatives -p $surfaces[0]`;
+	string $lights[];
+	string $name="gu_"+$surf[0]+"_light";
+	string $command="ls "+"\""+$name+"*\"";
+	$lights=`eval($command)`;
+	print($surfaces);
+	delete $lights;
+	
+	select -r $surfaces[0];
+	deleteAttr -at i;
+	deleteAttr -at lc;
+	deleteAttr -at sc;
+	deleteAttr -at lt;
+	deleteAttr -at dt;
+	deleteAttr -at udms;
+	deleteAttr -at urts;
+	deleteAttr -at dr;
+	deleteAttr -at dfs;
+	deleteAttr -at db;
+	deleteAttr -at rdl;
+}
+
+//zjsImagesPackager()	///////////////////////////////////////
+//This procedure generates a file list of current scene file and all the images that used in the scene,
+//then you can use the guImagesPackager.exe to collect all the files and copy them to a specific folder 
+//or add them to a ZIP file.
+global proc zjsImagesPackager()
+{	string $currentFileName=`file -q -sn`;	//query the name of current scene
+	if($currentFileName=="")
+		error "Current scene not saved yet.";
+	string $files[]=`lsType file`;	//files:tmp string ,stored imagefiles' name
+	int $i,$j,$size;
+	$size=size($files);
+	if($size==1)
+		error "No file texture(s) in current scene.";
+	global string $imageFiles[];	//global var
+	string $tmpString;	string $tempString[];
+	for($i=0;$i<$size-1;$i++)
+	{	$tmpString=`eval("getAttr "+$files[$i]+".fileTextureName")`;
+		if($tmpString!="")
+		{	$tmpString=toNativePath($tmpString);
+			$imageFiles[$j]=$tmpString;
+			$j++;
+		}
+	}
+	$imageFiles[$j]=toNativePath($currentFileName);	
+	$size=size($imageFiles);
+	if($size==0)
+		error "No file texture(s) in current scene.";
+
+	if(`window -ex zjsImagesPackagerWindow`) deleteUI zjsImagesPackagerWindow;
+	window -t "Textures and scene package" zjsImagesPackagerWindow;	columnLayout -adj 1;
+	text -l "The file textures used in the scene list here:";			//text
+	textScrollList -w 600 -nr 12 imageFileList;				//textScrollList
+	for($i=0;$i<$size;$i++)
+	{	textScrollList -e -a $imageFiles[$i] imageFileList;	}
+
+	tokenize($currentFileName,".",$tempString);
+	$tmpString=$tempString[0]+".gul";
+	text -l "The full filename of file-list to be generate:";
+	textField -tx $tmpString toBeSavedFileName;				//textField
+	string $commands="zjsSaveFile();";
+	button -l "Generate List File" -c $commands;					//button
+	showWindow zjsImagesPackagerWindow;
+	
+}
+// zjsSaveFile() =====================================================
+global proc zjsSaveFile()
+{	global string $imageFiles[];
+	int $fileID,$size;
+	$size=size($imageFiles);
+	string $toBeSavedFileName=`textField -q -tx toBeSavedFileName`;
+	string $tempString[];
+	int $i=tokenize($toBeSavedFileName,".",$tempString);
+	if($tempString[1]==""||$tempString[1]!="gul")
+		$toBeSavedFileName+=".gul";
+	$fileID=`fopen $toBeSavedFileName "w"`;
+	if($fileID==0)
+		error "Writen file error,The destination folder doesn't exist?";
+	for($i=0;$i<$size;$i++)
+	{	fprint $fileID $imageFiles[$i];	
+		fprint $fileID "\n";
+	}
+	fclose $fileID;
+	print("File writen successfully,use the program 'guImagesPackager' to package the files."+$toBeSavedFileName);
+	deleteUI zjsImagesPackagerWindow;
+}
+zjsImagesPackager();
+
+
+// End of zjsRendering.mel  //////////////////////////////////////////////

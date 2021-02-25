@@ -1,0 +1,125 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+
+proc string[] getlightSets(string $light)
+{
+	string $sets[];
+	clear $sets;
+	string $dest1[] = `listConnections -s 0 -d 1 -type objectSet ($light + ".nodeState")`;
+	string $dest2[] = `listConnections -s 0 -d 1 -type objectSet ($light + ".caching")`;
+	
+	$sets = {$dest1[0], $dest2[0]};
+	return $sets;
+}
+
+global proc zjMakeLightLinks()
+{
+	//remove unused sets
+	zjRemUnusedSets();
+	
+	string $all[] = `ls -long -selection -dagObjects -tr -noIntermediate`;
+	int $flag = 0;
+	for ($item in $all)
+	{
+		string $shape[] = `listRelatives -fullPath -children -shapes -noIntermediate $item`;
+		if (`objExists $shape[0]`)
+		{
+			string $insTrs[] = `listRelatives -fullPath -allParents -type transform -noIntermediate $shape[0]`;
+			if (size($insTrs)>1)
+			{
+				$flag = 1;
+				break;
+			}
+		}
+	}
+
+	string $lights[] = `ls -selection -dagObjects -lights`;
+
+	string $lightTransforms[];
+	clear $lightTransforms;
+	for ($lightsh in $lights)
+	{
+		string $tr = getTransform($lightsh);
+		$lightTransforms[size($lightTransforms)] = $tr;
+	}
+
+	string $objs[] = stringArrayRemove($lightTransforms, $all);
+
+	if (size($objs)&&size($lights))
+	{
+		string $lightlk[] = `ls -type lightLinker`;
+
+		for ($light in $lights)
+		{
+			string $sets[] = getlightSets($light);
+			string $lightLnk = $sets[0];
+			string $lightIgn = $sets[1];
+
+			if ((!`objExists $lightLnk`)&&$flag)
+			{
+				string $setname = `sets -empty -name ($light + "LnkSet")`;
+				string $ignore[] = `ls ($lightlk[0] + ".link[*]")`;
+				int $num = size($ignore);
+				connectAttr -f ($setname + ".message") ($lightlk[0] + ".link[" + $num + "].object");
+				connectAttr -f ($light + ".message") ($lightlk[0] + ".link[" + $num + "].light");
+				
+				connectAttr -f ($light + ".nodeState") ($setname + ".nodeState");
+
+				string $lightset = "lightRelationSet";
+				string $ex[] = `ls -type objectSet $lightset`;
+				if (size($ex)==0)
+					sets -empty -name $lightset;
+				sets -addElement $lightset $setname;
+			}
+			
+			for ($item in $objs)
+			{
+				string $shape[] = `listRelatives -fullPath -children -shapes -noIntermediate $item`;
+				if (`objExists $shape[0]`)
+				{
+					string $insTrs[] = `listRelatives -fullPath -allParents -type transform -noIntermediate $shape[0]`;
+					if (size($insTrs)>1)
+					{
+						string $sets[] = getlightSets($light);
+						string $lightLnk = $sets[0];
+						string $lightIgn = $sets[1];
+
+						sets -edit -forceElement $lightLnk $item;
+
+						if (`objExists $lightIgn`)
+							if (`sets -isMember $lightIgn $item`)
+								sets -remove $lightIgn $item;
+					}
+					else 
+						lightlink -make -light $light -object $item;
+				}
+			}
+
+			string $sets[] = getlightSets($light);
+			string $lightLnk = $sets[0];
+			string $lightIgn = $sets[1];
+			if (`objExists $lightLnk`)
+			{
+				string $items[] = `sets -q $lightLnk`;
+				if (size($items) == 0)
+					delete $lightLnk;
+			}
+			if (`objExists $lightIgn`)
+			{
+				string $items[] = `sets -q $lightIgn`;
+				if (size($items) == 0)
+					delete $lightIgn;
+			}
+
+		}
+	}
+
+}

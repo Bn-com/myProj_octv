@@ -1,0 +1,149 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc kcConvert2instanceNoFreeze()
+{
+	string $selected[] = `ls -long -selection`;
+
+	if (`size $selected` < 2)
+		error("Please select 2 or more objects to make instance.");
+
+	for ($item in $selected)
+		if (!kcIsType($item, "mesh"))
+			error("Selected objects must be mesh objects.");
+
+
+	string $child[] = `listRelatives -fullPath -children $selected[0]`;
+
+//	if ((`size $child` != 1) || (`nodeType $child[0]` != "mesh"))
+//		error("First object has more than 1 child or it is not a mesh.");
+
+	// for mesh bound to skeleton which has 2 child nodes: mesh, meshOrig, do NOT check for number of child nodes
+
+	string $baseShape = $child[0];
+	string $baseShapeParents[] = `listRelatives -fullPath -allParents $baseShape`;
+
+	for ($i = 1; $i < size($selected); $i++)
+	{
+		// convert duplicate to instance
+
+		string $child[] = `listRelatives -fullPath -children $selected[$i]`;
+
+//		if ((`size $child` == 1) && (`nodeType $child[0]` == "mesh"))
+		if (`nodeType $child[0]` == "mesh")
+		{
+			// delete shape node if previously not an instance object 
+
+			string $allParents[] = `listRelatives -fullPath -allParents $child[0]`;
+
+			if (`size $allParents` == 1)
+			{
+				delete $child[0];
+
+				// make instance 
+
+				int $alreadyInstance = false;
+
+				for ($item in $baseShapeParents)
+					if ($item == $selected[$i])
+					{
+						$alreadyInstance = true;
+						break;
+					}
+
+				if (!$alreadyInstance)
+					parent -addObject -shape $baseShape $selected[$i];
+			}
+			else
+			{
+				print("Previously an instance object: " + $selected[$i] + "\n");
+
+				// previously an instance object
+				
+				// make instance, this may make the baseShape name change
+
+//				string $newName[] = `parent -addObject -shape $baseShape $selected[$i]`;
+
+				// remove link to old shape node
+
+//				parent -removeObject -shape $child[0] $selected[$i];
+
+				// rename baseShape name to original name
+				
+//				string $tokens[];
+//				tokenize $baseShape "|" $tokens;
+
+//				print($newName[0] + "\n");
+//				print($tokens);
+
+//				rename $newName[0] $tokens[size($tokens) - 1];
+			}
+		}
+	}
+
+	// restore original selection
+
+	select $selected;
+}
+
+global proc kcConvert2instanceGroupNoFreeze()
+{
+	string $groups[] = `ls -long -selection`;
+
+	if (`size $groups` < 2)
+		error("Please select 2 or more groups to make instance.");
+
+	for ($item in $groups)
+		if (`nodeType $item` != "transform")
+			error("Selected objects must be group nodes.");
+		else
+		{
+			string $child[] = `listRelatives -fullPath -children $item`;
+
+			for ($node in $child)
+				if (`nodeType $node` != "transform")
+					error("Selected objects must be group nodes.");
+		}
+
+	string $child[] = `listRelatives -fullPath -children $groups[0]`;
+	
+	for ($j = 0; $j < size($child); $j++)
+	{
+		select $child[$j];
+
+		for ($i = 1; $i < size($groups); $i++)
+		{
+			string $nodes[] = `listRelatives -fullPath -children $groups[$i]`;
+			select -add $nodes[$j];		
+		}
+
+		kcConvert2instanceNoFreeze;
+	}
+
+	// restore original selection
+
+	select $groups;
+}
+
+global proc kcConvert2instanceNoFreezeGUI()
+{
+	if (`window -q -exists kcConvert2instanceNoFreezeWnd`)
+		return;
+
+	window -title "Convert to Instance" -resizeToFitChildren true kcConvert2instanceNoFreezeWnd;
+
+		columnLayout -adjustableColumn true;
+    		button -label "Object" -command kcConvert2instanceNoFreeze;
+    		button -label "Group" -command kcConvert2instanceGroupNoFreeze;
+			text -label "请先选择主Object/Group(比如捆绑模型),然后再选要转换成instance的Object/Group";
+		setParent ..;
+
+	showWindow kcConvert2instanceNoFreezeWnd;
+}

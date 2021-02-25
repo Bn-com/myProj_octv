@@ -1,0 +1,212 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc kcEFXCreateExp(string $EFXshader)
+{
+	string $exp = "";
+	$exp += "float $middledepth = " + $EFXshader + ".MiddleDepth;\n";
+	$exp += "float $fardepth = " + $EFXshader + ".FarDepth;\n";
+	$exp += "float $middlewidth = " + $EFXshader + ".MiddleWidth;\n";
+	$exp += "float $closewidth = " + $EFXshader + ".CloseWidth;\n";
+	$exp += "\n";
+	//$exp += "float $distance = sqrt(pow(EFX_SamplerInfo.pointCameraX, 2) + pow(EFX_SamplerInfo.pointCameraY, 2) + pow(EFX_SamplerInfo.pointCameraZ, 2));\n";
+	$exp += "float $distance = -1.0*EFX_SamplerInfo.pointCameraZ;\n";
+	$exp += "\n";
+	$exp += "if ($distance > $fardepth)\n";
+	$exp += "{\n";
+	$exp += "\t// white line\n";
+	$exp += "\t" + $EFXshader + ".lineColorR = 1.0;\n";
+	$exp += "\t" + $EFXshader + ".lineColorG = 1.0;\n";
+	$exp += "\t" + $EFXshader + ".lineColorB = 1.0;\n";
+	$exp += "\n";
+	$exp += "\t" + $EFXshader + ".lineWidth = 0.001;\n";
+	$exp += "}\n";
+	$exp += "else\n";
+	$exp += "{\n";
+	$exp += "\t// black line\n";
+	$exp += "\t" + $EFXshader + ".lineColorR = 0.0;\n";
+	$exp += "\t" + $EFXshader + ".lineColorG = 0.0;\n";
+	$exp += "\t" + $EFXshader + ".lineColorB = 0.0;\n";
+	$exp += "\n";
+	$exp += "\tif ($distance > $middledepth)\n";
+	$exp += "\t\t" + $EFXshader + ".lineWidth = $middlewidth;\n";
+	$exp += "\telse\n";
+	$exp += "\t{\n";
+	$exp += "\t\tfloat $diff = $closewidth - $middlewidth;\n";
+	$exp += "\t\t" + $EFXshader + ".lineWidth = $closewidth - (linstep(0.0, $middledepth, $distance) * $diff);\n";
+	$exp += "\t}\n";
+	$exp += "}\n";
+
+	expression -string $exp -name "EFX_Expression";
+}
+
+global proc zwEFXDepthShader()
+{
+	if(!`objExists EFX_SamplerInfo`)
+	{
+		string $spl = `shadingNode -asUtility "samplerInfo" -name "EFX_SamplerInfo"`;
+	}
+	
+	string $EFXShader = `shadingNode -asShader "EfxContour"`;
+	string $ShaderSG = `sets -renderable true -noSurfaceShader true -empty`;
+	$ShaderSG = `rename $ShaderSG ("EFX_SG")`;
+
+	connectAttr -force ($EFXShader + ".outColor") ($ShaderSG + ".surfaceShader");
+
+// Create New Attribute on EFX Node
+	addAttr -longName "MiddleDepth" -attributeType "double" -min 0.01 -softMaxValue 400 -defaultValue 30 $EFXShader;
+	addAttr -longName "FarDepth" -attributeType "double" -min 0.01 -softMaxValue 400 -defaultValue 60 $EFXShader;
+	addAttr -longName "CloseWidth" -attributeType "double" -min 0.0001 -max 10 -defaultValue 0.6 $EFXShader;
+	addAttr -longName "MiddleWidth" -attributeType "double" -min 0.001 -max 10 -defaultValue 0.3 $EFXShader;
+//	addAttr -longName "FarWidth" -attributeType "double" -min 0.001 -max 10 -defaultValue 0.001 $EFXShader;
+
+
+	$allCamera=`ls -cameras`;
+	$allCameraTransform =`listRelatives -p $allCamera`;
+	string $enumAllCamera ="None";
+	for ($i=0;$i<size($allCameraTransform);$i++ ) $enumAllCamera += (":"+$allCameraTransform[$i]);
+	
+	addAttr -longName "cameraInScene" -dataType "string" -readable 1 -writable 0 $EFXShader;
+	addAttr -longName "planeManipHandle"  -attributeType "enum" -enumName $enumAllCamera -defaultValue 0 $EFXShader;
+	setAttr ($EFXShader+".cameraInScene") -type "string" $enumAllCamera;
+
+	string $attr = ($EFXShader+".planeManipHandle");
+	$cmd = "changeCamera(\""+$EFXShader+"\")";
+	scriptJob -attributeChange $attr $cmd;
+
+	select -r $EFXShader;
+
+ 
+
+// create Expression string;
+
+	kcEFXCreateExp($EFXShader);
+
+}
+
+
+global proc changeCamera(string $EFXShader)
+{
+	
+	int $planeManipHandle = `getAttr ($EFXShader+".planeManipHandle")`;
+	string $strCamera= `getAttr ($EFXShader+".cameraInScene")`;
+	string $allCamera[];
+	$numOfCamera = `tokenize $strCamera  ":" $allCamera`;
+	$middle = `getAttr ($EFXShader+".MiddleDepth")`;
+	$far = `getAttr ($EFXShader+".FarDepth")`;
+	string $thruCameraName=$allCamera[$planeManipHandle];
+
+	if ($planeManipHandle > 0)
+	{
+		$selMiddle =`ls ($EFXShader+"_middlePlaneManip")`;
+		if (`size $selMiddle`> 0 )
+		{
+			delete ($EFXShader+"_middlePlaneManip");
+			delete ($EFXShader+"_farPlaneManip");
+		}
+
+		plane -p 0 0 0  -s 12 -n ($EFXShader+"_middlePlaneManip");
+		plane -p 0 0 0  -s 12 -n ($EFXShader+"_farPlaneManip");
+		setAttr -keyable false ($EFXShader+"_middlePlaneManip"+".tx");
+		setAttr -keyable false ($EFXShader+"_middlePlaneManip"+".ty");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".tz");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".rx");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".ry");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".rz");
+		setAttr  -keyable true ($EFXShader+"_middlePlaneManip"+".sx");
+		setAttr  -keyable true ($EFXShader+"_middlePlaneManip"+".sy");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".sz");
+		setAttr  -keyable false ($EFXShader+"_middlePlaneManip"+".v");
+
+		// set manipulator to red color
+
+		setAttr ($EFXShader+"_middlePlaneManip.overrideEnabled") 1;
+		setAttr ($EFXShader+"_middlePlaneManip.overrideColor") 13;
+
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".tx");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".ty");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".tz");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".rx");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".ry");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".rz");
+		setAttr  -keyable true ($EFXShader+"_farPlaneManip"+".sx");
+		setAttr  -keyable true ($EFXShader+"_farPlaneManip"+".sy");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".sz");
+		setAttr  -keyable false ($EFXShader+"_farPlaneManip"+".v");
+
+		// set manipulator to red color
+
+		setAttr ($EFXShader+"_farPlaneManip.overrideEnabled") 1;
+		setAttr ($EFXShader+"_farPlaneManip.overrideColor") 13;
+
+
+		createNode vectorProduct -n ($EFXShader+"_farManip_VP");
+		createNode vectorProduct -n ($EFXShader+"_midManip_VP");
+
+		createNode multiplyDivide -n ($EFXShader+"_farManip_MultDiv");
+		createNode multiplyDivide -n ($EFXShader+"_midManip_MultDiv");
+
+
+		setAttr ($EFXShader+"_farManip_VP.operation") 4;
+		setAttr ($EFXShader+"_midManip_VP.operation") 4;
+		setAttr ($EFXShader+"_farManip_VP.input1.input1X") 0;
+		setAttr ($EFXShader+"_farManip_VP.input1.input1Y") 0;
+		setAttr ($EFXShader+"_midManip_VP.input1.input1X") 0;
+		setAttr ($EFXShader+"_midManip_VP.input1.input1Y") 0;
+
+		connectAttr ($EFXShader+".FarDepth") ($EFXShader+"_farManip_MultDiv.input1.input1X");
+		connectAttr ($EFXShader+".MiddleDepth") ($EFXShader+"_midManip_MultDiv.input1.input1X");
+		setAttr ($EFXShader+"_farManip_MultDiv.operation") 1;
+		setAttr ($EFXShader+"_midManip_MultDiv.operation") 1;
+		setAttr ($EFXShader+"_farManip_MultDiv.input2.input2X") -1.0;
+		setAttr ($EFXShader+"_midManip_MultDiv.input2.input2X") -1.0;
+		connectAttr ($EFXShader+"_farManip_MultDiv.output.outputX") ($EFXShader+"_farManip_VP.input1.input1Z");
+		connectAttr ($EFXShader+"_midManip_MultDiv.output.outputX") ($EFXShader+"_midManip_VP.input1.input1Z");
+
+		connectAttr -f ($thruCameraName+".worldMatrix") ($EFXShader+"_farManip_VP.matrix");
+		connectAttr -f ($thruCameraName+".worldMatrix") ($EFXShader+"_midManip_VP.matrix");
+		connectAttr ($EFXShader+"_farManip_VP.output") ($EFXShader+"_middlePlaneManip.translate");
+		connectAttr ($EFXShader+"_midManip_VP.output") ($EFXShader+"_farPlaneManip.translate");
+
+		$midConstrt=`orientConstraint $thruCameraName ($EFXShader+"_middlePlaneManip") `;
+		$farConstrt=`orientConstraint $thruCameraName ($EFXShader+"_farPlaneManip") `;
+		$keyAttrMidConstrt = `listAttr -k $midConstrt`;
+		$keyAttrFarConstrt = `listAttr -k $farConstrt`;
+		setAttr -k false ($midConstrt[0]+".nodeState");
+		setAttr -k false ($farConstrt[0]+".nodeState");
+		setAttr -k false ($midConstrt[0]+"."+$keyAttrMidConstrt[2]);
+		setAttr -k false ($farConstrt[0]+"."+$keyAttrFarConstrt[2]);
+
+
+	}
+	else
+	{
+		$selMiddle =`ls ($EFXShader+"_middlePlaneManip")`;
+		if (`size $selMiddle`> 0 )
+		{
+			delete ($EFXShader+"_middlePlaneManip");
+			//delete ($EFXShader+"_midManip_VP");
+			//delete ($EFXShader+"_midManip_MultDiv");
+			//setAttr ($EFXShader+"_middlePlaneManip.visibility") 0;
+		}
+
+		$selfar =`ls ($EFXShader+"_farPlaneManip")`;
+		if (`size $selfar`> 0 )
+		{
+			delete ($EFXShader+"_farPlaneManip");
+			//delete ($EFXShader+"_farManip_VP");
+			//delete ($EFXShader+"_farManip_MultDiv");
+			//setAttr ($EFXShader+"_farPlaneManip.visibility") 0;
+		}
+	}
+	
+	select -r $EFXShader;
+
+}

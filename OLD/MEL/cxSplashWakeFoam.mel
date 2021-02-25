@@ -1,0 +1,956 @@
+
+//splash_wake_foam V1.5 威力加强版
+//--------------------------------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+//------------------------------------------------------------------------------------
+
+proc string  oceanNurbsPreviewPlane(int $xres, int $zres, string $oceanShader)
+  {
+      float $planscale = 25;
+	string $result[] = `nurbsPlane -w 1 -lr 1 -d 1 -u $xres -v $zres -ax 0 1 0 -ch 0`;
+	string $plane = $result[0];
+	setAttr -l true ( $plane+".rotate");
+	setAttr -l true ( $plane+".scaleY");
+	setAttr ($plane+".scaleX") $planscale ;
+      setAttr ($plane+".scaleZ") $planscale ;
+	int $x,$y;
+	int $xSize = $xres+1;
+	int $zSize = $zres+1;
+	int $planeZ, $planeX;
+
+	string $exp = ( "float $u, $v;\n"
+			  + "float $minx = " +$plane+ ".scaleX * -0.5 + " + $plane + ".translateX;\n"
+			  + "float $maxx = " +$plane+ ".scaleX *  0.5 + " + $plane + ".translateX;\n"
+			  + "float $minz = " +$plane+ ".scaleZ * -0.5 + " + $plane + ".translateZ;\n"
+	  		  + "float $maxz = " +$plane+ ".scaleZ *  0.5 + " + $plane + ".translateZ;\n"
+                    + "float $disp[] = `colorAtPoint -o A -su "+$xSize+" -sv "+$zSize
+			      +" -mu $minx -mv $minz -xu $maxx -xv $maxz "+$oceanShader+"`;\n"
+      );
+	// unfold loop and use output connections 
+	int $i=0;
+	for( $x = 0; $x < $xSize; $x++ ){
+		$planeX = $x * $zSize;
+		for( $z = 0; $z < $zSize; $z++ ){
+			$planeZ= $zSize - $z - 1;
+			$exp +=  ($plane + ".cv[" + ($planeX + $planeZ) + "].yv = $disp["+$i+"];\n");
+			$i++;
+		}
+	}
+
+	expression -s $exp;
+	select ($plane+".cv[0][0]");
+	select $plane;
+     return($plane);
+  }
+
+
+
+
+
+
+global proc  splashwakefoam(int $collidesize,int $startframe, float $splashrate, float $splashspeed , float $splashspeed_random , float $spread ,float $levelOfDetail  , float $wake_intensity, float $foam_creation ,float $fluid_dropoff,float $fluids_scale,int $objApplyto )
+
+{
+
+//------------------------------------------------------------------------------------------------------------
+//input ocean
+//------------------------------------------------------------------------------------------------------------
+
+
+if($objApplyto == 1)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Resource/Groups/Production/3DEffect/dod_ef/ocean_up/ocean_up.mb";
+}
+
+
+if($objApplyto == 2)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Resource/Groups/Production/3DEffect/dod_ef/ocean_up/undocean.mb";
+}
+
+if($objApplyto == 3)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Resource/Groups/Production/3DEffect/dod_ef/ocean_up/oceaninroom.mb";
+}
+
+if($objApplyto == 4)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Resource/Groups/Production/3DEffect/dod_ef/ocean_up/oceaninholl.mb";
+}
+
+select -cl  ;
+
+
+
+
+
+if  (`objExists susie_torso`)
+ 
+{ 
+
+select -r susieRtoef ;
+
+parent susieRtoef susie_r_hi_leg ;
+
+select -r susieLtoef ;
+
+parent susieLtoef susie_l_hi_leg ;
+
+select -cl  ;
+
+}
+
+
+if  (`objExists luseal_lobackA`)
+ 
+{ 
+select -r luseal_pelvisA ;
+select -add luseal_lobackA ;
+select -tgl lusealbodytoef ;
+SmoothBindSkin;
+select -cl  ;
+}
+
+if  (`objExists minnie_lobackA`)
+ 
+{ 
+select -r minnie_pelvisA ;
+select -add minnie_lobackA ;
+select -tgl minniebodytoef ;
+SmoothBindSkin;
+select -cl  ;
+}
+
+
+if  (`objExists beth_bodyA`)
+ 
+{ 
+select -r beth_neck1 ;
+select -add beth_bodyA ;
+select -tgl bethbodytoef ;
+SmoothBindSkin;
+select -cl  ;
+
+
+
+
+}
+
+if  (`objExists olly_bodyA`)
+ 
+{ 
+select -r olly_bodyA ;
+select -add olly_neckA ;
+select -tgl ollybodytoef ;
+SmoothBindSkin;
+select -cl  ;
+
+
+}
+
+if  (`objExists skid_front`)
+ 
+{ 
+select -r skid_front ;
+select -add skid_back ;
+select -tgl skidbodytoef;
+SmoothBindSkin;
+select -cl  ;
+
+}
+if  (`objExists susie_torso`)
+
+{ select -add   susieLbodytoef ;
+  select -add   susieRbodytoef ;}
+
+if  (`objExists minnie_lobackA`)
+{ select -add   minniebodytoef;  }
+if  (`objExists luseal_lobackA`)
+{ select -add   lusealbodytoef;  }
+if  (`objExists beth_bodyA`)
+{ select -add   bethbodytoef;  }
+if  (`objExists olly_bodyA`)
+{ select -add   ollybodytoef;   }
+if  (`objExists skid_front`)
+{ select -add   skidbodytoef;   }
+
+
+string $selObj[] = `ls  -sl` ;
+
+
+int $siz = `size $selObj`;
+
+for ($i=0;$i<$siz;$i++)
+{
+
+
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//initialize
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------- 
+  //string $selObj[] = `ls  -sl` ;
+  string  $oceanShader = getCurrentOcean();
+  string $gpname0 = `group -em -n $selObj[$i]`;
+
+  $gp = `objExists ef_fluid`;
+  
+  if ($gp == 0)
+  {
+   string $gpname2 = `group -em -n ef_fluid`;
+   addAttr -ln fluids_scale-at double  -dv $fluids_scale  ef_fluid;
+   setAttr -e -keyable true ef_fluid.fluids_scale;
+  }
+  
+  string $gpname0 = ("|"+$gpname0) ;
+  string $gpname1[] = `parent $gpname0 ef_fluid`;
+  string $gpname = $gpname1[0];
+
+
+  setAttr -lock true ($gpname+".tx");
+  setAttr -lock true ($gpname+".ty");
+  setAttr -lock true ($gpname+".tz");
+  setAttr -lock true ($gpname+".rx");
+  setAttr -lock true ($gpname+".ry");
+  setAttr -lock true ($gpname+".rz");
+  setAttr -lock true ($gpname+".sx");
+  setAttr -lock true ($gpname+".sy");
+  setAttr -lock true ($gpname+".sz");
+  setAttr -lock true ($gpname+".v");
+
+  addAttr -ln startframe -at double  -dv $startframe $gpname;
+  addAttr -ln rate -at double  -min 0 -max 50000 -dv $splashrate $gpname;
+  addAttr -ln speed -at double  -min 0 -max 20 -dv $splashspeed $gpname;
+  addAttr -ln speed_random -at double  -min 0 -max 50 -dv $splashspeed_random $gpname;
+  addAttr -ln spread -at double  -min 0 -max 1 -dv $spread  $gpname;
+  addAttr -ln levelOfDetail -at double  -min 0 -max 1 -dv $levelOfDetail  $gpname;
+
+  
+  addAttr -ln wake_intensity -at double  -dv $wake_intensity $gpname;
+  //addAttr -ln wake_damp -at double  -dv 0.1 $gpname;
+  //addAttr -ln wake_scale -at double  -dv 2 $gpname;
+
+  addAttr -ln foam_creation -at double  -dv $foam_creation  $gpname;
+  addAttr -ln fluid_dropoff -at double  -dv $fluid_dropoff  $gpname;
+  //addAttr -ln dissipation -at double  -dv 0.5 $gpname;
+  //addAttr -ln diffusion -at double  -dv 1 $gpname;
+  
+  setAttr -e -keyable true ($gpname+".startframe");
+  setAttr -e -keyable true ($gpname+".rate ");
+  setAttr -e -keyable true ($gpname+".speed ");
+  setAttr -e -keyable true ($gpname+".speed_random");
+  setAttr -e -keyable true ($gpname+".spread ");
+  setAttr -e -keyable true ($gpname+".levelOfDetail ");
+  setAttr -e -keyable true ($gpname+".wake_intensity");
+  //setAttr -e -keyable true ($gpname+".wake_damp");
+  //setAttr -e -keyable true ($gpname+".wake_scale");
+  setAttr -e -keyable true ($gpname+".foam_creation");
+  setAttr -e -keyable true ($gpname+".fluid_dropoff ");
+  //setAttr -e -keyable true ($gpname+".dissipation ");
+  //setAttr -e -keyable true ($gpname+".diffusion ");
+
+
+
+
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//splash
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+
+
+//greate collide surfaces
+  
+ 
+  oceanNurbsPreviewPlane($collidesize,$collidesize, $oceanShader);
+  
+  
+  string $plane[] = `ls  -sl` ;
+
+
+//create expressions
+
+   string $exp1 = "select -r " + $selObj[$i] + ";\r\n";           
+          $exp1 += "CenterPivot;\r\n";
+          $exp1 += "float $worldxyz1[] = `getAttr " + $selObj[$i] + ".scalePivot`;\r\n";           
+          $exp1 += $plane[0]+".translateX = $worldxyz1[0];\r\n";
+          $exp1 += $plane[0]+".translateZ = $worldxyz1[2];\r\n"; 
+          $exp1 += $plane[0]+".translateY = dod_oceanPlane1.translateY;\r\n";
+                     
+
+  expression -s $exp1 -o $plane[0] -ae 1 -uc all ; 
+
+  
+
+//create intersectCve
+  string $intersectCve[] = `intersect  -ch true -fs 0 -cos 0 -tol 0.01 $selObj[$i] $plane[0]` ;
+  move -r 0 0.02 0 ;
+  select -r $plane[0];
+  //move -r -ls -wd 0 -0.15 0 ;
+  setAttr ($plane[0]+".visibility") 0;
+  parent $plane[0] $gpname ;
+  parent $intersectCve[0] $gpname ;
+
+//create emitter and particle
+  select -r ($intersectCve[0]+"_1"); 
+  string $emittername[] = `emitter -type curve -r 100 -sro 0 -nuv 0 -cye frame -cyi 5 -spd 1 -srn 12 -nsp 0.2 -tsp 0.12 -mxd 0 -mnd 0 -dx 0 -dy 1 -dz 0 -sp 0`;  
+  string $particlename[] = `particle`;
+  string $particlename2[] = `particle`;
+  parent $particlename[0] $gpname ;
+  parent $particlename2[0] $gpname ;  
+
+
+  connectDynamic -em $emittername[1] $particlename[0];
+  connectDynamic -em $emittername[1] $particlename2[0];
+
+
+//set particle1
+    setAttr ($particlename[1]+".conserve") 0.98;
+    setAttr ($particlename[1]+".lifespanMode") 3;
+    setAttr ($particlename[1]+".particleRenderType") 9;
+    setAttr ($particlename[1]+".depthSort") 1;
+   // addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 3 $particlename[1];
+   // addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename[1];
+   // addAttr -is true -ln "multiRadius" -at "float" -min 0 -max 10 -dv 0.3 $particlename[1];
+   // addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename[1];
+
+    //addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 3 $particlename[1];
+    //addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename[1];
+
+    addAttr -is true -ln "radius0" -at "float" -min 0 -max 10 -dv 0.02 $particlename[1];
+    addAttr -is true -ln "radius1" -at "float" -min 0 -max 10 -dv 0.25 $particlename[1];
+    addAttr -is true -ln "tailSize" -at "float" -min 0 -max 10 -dv 1.00 $particlename[1];
+
+
+
+   //addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename[1];
+
+
+
+    //addAttr -ln "rgbPP" -dt vectorArray $particlename[1];
+    //addAttr -ln "rgbPP0" -dt vectorArray $particlename[1];
+    connectAttr -f ($gpname+".levelOfDetail") ($particlename[1] +".levelOfDetail"); 
+    //connectAttr -f ($gpname+".startframe") ($particlename[1] +".startFrame"); 
+
+    //create ramp
+    
+
+   /* string $arrayMap[] = `arrayMapper -target $particlename[1] -destAttr rgbPP -inputV ageNormalized -type ramp`;
+    string $ptcramp[] = `listConnections -source true -destination false $arrayMap[0]`;
+    setAttr ($ptcramp[0]+".colorEntryList[0].position") 0.01;
+    setAttr ($ptcramp[0]+".colorEntryList[0].color") -type double3 0.917 0.917 0.917 ;
+    setAttr ($ptcramp[0]+".colorEntryList[1].position") 0.25;
+    setAttr ($ptcramp[0]+".colorEntryList[1].color") -type double3 0 0.24661 0.42;
+    setAttr ($ptcramp[0]+".colorEntryList[2].position") 0.50;
+    setAttr ($ptcramp[0]+".colorEntryList[2].color") -type double3 1 1 1;
+    */
+
+
+    //create expressions
+    string $exp1 = $particlename[1]+".startFrame = "+$gpname+".startframe;\r\n    ";
+       $exp1 += "    vector $pv = "+$particlename[1]+".position;\r\n    ";  
+       $exp1 += "float $x = $pv.x;\r\n    ";
+       $exp1 += "float $y = $pv.y;\r\n    ";
+       $exp1 += "float $z = $pv.z;\r\n    ";
+       //$exp1 += "float $h[] = `colorAtPoint -u $x -v $z "+$oceanShader+"`;\r\n\r\n    ";
+       $exp1 += "if( $y > (dod_oceanPlane1.translateY-2))\r\n\t";
+       $exp1 += "{"+$particlename[1]+".lifespanPP  = rand(2,4);\r\n    ";
+       $exp1 += "} else {\r\n\t";
+       $exp1 += ""+$particlename[1]+".lifespanPP = 0;\r\n    ";
+       $exp1 += "}";
+
+    dynExpression -rbd -string $exp1 $particlename[1];
+
+     select -r $particlename[1];
+     sets -e -forceElement dod_splashCloud1SG;
+      
+
+
+//set particle2
+    setAttr ($particlename2[1]+".conserve") 0.99;
+    setAttr ($particlename2[1]+".lifespanMode") 3;
+    setAttr ($particlename2[1]+".particleRenderType") 9;
+    setAttr ($particlename2[1]+".depthSort") 1;
+    setAttr ($particlename2[1]+".maxCount") 500;
+
+
+ //   addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 1 $particlename2[1];
+ //   addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename2[1];
+ //   addAttr -is true -ln "multiRadius" -at "float" -min 0 -max 10 -dv 0.2 $particlename2[1];
+ //   addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename2[1];
+
+    addAttr -is true -ln "radius0" -at "float" -min 0 -max 10 -dv 0.045 $particlename2[1];
+    addAttr -is true -ln "radius1" -at "float" -min 0 -max 10 -dv 0.35 $particlename2[1];
+    addAttr -is true -ln "tailSize" -at "float" -min 0 -max 10 -dv 1.50 $particlename2[1];
+
+
+
+
+//   addAttr -ln "rgbPP" -dt vectorArray $particlename2[1];
+//    addAttr -ln "rgbPP0" -dt vectorArray $particlename2[1];
+
+    //connectAttr -f ($gpname+".levelOfDetail") ($particlename2[1] +".levelOfDetail"); 
+    //connectAttr -f ($gpname+".startframe") ($particlename2[1] +".startFrame"); 
+
+    //create ramp
+    //string $cmd= "arrayMapper -target $particlename2[1] -destAttr rgbPP -inputV ageNormalized -type ramp";
+/*
+    string $arrayMap[] = `arrayMapper -target $particlename2[1] -destAttr rgbPP -inputV ageNormalized -type ramp`;
+    string $ptcramp[] = `listConnections -source true -destination false $arrayMap[0]`;
+    setAttr ($ptcramp[0]+".colorEntryList[0].position") 0.0;
+    setAttr ($ptcramp[0]+".colorEntryList[0].color") -type double3 0.544 0.615 0.692;
+    setAttr ($ptcramp[0]+".colorEntryList[1].position") 0.345;
+    setAttr ($ptcramp[0]+".colorEntryList[1].color") -type double3 1 1 1;
+    setAttr ($ptcramp[0]+".colorEntryList[2].position") 1;
+    setAttr ($ptcramp[0]+".colorEntryList[2].color") -type double3 1 1 1;
+*/
+
+
+    //create expressions
+    string $exp1 = $particlename2[1]+".startFrame = "+$gpname+".startframe;\r\n    ";
+       $exp1 += "    vector $pv = "+$particlename2[1]+".position;\r\n    ";  
+       $exp1 += "float $x = $pv.x;\r\n    ";
+       $exp1 += "float $y = $pv.y;\r\n    ";
+       $exp1 += "float $z = $pv.z;\r\n    ";
+       $exp1 += "float $h[] = `colorAtPoint -u $x -v $z "+$oceanShader+"`;\r\n\r\n    ";
+       $exp1 += "if( $y > (dod_oceanPlane1.translateY-2))\r\n\t";
+       $exp1 += "{"+$particlename2[1]+".lifespanPP  = rand(2,4);\r\n    ";
+       $exp1 += "} else {\r\n\t";
+       $exp1 += ""+$particlename2[1]+".lifespanPP = 0;\r\n    ";
+       $exp1 += "}";
+
+    dynExpression -rbd -string $exp1 $particlename2[1];
+
+     select -r $particlename2[1];
+     sets -e -forceElement dod_splashCloud2SG;
+
+
+
+//set enmitter
+select -r $emittername[1] ; 
+addAttr -ln moveX -at double;
+addAttr -ln moveY -at double;
+addAttr -ln moveZ -at double;
+addAttr -ln velocity -at double;
+addAttr -ln startframe -at double;
+
+
+    //create expressions
+    //string $exp1 = "float $worldxyz1[] = `xform -q -ws -t " + $selObj[$i] + "`;\r\n"; 
+      
+     // string $exp1 = "$worldxyz = `xform -q -ws -t " + $selObj[$i] + "`;\r\n";  
+       string $exp1 = "float $worldxyz[] = `getAttr " + $selObj[$i] + ".scalePivot`;\r\n";            
+       $exp1 += "if (frame == " + $emittername[1] + ".startframe)\r\n";           
+       $exp1 += "{\r\n  ";             
+       $exp1 += $emittername[1] +".moveX = $worldxyz[0]; \r\n";
+       $exp1 += $emittername[1] +".moveY = $worldxyz[1]; \r\n";
+       $exp1 += $emittername[1] +".moveZ = $worldxyz[2]; \r\n";
+       $exp1 += "}\r\n  "; 
+       $exp1 += "else\r\n";             
+       $exp1 += "{\r\n ";
+       $exp1 += "float $fAx = " + $emittername[1] + ".moveX;\r\n ";             
+       $exp1 += "float $fAy = " + $emittername[1] + ".moveY;\r\n ";              
+       $exp1 += "float $fAz = " + $emittername[1] + ".moveZ;\r\n ";              
+       $exp1 += "float $fBx = $worldxyz[0] ;\r\n";
+       $exp1 += "float $fBy = $worldxyz[1] ;\r\n";
+       $exp1 += "float $fBz = $worldxyz[2] ;\r\n";
+       $exp1 += "float $wyx = abs($fBx-$fAx);\r\n";
+       $exp1 += "float $wyy = abs($fBy-$fAy);\r\n";
+       $exp1 += "float $wyz = abs($fBz-$fAz);\r\n";
+       $exp1 += "\r\n";
+       $exp1 += "if ($wyx >1.5)\r\n";
+       $exp1 += "$wyx = 1.5;\r\n";
+       $exp1 += "if ($wyz >1.5)\r\n";
+       $exp1 += "$wyz = 1.5;\r\n\r\n\r\n\r\n";
+       $exp1 += "if ($wyy>$wyx && $wyy>$wyz)\r\n";              
+       $exp1 += "{" + $emittername[1] + ".velocity =  $wyy;}\r\n\r\n";             
+       $exp1 += "else{\r\n";
+       $exp1 += "if ($wyx>$wyy && $wyx>$wyz)\r\n";
+       $exp1 += "{" + $emittername[1] + ".velocity =  $wyx;}\r\n   ";
+       $exp1 += "\r\n";
+       $exp1 += "else{\r\n";
+       $exp1 += "if ($wyz>$wyx && $wyz>$wyy)\r\n";
+       $exp1 += "{" + $emittername[1] + ".velocity =  $wyz;}\r\n\r\n ";
+       $exp1 += "else{\r\n ";
+       $exp1 += "if ($wyz==$wyx && $wyz==$wyz)   \r\n";
+       $exp1 += "{" + $emittername[1] + ".velocity =  $wyy;}\r\n ";
+       $exp1 += "}\r\n";
+       $exp1 += "}\r\n ";
+       $exp1 += "}\r\n\r\n";
+       $exp1 += "if (" + $emittername[1] + ".velocity > 4)\r\n";
+       $exp1 += "" + $emittername[1] + ".velocity = 4;\r\n\r\n\r\n  ";
+       $exp1 += $emittername[1] + ".moveY = $fBy;\r\n";
+       $exp1 += $emittername[1] + ".moveX = $fBx;\r\n";
+       $exp1 += $emittername[1] + ".moveZ = $fBz;\r\n";
+       $exp1 += "\r\n";
+       $exp1 += "}";  
+
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ;  
+       
+
+    string $exp1 = $emittername[1] + ".rate = " +$emittername[1] +".velocity*4*" + $gpname+ ".rate";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ; 
+    string $exp1 = $emittername[1] + ".speed = " +$emittername[1] +".velocity*" + $gpname+ ".speed ";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ;  
+    string $exp1 = $emittername[1] + ".speedRandom = " +$emittername[1] +".velocity*3.5*" + $gpname+ ".speed_random";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ;   
+    connectAttr -f ($gpname+".startframe") ($emittername[1] +".startframe"); 
+    connectAttr -f ($gpname+".spread ") ($emittername[1] +".spread ");  
+
+//create  gravity 
+
+                                 
+    string $gravityname[] = `gravity -pos 0 0 0 -m 100 -att 0 -dx 0 -dy -1 -dz 0  -mxd -1  -vsh none -vex 0 -vof 0 0 0 -vsw 360 -tsr 0.5`;
+    connectDynamic -f $gravityname[0] $particlename[0];
+    connectDynamic -f $gravityname[0] $particlename2[0];
+    parent $gravityname[0] $gpname ;
+
+
+//create collide
+    collision -r 0.1 -f 0  $plane[0];
+    connectDynamic -c $plane[0] $particlename[0];
+    collision -r 0.1 -f 0  $plane[0];
+    connectDynamic -c $plane[0] $particlename2[0];
+    event -die 1 -count 3 $particlename[0];
+    event -die 1 -count 3 $particlename2[0]; 
+
+
+
+
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//wake and foam
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+
+//ceate fluidemitterde
+
+    select -r $selObj[$i];
+    createOceanWake 100 1 1;
+    string $fluidemitterdel[0] = `ls  -sl` ;
+    string $fluidtextur[] = `listConnections -source true -destination false $fluidemitterdel[0]`;
+    delete;
+    select -r $selObj[$i];
+    string $fluidemitter[] = `fluidEmitter -type surface -der 0.05 -her 0.5 -fer 0.5 -fdr 0.5 -r 100.0 -cye none -cyi 1 -mxd 1 -mnd 0`;
+    connectDynamic -em $fluidemitter[1] $fluidtextur[1]; 
+    connectDynamic -em $fluidemitter[1] $fluidtextur[2]; 
+    //connectAttr -f ($gpname+".wake_intensity") ($fluidemitter[1] +".fluidDensityEmission");
+
+   //create expressions
+     string $exp1 = $fluidemitter[1] + ".fluidDensityEmission = " + $gpname + ".wake_intensity + (" + $emittername[1] + ".velocity /100.00);\r\n    "; 
+          $exp1 += $fluidemitter[1] + ".fluidHeatEmission = .2;\r\n    "; 
+          $exp1 += $fluidemitter[1] + ".fluidHeatEmission = " + $gpname + ".foam_creation  * " + $emittername[1] + ".velocity;\r\n    "; 
+          $exp1 += "if (" + $fluidemitter[1] + ".fluidHeatEmission > 1)\r\n "; 
+          $exp1 += "{" + $fluidemitter[1] + ".fluidHeatEmission = 1;}\r\n    "; 
+          $exp1 += "if (" + $fluidemitter[1] + ".fluidHeatEmission < 0.2)\r\n    ";
+          $exp1 += "{" + $fluidemitter[1] + ".fluidHeatEmission = .2;}\r\n    "; 
+
+    expression -s $exp1 -o $fluidemitter[1] -ae 1 -uc all ;
+
+
+    $gp = `objExists fluidTexture3D1`;
+  
+    if ($i == 0)
+    {
+    parent $fluidtextur[1] ef_fluid;
+    parent $fluidtextur[2] ef_fluid;
+    
+ 
+//set wake
+    setAttr ($fluidtextur[1]+".resolution") 300 300 1;
+    setAttr ($fluidtextur[1]+".dimensionsW") 10;
+    setAttr ($fluidtextur[1]+".dimensionsH") 10;
+    setAttr ($fluidtextur[1]+".dimensionsD") 4;
+    setAttr ($fluidtextur[1]+".gravity") 12;
+    setAttr ($fluidtextur[1]+".velocityDamp") 0.1;
+    setAttr ($fluidtextur[1]+".densityScale") 2;
+    setAttr ($fluidtextur[1]+".densityDissipation") 1;
+    setAttr ($fluidtextur[1]+".densityDiffusion") 1;
+    setAttr ($fluidtextur[1] + ".sx") 13.1;
+    setAttr ($fluidtextur[1] + ".sy") 13.1;
+    setAttr ($fluidtextur[1] + ".sz") 13.1;
+    setAttr -lock true ($fluidtextur[1]+".tx");
+    setAttr -lock true ($fluidtextur[1]+".ty");
+    setAttr -lock true ($fluidtextur[1]+".tz");
+    setAttr -lock true ($fluidtextur[1]+".rx");
+    setAttr -lock true ($fluidtextur[1]+".ry");
+    setAttr -lock true ($fluidtextur[1]+".rz");
+    setAttr -lock true ($fluidtextur[1]+".sx");
+    setAttr -lock true ($fluidtextur[1]+".sy");
+    setAttr -lock true ($fluidtextur[1]+".sz");
+    setAttr -lock true ($fluidtextur[1]+".v");
+    
+    connectAttr -f ($gpname+".startframe") ($fluidtextur[1] +".startFrame"); 
+
+    //create expressions
+    string $exp1 =  $fluidtextur[1] + ".dimensionsW = 10+((ef_fluid.fluids_scale-30)/3);\r\n    ";  
+       $exp1 += $fluidtextur[1] + ".resolutionW = ef_fluid.fluids_scale * 10;\r\n    ";
+      $exp1 += $fluidtextur[1] + ".dimensionsH = " + $fluidtextur[1] + ".dimensionsW;\r\n    ";
+       $exp1 += $fluidtextur[1] + ".resolutionH = " + $fluidtextur[1] + ".resolutionW;\r\n    ";   
+
+    
+    expression -s $exp1 -o $fluidtextur[1] -ae 1 -uc all ;
+
+
+//set foam
+    setAttr ($fluidtextur[2]+".resolution") 100 100 1;    
+    setAttr ($fluidtextur[2]+".dimensionsW") 20;
+    setAttr ($fluidtextur[2]+".dimensionsH") 20;
+    setAttr ($fluidtextur[2]+".dimensionsD") 4;
+    setAttr ($fluidtextur[2]+".gravity") 9.8;
+    setAttr ($fluidtextur[2]+".velocityDamp") 0.002;
+    setAttr ($fluidtextur[2]+".temperatureScale") 2;
+    setAttr ($fluidtextur[2]+".temperatureDissipation") 0.5;
+    setAttr ($fluidtextur[2]+".temperatureDiffusion") 1;
+    setAttr ($fluidtextur[2] + ".sx") 5.4;
+    setAttr ($fluidtextur[2] + ".sy") 5.4;
+    setAttr ($fluidtextur[2] + ".sz") 5.4;
+    setAttr -lock true ($fluidtextur[2]+".tx");
+    setAttr -lock true ($fluidtextur[2]+".ty");
+    setAttr -lock true ($fluidtextur[2]+".tz");
+    setAttr -lock true ($fluidtextur[2]+".rx");
+    setAttr -lock true ($fluidtextur[2]+".ry");
+    setAttr -lock true ($fluidtextur[2]+".rz");
+    setAttr -lock true ($fluidtextur[2]+".sx");
+    setAttr -lock true ($fluidtextur[2]+".sy");
+    setAttr -lock true ($fluidtextur[2]+".sz");
+    setAttr -lock true ($fluidtextur[2]+".v");
+
+    connectAttr -f ($gpname+".startframe") ($fluidtextur[2] +".startFrame"); 
+    
+    //create expressions
+    string $exp1 = $fluidtextur[2] + ".resolutionW = (ef_fluid.fluids_scale * 10)/3.00;\r\n    ";  
+          $exp1 += $fluidtextur[2] + ".dimensionsW = (ef_fluid.fluids_scale/3.00)*2;\r\n    ";
+          $exp1 += $fluidtextur[2] + ".resolutionH = " + $fluidtextur[2] + ".resolutionW ;\r\n    ";
+          $exp1 += $fluidtextur[2] + ".dimensionsH = " + $fluidtextur[2] + ".dimensionsW ;\r\n    ";   
+
+    
+       expression -s $exp1 -o $fluidtextur[2] -ae 1 -uc all ;
+
+    string $exp1 = $fluidtextur[2] + ".temperatureDiffusion = .8 - (.12*" + $emittername[1] + ".velocity);\r\n    ";  
+            $exp1 += $fluidtextur[2] + ".temperatureDissipation = .8 - (.12*" + $emittername[1] + ".velocity);\r\n    ";  
+
+
+       expression -s $exp1 -o $fluidtextur[2] -ae 1 -uc all ;
+
+ }
+     
+  }   
+     
+
+//------------------------------------------------------------------------------------------------
+
+
+
+}
+
+//huojian 2006.5.10
+
+global proc jayeocean()
+{
+	string $jayelist		[]	=`ls -geometry`;
+	string $hjparticle          []  =`ls -type "particle" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,$jayelist);
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	string $jayelistlights   []  =`ls -lights -tr "seaLight"`;
+	string $hjcrelayer			=`createRenderLayer -name "ocean" -number 1 -makeCurrent -noRecurse $jayestnurbers  $jayelistlight $jayelistlights	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	editRenderLayerAdjustment "defaultRenderQuality.enableRaytracing";
+	editRenderLayerAdjustment "defaultRenderQuality.reflections";
+	editRenderLayerAdjustment "defaultRenderQuality.refractions";
+	editRenderLayerAdjustment "defaultRenderQuality.shadows";
+	
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 	0;
+	setAttr "defaultRenderQuality.shadingSamples" 		2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 	8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 	1;
+	setAttr "defaultRenderQuality.pixelFilterType" 		2;
+	setAttr "defaultRenderQuality.redThreshold" 		0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 		0.3;
+	setAttr "defaultRenderQuality.blueThreshold"        0.6;
+	setAttr "defaultRenderQuality.enableRaytracing" 	1;
+	setAttr "defaultRenderQuality.reflections" 			6;
+	setAttr "defaultRenderQuality.refractions" 			6;
+	setAttr "defaultRenderQuality.shadows" 				0;
+	
+}
+
+proc string jayeground()
+{
+	//create matter
+	string $jayematerma[]=`ls -materials "Matter"`;
+			if (`size $jayematerma`==0)
+			{
+			string $sdra = `shadingNode -asShader -name Matter lambert`;
+    		setAttr ($sdra+".color") -type float3 0.0 0.0 0.0;
+    		setAttr ($sdra+".matteOpacityMode") 0;
+    		string $set = `sets -renderable true -noSurfaceShader true -empty`;
+    		connectAttr ($sdra+".color") ($set+".surfaceShader");
+			
+			}
+	//create matter	
+	        string $jayemater[]=`ls -materials "noMatter"`;
+			if (`size $jayemater`==0)
+			{
+			string $sdra = `shadingNode -asShader -name noMatter lambert`;
+    		setAttr ($sdra+".color") -type float3 0.5 0.5 0.5;
+    		//setAttr ($sdra+".hideSource") 1;
+    		string $set = `sets -renderable true -noSurfaceShader true -empty`;
+    		connectAttr ($sdra+".color") ($set+".surfaceShader");
+			
+			}
+	
+	//create ground	
+	        string $jayemater[]=`ls -materials "Shadow_useBackground"`;
+			if (`size $jayemater`==0)
+			{
+			string 	$sdrblur 	= `shadingNode -asShader -name Shadow_useBackground useBackground`;
+			setAttr ($sdrblur+".specularColor") -type   double3 0.5 0.5 0.5;
+			setAttr ($sdrblur+".reflectivity") 	0.0;
+			string 	$setblur 	= `sets -name ShadowSG -renderable true -noSurfaceShader true -empty`;
+			connectAttr ($sdrblur+".outColor") ($setblur+".surfaceShader");
+			
+			}
+	
+	
+	
+   return "";
+}
+
+
+
+
+global proc jayeoceanm()
+{
+	
+
+	string $hjlist				[]	=`ls -dag -long -geometry `		;
+	string $hjlglist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	string $hjparticle          []  =`ls -long "particle*" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,	$hjlist);
+	string $jayestnurber 		[]	= stringArrayRemove($hjlglist,	$jayestnurbers);
+	string $jayematter          []  =`ls -materials "Matter"`;
+	string $jayematterocean     []  =`ls -materials "oceanShader*"`;
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	string $jayelistlights   []  =`ls -lights -tr "seaLight"`;
+	string $hjcrelayer				=`createRenderLayer -name "oceanM" -number 1 -makeCurrent -noRecurse $jayestnurbers $jayelistlight $jayelistlights 	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	
+	editRenderLayerAdjustment ($jayematterocean[0]+".transparency");
+	setAttr ($jayematterocean[0]+".transparency") -type double3 0.0 0.0 0.0 ;
+	select 				$jayestnurber 							;
+	hyperShade  -assign $jayematter[0] 							;
+	
+}
+
+
+
+
+//set layershadow 
+global proc jayeshadowlayer()
+{
+
+	
+	string $hjlistamesh			[]	=`ls -dag -ap -sl -type "mesh" `		;
+	string $hjlglistnurber		[]	=`ls -dag -ap -sl -type "nurbsSurface" `;
+	string $hjlglistsubdiv		[]	=`ls -dag -ap -sl -type "subdiv" `		;
+	
+	string $hjlight				[]	=`ls  -lights -tr  "shadowslight*"`;
+	string $hjcrelayer				=`createRenderLayer -name "oceanShadow" -number 1 -makeCurrent -noRecurse $hjlistamesh $hjlglistnurber $hjlglistsubdiv $hjlight	`;
+	string $hjoceanlist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	
+	string $jayerenderlayoutls	[]	=`editRenderLayerMembers -q -fullNames $hjcrelayer`;
+	string $jayediffa			[] 	= stringArrayRemove($hjoceanlist, 	$jayerenderlayoutls);
+	string $jayediffb           []  = stringArrayRemove($hjlight, 	$jayediffa);
+	string $jayematter;
+	
+	string $jayenomatter        []  =`ls -materials "noMatter"`				;
+	string $jayeuseback[]			=`ls -materials "Shadow_useBackground"`;
+	
+	setAttr "defaultRenderLayer.renderable" 0						;
+	layerEditorLayerButtonSelect 0 $hjcrelayer						;
+	for ($jayematter in $jayediffb)
+	{
+		if (`attributeExists "primaryVisibility" $jayematter`) 
+		{
+		setAttr ($jayematter+".primaryVisibility") 0;
+		}
+		
+	}
+	
+	select 				$jayediffb  								;
+	hyperShade  -assign $jayenomatter[0] 							;
+	select -cl ;
+	select 				$hjoceanlist										;
+	hyperShade  -assign $jayeuseback[0] 							;
+	select -cl ;
+	editRenderLayerAdjustment "defaultRenderQuality.enableRaytracing";
+	editRenderLayerAdjustment "defaultRenderQuality.reflections";
+	editRenderLayerAdjustment "defaultRenderQuality.refractions";
+	editRenderLayerAdjustment "defaultRenderQuality.shadows";
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 	0;
+	setAttr "defaultRenderQuality.shadingSamples" 		2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 	8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 	1;
+	setAttr "defaultRenderQuality.pixelFilterType" 		2;
+	setAttr "defaultRenderQuality.redThreshold" 		0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 		0.3;
+	setAttr "defaultRenderQuality.blueThreshold"        0.6;
+	setAttr "defaultRenderQuality.enableRaytracing" 	1;
+	setAttr "defaultRenderQuality.reflections" 			0;
+	setAttr "defaultRenderQuality.refractions" 			0;
+	setAttr "defaultRenderQuality.shadows" 				3;
+	
+	
+
+}
+
+
+global proc string jayesetvis()
+{
+string $jayelayercurrect		=`editRenderLayerGlobals -q -currentRenderLayer`;
+int    $jayreturnlayer          =`gmatch $jayelayercurrect "ocean"`;
+if ($jayreturnlayer ==1)
+{	
+string $obj[] = `ls -dag -ap -sl`;
+int $siz = `size $obj`;
+for($i=0;$i<$siz;$i++)
+	{
+	if (`attributeExists "primaryVisibility" $obj[$i]`)
+		{
+		setAttr ($obj[$i]+".primaryVisibility") 0;
+		}
+
+	}	
+}
+else 
+{
+warning "请选择海面层";
+}
+	
+	return "";
+}
+
+global proc string jayepartic ()
+{
+	string $hjlist				[]	=`ls -dag -long -geometry `		;
+	string $hjlglist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	string $hjparticle          []  =`ls -long "particle*" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,	$hjlist);
+	string $jayestnurber 		[]	= stringArrayRemove($hjlglist,	$jayestnurbers);
+
+	string $jayematter          []  =`ls -materials "Matter"`;
+	string $jayematterocean     []  =`ls -materials "oceanShader*"`;
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	
+	string $hjcrelayer				=`createRenderLayer -name "Particle" -number 1 -makeCurrent -noRecurse $hjlist $jayelistlight  $hjparticle  	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	
+	editRenderLayerAdjustment ($jayematterocean[0]+".transparency");
+	editRenderLayerAdjustment ($jayematterocean[0]+".matteOpacityMode ");
+	setAttr ($jayematterocean[0]+".transparency") -type double3 0.0 0.0 0.0 ;
+	setAttr ($jayematterocean[0]+".matteOpacityMode") 0 ;
+	select 				$jayestnurber 							;
+	hyperShade  -assign $jayematter[0] 							;
+	return $jayelistlight[0];
+}
+
+
+//
+
+
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//create window
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+global proc cxSplashWakeFoam()
+{
+string $jayeshade=`jayeground`;
+$winexists  = `window -exists CearteSplashWakeFoam`;
+if ($winexists ==1)
+{deleteUI -window CearteSplashWakeFoam;}
+window CearteSplashWakeFoam; 
+columnLayout -adj true;
+menuBarLayout;
+menu -label "Help";
+menuItem -label "Help on RGBlayer " -command "zjHelpCallback hjRgbatranstion";
+setParent ..;	
+
+
+radioButtonGrp -numberOfRadioButtons 4 -label "select type" -labelArray4 "ocean""undocean""room""holl" -select 1 radioOfApl;
+
+intSliderGrp -l "splashcollidesize:" -field true -min 10 -max 30 -v 20 aSlider; 
+
+intSliderGrp -l "startframe:" -field true -v 43 bSlider; 
+
+floatSliderGrp -l "splashrate:"	-precision 4 -field true -min 0 -max 50000 -v 3500 cSlider;
+
+floatSliderGrp -l "splashspeed:"	-precision 4 -field true -min 0.00 -max 20.00 -v 4 dSlider;
+
+floatSliderGrp -l "splashspeedrandom :"	-precision 4 -field true -min 0.00 -max 50 -v 10 eSlider;
+
+floatSliderGrp -l "splashspread:"	-precision 4 -field true -min 0.00 -max 1.00 -v 0.12 fSlider;
+
+floatSliderGrp -l " levelOfDetail  :"	-precision 4 -field true -min 0.00 -max 1.00 -v 1 gSlider;
+
+floatSliderGrp -l "wake intensity:"	-precision 4 -field true -min 0.00 -max 20.00 -v 0.1 hSlider;
+
+floatSliderGrp -l "foam creation :"	-precision 4 -field true -min 0.00 -max 20.00 -v 0.5 iSlider;
+
+floatSliderGrp -l "fluid dropoff:" 	-precision 4 -field true -min 0.00 -max 20.00 -v 0.5 jSlider;
+
+floatSliderGrp -l "fluids scale:" 	-precision 4 -field true -min 0.00 -max 200.00 -v 30 kSlider;
+
+$objApplyto = `radioButtonGrp -q -select radioOfApl`; 
+
+       string $cwiondow =           " int $collidesize =`intSliderGrp -q -v aSlider`; ";   
+              $cwiondow +=          " int $startframe =`intSliderGrp -q -v bSlider`; ";
+              $cwiondow +=         "float $splashrate=`floatSliderGrp -q -v cSlider`;  "; 
+              $cwiondow +=         "float $splashspeed =`floatSliderGrp -q -v dSlider`; "; 
+              $cwiondow +=         "float $splashspeed_random =`floatSliderGrp -q -v eSlider`; "; 
+              $cwiondow +=         "float $spread  =`floatSliderGrp -q -v fSlider`; "; 
+              $cwiondow +=         "float $levelOfDetail  =`floatSliderGrp -q -v gSlider`;"; 
+              $cwiondow +=         "float $wake_intensity =`floatSliderGrp -q -v hSlider`;"; 
+              $cwiondow +=         "float $foam_creation =`floatSliderGrp -q -v iSlider`;"; 
+              $cwiondow +=         "float $fluid_dropoff =`floatSliderGrp -q -v jSlider`;"; 
+              $cwiondow +=         "float $fluids_scale =`floatSliderGrp -q -v kSlider`;"; 
+              $cwiondow +=          " int $objApplyto = `radioButtonGrp -q -select radioOfApl`;"; 
+
+              $cwiondow +=         "splashwakefoam($collidesize,$startframe,$splashrate,$splashspeed,$splashspeed_random,$spread,$levelOfDetail,$wake_intensity,$foam_creation,$fluid_dropoff,$fluids_scale,$objApplyto );"; 
+
+
+		
+rowColumnLayout -numberOfColumns 10;
+button 		-l "splash wake foam" 	-c $cwiondow 		-align "center";
+button 		-label "Ocean" 			-c jayeocean		-align "center" ;
+button 		-label "OceanM"  		-c jayeoceanm 		-align "center" ;
+button 		-label "Patrticle"  	-c jayepartic 		-align "center" ;
+button 		-label "Oceanshadow"  	-c jayeshadowlayer 	-align "center" ;
+button 		-label "Visibility"  	-c jayesetvis 		-align "center" ;
+
+		setParent ..;
+	setParent ..;
+setParent ..;
+showWindow CearteSplashWakeFoam;
+
+}
+
+

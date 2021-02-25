@@ -1,0 +1,65 @@
+// Make a normal pass
+global proc ysAddNormalPass ()
+{
+	//Creat common normal shader
+	if(!(`objExists "normalTex"`))
+	{
+		string $texNormal = `shadingNode -asTexture mib_amb_occlusion -name "normalTex"`;
+		string $sdNormal = `shadingNode -asShader surfaceShader -name "normalShader"`;
+		setAttr ($texNormal+".output_mode") 2;
+		connectAttr -f ($texNormal+".outValue") ($sdNormal+".outColor");
+	}
+
+	// Create normal channel 
+	string $bufferList[] = `listConnections "miDefaultOptions.frameBufferList"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	int $number = size($bufferList);
+	for($item in $bufferList)
+	{
+		if(!(`gmatch $item "IDMT_FB_normal*"`) && !(`gmatch $item "IDMT_FB_normalPass*"`))
+		{
+		string $camera[] = `listConnections -shapes on "mentalrayOutputPass0.message"`;	
+		createNode mentalrayUserBuffer -name "IDMT_FB_normal";
+		connectAttr -force "IDMT_FB_normal.message" ("miDefaultOptions.frameBufferList["+$number+"]");
+		createNode mentalrayOutputPass -name "IDMT_FB_normalPass";
+		connectAttr -force "IDMT_FB_normalPass.message" ($camera[0] + ".miOutputShaderList["+$number+"]");
+		connectAttr -force "IDMT_FB_normal.message" "IDMT_FB_normalPass.dataType";
+		setAttr "IDMT_FB_normalPass.fileMode" 1;
+		setAttr -type "string" IDMT_FB_normalPass.fileName "normal";
+		break;
+		}
+	}
+	
+	string $bufferNodes[] = `ls -type "buffer_store"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	global string $bufferNode;
+	int $number = size($outputList)-1;
+
+	// Check out material which is connected by bump map		
+	for ($item in $bufferNodes)
+	{	
+		setAttr ($item + ".store_"+$number) 1;
+		$bufferNode = $item;
+		string $Array[] = `listConnections -s on ($bufferNode+".primarybuffer")`;
+		for($mat in $Array)
+		{
+			if(`connectionInfo -isDestination ($mat+".normalCamera")`)
+			{					
+				//Creat special normal shader that has bump 
+				string $normalTexX = `shadingNode -asTexture mib_amb_occlusion -name "normalTex"`;
+				setAttr ($normalTexX+".output_mode") 2;
+				string $normalLambert = `shadingNode -asShader lambert -name "normalLambert"`;
+				setAttr ($normalLambert+".color") -type double3 0 0 0;
+				setAttr ($normalLambert+".diffuse") 0;
+				connectAttr -force ($normalTexX+".outValue") ($normalLambert+".incandescence");
+				string $bump = `connectionInfo -sourceFromDestination ($mat+".normalCamera")`;
+				connectAttr -force $bump ($normalLambert+".normalCamera");
+				connectAttr ($normalLambert+".outColor") ($bufferNode+".inbuffer_"+$number); 
+			}
+			if((`connectionInfo -isDestination ($mat+".normalCamera")`)==0)
+			{
+				connectAttr -force ("normalShader.outColor") ($bufferNode+".inbuffer_"+$number); 
+			}
+		}
+	}		
+}

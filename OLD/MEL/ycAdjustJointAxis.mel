@@ -1,0 +1,160 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: “¸Í…
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ShowAllAxis()
+{
+	toggle -below -localAxis;
+}
+
+global proc ycAdjustJointAxis()
+{
+	if(`window -exists ycAdjustJointAxis`)
+	{
+		deleteUI -window ycAdjustJointAxis;
+	}
+		window -menuBar true -title "Adjust Joint Axis" -width 445 -height 200 ycAdjustJointAxis;
+			menu -label "Help";
+				menuItem -label "Help on Adjust Joint Axis..." -command "zjHelpCallback ycAdjustJointAxis";
+			formLayout formLayout1;
+				columnLayout columnLayout1;
+					radioButtonGrp -enable 1 -numberOfRadioButtons 3 -select 1 
+							-label "Orient" -labelArray3 "Orient up"  "Object" "Fix up" JointAxisOrient;					
+					checkBoxGrp	-numberOfCheckBoxes 1 -label "Show/Unshow All Axis" -changeCommand1 "ShowAllAxis" ShowAllAxis;
+				setParent ..;
+				string $button1 = `button -label "Adjust Joint Axis" -command "AdjustJointAxis;\ndeleteUI ycAdjustJointAxis"`;
+				string $button2 = `button -label "Apply" -command "AdjustJointAxis"`;
+				string $button3 = `button -label "Close" -command "deleteUI ycAdjustJointAxis"`;
+
+			formLayout -edit
+				-attachForm	columnLayout1	"top"		5
+				-attachForm	columnLayout1	"left"		5
+
+				-attachForm	$button1	"left"		5
+				-attachForm	$button1	"bottom"	5
+				-attachPosition	$button1	"right"		5	33
+
+				-attachControl	$button2	"left"		5	$button1
+				-attachForm	$button2	"bottom"	5
+				-attachPosition	$button2	"right"		5	67
+
+				-attachControl	$button3	"left"		5	$button2
+				-attachForm	$button3	"bottom"	5
+				-attachForm	$button3	"right"		5
+			formLayout1;
+
+	showWindow;
+}
+
+global proc AdjustJointAxis()
+{
+	int $OrientMode=`radioButtonGrp -q -select  JointAxisOrient`;
+	switch ($OrientMode)
+	{
+		case 1:
+			orientJoint;
+		break;
+		
+		case 2:
+			fixup;
+		break;
+		
+		case 3:
+			ZsoAdjust;
+		break;
+	}
+}
+
+global proc ZsoAdjust()
+{
+	string $FirstJoint[]=`ls -sl -type joint`;
+	if (size($FirstJoint) == 0)
+	{
+		confirmDialog -title "error" -message "You must select joint."	-button "OK" ;
+		return;
+	}
+
+	string $JointList[]=`listRelatives -fullPath  -allDescendents $FirstJoint[0]`;
+
+	for ($i=0;$i<size($JointList);$i++)
+	{
+		joint -e -zso -oj xyz $JointList[$i];
+	}
+	joint -e -zso -oj xyz $FirstJoint[0];
+}
+
+global proc orientJoint()
+{
+	$select = `ls -sl -type joint`;
+	
+	if (size($select) == 0)
+		{
+		confirmDialog -title "error" -message "You must select joint."	-button "OK" ;
+		return;
+		}
+
+	$children = `listRelatives -fullPath  -allDescendents $select`;//
+	$num = size ($children);
+	
+	$firstSelected = $select;
+	
+	for ($i = 1; $i <= ($num); $i++)
+	{	
+		$unparent = `parent -world $children[($num - $i)]`;
+		setAttr ($select[0] + ".rotate") 0 0 0;
+		setAttr ($select[0] + ".jointOrient") 0 0 0;
+		select -add $select;
+		$const = `aimConstraint -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0`;
+		delete $const;
+		
+		$r= `getAttr ($select[0] + ".rotate")`;
+		setAttr ($select[0] + ".jointOrient") $r[0] $r[1] $r[2];
+		setAttr ($select[0] + ".rotate") 0 0 0;			
+		parent $unparent $select;
+		$select = `ls -sl -type joint`;
+	}
+	setAttr ($select[0] + ".jointOrient") 0 0 0;
+	select $firstSelected;
+}
+
+global proc fixup()
+{
+	$select = `ls -sl -type joint`;
+	
+	if (size($select) == 0)
+		{
+		confirmDialog -title "error" -message "You must select joint."	-button "OK" ;
+		return;
+		}
+	
+	$children = `listRelatives -fullPath  -allDescendents $select`;
+	$num = size ($children);
+
+	$firstSelected = $select;
+	
+	for ($i = 0; $i<=($num); $i++ )
+	{
+		float $r[],$jox[],$joy[],$joz[],$j[];
+		$r= `getAttr ($select[0] + ".rotate")`;
+		$jox[0]=`getAttr ($select[0] + ".jointOrientX")`;
+		$joy[0]=`getAttr ($select[0] + ".jointOrientY")`;
+		$joz[0]=`getAttr ($select[0] + ".jointOrientZ")`;
+		$j[0]=$r[0]+$jox[0];
+		$j[1]=$r[1]+$joy[0];
+		$j[2]=$r[2]+$joz[0];
+
+		setAttr ($select[0] + ".jointOrientX") $j[0];
+		setAttr ($select[0] + ".jointOrientY") $j[1];
+		setAttr ($select[0] + ".jointOrientZ") $j[2];
+		setAttr ($select[0] + ".rotateX") 0;
+		setAttr ($select[0] + ".rotateY") 0;
+		setAttr ($select[0] + ".rotateZ") 0;	
+		$select=`listRelatives -fullPath  $select`;
+	}
+}

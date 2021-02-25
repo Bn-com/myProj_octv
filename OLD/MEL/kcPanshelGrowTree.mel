@@ -1,0 +1,153 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc kcPanshelGrowTree(int $numSeg)
+{
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) != 2)
+		error("Please select circle then path in that order.");
+
+	string $obj = $selected[0];
+	string $path = $selected[1];
+
+	int $startFrame = 0;
+	int $endFrame = 100;
+	float $startU = 0.0;
+	float $endU = 1.0;
+//	int $numSeg = 10;
+	int $numGrowSeg = 1;
+
+
+	string $parent = `group -empty -name grow_group`;
+
+	// add attributes to parent
+
+	addAttr -longName startFrame -attributeType long -keyable true -defaultValue $startFrame $parent;
+	addAttr -longName endFrame -attributeType long -keyable true -defaultValue $endFrame $parent;
+	addAttr -longName startU -attributeType double -keyable true -defaultValue $startU $parent;
+	addAttr -longName endU -attributeType double -keyable true -defaultValue $endU $parent;
+	addAttr -longName numSeg -attributeType long -keyable true -hidden true -defaultValue $numSeg $parent;
+	addAttr -longName numGrowSeg -attributeType long -keyable true -defaultValue $numGrowSeg $parent;
+
+
+	string $motionPathArray[];
+	string $objectArray[];
+
+	for ($i = 0; $i < $numSeg + 1; $i++)
+	{
+		// duplicate object and parent under group
+
+		string $new[] = `duplicate -returnRootsOnly $obj`;
+
+		// add attribute to object
+
+		addAttr -longName extent -attributeType double -keyable true -defaultValue 0 $new[0];
+
+
+		string $motionPath = `pathAnimation -fractionMode true -follow true -followAxis y -upAxis x -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -curve $path $new[0]`;
+
+		// delete position marker and keyframe node
+
+		string $connections[] = `listConnections -source true -destination false ($motionPath + ".positionMarkerTime[0]")`;
+		if (size($connections) > 0)
+			delete $connections[0];
+
+		string $connections[] = `listConnections -source true -destination false ($motionPath + ".uValue")`;
+		if (size($connections) > 0)
+			delete $connections[0];
+
+		// parent to group
+
+		$new = `parent $new[0] $parent`;
+		$motionPathArray[size($motionPathArray)] = $motionPath;
+		$objectArray[size($objectArray)] = $new[0];
+	}
+
+	//	write expression to control the uValue of motion paths
+	//
+	//	int $startFrame = grow_group.startFrame;
+	//	int $endFrame = grow_group.endFrame;
+	//	float $startU = grow_group.startU;
+	//	float $endU = grow_group.endU;
+	//	int $numSeg = grow_group.numSeg;
+	//	int $numGrowSeg = grow_group.numGrowSeg;
+	//	
+	//	float $totalDuration = $endFrame - $startFrame;
+	//	float $segDuration;
+	//	
+	//	if ($numGrowSeg == $numSeg)
+	//	$segDuration = $totalDuration;
+	//	else
+	//		$segDuration = $totalDuration / (1.0 + ($numSeg - 1.0) / $numGrowSeg);
+	//	
+	//	float $totalU = $endU - $startU;
+	//	float $segU = 1.0 / $numSeg;
+	//	
+	//	// the ith motion path
+	//	
+	//	float $accum = 0;
+	//	
+	//	int $i = 0;
+	//	float $startTime = $startFrame + $i * $segDuration / $numGrowSeg;
+	//	float $endTime = $startTime + $segDuration;
+	//	$accum += linstep($startTime, $endTime, frame) * $segU;
+	//	motionPath4.uValue = $startU + $accum * $totalU;
+	//	
+	//	motionPath3.uValue = $startU;
+
+
+	string $exp;
+
+	$exp += "int $startFrame = " + $parent + ".startFrame;\n";
+	$exp += "int $endFrame = " + $parent + ".endFrame;\n";
+	$exp += "float $startU = " + $parent + ".startU;\n";
+	$exp += "float $endU = " + $parent + ".endU;\n";
+	$exp += "int $numSeg = " + $parent + ".numSeg;\n";
+	$exp += "int $numGrowSeg = " + $parent + ".numGrowSeg;\n";
+	$exp += "\n";
+	$exp += "if ($numGrowSeg <= 0.0)\n";
+	$exp += "\t$numGrowSeg = 1;\n";
+	$exp += "\n";
+	$exp += "float $totalDuration = $endFrame - $startFrame;\n";
+	$exp += "float $segDuration;\n";
+	$exp += "\n";
+	$exp += "if ($numGrowSeg == $numSeg)\n";
+	$exp += "\t$segDuration = $totalDuration;\n";
+	$exp += "else\n";
+	$exp += "\t$segDuration = $totalDuration / (1.0 + ($numSeg - 1.0) / $numGrowSeg);\n";
+	$exp += "\n";
+	$exp += "float $totalU = $endU - $startU;\n";
+	$exp += "float $segU = 1.0 / $numSeg;\n";
+	$exp += "\n";
+	$exp += "// the ith motion path\n";
+	$exp += "\n";
+	$exp += "float $accum = 0;\n";
+
+	for ($i = size($motionPathArray) - 2; $i >= 0; $i--)
+	{
+		$exp += "\n";
+		$exp += "int $i = " + $i + ";\n";
+		$exp += "float $startTime = $startFrame + $i * $segDuration / $numGrowSeg;\n";
+		$exp += "float $endTime = $startTime + $segDuration;\n";
+		$exp += "float $extent = linstep($startTime, $endTime, frame);\n";
+		$exp += "$accum += $extent * $segU;\n";
+		$exp += $motionPathArray[$i] + ".uValue = $startU + $accum * $totalU;\n";
+		$exp += $objectArray[$i] + ".extent = $extent;\n";
+	}
+
+	$exp += "\n";
+	$exp += $motionPathArray[size($motionPathArray) - 1] + ".uValue = $startU;\n";
+	$exp += $objectArray[size($motionPathArray) - 1] + ".extent = 0.0;\n";
+
+//	print $exp;
+	expression -string $exp -name grow_exp;
+}
+

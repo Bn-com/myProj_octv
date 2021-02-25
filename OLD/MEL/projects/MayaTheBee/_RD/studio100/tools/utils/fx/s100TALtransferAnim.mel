@@ -1,0 +1,289 @@
+global proc s100TALtransferAnim(string $UI,string $UIanimHi, string $UIanimLo)
+{
+
+	s100TALprogressBar(0);
+	string $prodName = `optionMenu -q -v s100TALoptionProdMenu`;
+		$prodName = startString($prodName,2);
+		$ss = startString($prodName,1);
+		$ss = capitalizeString($ss);
+		$es = endString($prodName,1);
+		$es = capitalizeString($es);
+
+		$prodName = ($ss + $es);
+
+
+	$way = `s100TALexistRigInfo($UI)`;
+	$char = `textScrollList -q -si $UI`;
+	$animRep = `textScrollList -q -si $UIanimHi`;
+	$wayImp = `textField -q -tx s100TALtmpAnim`;
+	string $wayExp = `textField -q -tx s100TALtmpAnimLo`;
+
+	if(size($animRep) > 0)
+	{
+	s100TALprogressBar(1);
+		for($obj in $animRep)
+		{
+		$arrayAnimRep = stringToStringArray($obj, ":");
+		$tag = s100TALreturnType($arrayAnimRep[0]);
+		string $name = ($prodName + "_" +$tag[1] + "_"+ $char[0] + "_"  + $arrayAnimRep[1]);
+		float $fr[];
+		python("import s100_AM");
+		$fr = python("s100_AM.s100_AM().getKeyRange(\""+$wayImp + $name + ".anim" +"\")");
+			if(`filetest -e ($wayImp + $name +".anim")`)
+			{
+			s100TALprogressBar(2);
+			if($way != "none")
+				{
+				$file = `getFileList -folder $way -filespec "*.ma"`;
+					if(size($file)>0)
+						{
+						s100TALprogressBar(3);
+						$sceneName = `file -q -sceneName`;
+						file -f -open ($way + $file[0]);
+
+						$rigLo = `s100TALgetRig($UI)`;
+						$rigName = `textField -q -tx s100TALlistRigTextField`;
+
+						file -f -import -namespace "lo" ($rigLo + $rigName);
+
+						string $root[];
+							$root = s100TALgetRootBones();
+						s100TALprogressBar(4);
+						string $rootHi[];
+						string $rootLo[];
+						string $rootLoBk[];
+
+						string $pconstraintGrp[];
+						string $sconstraintGrp[];
+
+							for($obj in $root)
+								{
+									$arObj = stringToStringArray ($obj,":");
+									$hiAr = `listRelatives -allDescendents -type "joint" $obj`;
+									if($arObj[0] == "lo")
+										$rootLoBk[size($rootLoBk)] = $obj;
+
+										for($hi in $hiAr)
+										{
+										$arObj = stringToStringArray ($hi,":");
+										if($arObj[0] == "lo")
+											$rootLo[size($rootLo)] = $hi;
+										else
+											$rootHi[size($rootHi)] = $hi;
+
+                                        }
+								}
+						s100TALprogressBar(5);
+							for($obj in $rootLo)
+								{
+									$arLo = stringToStringArray ($obj,":");
+									if(stringArrayContains($arLo[1],$rootHi))
+									{
+									int $tx = `getAttr -l ($obj + ".tx")`;
+									int $ty = `getAttr -l ($obj + ".ty")`;
+									int $tz = `getAttr -l ($obj + ".tz")`;
+
+									int $rx = `getAttr -l ($obj + ".rx")`;
+									int $ry = `getAttr -l ($obj + ".ry")`;
+									int $rz = `getAttr -l ($obj + ".rz")`;
+
+									int $sx = `getAttr -l ($obj + ".scaleX")`;
+									int $sy = `getAttr -l ($obj + ".scaleY")`;
+									int $sz = `getAttr -l ($obj + ".scaleZ")`;
+
+
+									string $skip = " ";
+									string $skipS = " ";
+
+									if($tx == 1)
+										$skip += " -st x ";
+									if($ty == 1)
+										$skip += " -st y ";
+									if($tz == 1)
+										$skip += " -st z ";
+
+									if($rx == 1)
+										$skip += " -sr x ";
+									if($ry == 1)
+										$skip += " -sr y ";
+									if($rz == 1)
+										$skip += " -sr z ";
+
+									if($rx == 1)
+										$skipS += " -sk x ";
+									if($ry == 1)
+										$skipS += " -sk y ";
+									if($rz == 1)
+										$skipS += " -sk z ";
+
+									string $pcEv;
+									string $scEv;
+									$pcEv = ("parentConstraint " + $skip + $arLo[1] + " " + $obj);
+
+									$pc = eval($pcEv);
+
+									$scEv = ("scaleConstraint " + $skipS + $arLo[1] + " " + $obj);
+									$sc = eval($scEv);
+
+									$pconstraintGrp[size($pconstraintGrp)] = $pc[0];
+									$sconstraintGrp[size($sconstraintGrp)] = $sc[0];
+									}
+								}
+						s100TALprogressBar(6);
+							//$grpBones = `createNode "transform" -n "transform_grp"`;
+							//parent $root $grpBones;
+
+						$timeIn = `playbackOptions -e -animationStartTime $fr[0]`;
+						$timeOut = `playbackOptions -e -animationEndTime $fr[1]`;
+						python("import s100_AM");
+						$python = "s100_AM.s100_AM().importKey(path=\\\""+ $wayImp + $name + ".anim"  + "\\\",cropIn=" + $fr[0] + ",cropOut=" + $fr[1] + ",placeIn=" +$fr[0]+",placeOut="+$fr[1]+",action='"+ "" +"')";
+
+						$imp = "python(\"" + $python + "\")";
+						$eval = eval($imp);
+
+
+							for($obj in $rootLoBk)
+								bakeResults
+									-simulation true
+									-t ($timeIn + ":" + $timeOut)
+									-hierarchy below
+									-sampleBy 1
+									-disableImplicitControl true
+									-preserveOutsideKeys true
+									-sparseAnimCurveBake false
+									-removeBakedAttributeFromLayer false
+									-bakeOnOverrideLayer false
+									-controlPoints false
+									-shape true {"DeformationSystem"}
+								$obj;
+						s100TALprogressBar(8);
+						s100TALbakeAnimation;
+
+							/*for($objR in $root)
+								{
+									$jntList = `listRelatives -ad -typ "joint" $objR`;
+									$jntList[size($jntList)] = $objR;
+									$rootDesc = `listRelatives -ad $objR`;
+									$rootDesc = stringArrayRemove($jntList,$rootDesc);
+									delete $rootDesc;
+								}*/
+
+
+							//$fullGrp = firstParentOf($rootHi)
+							if(`objExists "full_grp"`)
+								delete "full_grp";
+							for($obj in $pconstraintGrp)
+								{
+									if(`objExists $obj`)
+										delete $obj;
+                                }
+							for($obj in $sconstraintGrp)
+								{
+									if(`objExists $obj`)
+										delete $obj;
+                                }
+
+
+						s100TALcleanSceneNode;
+						s100TALprogressBar(9);
+						$animCurve = `ls -type "animCurve"`;
+							for($obj in $animCurve)
+							{
+								setAttr ($obj + ".preInfinity") 3;
+								setAttr ($obj + ".postInfinity ") 3;
+							}
+
+
+						string $expPython;
+
+						DeleteAllStaticChannels;
+						delete -all -staticChannels;
+						python("import s100_AM");
+						$pythonExp = ("s100_AM.s100_AM().exportKey(\\\"" + $wayExp + $name + "_lo.anim" + "\\\", nodes = s100_AM.s100_AM().getAnimNode())");
+
+						$expPython = "python(\"" + $pythonExp + "\")";
+						//print $expPython;
+						eval($expPython);
+						//file -f -newFile $sceneName;
+						s100TALprogressBar(10);
+						s100TALprogressBar(0);
+						}
+						else
+						warning "no base rig exist";
+
+				}
+
+            }
+
+        }
+	}
+	else
+	warning "select animation to transfer";
+}
+
+global proc s100TALbakeAnimation()
+{
+string $attr;
+$skinCluster = `ls -type "skinCluster"`;
+	for($skin in $skinCluster)
+		{
+			$bones = `skinCluster -q -inf $skin`;
+			//print $bones;
+			$bones = {"Root_M"};
+			for($b in $bones)
+				{
+				$attrList = `listAttr $b`;
+				for($attr in $attrList)
+					{
+					if(`gmatch $attr "*blend*"`)
+						setAttr ($b + "." + $attr) 1;
+                    }
+	            }
+        }
+}
+
+global proc s100TALopenAnimLo(string $UI,string $UIanimHi, string $UIanimLo)
+{
+string $prodName = `optionMenu -q -v s100TALoptionProdMenu`;
+		$prodName = startString($prodName,2);
+		$ss = startString($prodName,1);
+		$ss = capitalizeString($ss);
+		$es = endString($prodName,1);
+		$es = capitalizeString($es);
+
+		$prodName = ($ss + $es);
+
+	python("import s100_AM");
+	$way = `s100TALgetRig($UI)`;
+	string $char[] = `textScrollList -q -si $UI`;
+	string $animRep[] = `textScrollList -q -si $UIanimHi/*$UIanimLo*/`;
+	string $wayImp = `textField -q -tx s100TALtmpAnimLo`;
+
+	string $rig = `textField -q -tx s100TALlistRigTextField`;
+
+
+	if(`filetest -e ($way + $rig)`)
+	{
+
+		$arrayAnimRep = stringToStringArray($animRep[0], ":");
+		$tag = s100TALreturnType($arrayAnimRep[0]);
+
+		$name = ($prodName + "_" +$tag[1] + "_"+ $char[0] + "_"  + $arrayAnimRep[1]);
+		float $fr[];
+		$fr = python("s100_AM.s100_AM().getKeyRange(\""+$wayImp + $name + ".anim" +"\")");
+			if(`filetest -e ($wayImp + $name +".anim")`)
+			{
+				file -f -open ($way + $rig);
+				$timeIn = `playbackOptions -e -animationStartTime $fr[0]`;
+				$timeOut = `playbackOptions -e -animationEndTime $fr[1]`;
+				print($wayImp);
+				$python = "s100_AM.s100_AM().importKey(path=\\\""+ $wayImp + $name + ".anim"  + "\\\",cropIn=" + $fr[0] + ",cropOut=" + $fr[1] + ",placeIn=" +$fr[0]+",placeOut="+$fr[1]+",action='"+ "" +"')";
+
+				$imp = "python(\"" + $python + "\")";
+				$eval = eval($imp);
+
+				file -rename "untiltled";
+            }
+
+    }
+}

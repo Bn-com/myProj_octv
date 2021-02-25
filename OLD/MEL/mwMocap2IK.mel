@@ -1,0 +1,139 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwMocap2IK()
+{
+	$tmp = `ls -sl`;
+	string $name_parts[];
+	string $selected = $tmp[0];
+	int $tok = tokenize($selected, "_", $name_parts);
+	if(`strcmp "l" $name_parts[$tok-1]`==0||`strcmp "r" $name_parts[$tok-1]`==0)
+	{
+		string $char = $name_parts[0];
+		string $side = $name_parts[$tok-1];
+		string $leg = $tmp[0];
+
+		//DUPLICATE LEG
+		string $dup[] = `duplicate -rr -ic $leg`;
+		delete `pickWalk -d down $dup`;
+		string $leg_list[] = `listRelatives -ad -pa $leg`;
+
+		//GET TOE POSITION
+		$tmp = `spaceLocator`;
+		string $toe_loc = `rename $tmp ($char+"_toeLoc_"+$side)`;
+		string $pc[] = `pointConstraint -weight 1 $leg_list[0] $toe_loc`;
+		delete $pc;
+
+		//GET BALL OF FOOT POSITION
+		$tmp = `spaceLocator`;
+		string $ball_loc = `rename $tmp ($char+"_ballLoc_"+$side)`;
+		string $pc[] = `pointConstraint -weight 1 $leg_list[1] $ball_loc`;
+		delete $pc;
+
+		//GET ANKLE POSITION
+		$tmp = `spaceLocator`;
+		string $ankle_loc = `rename $tmp ($char+"_ankleLoc_"+$side)`;
+		string $pc[] = `pointConstraint -weight 1 $leg_list[2] $ankle_loc`;
+		delete $pc;
+
+		//GET HIP POSITION
+		$tmp = `spaceLocator`;
+		string $pole_loc = `rename $tmp ($char+"_poleLoc_"+$side)`;
+		string $pc[] = `pointConstraint -weight 1 $leg $pole_loc`;
+		delete $pc;
+
+		//CREATE FOOT CONTROL GROUPS
+		string $tGroup = `group -em -name ($char+"_toeRot_"+$side)`;
+		float $piv[3] = `xform -q -ws -rp ($char+"_ballLoc_"+$side)`;
+		xform -piv $piv[0] $piv[1] $piv[2] $tGroup;
+		string $bGroup = `group -em -name ($char+"_ballRot_"+$side)`;
+		xform -piv $piv[0] $piv[1] $piv[2] $bGroup;
+
+		//CONSTRAIN FOOT CONTROLS
+		string $toe_oc[] = `orientConstraint -weight 1 $leg_list[1] $tGroup`;
+		string $aGroup = `group -name ($char+"_ankleRot_"+$side) $bGroup $tGroup`;
+		$piv = `xform -q -ws -rp ($char+"_ankleLoc_"+$side)`;
+		xform -piv $piv[0] $piv[1] $piv[2] $aGroup;
+		string $ankle_pc[] = `pointConstraint -weight 1 $leg_list[2] $aGroup`;
+		string $ankle_oc[] = `orientConstraint -weight 1 $leg_list[2] $aGroup`;
+
+		//PARENT FOOT LOCATORS TO FOOT CONTROL GROUPS
+		parent $toe_loc $ball_loc $tGroup;
+		float $p[3] = `xform -q -ws -rp $leg_list[1]`;
+		float $p1[3] = `xform -q -ws -rp $leg_list[2]`;
+		float $x = abs($p[0]-$p1[0]);
+		float $z = abs($p[2]-$p1[2]);
+		string $ball_ac[];
+		if($x<$z)
+		{
+			if($p[2]<$p1[2])
+			{
+				$ball_ac = `aimConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 $leg_list[2] $bGroup`;
+			}
+			else
+			{
+				$ball_ac = `aimConstraint -weight 1 -aimVector 0 0 -1 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 $leg_list[2] $bGroup`;
+			}
+		}
+		else
+		{
+			if($p[0]<$p1[0])
+			{
+				$ball_ac = `aimConstraint -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 $leg_list[2] $bGroup`;
+			}
+			else
+			{
+				$ball_ac = `aimConstraint -weight 1 -aimVector -1 0 0 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 $leg_list[2] $bGroup`;
+			}
+		}
+		parent $ankle_loc $bGroup;
+
+		//BAKE MOCAP TO FOOT CONTROLS
+		float $start = `playbackOptions -q -min`;
+		float $end = `playbackOptions -q -max`;
+		bakeResults -simulation true -t ($start+":"+$end) -hierarchy below -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys false -sparseAnimCurveBake false -controlPoints false -shape false $aGroup;
+
+		//DELETE THE CONSTRAINTS
+		delete $toe_oc $ball_ac $ankle_pc $ankle_oc;
+
+		//CREATE IK HANDLES
+		string $ik[] = `ikHandle -sj $leg -ee $leg_list[2]`;
+		string $footIK[] = `ikHandle -sj $leg_list[2] -ee $leg_list[1]`;
+		string $toeIK[] = `ikHandle -sj $leg_list[1] -ee $leg_list[0]`;
+
+		//PLACE POLEVECTOR LOCATOR
+		float $pvX = `getAttr ($ik[0]+".poleVectorX")`;
+		float $pvY = `getAttr ($ik[0]+".poleVectorY")`;
+		float $pvZ = `getAttr ($ik[0]+".poleVectorZ")`;
+		move -r $pvX $pvY $pvZ $pole_loc;
+
+		//CONSTRAIN IK HANDLES
+		string $ik_pc[] = `pointConstraint -weight 1 $ankle_loc $ik[0]`;
+		string $ik_pole[] = `poleVectorConstraint -weight 1 $pole_loc $ik[0]`;
+		pointConstraint -weight 1 $ball_loc $footIK[0];
+		pointConstraint -weight 1 $toe_loc $toeIK[0];
+
+		//PARENT POLEVECTOR LOCATOR
+		parent $pole_loc $dup[0];
+
+		//GROUP IK HANDLES AND PARENT
+		string $ikGroup = `group -name ($char+"_HANDLE_"+$side+"_GROUP") $ik[0]`;
+		$piv = `xform -q -ws -rp $leg`;
+		xform -piv $piv[0] $piv[1] $piv[2] $ikGroup;
+		parent $ikGroup `listRelatives -parent $leg`;
+		parent $toeIK[0] $footIK[0];
+		parent $footIK[0] $ik[0];
+	}
+	else
+	{
+		print "NO SIDE DESIGNATION\n";
+	}
+
+}

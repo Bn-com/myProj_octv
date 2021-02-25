@@ -1,0 +1,110 @@
+global proc woMakeEyes()
+{	
+	//source "ysMakeEyes.mel";
+	source "zxEdgeConstrain.mel";
+	// Make matte shader and assign it to objects
+	if(!(`objExists "MatteSG"`) && !(`objExists "Matte"`))
+	{
+		shadingNode -asShader lambert -name Matte;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr Matte.matteOpacityMode 0;
+		sets -renderable true -noSurfaceShader true -empty -name "MatteSG";
+		connectAttr -force Matte.outColor MatteSG.surfaceShader;
+	}
+	string $allObjects[] = `ls -geometry -ni`;
+	string $allEyes[] = `ls -geometry -ni "*eye_L*" "*:*_eye_L*"`;
+	string $rEye[] = `ls -geometry -ni "*eye_R*" "*:*_eye_R*"`;
+	int $countEyes = size($rEye);
+	appendStringArray($allEyes, $rEye, $countEyes);
+	string $allObjects[] = stringArrayRemove($allEyes, $allObjects);
+
+	//Create Eye's render layer
+	createRenderLayer -name "CharEyes" -number 1 -makeCurrent -noRecurse $allObjects $allEyes `ls -lights`;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	setAttr "defaultRenderLayer.renderable" 0;
+	for ($obj in $allObjects )
+	{
+		string $parent[] = `listRelatives -p -f $obj`;
+		catch(`sets -e -forceElement MatteSG  $parent`);
+	}
+	
+	// Looking for namespace of reference nodes 
+	//string $rfNodes[] = `ls -type "reference"`;
+	string $rfNodes[];
+	for ($eyes in $allEyes)
+	{
+		string $buff[];
+		int $num = `tokenize $eyes ":" $buff`;
+		string $pre = `substring $eyes 1 (size($eyes)-size($buff[$num-1])-1)`;
+		$rfNodes[size($rfNodes)] = $pre;
+	}
+	$rfNodes = stringArrayRemoveDuplicates($rfNodes);
+	for($item in $rfNodes)
+	{
+			string $rfSN = $item;
+			string $leftEye_01 = $rfSN + ":MSH_eye_L_";
+			string $rightEye_01 = $rfSN + ":MSH_eye_R_";		
+			
+			$leftEyeEdgeL_01 = $rfSN + ":MSH_eye_L_.e[769]" ;
+			$leftEyeEdgeR_01 = $rfSN + ":MSH_eye_L_.e[779]" ;
+			$rightEyeEdgeL_01 = $rfSN + ":MSH_eye_R_.e[769]" ;
+			$rightEyeEdgeR_01 = $rfSN + ":MSH_eye_R_.e[779]";
+			select $leftEyeEdgeL_01 $leftEyeEdgeR_01;
+			ysApplyPointLight($leftEye_01);
+			woRenderSetMat($leftEye_01);
+			select $rightEyeEdgeL_01 $rightEyeEdgeR_01;
+			ysApplyPointLight($rightEye_01);	
+			woRenderSetMat($rightEye_01);
+	}
+}
+
+global proc ysApplyPointLight(string $item)
+{
+	zxEdgeConstrain;
+	string $locGrp = `rename zxEdgeCons1 LocGrp`;
+	string $pLight = `pointLight`;
+	parent $pLight $locGrp;
+	$pLightTransform = `listRelatives -parent $pLight`;
+	string $listLights[] = `listConnections -s on -d off "defaultLightSet.dagSetMembers"`;
+	int $countLight = size($listLights)-1;
+	if($countLight != 0)
+	{
+		disconnectAttr ($pLightTransform[0] + ".instObjGroups") ("defaultLightSet.dagSetMembers["+$countLight+"]");
+	}
+	if($countLight == 0)
+	{
+		disconnectAttr ($pLightTransform[0] + ".instObjGroups") ("defaultLightSet.dagSetMembers[0]");
+	}
+	setAttr ($pLight + ".emitDiffuse") 0;
+	setAttr ($pLightTransform[0] + ".rotateX")	0;
+	setAttr ($pLightTransform[0] + ".rotateY")	0;	
+	setAttr ($pLightTransform[0] + ".rotateZ")	0;
+	setAttr ($pLightTransform[0] + ".translateX") -3;
+	setAttr ($pLightTransform[0] + ".translateY") -0.796;
+	setAttr ($pLightTransform[0] + ".translateZ") 0;
+	lightlink -make -light $pLightTransform -object $item;
+}
+
+global proc woRenderSetMat(string $item)
+{
+	string $buff[] = `listRelatives -c $item`;
+	$item = $buff[0];
+	string $sgs[] = `listConnections -type shadingEngine $item`;
+	for ($sg in $sgs)
+	{
+		string $allUPs[] = `hyperShade -lun $sg`;
+		for ($node in $allUPs)
+		{
+			if (nodeType($node) == "phongE" && match("eye",$node) != "")
+			{
+				string $set = `sets -renderable true -noSurfaceShader true -empty -name ($node+"SG")`;
+				connectAttr -force ($node+".outColor") ($set+".surfaceShader");
+				sets -e -forceElement $set $item;
+
+				setAttr ($node+".transparency") -type double3 0 0 0;
+				setAttr ($node+".roughness") 1.322;
+				setAttr ($node+".highlightSize") 0.074;
+			}
+		}
+	}
+}

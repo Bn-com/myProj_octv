@@ -1,0 +1,79 @@
+global proc zwWinxCacheProc(string $file)
+{
+	string $buf[];
+	tokenize $file "." $buf;
+	string $str = `match "_[^_]+$" $buf[0]`;
+	if (!($str == "_cache" || $str == "_anim" || $str == "_render"))
+	{
+		error "只有cache、anim 和render 文件才可以进行此操作";
+	}
+	string $cache = `substitute ($str + "$") $buf[0] "_cache.mb"`;
+	if (!`filetest -f $cache`)
+	{
+		error ("对应的" + $cache + "不存在");
+	}
+
+// Create New Cache
+	string $dir = `zwCacheSetDirectory "geoCache" ""`;
+	if (!`filetest -d $dir`)
+	{
+		error "不能自动指定geoCache 目录";
+	}
+	string $cacheFile = `match "[^/\\]+$" $cache`;
+	$cacheFile = `match "[^.]+" $cacheFile`;
+	$cacheFile = `substitute "_cache$" $cacheFile ""`;
+	$str = `match "[{][0-9]+[}]$" $file`;
+	if ($str != "")
+	{
+		$cacheFile += `match "[0-9]+" $str`;
+	}
+	$dir += "/" + $cacheFile;
+	if (!`filetest -d $dir`)
+	{
+		sysFile -makeDir $dir;
+	}
+	if (!`filetest -d $dir`)
+	{
+		error ("不能自动生成Cache 目录：" + $dir);
+	}
+	if (`filetest -f ($dir + "/" + $cacheFile + ".xml")`)
+	{
+		sysFile -del ($dir + "/" + $cacheFile + ".xml");
+	}
+
+	if (`control -exists "modelPanel4"`)
+	{
+		isolateSelect -state 0 "modelPanel4";
+	}
+	$buf = `referenceQuery -dagPath -nodes $file`;
+	$buf = `ls -visible -type "mesh" -noIntermediate $buf`;
+	select $buf;
+	if (`control -exists "modelPanel4"`)
+	{
+		isolateSelect -state 1 "modelPanel4";
+	}
+
+	optionVar -stringValue "zwGeomCacheDirName" $dir;
+	optionVar -stringValue "zwGeomCacheName" $cacheFile;
+	performCreateGeometryCache 3 "replace";
+
+// Add Cache
+	string $namespace = `match "[^/\\]+$" $cache`;
+	$namespace = `match "[^.]+" $namespace`;
+	$file = `file -reference -namespace $namespace $cache`;
+
+// Import Cache
+	eval "source \"zwImportCacheByNamespace.mel\"";
+	string $namespace = `file -query -renamingPrefix $file`;
+	zwImportCacheByNamespaceproc $namespace ($dir + "/" + $cacheFile + ".xml") "";
+}
+
+global proc zwWinxCache()
+{
+	global string $gReferenceEditorPanel;
+	string $selFileReal[] = `sceneEditor -query -selectItem $gReferenceEditorPanel`;
+	for ($file in $selFileReal)
+	{
+		zwWinxCacheProc $file;
+	}
+}

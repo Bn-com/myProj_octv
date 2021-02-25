@@ -1,0 +1,307 @@
+global proc ezAnimLib()
+{
+	global string $ezAnimLibFolder;
+	$ezAnimLibFolder = "\\\\file-cluster\\GDC\\Projects\\woodlies\\Woodlies_Scratch\\Animation\\动作库\\";
+
+	string $gender[] = {"boy", "girl"};
+
+	if (`window -exists "ezAnimLib"`)
+		deleteUI "ezAnimLib";
+	window -mb true -width 328 -height 400 -title "Animation Library" ezAnimLib;
+
+		menu -label "Help";
+			menuItem -label "Help on ezAnimLib..." -command "zjHelpCallback ezAnimLib";
+		
+		columnLayout -rowSpacing 5;
+			optionMenu -changeCommand "ezAnimLibSelectClass" ezAnimLibOmClass;
+			string $buf[] = `getFileList -folder $ezAnimLibFolder`;
+			for ($class in $buf)
+			{
+				if (`filetest -d ($ezAnimLibFolder + $class)`)
+				{
+					menuItem -label $class;
+				}
+			}
+			textScrollList -width 320 -visible false -selectCommand "ezAnimLibSelectAnim" ezAnimLibTslAnim;
+			textScrollList -width 320 -visible false -selectCommand "ezAnimLibSelectAnimLib" ezAnimLibTslAnimLib;
+			
+			string $formLayout = `formLayout`;
+				//button -width 104 -enable false -label "导入角色" -command "ezAnimLibImportCharacter" ezAnimLibBtnImportCharacter;
+				button -width 154 -enable false -label "导入动画" -command "ezAnimLibImportAnim" -annotation "先选择一个MASTER" ezAnimLibBtnImportAnim;
+				button -width 154 -enable false -label "浏览avi" -command "ezAnimLibAvi" ezAnimLibBtnAvi;
+	
+				formLayout -edit
+					-attachForm	ezAnimLibBtnImportAnim		"left"		4	
+					-attachControl	ezAnimLibBtnAvi			"left"		4	ezAnimLibBtnImportAnim
+				$formLayout;
+	showWindow ezAnimLib;
+
+	ezAnimLibSelectClass;
+}
+
+global proc ezAnimLibSelectClass()
+{
+	global string $ezAnimLibFolder;
+
+	textScrollList -edit -removeAll -visible false ezAnimLibTslAnim;
+//	button -edit -enable false ezAnimLibBtnImportCharacter;
+	button -edit -enable false ezAnimLibBtnImportAnim;
+	button -edit -enable false ezAnimLibBtnAvi;
+
+	int $i = 0;
+	string $class = `optionMenu -query -value ezAnimLibOmClass`;
+	string $buf[] = `getFileList -folder ($ezAnimLibFolder + $class + "\\")`;
+	for ($anim in $buf)
+	{
+		if (`filetest -d ($ezAnimLibFolder + $class + "\\" + $anim)`)
+		{
+			textScrollList -edit -append $anim ezAnimLibTslAnim;
+			$i ++;
+		}
+	}
+	if ($i)
+	{
+		textScrollList -edit -visible true -numberOfRows $i -selectIndexedItem 1 ezAnimLibTslAnim;
+		ezAnimLibSelectAnim;
+	}
+}
+
+global proc ezAnimLibSelectAnim()
+{
+	global string $ezAnimLibFolder;
+
+	textScrollList -edit -removeAll -visible false ezAnimLibTslAnimLib;
+//	button -edit -enable false ezAnimLibBtnImportCharacter;
+	button -edit -enable false ezAnimLibBtnImportAnim;
+	button -edit -enable false ezAnimLibBtnAvi;
+
+	string $class = `optionMenu -query -value ezAnimLibOmClass`;
+	string $anim[] = `textScrollList -query -selectItem ezAnimLibTslAnim`;
+	if (!size($anim))
+	{
+		return;
+	}
+	int $i = 0;
+	string $buf[] = `getFileList -filespec ($ezAnimLibFolder + $class + "\\" + $anim[0] + "\\*.mb")`;
+	for ($animLib in $buf)
+	{
+		if (`filetest -f ($ezAnimLibFolder + $class + "\\" + $anim[0] + "\\" + $animLib)`)
+		{
+			textScrollList -edit -append $animLib ezAnimLibTslAnimLib;
+			$i ++;
+		}
+	}
+	if ($i)
+	{
+		textScrollList -edit -visible true -numberOfRows $i -selectIndexedItem 1 ezAnimLibTslAnimLib;
+//		button -edit -enable true ezAnimLibBtnImportCharacter;
+		button -edit -enable true ezAnimLibBtnImportAnim;
+
+		ezAnimLibSelectAnimLib;
+	}
+}
+
+global proc ezAnimLibSelectAnimLib()
+{
+	string $avi = ezAnimLibGetAvi();
+	int $enable = `filetest -f $avi`;
+	button -edit -enable $enable ezAnimLibBtnAvi;
+}
+
+global proc ezAnimLibExport()
+{
+	if (!`pluginInfo -query -loaded "animImportExport.mll"`)
+		loadPlugin "animImportExport.mll";
+
+	string $mb = `file -query -sceneName`;
+	string $buf[];
+	tokenize $mb "/" $buf;
+	string $anim = $buf[size($buf)-1];
+	$anim = `substring $anim 1 (size($anim)-2)` + "anim";
+	string $temp = `internalVar -userTmpDir` + $anim;
+	string $options = "precision=8;intValue=17;nodeNames=1;verboseUnits=0;whichRange=1;range=0:10;options=keys;hierarchy=below;controlPoints=0;shapes=1;helpPictures=0;useChannelBox=0;copyKeyCmd=-animation objects -option keys -hierarchy below -controlPoints 0 -shape 1 ";
+	select `ls -long -assemblies "*_MASTER"`;
+	file -options $options -type "animExport" -exportSelected $temp;
+	idmtFile -edit -modified $mb $temp;
+	string $dest = `substring $mb 1 (size($mb)-2)` + "anim";
+	zwSysFile "move" $temp $dest true;
+}
+
+global proc ezAnimLibImportAnim()
+{
+	string $buf[];
+
+	string $sel[] = `ls -selection `;
+	if (size($sel) != 1)
+	{
+		error "请选择一个MASTER";
+	}
+	tokenize $sel[size($sel)-1] "|" $buf;
+	string $character = `substitute "Master$" $buf[size($buf)-1] ""`;
+	string $set = $character + "bodySet";
+	if (!`objExists $set`)
+	{
+		error ("找不到" + $set);
+	}
+
+	if (!`pluginInfo -query -loaded "animImportExport.mll"`)
+		loadPlugin "animImportExport.mll";
+
+	string $mb = ezAnimLibGetAnimLib();
+	string $anim = `substring $mb 1 (size($mb)-2)` + "anim";
+
+	string $class = `optionMenu -query -value ezAnimLibOmClass`;
+	
+	file -reference -namespace "ezAnimLib" $mb;
+	catch(`ezAnimLibCopyPaste $character`);
+	file -removeReference $mb;
+	select $sel;
+}
+
+global proc ezAnimLibCopyPaste(string $character)
+{
+	string $buf[] = `ls "ezAnimLib:*:*Master" "ezAnimLib:*Master"`;
+	if (size($buf) != 1)
+	{
+		error "Master";
+	}
+	tokenize $buf[size($buf)-1] "|" $buf;
+	string $set = `substitute "Master$" $buf[size($buf)-1] "bodySet"`;
+	if (!`objExists $set`)
+	{
+		error ("找不到" + $set);
+	}
+	string $prefix = `substitute "bodySet$" $set ""`; 
+
+	$buf = `sets -query $set`;
+	for ($sourceObj in $buf)
+	{
+		string $destObj = `substitute $prefix $sourceObj $character`;
+		if (`objExists $destObj`)
+		{
+			if (`copyKey $sourceObj`)
+			{
+				pasteKey $destObj;
+			}
+		}
+	}
+}
+
+
+/*
+global proc slAnimLibCopyPaste(string $character)
+{
+	slUnlockJoint ($character);
+	string $buf[] = `ls "zwAnimLib:*:*_MASTER" "zwAnimLib:*_MASTER"`;
+	if (size($buf) != 1)
+	{
+		error "找不到MASTER";
+	}
+	tokenize $buf[size($buf)-1] "|" $buf;
+	string $set = `substitute "_MASTER$" $buf[size($buf)-1] "_set"`;
+	if (!`objExists $set`)
+	{
+		error ("找不到" + $set);
+	}
+	string $prefix = `substitute "_set$" $set ""`; 
+
+	$buf = `ls -type joint "zwAnimLib:*"`;
+	for ($sourceObj in $buf)
+	{
+		string $destObj = `substitute "zwAnimLib:" $sourceObj ($character+"_")`;
+		if (`objExists $destObj`)
+		{
+			if (`copyKey $sourceObj`)
+			{
+				pasteKey $destObj;
+			}
+		}
+	}
+}
+
+global proc slUnlockJoint(string $char)
+{
+	string $joints[] = `ls -type joint ($char+"_*")`;
+	for ($temp in $joints )
+	{
+		setAttr -lock false -keyable true ($temp + ".tx");
+		setAttr -lock false -keyable true ($temp + ".ty");
+		setAttr -lock false -keyable true ($temp + ".tz");
+		setAttr -lock false -keyable true ($temp + ".rx");
+		setAttr -lock false -keyable true ($temp + ".ry");
+		setAttr -lock false -keyable true ($temp + ".rz");
+
+		delete -icn ($temp + ".tx");
+		delete -icn ($temp + ".ty");
+		delete -icn ($temp + ".tz");
+		delete -icn ($temp + ".rx");
+		delete -icn ($temp + ".ry");
+		delete -icn ($temp + ".rz");
+	}
+}
+*/
+
+global proc ezAnimLibImportCharacter()
+{
+	string $mb = ezAnimLibGetAnimLib();
+	string $character = ezAnimLibGetCharacter();
+	if ($character == "")
+	{
+		$character = "group";
+	}
+	string $groupName;
+	for ($i=0; ; $i++)
+	{
+		if ($i == 0)
+			$groupName = $character;
+		else
+			$groupName = $character + "_" + $i;
+		string $buf[] = `ls $groupName`;
+		if (!size($buf))
+			break;
+	}
+	file -import -type "mayaBinary" -groupReference -groupName $groupName $mb;
+	select $groupName;
+}
+
+global proc ezAnimLibAvi()
+{
+	string $avi = ezAnimLibGetAvi();
+	system ("load " + $avi);
+}
+
+global proc string ezAnimLibGetAnimLib()
+{
+	global string $ezAnimLibFolder;
+
+	string $class = `optionMenu -query -value ezAnimLibOmClass`;
+	string $anim[] = `textScrollList -query -selectItem  ezAnimLibTslAnim`;
+	string $animLib[] = `textScrollList -query -selectItem  ezAnimLibTslAnimLib`;
+	
+	return ($ezAnimLibFolder + $class + "\\" + $anim[0] + "\\" + $animLib[0]);
+}
+
+global proc string ezAnimLibGetAvi()
+{
+	string $mb = ezAnimLibGetAnimLib();
+	string $avi = `substring $mb 1 (size($mb)-2)` + "avi";
+
+	return $avi;
+}
+
+global proc string ezAnimLibGetCharacter()
+{
+	string $buf[] = `textScrollList -query -selectItem ezAnimLibTslAnimLib`;
+	string $character = $buf[0];
+	if (`tokenize $character "_" $buf` > 2)
+	{
+		$character = $buf[1];
+	}
+	else
+	{
+		$character = ""; 
+	}
+	$character = `substitute "^dvd" $character ""`;
+
+	return $character;
+}

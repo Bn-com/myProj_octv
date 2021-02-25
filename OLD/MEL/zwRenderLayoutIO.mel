@@ -1,0 +1,119 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ª∆÷ŸŒ¨
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwRenderLayoutIO()
+{
+	if (`window -exists "renderLayoutIO"`)
+		deleteUI "renderLayoutIO";
+	window -menuBar true -sizeable false -resizeToFitChildren true -title "Matte Export, Render Layer Import/Export" "renderLayoutIO";
+		menu -label "Help";
+			menuItem -label "Help on Render Layout IO..." -command "zjHelpCallback zwRenderLayoutIO";
+		columnLayout -adjustableColumn true;
+			button -align "left" -label "Export Render Layer..." -command "renderLayerExportBrowse";
+			button -align "left" -label "Import Render Layer..." -command "renderLayerImportBrowse";
+			button -align "left" -label "Export Scene As Matte File..." -command "matteExportBrowse \"exportAll\"";
+			rowLayout -numberOfColumns 2 -columnAttach 1 "both" 0 -columnAttach 2 "both" 0 -adjustableColumn 2;
+				button -align "left" -label "Matte Object" -command "matteExportList";
+				button -align "left" -label "Export Selection As Matte File..." -command "matteExportBrowse \"exportSelected\"";
+
+	showWindow "renderLayoutIO";
+}
+
+global proc renderLayerExportBrowse()
+{
+	fileBrowserDialog -mode 1 -fileCommand "renderLayerExport" -fileType "Best Guess" -actionName "Export";
+}
+
+global proc renderLayerImportBrowse()
+{
+	fileBrowserDialog -mode 0 -fileCommand "renderLayerImport" -fileType "Best Guess" -actionName "Import";
+}
+
+global proc matteExportBrowse(string $type)
+{
+	fileBrowserDialog -mode 1 -fileCommand ("matteExport \"" + $type + "\"") -fileType "mayaBinary" -actionName "Export";
+}
+
+global proc renderLayerExport(string $filename, string $fileType)
+{
+	int $i;
+
+	int $fileId = `fopen $filename "w"`;
+	string $buf[] = `listConnections "renderLayerManager"`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		if ($i != 0)
+			fprint $fileId "\n";
+		fprint $fileId ($buf[$i] + "\n");
+		string $buf1[] = `editRenderLayerMembers -query -fullNames $buf[$i]`;
+		for ($str in $buf1)
+			fprint $fileId ($str + " ");
+	}
+	fclose $fileId;
+}
+
+global proc renderLayerImport(string $filename, string $fileType)
+{
+	string $buf[];
+
+	int $fileId = `fopen $filename "r"`;
+	if ($fileId == 0)
+		return;
+	while ( !`feof $fileId` )
+	{
+		string $layer = strip(`fgetline $fileId`);
+		if (!`objExists $layer`)
+			createRenderLayer -empty -name $layer;
+		string $str = `fgetline $fileId`;
+		if (`tokenize $str " " $buf` != 0)
+		{
+			for ($obj in $buf)
+			{
+				if (`objExists $obj`)
+					editRenderLayerMembers -noRecurse $layer $obj;
+				else
+					warning ($obj + " does not exists.");
+			}
+		}
+	}
+	fclose $fileId;
+}
+
+global proc string matteExport(string $type, string $filename, string $fileType)
+{
+	if ($type == "exportAll")
+	{
+		matteExportList;
+		file -type $fileType -exportAll $filename;
+	}
+	else if ($type == "exportSelected")
+		file -type $fileType -exportSelected $filename;
+	waitCursor -state on;
+	system ("mayabatch -file \"" + $filename + "\" -command \"zwAssignMatte\"");
+	waitCursor -state off;
+	if (!`filetest -f $filename`)
+		error "Export As Matte File Failed!";
+	
+	return $filename;
+}
+
+global proc matteExportList()
+{
+	string $file = `internalVar -userTmpDir` + "exporMatte.txt";
+	string $buf[] = `ls -long -sl`;
+	int $fileId = `fopen $file "w"`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		if ($i != 0)
+			fprint $fileId "\n";
+		fprint $fileId $buf[$i];
+	}
+	fclose $fileId;
+}

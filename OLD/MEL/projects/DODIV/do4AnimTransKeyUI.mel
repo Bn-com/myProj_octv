@@ -1,0 +1,133 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc do4AnimTransKeyUI()
+{
+	if (`window -ex do4AnimTransKeyWin`)
+		deleteUI do4AnimTransKeyWin;
+	
+	window  -menuBar true -title "¹ý¶ÉÖ¡" -resizeToFitChildren true do4AnimTransKeyWin;
+		columnLayout -adjustableColumn true;
+			button -label "AnimLayer" -h 30 -command "do4AnimTransKeyMergeAnimLayers";
+			button -label "Line" -h 30 -command "do4AnimTransKey 0";
+			button -label "Cycle" -h 30 -command "do4AnimTransKey 1";
+
+	showWindow do4AnimTransKeyWin;
+	window -e -wh 210 100 do4AnimTransKeyWin;
+}
+
+global proc do4AnimTransKeyMergeAnimLayers()
+{
+	string $animLayers[] = `ls -type animLayer`;
+	if (size($animLayers)>1)
+	{
+		source performAnimLayerMerge.mel;
+		animLayerMerge $animLayers;
+	}
+}
+
+
+//type---0   linear
+//type---1   cycle
+global proc do4AnimTransKey(int $type)
+{
+	string $animCurves[]={};
+	
+	string $sel[] = `ls -sl`;
+	if (size($sel))
+	{
+		for ($item in $sel)
+		{
+			string $source[] = `listConnections -s 1 -d 0 -type animCurve $item`;
+			for ($s in $source)
+			{
+				if (!`referenceQuery -inr $s`)
+				{
+					$animCurves[size($animCurves)]=$s;
+				}
+			}
+		}
+	}
+	/*else 
+	{
+		string $source[] = `ls -type animCurve`;
+		for ($s in $source)
+		{
+			if (!`referenceQuery -inr $s`)
+			{
+				$animCurves[size($animCurves)]=$s;
+			}
+		}
+	}*/
+
+	int $start = `playbackOptions -q -min`;
+	int $end = `playbackOptions -q -max`;
+	int $transS = $start-50;
+	int $transE = $end+50;
+
+	for ($ac in $animCurves)
+	{
+		setKeyframe -t $start -t $end -i $ac;
+
+		float $time[] = `keyframe -q -tc $ac`;
+
+		if($time[0]<=($start-1))
+		{
+		    cutKey -clear -t ($time[0]+":"+($start-1)) $ac;
+		}
+
+		if ($type==1)
+		{
+			//print "cycle\n";
+			if($time[size($time)-1]>=($end+1))
+			{
+			    cutKey -clear -t ($time[size($time)-1]+":"+($end+1)) $ac;
+			}
+			/*select -r $ac;
+			setInfinity -pri cycle ;
+			setInfinity -poi cycle ;
+			select -cl;*/
+		}
+		else if ($type ==0)
+		{
+			//print "line\n";
+			keyTangent -itt spline -t $start $ac;
+			/*select -r $ac;
+			setInfinity -pri linear;
+			select -cl;*/
+		}
+	}
+
+	for ($c in $sel)
+	{
+		switch ($type)
+		{
+			case 0 :
+				setInfinity -pri linear -s 1 $c;
+				break;
+			case 1 :
+				setInfinity -pri cycle  -poi cycle -s 1 $c;
+				break;
+		}
+		string $cons[] = `listConnections -s 1 -d 0 -type constraint $c`;
+		string $pair[] = `listConnections -s 1 -d 0 -type pairBlend $c`;
+		if (!size($cons) && !size($pair))
+		{
+			bakeResults -sampleBy 1 -time ($transS+":"+($start-1)) -preserveOutsideKeys 1 -sparseAnimCurveBake 1 {$c};
+			bakeResults -sampleBy 1 -time (($end+1)+":"+$transE) -preserveOutsideKeys 1 -sparseAnimCurveBake 1 {$c};
+			setInfinity -pri constant  -poi constant -s 1 $c;
+		}
+		
+	}
+
+	select -r $sel;
+}

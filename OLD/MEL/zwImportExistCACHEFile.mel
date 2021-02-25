@@ -1,0 +1,215 @@
+global proc zwImportExistCACHEFile()
+{
+	int $dirty = false;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if ($project == "")
+	{
+		return;
+	}
+
+	$sceneName = `match "^[^.]+" $sceneName`;
+	string $buf[];
+	if (`tokenize $sceneName "_" $buf` < 3)
+	{
+		return;
+	}
+	string $episode = "episode_" + $buf[1];
+	string $scene = "scene_" + $buf[2];
+
+	string $path = "//file-cluster/GDC/Projects/" + $project + "/Project/data/" + $episode + "/" + $scene + "/geoCache/";
+
+	string $folders[] = `getFileList -folder $path`;
+	for($folder in $folders)
+	{
+		if (!`filetest -d ($path + $folder)`)
+		{
+			continue;
+		}
+		if (`match "history" $folder` != "")
+		{
+			continue;
+		}
+
+		if (`tokenize $folder "_" $buf` < 2)
+		{
+			continue;
+		}
+		string $assetId = $buf[1];
+
+		string $master = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/characters/" + $assetId + "/master/" + $folder + ".mb";
+		if (!`filetest -f $master`)
+		{
+			$master = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/props/" + $assetId + "/master/" + $folder + ".mb";
+		}
+		if (!`filetest -f $master`)
+		{
+			continue;
+		}
+
+		int $find = false;
+		string $references[] = `file -query -reference`;
+		for ($reference in $references)
+		{
+			string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+			if (tolower($filename) == tolower($folder) + ".mb")
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+
+		xyImportExistCACHEFile(true, $master, $path + $folder, $folder);
+		$dirty = true;
+
+		string $selFileReal = "";
+		string $references[] = `file -query -reference`;
+		for ($reference in $references)
+		{
+			string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+			if (tolower($filename) == tolower($folder) + ".mb")
+			{
+				$selFileReal = $reference;
+				break;
+			}
+		}
+		if ($selFileReal == "")
+		{
+			continue;
+		}
+
+		string $temp = `internalVar -userTmpDir` + "zwShadingEngineIOtemp.mel";
+		sysFile -delete $temp;
+
+		string $renamePrefix = `file -query -namespace $selFileReal`;
+
+		string $node = `file -query -referenceNode $selFileReal`;
+		string $namespace = `match "([^:]+:)+" $node`;
+		$renamePrefix = $namespace + $renamePrefix;
+
+		string $cmd = "mayabatch -file \"" + $master + "\" -command \"zwShadingEngineIO \\\"" + $renamePrefix + "\\\"\"";
+		waitCursor -state on;
+		system $cmd;
+		waitCursor -state off;
+
+		eval ("source \"" + $temp + "\"");
+		sysFile -delete $temp;
+	}
+
+	if ($dirty)
+	{
+		file -save;
+	}
+}
+
+global proc xyImportExistCACHEFile(string $CACHEFileCheckBox,string $CACHEFilePathField,string $CachePathField,string $CacheNameField )
+{
+int $doImCACHEFile = $CACHEFileCheckBox;
+string $CACHEFilePath = $CACHEFilePathField;
+if ($doImCACHEFile) 
+{
+ //++++++++++++++++++++++++
+ string $basenamePrefix = `match "[^/\\]+$" $CACHEFilePath`;
+	$basenamePrefix = `match "[^.]+" $basenamePrefix`;
+
+ string $renamePrefix = $basenamePrefix;
+int $nameexist = `namespace -exists $renamePrefix`;
+int $nameid = 1;
+
+while ($nameexist)
+	{ 
+$renamePrefix = $basenamePrefix;
+$renamePrefix = $renamePrefix + $nameid+"clone";
+$nameexist = `namespace -exists $renamePrefix`;
+$nameid++;
+	} 
+
+
+ file -reference -namespace $renamePrefix $CACHEFilePath;
+ //++++++++++++++++++++++++
+//*
+ string $mintime = `playbackOptions -q -min`;
+ string $maxtime =`playbackOptions -q -max`;
+ string $geoCachePath = $CachePathField;
+ string $geoCacheName = $CacheNameField;
+
+ string $cachefilename = `createNode cacheFile -n $renamePrefix`;
+  setAttr ($cachefilename+".cn") -type "string" $geoCacheName;
+  setAttr ($cachefilename+".cp") -type "string" $geoCachePath ;
+	setAttr ($cachefilename+".os") $mintime;
+	setAttr ($cachefilename+".oe") $maxtime;
+	setAttr ($cachefilename+".ss") $mintime;
+	setAttr ($cachefilename+".se") $maxtime;
+	setAttr ($cachefilename+".sf") $mintime;
+
+ connectAttr ":time1.o" ($cachefilename+".tim");
+
+string $channelnames[] =`cacheFile -q -cnm  $cachefilename`;
+
+  string $arraych[] ={};
+ string $arraychclash[]={};
+  $arraychclash = stringToStringArray($channelnames[0], "|");
+string $basename = $arraychclash[size($arraychclash)-1];
+  $arraych = stringToStringArray($basename, ":");
+  int $k =0;
+  $channelnamespace = "";
+  for($k=0;$k<size($arraych)-1;$k++)
+   {
+    $channelnamespace = ($channelnamespace+$arraych[$k]+":");
+    }
+
+ int $channelsize = size($channelnames);
+
+
+ setAttr -s $channelsize ($cachefilename+".ch");
+
+ for($i = 0;$i<$channelsize;$i++)
+   {
+   
+ string $chanelarraychclash[]={};
+ $chanelarraychclash = stringToStringArray($channelnames[$i], "|");
+string $basename = $chanelarraychclash[size($chanelarraychclash)-1];
+ 
+   setAttr ($cachefilename+".ch["+$i+"]") -type "string" $channelnames[$i];
+
+  string $arraych[] ={};
+  $arraych = stringToStringArray($basename, ":");
+  int $k =0;
+  $channelnamespace = "";
+  for($k=0;$k<size($arraych)-1;$k++)
+   {
+    $channelnamespace = ($channelnamespace+$arraych[$k]+":");
+    }
+
+
+
+
+   string $origename = `substitute  $channelnamespace $basename "" `;
+   $origename = `substitute  "Deformed" $origename "" `;
+   string $switchname = `createNode historySwitch -n ($origename+"swith") `;
+   setAttr ($switchname+".ihi") 0;
+   connectAttr ($cachefilename+".ocd["+$i+"]") ($switchname+".inp[0]");
+   connectAttr ($cachefilename+".ir") ($switchname+".pfc");
+   connectAttr -f ($renamePrefix+":"+$origename+".outMesh") ($switchname+".undeformedGeometry[0]");
+   disconnectAttr ($renamePrefix+":"+$origename+".outMesh") ($switchname+".undeformedGeometry[0]");
+   connectAttr -f ($switchname+".outputGeometry[0]") ($renamePrefix+":"+$origename+".inMesh");
+
+   }
+
+
+ print "\n";
+ print "²Î¿¼CACHE:";
+ print "\n";
+ print $CACHEFilePath;
+ print "\n";
+
+print $renamePrefix;
+print "\n";
+ }
+else;
+}

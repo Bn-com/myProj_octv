@@ -1,0 +1,134 @@
+/////////////////////////////////////////////////////////////////////////
+// UserSetup.mel will call this procedure. This procedure can be used
+// to execute common MEL scripts for the project when Maya is started.
+//
+// Ong Kiem Ching, 17 Dec 2001
+/////////////////////////////////////////////////////////////////////////
+
+global proc zwAddBasePivotMenu()
+{
+	global string $gMainModifyMenu;
+
+	menu -edit -postMenuCommandOnce false -postMenuCommand ("ModObjectsMenu \"" + $gMainModifyMenu + "\"") $gMainModifyMenu;
+
+	menuItem -parent $gMainModifyMenu -insertAfter "centrePivotItem" -label "Base Pivot" -annotation "Base Pivot: Select an object(s)" -command "zjBasePivot" basePivotItem;
+}
+
+global proc customIDMTSetup()
+{
+	zwInitEnv();
+
+// mental ray 只用一个CPU渲染
+	optionVar -intValue "v_mrBatchRenderNumThreadAuto" 0;
+	optionVar -intValue "v_mrBatchRenderNumThread" 1;
+	optionVar -intValue "v_mrBatchRenderLogVerbosity" 5;
+
+	if (!`about -batch`)
+	{
+		//enable help tooltip 2006.03.15 hanjiang
+		//i dunno where to put this...
+		help -popupMode 1 -popupDisplayTime 4;
+	}
+
+// get version
+	string $version = `about -version`;
+	$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+
+// set PATH
+//	if ((float)$version < 7.0)
+//	{
+//		string $path = `getenv "PATH"`;
+//		string $MAYA_LOCATION = `getenv "MAYA_LOCATION"`;
+//		$path = $MAYA_LOCATION + "/bin;" + $path;
+//		putenv "PATH" $path;
+//	}
+
+// load idmtCmd.mll
+	zwLoadPlugin("idmtCmd");
+
+// to avoid the collision between hsvAdjust.mll and MayaToAlias.mll,load hsvAdjust first!
+//	if ((float)$version >= 7.0 && (float)$version <= 8.5)
+//	{
+//		if ((!`pluginInfo -q -autoload "HSVadjust2.mll"`) || (!`pluginInfo -q -loaded "HSVadjust2.mll"`))
+//		{
+//			catch(`loadPlugin -quiet "HSVadjust2.mll"`);
+//			catch(`pluginInfo -edit -autoload true "HSVadjust2.mll"`);
+//			catch(`loadPlugin -quiet "HSVadjust2.mll"`);
+//		}
+//	}
+
+	if (!`about -batch`)
+	{
+	// IMDT Menu
+		IDMTMenu;
+
+	// shelf
+		global string $gShelfTopLevel;
+		int $activeTab = `optionVar -query "selectedShelf"`;
+
+		// old projects
+		deleteMoebiusShelf("DOD");
+		deleteMoebiusShelf("LittleTikes");
+		deleteMoebiusShelf("Taowa");
+
+		// old names
+		deleteMoebiusShelf("IDMT_Model");
+		deleteMoebiusShelf("IDMT_Phoneme");
+		deleteMoebiusShelf("Little Tikes");
+		deleteMoebiusShelf("Little_Tikes");
+		deleteMoebiusShelf("Moebius_Anim");
+		deleteMoebiusShelf("Moebius_Model");
+		deleteMoebiusShelf("Moebius_Phoneme");
+		deleteMoebiusShelf("Moebius_TD");
+
+		// shanghai
+		deleteMoebiusShelf("IDMT_Pre");
+		deleteMoebiusShelf("IDMT_TD");
+		deleteMoebiusShelf("BenAndIzzy");
+		deleteMoebiusShelf("WinX");
+
+		if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+		{
+			addMoebiusShelf("IDMT_Pre", "shelf_Model");
+			addMoebiusShelf("IDMT_TD", "shelf_TD");
+		}
+		addMoebiusShelf("IDMT_Anim", "shelf_Anim");
+		addMoebiusShelf("Bratz", "shelf_Bratz");
+		if (`getenv "OFFICE_LOCATION"` == "shanghai")
+		{
+			addMoebiusShelf("Bratz_Render", "shelf_Bratz_Render");	// add a Bratz_render shelf 2006.03.12 hanjiang
+		}
+		if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+		{
+			addMoebiusShelf("BenAndIzzy", "shelf_BenAndIzzy");
+			if ((float)$version >= 8.5)
+			{
+				addMoebiusShelf("WinX", "shelf_WinxClub");
+			}
+		}
+
+		if ($activeTab <= `optionVar -query numShelves`)
+		{
+			shelfTabLayout -edit -selectTabIndex $activeTab $gShelfTopLevel;
+		}
+
+	// File -> Create Reference
+		menuItem -edit -command "source slImportRef.mel;" "referenceFileItem";
+		deleteUI "referenceFileOptions";
+		czRemoveHotkey("Ctrl+r");
+
+	// Modify -> Base Pivot
+		global string $gMainModifyMenu;
+		menu -edit -postMenuCommandOnce true -postMenuCommand ("ModObjectsMenu \"" + $gMainModifyMenu + "\"; zwAddBasePivotMenu") $gMainModifyMenu;
+
+	// run scripts when opening new file
+		if (!`about -batch`)
+		{
+			evalDeferred -lowestPriority "zwSceneOpenedScriptJob";
+		}
+	}
+
+// auto updata RenderGlobal's preset
+	string $preset_source = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\" + $version + "\\presets";
+	mhUpdataPreset ($preset_source, $version);
+}

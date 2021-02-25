@@ -1,0 +1,578 @@
+global proc string s100PCSPgetLocalPath()
+{
+
+string $myScriptDir = `internalVar -userAppDir `;
+
+
+$myScriptDir += "s100lightPreset/" ;
+
+	if(`filetest -d $myScriptDir` != 1 )
+	{
+	sysFile -md $myScriptDir ;
+    }
+
+return $myScriptDir ;
+}
+
+global proc string s100PCSPgetSharePath()
+{
+
+	global string $currentProdBank_path ;
+
+
+	//print $currentProdBank_path ;
+
+$sub   = $currentProdBank_path + "_commons/s100lightPreset/" ;
+$myScriptDir =substituteAllString($sub , "//","/") ;
+$myScriptDir =substituteAllString($myScriptDir , ";","") ;
+
+	if(`filetest -d $myScriptDir` == 0 )
+	{
+	sysFile -md $myScriptDir ;
+    }
+
+return $myScriptDir ;
+}
+
+//s100PCcreateClassUI("local") ;
+
+global proc s100PCcreateClassUI(string $type)
+{
+
+
+	if(`window -ex 	s100PCcreateClassUI`)
+			deleteUI s100PCcreateClassUI;
+
+		window -title "Create Class" s100PCcreateClassUI;
+		columnLayout -adjustableColumn true s100PCUICLMain;
+		$text = `text -l ("class : " + $type)`;
+		separator;
+		text -l "name :" ;
+		$textF = `textField s100PCcreateClassUITF`;
+		$bt = `button -c ("s100PCcreateClass(\""+$type+"\")")  -label "create"`;
+
+
+
+window -e -resizeToFitChildren 1 s100PCcreateClassUI ;
+showWindow ;
+
+
+
+}
+global proc  s100PClistClassForUI()
+{
+textScrollList -e -removeAll s100PCUIRMlightTFSavedLeft ;
+textScrollList -e -append "---Share---"  s100PCUIRMlightTFSavedLeft ;
+
+string $shares[] = `s100PClistClassType("share") `;
+	for($tmp in $shares)
+	{
+	textScrollList -e -append $tmp  s100PCUIRMlightTFSavedLeft ;
+
+    }
+textScrollList -e -append "---Local---"  s100PCUIRMlightTFSavedLeft ;
+string $locals[] = `s100PClistClassType("local") `;
+	for($tmp in $locals)
+	{
+	textScrollList -e -append $tmp  s100PCUIRMlightTFSavedLeft ;
+
+    }
+
+
+
+
+
+}
+global proc string[] s100PCgetClassForSelection(int $ind[] )
+{
+string $return[] ;
+int $loc = `s100PCgetIndexForLocal`;
+
+	for($i = 0 ; $i < size($ind) ; $i++)
+	{
+	$return[$i] = "share";
+		if($ind[$i] > $loc)
+		{
+		$return[$i] = "local";
+
+        }
+
+
+    }
+
+
+
+return $return ;
+}
+global proc int s100PCgetIndexForLocal()
+{
+string  $all[]   = `textScrollList -q   -allItems   s100PCUIRMlightTFSavedLeft`;
+int $ret ;
+
+	for($i = 0 ; $i < size($all) ; $i++)
+	{
+		if($all[$i] == "---Local---")
+		{
+		$ret = $i ;
+		break ;
+        }
+    }
+
+return $ret;
+}
+
+//s100PClistClassType("local") ;
+
+global proc string[] s100PClistClassType(string $type)
+{
+string $path ;
+		if($type == "local")
+		{
+		$path = `s100PCSPgetLocalPath`;
+
+        }else{
+		$path = `s100PCSPgetSharePath`;
+        }
+
+string $return[] ;
+
+
+$return = `s1KeepOnlyFolderWhitoutFullPath($path) ` ;
+
+return $return ;
+}
+global proc s100PCcreateClass(string $type)
+{
+string $path ;
+string $textF = `textField -q -text  s100PCcreateClassUITF`;
+
+	if(size($textF) >0)
+	 {
+		if($type == "local")
+		{
+		$path = `s100PCSPgetLocalPath`;
+
+        }else{
+		$path = `s100PCSPgetSharePath`;
+        }
+
+	 $path += $textF +"/" ;
+		sysFile -md $path ;
+		print ("\nFolder created : " + $path ) ;
+			deleteUI s100PCcreateClassUI;
+	s100PClistClassForUI ;
+
+     }else{
+		warning "specify a name" ;
+     }
+
+
+
+
+
+
+}
+
+
+
+global proc s100PCSAVEPRESETUI()
+{
+
+int $typeTI[]   = `textScrollList -q -selectIndexedItem     s100PCUIRMlightTFSavedLeft ` ;
+string $typeT[] = `s100PCgetClassForSelection($typeTI) `;
+$type= $typeT[0];
+string  $class[]   = `textScrollList -q -selectItem     s100PCUIRMlightTFSavedLeft ` ;
+
+
+	if(`window -ex 	s100PCSAVEPRESETUI`)
+			deleteUI s100PCSAVEPRESETUI;
+
+		window -title "Save Preset" s100PCSAVEPRESETUI;
+		columnLayout -adjustableColumn true s100PCSAVEPRESETUICLMain;
+		$text = `text -l ("Preset : " + $type)`;
+		separator;
+		text -l "name :" ;
+		$textF = `textField s100PCSAVEPRESETUITF`;
+		$bt = `button -c ("s100PCSAVEPRESET(\""+$type+"\",\"" +$class[0]  +"\")")  -label "create"`;
+
+
+window -e -resizeToFitChildren 1 s100PCSAVEPRESETUI ;
+showWindow ;
+
+}
+global proc s100PCSAVEPRESET(string $type, string $class)
+{
+$textF = `textField -q -tx   s100PCSAVEPRESETUITF`;
+		if($textF != "")
+		{
+		string $path = s100PCcreateFOLDER($type,$textF,$class) ;
+
+		s100PCLightSavePresetFull($path, $textF) ;
+
+			if(`window -ex 	s100PCSAVEPRESETUI`)
+					deleteUI s100PCSAVEPRESETUI;
+		s100PCrefreshPresetWhenSelected ;
+		}else{
+		warning "choose a name";
+        }
+
+}
+global proc s100PCLightSavePresetFull(string $path,string $name)
+{
+string $passes[] = `s100PCgetAllLights`;
+	for($i = 0 ; $i < size($passes) ; $i ++)
+	{
+	string $stringT  = s100PCLightSavePresetForLight($passes[$i] , $path ,$name) ;
+
+
+    }
+
+
+}
+global proc string s100PCcreateFOLDER(string $type , string $name , string $class )
+{
+//create Folder for preset
+string $path ;
+		if($type == "local")
+		{
+		$path = `s100PCSPgetLocalPath`;
+
+        }else{
+		$path = `s100PCSPgetSharePath`;
+        }
+
+$path += $class +"/" + $name +"/" ;
+sysFile -md $path ;
+return $path ;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//APPLY PRESET
+global proc string s100PCgetPass()
+{
+	int $typeTI[]   = `textScrollList -q -selectIndexedItem     s100PCUIRMlightTFSavedLeft ` ;
+string $typeT[] = `s100PCgetClassForSelection($typeTI) `;
+$type= $typeT[0];
+string  $class[]   = `textScrollList -q -selectItem     s100PCUIRMlightTFSavedLeft ` ;
+string  $preset[]   = `textScrollList -q -selectItem     s100PCUIRMlightTFSavedRight ` ;
+
+string $path ;
+		if($type == "local")
+		{
+		$path = `s100PCSPgetLocalPath`;
+
+        }else{
+		$path = `s100PCSPgetSharePath`;
+        }
+
+//print $path ;
+$path = $path + $class[0] +"/" +$preset[0]+ "/" ;
+return $path ;
+}
+global proc s100PCApplyPreset()
+{
+$path = `s100PCgetPass`;
+
+string $mels[] = `s1ListAllMelFiles({$path}) `;
+
+
+	for($i = 0 ; $i < size($mels) ; $i++)
+	{
+	//print $mels[$i] ;
+	string $tmpS = s100PCconverFileToString($mels[$i] ) ;
+	s100PCLightLoadPresetForLight($tmpS);
+    }
+
+
+}
+global proc string s100PCconverFileToString(string $path)
+{
+string $get[];
+$i = 0 ;
+//print $path;
+$fileId=`fopen $path "r"`;
+
+string $nextLine = `fgetline $fileId`;
+while ( size( $nextLine ) > 0 )
+	{
+    $nextLine = `fgetline $fileId`;
+	$get[$i] = $nextLine ;
+	$i++;
+	}
+fclose $fileId;
+
+
+string $return = stringArrayToString( $get ,"") ;
+
+return $return ;
+}
+
+
+
+
+
+//SAVE PRESET
+
+
+
+global proc string[] s100getAttrsToPublish( string $nodeName, string $listAttrString)
+{
+	string $atrs[];
+	string $cmd = ($listAttrString+" "+$nodeName);
+	$atrs = eval($cmd);
+
+	if (nodeType($nodeName) == "container") {
+
+		string $pubAttrs[] = `container -q -ba $nodeName`;
+		int $pubCount = size($pubAttrs);
+		for ($pp = 1; $pp < $pubCount; $pp += 2) {
+			$cmd = ($listAttrString+" "+$nodeName+"."+$pubAttrs[$pp]);
+			string $testAttr[] = eval($cmd);
+			if (size($testAttr) == 1 &&
+				$testAttr[0] == $pubAttrs[$pp]) {
+				$atrs[size($atrs)] = $pubAttrs[$pp];
+			}
+		}
+	}
+	return $atrs;
+}
+global proc string s100PCprocessString( string $inputStr )
+//
+//	Description:
+//		This proc will process the input string for output as an
+//		arg in a "blendAttr" command.
+//		Mainly, this proc changes all occurrences of carriage
+//		returns and line feeds to "\r" and "\n" respectively.
+//
+{
+	string $attr = $inputStr;
+
+	// Use "substitute" repeatedly until there are no more
+	// substitutions.
+	//
+	int $numChecks = size($attr);
+	int $i = 0;
+	for( ; $i < $numChecks; $i ++ ) {
+		string $tmp  = `substitute "\n" $attr "\\n"`;
+		$tmp  = `substitute "\r" $tmp "\\r"`;
+		if( $tmp == $attr ) {
+		 	break; 	// no more substitutions necessary
+		} else {
+			$attr = $tmp;
+			// there were some substitutions here,
+			// so keep trying to substitute
+		}
+	}
+    $attr = `substituteAllString $attr "\"" "\\\""`;
+    $attr = `substituteAllString $attr "\'" "\\\'"`;
+	return $attr;
+}
+
+//$string = s100PCLightSavePresetForLight( "sunDirectionDecor"  ,"") ;
+//eval($test) ;
+//s100PCLightLoadPresetForLight($string);
+
+global proc s100PCLightLoadPresetForLight(string $string)
+{
+$cur = `editRenderLayerGlobals  -q  -currentRenderLayer`;
+	if(`objExists "defaultRenderLayer"`)
+		editRenderLayerGlobals -currentRenderLayer "defaultRenderLayer" ;
+
+string $arr[] = stringToStringArray($string ,";") ;
+
+	for($i = 0 ; $i < size($arr) ; $i++)
+	{
+
+		if(`gmatch $arr[$i] "*setAttr*"` )
+		{
+		$stTmp =stringToStringArray($arr[$i] ,"\"") ;
+			//print($i +  "ici\n" );
+
+			if(size($stTmp) == 3 )
+			{
+			$obj = $stTmp[1]  ;
+				if(!`gmatch $arr[$i] "*dmapUseMacro*"` &&!`gmatch $arr[$i] "*lastWrittenDmapAnimExtName*"`&&!`gmatch $arr[$i] "*smapFilename*"` )
+				{
+					if(`objExists $obj`)
+					{
+						if(! `getAttr -l $obj `)
+						{
+						$ch = 1 ;
+						$arrtmp2 = stringToStringArray($obj,".");
+
+							if(size($arrtmp2) > 2)
+							{
+							$ch2 = `getAttr -l ($arrtmp2[0] +"." + $arrtmp2[1] ) ` ;
+								if($ch2)
+								{
+								$ch = 0 ;
+
+								}
+							string $listC[] = `listConnections -d 0 -s  1   ($arrtmp2[0] +"." + $arrtmp2[1] )`;
+								if(size($listC)> 0)
+								{
+								$ch = 0 ;
+
+								}
+							}
+
+
+							if($ch)
+							{
+							string $listC[] = `listConnections -d 0 -s 1   $obj`;
+							//print "ici" ;
+								if(size($listC)== 0)
+								{
+								eval($arr[$i]) ;
+								}
+
+							}
+
+						}
+
+
+					}
+
+            	}
+
+
+
+            }
+
+        }
+
+
+    }
+
+
+		editRenderLayerGlobals -currentRenderLayer $cur ;
+
+
+}
+global proc s100PCLightSavePresetForLight(string $light, string $path, string $name)
+{
+//$light = $passes[0]
+//$name =$textF
+string $stringT  =  `s100PCLightSavePreset($light) `;
+$pathS = $path + $name  + "_" + $light + ".mel" ;
+s100PCconvertStringToFile($pathS , $stringT );
+$listS = `listRelatives -s $light`;
+string $stringS  = s100PCLightSavePreset($listS[0]) ;
+
+$pathS = $path + $name  + "_" + $listS[0] + ".mel" ;
+
+s100PCconvertStringToFile($pathS , $stringS );
+
+
+}
+
+global proc s100PCconvertStringToFile(string $path, string $string)
+{
+//print $path = "c:/test.mel"
+string $arr[] =stringToStringArray($string,";") ;
+
+$fileId = `fopen $path "w"` ;
+
+	for($i = 0 ; $i < size($arr) ; $i++)
+	{
+	fprint $fileId ($arr[$i] +";\n");
+
+    }
+
+fclose $fileId;
+
+
+
+
+}
+
+global proc string s100PCLightSavePreset(string $light)
+{
+//$light = $passes[$i]
+
+$nodeName = $light ;
+
+	if( !`objExists $nodeName` ){
+		return "";
+	}
+
+	// leave requires command commented out, it may reset defaults inappropriately
+	// but keep the version info around in case we need it later
+	string $nType = `nodeType $nodeName`;
+	string $reslt = "// requires maya \"" + `about -file`  + "\";\n";
+	$reslt = $reslt + ";\n";
+	// string $atrs[] = `listAttr -k -w -s -m $nodeName`;
+
+	// first do string attributes if any
+	string $atrs[];
+	//int $count = 0;
+
+	string $listStringAttrs = "listAttr -read -write -visible -hasData";
+	$atrs = s100getAttrsToPublish($nodeName,$listStringAttrs);
+
+	for ($atr in $atrs)
+	{
+		string $objAt = $nodeName + "." + $atr;
+		if( objExists($objAt)  ){
+			string $type = "";
+			// TODO: The following line generates
+			// a warning message for message attrs
+			// The -sl flag should suppress this, but
+			// it is not for some reason.
+			string $tCmd = "getAttr -sl -type \""+$objAt+"\"";
+			$type = eval( $tCmd );
+			if( "string" == $type)
+			{
+                // Bug 123944: skip strings that have null data
+                // for compatibility with previous behaviour of
+                // getAttr -type on string attributes.
+                if (size(`listAttr -hasNullData $objAt`) == 0)
+                {
+                   string $vCmd = "getAttr \"" + $objAt + "\"";
+				   string $str = eval( $vCmd );
+				   $str = s100PCprocessString( $str );
+				   $reslt = $reslt +"setAttr \""+$nodeName +"."  + $atr + "\" \"" + $str + "\"; ";
+    		   	   $reslt = $reslt + "\n";
+                }
+			}
+		}
+	}
+
+	// next do scalar attributes..floats, ints, bools & enums
+	// treating them all as floats
+	string $listNumericalAttrs = "listAttr -multi -write -scalar -visible -hasData";
+	$atrs = s100getAttrsToPublish($nodeName,$listNumericalAttrs);
+
+	for ($atr in $atrs)
+	{
+		if( !validNodeTypeAttrForCurrentPreset( `nodeType $nodeName`, $atr ) )
+		{
+			continue;
+		}
+
+		string $gAtr = "getAttr \"" + $nodeName +"." + $atr + "\"";
+		$reslt = $reslt + "setAttr \"" +$nodeName +"."  + $atr + "\" " + eval($gAtr) + "; ";
+		// $count++;
+		// if( $count > 2 ) {
+		// 	$count = 0;
+			$reslt = $reslt + "\n";
+		//}
+	}
+	$reslt = $reslt + ";\n";
+	return $reslt;
+
+
+
+}

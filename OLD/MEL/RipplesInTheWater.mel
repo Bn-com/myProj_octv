@@ -1,0 +1,250 @@
+global proc zzyCreateRipplesInWater()
+//
+//函数描述：
+//         粒子碰撞平面，扭曲贴图产生水面涟漪效果
+//
+{
+
+	string $asSelect[]=`ls -sl`;
+	if(size($asSelect)==2)
+	{
+		if(`objectType $asSelect[0]`=="transform")
+		{
+			string $asTemp[]=`listRelatives -s $asSelect[0]`;
+			$asSelect[0]=$asTemp[0];
+		}
+		if(`objectType $asSelect[1]`=="transform")
+		{
+			string $asTemp[]=`listRelatives -s $asSelect[1]`;
+			$asSelect[1]=$asTemp[0];
+		}
+		
+		string $asConnect1[]=`listConnections  $asSelect[0]`;
+		string $asConnect2[]=`listConnections  $asSelect[1]`;
+		string $asGeoConnector1[]=`ls -typ geoConnector $asConnect1`;
+		string $asGeoConnector2[]=`ls -typ geoConnector $asConnect2`;		
+		
+		if($asGeoConnector1[0]!=$asGeoConnector2[0])
+		{
+			error "请选择碰撞的粒子和平面";	
+		}
+		else if(size($asGeoConnector1)==0 || size($asGeoConnector2)==0)
+		{
+
+			error "请确定选择的粒子和平面有碰撞";
+		}
+
+	}
+	else
+	{
+		error "请选择碰撞的粒子和平面";	
+	}
+
+	string $sCollisionPlaneShape;
+	string $sCollisionParticle;
+	if( `objectType -isType "mesh" $asSelect[0]` || `objectType -isType "nurbsSurface" $asSelect[0]` )
+	{
+		$sCollisionPlaneShape=$asSelect[0];
+		if(`objectType -isType "particle" $asSelect[1]`)
+		{
+			$sCollisionParticle=$asSelect[1];	
+		}
+		else
+		{
+			error "请选择碰撞的粒子和平面";	
+		}
+	}
+	else if(`objectType -isType "particle" $asSelect[0]`)
+	{
+		$sCollisionParticle=$asSelect[0];
+		if(`objectType -isType "mesh" $asSelect[1]` || `objectType -isType "nurbsSurface" $asSelect[1]`)
+		{
+			$sCollisionPlaneShape=$asSelect[1];	
+		}
+		else
+		{
+			error "请选择碰撞的粒子和平面";	
+		}
+	}
+
+	
+	string $asGetShadingEngine[]=`listConnections ($sCollisionPlaneShape+".instObjGroups[0]")`;//检查平面是否赋予了贴图
+
+	string $asGetPlaneShader[]=`listConnections ($asGetShadingEngine[0]+".surfaceShader")`;
+
+	string $asGetShaderColorFiler[]=`listConnections ($asGetPlaneShader[0]+".color")`;
+
+	if(size($asGetShaderColorFiler)==0)
+	{
+		error "请给平面赋予贴图";	
+	}
+
+
+        string $asTemp[]=`listRelatives -p $sCollisionPlaneShape`;
+	string $sCollisionPlane= $asTemp[0];
+	//碰撞的平面添加些控制属性；
+	if (!`attributeExists "frequency" $sCollisionPlane`) 
+	{
+		addAttr -ln "frequency"      -at double  -min 0 -max 1000 -dv 100     $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".frequency");
+	}
+	if (!`attributeExists "decay" $sCollisionPlane`) 
+	{
+		addAttr -ln "decay"          -at double  -min 0 -max 10 -dv 4	      $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".decay");
+	}
+	if (!`attributeExists "timeDecay" $sCollisionPlane`) 
+	{
+		addAttr -ln "timeDecay"      -at double  -min 0 -max 1 -dv 0.01       $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".timeDecay");
+	}
+	if (!`attributeExists "amplitudeMult" $sCollisionPlane`) 
+	{
+		addAttr -ln "amplitudeMult"  -at double  -min 0 -max 10 -dv 0.5       $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".amplitudeMult");
+	}
+	if (!`attributeExists "speed" $sCollisionPlane`) 
+	{
+		addAttr -ln "speed"          -at double  -min 0 -max 10 -dv 0.25      $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".speed");
+	}
+	if (!`attributeExists "skip" $sCollisionPlane`) 
+	{
+		addAttr -ln "skip"           -at long    -min 1 -max 100 -dv 5        $sCollisionPlane;
+		setAttr -e-keyable true ($sCollisionPlane+".skip");
+	}
+	
+	
+	
+	
+	
+	
+
+	if (!`attributeExists collisionU   $sCollisionParticle`) 
+	{
+		addAttr -ln collisionU	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists collisionU0   $sCollisionParticle`) 
+	{
+		addAttr -ln collisionU0 -dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists collisionV   $sCollisionParticle`) 
+	{
+		addAttr -ln collisionV	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists collisionV0   $sCollisionParticle`) 
+	{
+		addAttr -ln collisionV0 -dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists goalU   $sCollisionParticle`) 
+	{
+		addAttr -ln goalU	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists goalU0   $sCollisionParticle`) 
+	{
+		addAttr -ln goalU0	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists goalV   $sCollisionParticle`) 
+	{
+		addAttr -ln goalV	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists goalV0   $sCollisionParticle`) 
+	{
+		addAttr -ln goalV0	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists parentU   $sCollisionParticle`) 
+	{
+		addAttr -ln parentU	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists parentU0   $sCollisionParticle`) 
+	{
+		addAttr -ln parentU0	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists parentV   $sCollisionParticle`) 
+	{
+		addAttr -ln parentV	-dt doubleArray $sCollisionParticle;
+	}
+	if (!`attributeExists parentV0   $sCollisionParticle`) 
+	{
+		addAttr -ln parentV0	-dt doubleArray $sCollisionParticle;
+	}
+
+
+	string $ParticleCExpression=`dynExpression -q -s -c $sCollisionParticle`;
+	
+	string $addExpression1=$sCollisionParticle+".goalU = "+$sCollisionParticle+".parentU;\n"+$sCollisionParticle+".goalV = "+$sCollisionParticle+".parentV;";
+
+	string $ParticleCExpression=$ParticleCExpression+$addExpression1;
+
+	dynExpression  -s $ParticleCExpression -c $sCollisionParticle;
+	
+	
+	string $ParticleRadExpression=`dynExpression -q -s -rad $sCollisionParticle`;
+
+	string $addExpression2="\n\n//------------\n// RIPPLE\n\nglobal vector $collisionData[];\nif ("+$sCollisionParticle+".collisionU != -1) {\n\n\tif ("+$sCollisionParticle+".particleId % "+$sCollisionPlane+".skip == 0) $collisionData[size($collisionData)] = << "+$sCollisionParticle+".collisionU, "+$sCollisionParticle+".collisionV, frame >>;\n\t"+$sCollisionParticle+".lifespanPP = 0;\n\n}";
+
+	string $ParticleRadExpression=$ParticleRadExpression+$addExpression2;
+
+	dynExpression  -s $ParticleRadExpression -rad $sCollisionParticle;
+
+
+	string $sSamplerInfo=`shadingNode -asUtility samplerInfo`;//创建采样节点；
+
+	string $sRippleRamp=`shadingNode -asTexture ramp`;//创建ramp
+	removeMultiInstance -break true ($sRippleRamp+".colorEntryList[1]");
+	setAttr ($sRippleRamp+".colorEntryList[2].color") -type double3 1 1 1 ;
+	setAttr ($sRippleRamp+".colorEntryList[2].position") 1;
+	setAttr ($sRippleRamp+".colorEntryList[0].color") -type double3 0 0 0 ;
+
+
+	expression  -s ("global vector $collisionData[];\nif (frame<2) clear $collisionData; \n\nint $i;\nfloat $amplitude;\nfloat $totalAmplitude = 0;\n\nfloat $frequency="+$sCollisionPlane+".frequency; //100\nfloat $decay="+$sCollisionPlane+".decay; //4\nfloat $timeDecay="+$sCollisionPlane+".timeDecay; //.01\nfloat $ampMult = "+$sCollisionPlane+".amplitudeMult; //.5\nfloat $speed = "+$sCollisionPlane+".speed; //.25\n\n\nfor ($i=0; $i< size($collisionData); $i++) {\n\n\tvector $data = $collisionData[$i];\n\n\tfloat $tdist = (frame-($data.z))*$speed;\n\tfloat $dist = mag(<<"+$sSamplerInfo+".uCoord,"+$sSamplerInfo+".vCoord,0>> - <<($data.x),($data.y),0>>);\n\tfloat $x = ($dist*$frequency - $tdist);\n\t$amplitude= (1 - smoothstep(0,3,$x))*(1+cos($x))*exp(-$dist*$decay-$tdist*$timeDecay);\n\n\t$totalAmplitude += $amplitude;\n\n}\n\n"+$sRippleRamp+".vCoord = clamp(0,1,$totalAmplitude*$ampMult);")  -o $sRippleRamp -ae 1 -uc all ;
+	//expression  -s ""  -o $sRippleRamp -ae 1 -uc all ;
+
+		
+	string $asGetPlace2dTexture[]=`listConnections ($asGetShaderColorFiler[0]+".offset")`;
+
+	if(size($asGetPlace2dTexture)==0)
+	{
+		$asGetPlace2dTexture[0]=`shadingNode -asUtility place2dTexture`;
+		connectAttr -f place2dTexture1.outUV		($asGetShaderColorFiler[0]+".uvCoord"); 
+		connectAttr -f place2dTexture1.outUvFilterSize  ($asGetShaderColorFiler[0]+".uvFilterSize"); 
+		connectAttr -f place2dTexture1.coverage         ($asGetShaderColorFiler[0]+".coverage"); 
+		connectAttr -f place2dTexture1.translateFrame   ($asGetShaderColorFiler[0]+".translateFrame"); 
+		connectAttr -f place2dTexture1.rotateFrame      ($asGetShaderColorFiler[0]+".rotateFrame"); 
+		connectAttr -f place2dTexture1.mirrorU		($asGetShaderColorFiler[0]+".mirrorU"); 
+		connectAttr -f place2dTexture1.mirrorV		($asGetShaderColorFiler[0]+".mirrorV"); 
+		connectAttr -f place2dTexture1.stagger		($asGetShaderColorFiler[0]+".stagger"); 
+		connectAttr -f place2dTexture1.wrapU		($asGetShaderColorFiler[0]+".wrapU"); 
+		connectAttr -f place2dTexture1.wrapV		($asGetShaderColorFiler[0]+".wrapV"); 
+		connectAttr -f place2dTexture1.repeatUV		($asGetShaderColorFiler[0]+".repeatUV"); 
+		connectAttr -f place2dTexture1.vertexUvOne      ($asGetShaderColorFiler[0]+".vertexUvOne"); 
+		connectAttr -f place2dTexture1.vertexUvTwo	($asGetShaderColorFiler[0]+".vertexUvTwo"); 
+		connectAttr -f place2dTexture1.vertexUvThree	($asGetShaderColorFiler[0]+".vertexUvThree"); 
+		connectAttr -f place2dTexture1.vertexCameraOne	($asGetShaderColorFiler[0]+".vertexCameraOne"); 
+		connectAttr -f place2dTexture1.noiseUV		($asGetShaderColorFiler[0]+".noiseUV"); 
+		connectAttr -f place2dTexture1.offset		($asGetShaderColorFiler[0]+".offset"); 
+		connectAttr -f place2dTexture1.rotateUV		($asGetShaderColorFiler[0]+".rotateUV");
+	}
+	connectAttr  ($sRippleRamp+".outAlpha") ($asGetPlace2dTexture[0]+".offsetU");
+	connectAttr  ($sRippleRamp+".outAlpha") ($asGetPlace2dTexture[0]+".offsetV");
+
+}
+
+
+
+global proc zzyRipplesInWaterWindow()
+//
+//
+//
+//
+{
+	if(`window -q -ex RipplesInWater`)
+		deleteUI RipplesInWater;
+	window -title "WaterTrickle"  RipplesInWater;
+
+	columnLayout -adjustableColumn true;
+	    button -label "CreateRipplesInWater" -command "zzyCreateRipplesInWater";
+	    
+	showWindow RipplesInWater;
+}
+

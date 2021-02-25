@@ -1,0 +1,543 @@
+
+global proc layertool() 
+ {
+    if (`window -exists CreateLayer`)
+		deleteUI CreateLayer;
+	window -title "CreateLayer" -resizeToFitChildren true 
+	       -widthHeight 500 100
+	       -s 1
+	       CreateLayer;
+	       columnLayout 
+		             -w 500
+			     -h 300;
+	         frameLayout   -label "请选择需要创建的层"
+	                       -bs "etchedIn"
+			       -w 150
+			       -h 300
+			       -la "center";
+		     columnLayout  -rs  10 
+		                   -cw  10;
+		       checkBoxGrp -l1 "BGcolor"
+		                   -v1 1 BGcolorUI;		       
+		       checkBoxGrp -l1 "BGrgba"
+		                   -v1 1 BGrgbaUI;
+		       checkBoxGrp -l1 "Depth"
+		                   -v1 1 DepthUI;				   
+		       checkBoxGrp -l1 "shadow"
+		                   -v1 1 shadowUI;
+		       checkBoxGrp -l1 "caustic"
+		                   -v1 1 causticUI;
+		       checkBoxGrp -l1 "charcolor" 
+		                   -onc "radioUI"
+				   -ofc "radioUI"
+				   -v1 1 charcolorUI;
+                         radioCollection;
+			  radioButton -label "day_light" -sl  day;
+			  radioButton -label "night_light" night;
+		    setParent..;
+		    setParent..;
+		     columnLayout  -rs  10 
+                                   -cw  10;
+		    button -label "创建层" -c createALL;
+		    button -label "删除所有层" -c delLayer;
+
+                
+	showWindow CreateLayer;
+
+ }
+
+
+global proc  delLayer ()
+{
+ string $layers[];
+ $layers = `ls -type "renderLayer"`;
+ $n = `size $layers`;
+ for ($i = 0 ;$i<$n ;$i++)
+ { string $buf2[];
+   tokenize $layers[$i] ":" $buf2;
+   $bufnum =`size $buf2`;
+    if ($bufnum == 1)
+     {  editRenderLayerGlobals -currentRenderLayer defaultRenderLayer;
+        delete $buf2;
+        print "删除完成";
+
+     }
+ 
+ }
+
+}
+
+
+global proc  radioUI ()
+ { $n = `checkBoxGrp -q -v1 charcolorUI`;
+    if ($n == 0)
+     {radioButton -e -en 0 day;
+      radioButton -e -en 0 night;
+     
+     }
+     else 
+      {radioButton -e -en 1 day;
+       radioButton -e -en 1 night;
+      }
+ }
+
+
+
+global proc createALL()
+{
+ $bc = `checkBoxGrp -q -v1 BGcolorUI`;
+ $br = `checkBoxGrp -q -v1 BGrgbaUI`;
+ $dp = `checkBoxGrp -q -v1 DepthUI`;
+ $sd = `checkBoxGrp -q -v1 shadowUI`;
+ $ct = `checkBoxGrp -q -v1 causticUI`;
+ $cc = `checkBoxGrp -q -v1 charcolorUI`;
+
+  changerender;
+  if ($bc ==1)
+  {bgcolorlayer;
+  }
+   if ($br ==1)
+  {bgRGBAlayer;
+  }
+    if ($dp ==1)
+  {Depthlayer;
+  }
+    if ($ct ==1)
+  {causticlayer;
+  }
+    if ($sd ==1)
+  {shadowlayer;
+  }
+    if ($cc ==1)
+  {CharColorlayer;
+  }
+ print "创建完成";
+
+}
+global proc changerender() 
+{
+  $df =`getAttr defaultRenderLayer.renderable`;
+
+  if ($df == 1)
+  {setAttr defaultRenderLayer.renderable 0;
+  }
+
+}
+
+
+
+
+global proc bgRGBAlayer() 
+{
+
+  if (catch( `editRenderLayerGlobals -currentRenderLayer bgRGBA`))
+   {set ;
+    $set = `ls -sl`;
+    select -cl;
+    createRenderLayer -name "bgRGBA";
+    editRenderLayerGlobals -currentRenderLayer bgRGBA;
+    editRenderLayerMembers bgRGBA  $set;
+    creatematte;
+    select -cl;
+    select $set;
+    hyperShade -assign do2_matte;
+    changerender;
+
+   }
+}
+
+
+
+global proc creatematte()
+{if (catch( `select do2_matte`))
+   {
+    shadingNode -asShader lambert -name do2_matte;
+    setAttr "do2_matte.color" -type double3 0 0 0 ;
+    setAttr do2_matte.matteOpacityMode 0;
+    sets -renderable true -noSurfaceShader true -empty -name do2_matteSG;
+    connectAttr -f do2_matte.outColor do2_matteSG.surfaceShader;	
+    }
+}
+
+
+
+
+
+global proc bgcolorlayer() 
+{if (catch( `editRenderLayerGlobals -currentRenderLayer BGcolor`))
+   {set ;
+    $set = `ls -sl`;
+    setlight;
+    $light =`ls -sl`;
+    select -cl;
+    createRenderLayer -name "BGcolor";
+    editRenderLayerMembers BGcolor  $set;
+    editRenderLayerMembers BGcolor  $light;
+      changerender;
+   }
+}
+
+
+
+global proc causticlayer() 
+{if (catch( `editRenderLayerGlobals -currentRenderLayer caustic`))
+   {set ;
+    $set = `ls -sl`;
+    select -cl;
+    impotCauLight;
+    createRenderLayer -name "caustic";
+    editRenderLayerMembers caustic  $set;
+    editRenderLayerMembers caustic  CauLight_directional;
+  
+    creatCausticShade;
+    hookShaderOverride("caustic","","causticShade");
+        changerender;
+   }
+}
+
+
+
+global proc creatCausticShade()
+ { if (catch( `select causticShade`))
+  {
+   $cshade = `shadingNode -asShader lambert`;
+   rename $cshade "causticShade";
+   setAttr "causticShade.color" -type double3 1 1 1 ;
+  }
+ }
+
+
+
+global proc Depthlayer() 
+{ if (catch( `editRenderLayerGlobals -currentRenderLayer Depth`))
+   { 
+    set ;
+    $set = `ls -sl`;
+    select -cl;
+    createRenderLayer -name "Depth";
+    editRenderLayerMembers Depth  $set;
+  
+    impotDepthshade;
+    hookShaderOverride("Depth","","depthShade");
+        changerender;
+
+   }
+}
+
+
+
+global proc CharColorlayer() 
+{ if (catch( `editRenderLayerGlobals -currentRenderLayer charcolor`))
+   { 
+   
+  char ; 
+  $char = `ls -sl`;
+  prop ; 
+  $prop = `ls -sl`;
+  sellight;
+  $light =`ls -sl`;
+  //print $light;
+  select -cl;
+ createRenderLayer -name "charcolor";
+ editRenderLayerMembers charcolor  $char;
+ editRenderLayerMembers charcolor  $prop;
+ editRenderLayerMembers charcolor  $light;
+ 
+ orientlight;
+ select -cl;
+ locatorCam;
+     changerender;
+}
+}
+
+global proc sellight()
+{
+  $d = `radioButton -q -sl day`;
+  
+  if ($d == 1 )
+    {
+      importDayLight;
+    }
+    else 
+    {
+      importNightLight;
+    }
+}
+
+global proc locatorCam() 
+{
+ select -cl;
+ sellight;
+ $light =`ls -sl`;
+ cameraA;
+ $cam = `ls -sl`;
+ $locat = `pointConstraint -offset 0 0 0 -weight 1 $cam $light`;
+ delete $locat;
+
+
+}
+
+
+
+global proc orientlight() 
+{select -cl;
+ cameraA;
+ $cam = `ls -sl `;
+ select -tgl back_light ;
+ //print $cam;
+ orientConstraint -offset 0 -90 -45 -weight 1  ;
+}
+
+
+
+
+
+
+global proc impotCauLight()
+{if (catch(`select CauLight_directional`))
+{
+ file -import -type "mayaBinary" -rpr "CauLight" -options "v=0;p=17" "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/rendering/light/sence/CauLight.mb";
+}
+
+}
+
+
+global proc impotDepthshade()
+{if (catch(`select depthShade`))
+{
+ file -import -type "mayaBinary" -rpr "depth" -options "v=0;p=17" "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/rendering/shade/depth.mb";
+}
+ select -cl;
+}
+
+
+global proc importDayLight() 
+{ if (catch(`select char_day_light`))
+  {
+  file -import -type "mayaBinary" -rpr "char_day_light" -options "v=0;p=17" "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/rendering/light/char/day/char_day_light.mb";
+  select char_day_light;
+  }
+   
+}
+
+
+global proc importNightLight() 
+{ if (catch(`select char_night_light`))
+  {
+     file -import -type "mayaBinary" -rpr "char_night_light" -options "v=0;p=17" "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/rendering/light/char/night/char_night_light.mb";
+     select char_night_light;
+  }
+   
+}
+
+
+global proc cameraA()
+
+{cam ;
+ $camera = `ls -sl`;
+ $n = `size $camera`;
+ if ($n ==0)
+  {  error  "请参考一个摄像机";
+    select -cl;
+  }
+  else if($n > 1)
+  { error "场景中有多个摄像机";
+    select -cl;
+  }
+   else
+   {select $camera;
+   }
+}
+
+global proc shadowlayer() 
+{ if (catch( `editRenderLayerGlobals -currentRenderLayer shadow`))
+   { 
+   
+  char ; 
+  $char = `ls -sl`;
+  prop ; 
+  $prop = `ls -sl`;
+  set ;
+  $set = `ls -sl`;
+  shadowlight;
+  $light =`ls -sl`;
+  select -cl;
+  createRenderLayer -name "shadow";
+ editRenderLayerGlobals -currentRenderLayer shadow;
+ editRenderLayerMembers  shadow  $char;
+ editRenderLayerMembers  shadow  $prop;
+ editRenderLayerMembers  shadow  $set;
+ editRenderLayerMembers  shadow $light;
+ for ($ss in $set)
+ {eval ("editRenderLayerAdjustment "+$ss+".castsShadows");
+  eval("setAttr "+$ss +".castsShadows 0");
+ }
+ for ($cc in $char)
+ {eval ("editRenderLayerAdjustment "+$cc+".primaryVisibility");
+  eval("setAttr "+$cc +".primaryVisibility 0");
+ }
+ for ($pp in $prop)
+ {eval ("editRenderLayerAdjustment "+$pp+".primaryVisibility");
+  eval("setAttr "+$pp +".primaryVisibility 0");
+ }
+ select $set;
+
+ $shade = `shadingNode -asShader useBackground`;
+ hookShaderOverride("shadow","",$shade);
+     changerender;
+ 
+ select $light;
+
+ }
+}
+
+
+
+
+global proc shadowlight() 
+{ if (catch( `select shadowlight1`))
+   { 
+
+    string $light = `directionalLight -n shadowlight1  -rotation -90 0 0`;
+    eval("setAttr shadowlight1.useDepthMapShadows 1");
+    eval("setAttr shadowlight1.dmapResolution 4096");
+    eval("setAttr shadowlight1.dmapFilterSize 10");
+   }
+  
+}
+
+
+global proc char() 
+{
+   select -cl;
+  string $refname[]= `file -q -r -shn`;
+  string $refpath[]=`file -q -r`;
+  int $n = size($refname);
+
+  for ($i=0;$i<$n;$i++)
+  {	string $buf[];
+	tokenize $refname[$i] "_" $buf;
+        $aa = `substring $buf[1] 1 1`;
+        if($aa == "c" )
+	{$namespace = `file -q -namespace $refpath[$i]`;
+	 $name = $namespace+":*";
+	 //print ($name +"\n");
+	 select -add `ls -type mesh $name`;
+         select -add `ls -type nurbsSurface $name`;
+	}
+	
+	
+  }
+    	 $sel = `ls -sl`;
+         $num =`size $sel`;
+	  if ($num == 0)
+	   {error "文件中没有参考角色";
+	   }
+	}
+
+
+
+
+
+global proc cam() 
+{select -cl;
+  string $refpath[]=`file -q -r`;
+  int $n = size($refpath);
+
+  for ($i=0;$i<$n;$i++)
+  {	string $buf[];
+	tokenize $refpath[$i] "." $buf;
+        $aa = `substring $buf[1] 1 3`;
+	
+        if($aa == "ma" )
+	{$namespace = `file -q -namespace $refpath[$i]`;
+	 print $namespace;
+	 $name = $namespace+":*";
+         select -add `ls -type transform $name`;
+	}
+   }
+	  	 $sel = `ls -sl`;
+         $num =`size $sel`;
+	  if ($num == 0)
+	   {error "文件中没有参考摄像机";
+	   }
+}
+
+global proc set() 
+{
+      select -cl;
+  string $refname[]= `file -q -r -shn`;
+  string $refpath[]=`file -q -r`;
+  int $n = size($refname);
+
+  for ($i=0;$i<$n;$i++)
+  {	string $buf[];
+	tokenize $refname[$i] "_" $buf;
+        $aa = `substring $buf[1] 1 1`;
+        if($aa == "s" )
+	{$namespace = `file -q -namespace $refpath[$i]`;
+	 $name = $namespace+":*";
+	 //print ($name +"\n");
+	 select -add `ls -type mesh $name`;
+         select -add `ls -type nurbsSurface $name`;
+	}
+	
+	
+  
+	
+  }
+  	 $sel = `ls -sl`;
+         $num =`size $sel`;
+	  if ($num == 0)
+	   {error "文件中没有参考场景";
+	   }
+	}
+global proc setlight() 
+{
+      select -cl;
+  string $refname[]= `file -q -r -shn`;
+  string $refpath[]=`file -q -r`;
+  int $n = size($refname);
+
+  for ($i=0;$i<$n;$i++)
+  {	string $buf[];
+	tokenize $refname[$i] "_" $buf;
+        $aa = `substring $buf[1] 1 1`;
+        if($aa == "s" )
+	{$namespace = `file -q -namespace $refpath[$i]`;
+	 $name = $namespace+":*";
+	 //print ($name +"\n");
+         select -add `ls -type light $name`;
+	}
+	
+	
+  
+	
+  }
+	}
+
+
+global proc prop() 
+{
+     select -cl;
+  string $refname[]= `file -q -r -shn`;
+  string $refpath[]=`file -q -r`;
+  int $n = size($refname);
+
+  for ($i=0;$i<$n;$i++)
+  {	string $buf[];
+	tokenize $refname[$i] "_" $buf;
+        $aa = `substring $buf[1] 1 1`;
+        if($aa == "p" )
+	{$namespace = `file -q -namespace $refpath[$i]`;
+	 $name = $namespace+":*";
+	 //print ($name +"\n");
+	 select -add `ls -type mesh $name`;
+         select -add `ls -type nurbsSurface $name`;
+	}
+	
+	
+  }  	
+	}
+
+

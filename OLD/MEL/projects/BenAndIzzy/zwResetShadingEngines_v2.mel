@@ -1,0 +1,122 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///				reconnect all the SE nodes;
+
+///  2006.01.12 
+///			1.if dagSetMember attr is connected by renderLayer,then we do not disconnect it
+///  2006.03.12   
+///                     
+
+// 解决赋不了材质的问题
+global proc zwResetShadingEngines_v2()
+{
+	//int $couter=0;
+	
+	string $message;
+	
+	$message ="注意：\n\n运行本工具之前请确保文件保存有备份，万一出错就追悔莫及啦\n\n"+
+		"本工具只能用在当前渲染层上，master层和其他层的material会丢失，\n\n而且当前渲染层必须是最后建立的渲染层。\n\n\点\"OK\"开始运行本工具\n"+
+		"______________________________________________________________________\n\n"+
+		" "
+		;
+	
+	string $buf[];
+	
+	if (`confirmDialog -message $message 
+			-button "OK" 
+			-button "Cancel" 
+			-defaultButton "Cancel" 
+			-cancelButton "Cancel"` 
+			!= "OK")
+	{
+		return;
+	}
+
+	string $script = "";
+	string $renderLayerScript="";
+	int $i;
+
+	string $sel[] = `ls -l -sl`;
+	string $shadingEngines[];
+	if (`objExists $sel[0]`)
+	{
+		for ($obj in $sel)
+		{
+			string $shape[] = `listRelatives -ni -shapes $obj`;
+			string $selShadingEngine[] = `listConnections -type shadingEngine $shape[0]`;
+			$shadingEngines = stringArrayCatenate($shadingEngines,$selShadingEngine);
+		}
+	}
+	else
+		$shadingEngines = `ls -type "shadingEngine"`;
+	
+	for ($shadingEngine in $shadingEngines)
+	{
+		if ($shadingEngine == "initialShadingGroup")
+		{
+			continue;
+		}
+		
+		$buf = `sets -query $shadingEngine`;
+		
+		
+		if (!size($buf))
+		{
+			continue;
+		}
+		
+		
+		string $f = "";
+		string $tmp;
+		
+		// $buf now stores which attributes connects to shadingEngine.dagSetMember
+		for ($obj in $buf)
+		{
+			
+			
+			if (`objExists $obj`)
+			{
+				$f += " \"" + $obj + "\"";
+			}
+		}
+		if ($f != "")
+		{
+			$script += "sets -forceElement \"" + $shadingEngine + "\"" + $f + ";\r\n";
+		}
+		
+		
+		
+		$buf = `listConnections -connections true -plugs true ($shadingEngine + ".dagSetMembers")`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			$tmp=`match "^.[^.]+" $buf[$i+1]`;
+			if(`objectType $tmp`!="renderLayer")
+				disconnectAttr $buf[$i+1] $buf[$i];
+		}
+		
+
+		$buf = `listConnections -connections true -plugs true ($shadingEngine + ".memberWireframeColor")`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			$tmp=`match "^.[^.]+" $buf[$i+1]`;
+			if(`objectType $tmp`!="renderLayer")
+				disconnectAttr $buf[$i] $buf[$i+1];
+		}
+	}
+	
+	
+	
+	if ($script != "")
+	{
+		evalEcho $script;
+
+	}
+	
+
+	warning (size($shadingEngines) + " ShadingEngines Processed...\n");
+}

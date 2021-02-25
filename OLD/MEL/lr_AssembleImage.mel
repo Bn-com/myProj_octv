@@ -1,0 +1,126 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 李锐
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//      Proc Name:  lr_AssembleImage 
+//             By:  Larry
+//    Last Update:  2002.3.26
+//    Description:  Assemble split images render by split render tool.
+//
+//
+
+
+global proc lr_AssembleImage()
+{
+    if(`window -ex AssembleImageUI`) deleteUI AssembleImageUI;
+    window -title "Assemble Image Tool V1.0" -wh 380 130 AssembleImageUI;   
+       menuBarLayout;
+            menu -label "Help";
+            menuItem -label "Help on Assemble Image Tool..." -command "zjHelpCallback lr_AssembleImage";
+       setParent ..;
+       
+      columnLayout -w 380 -rs 10  ;
+         textFieldButtonGrp -w 380 -cw3 60 250 80 -label "Info File:" -text "" -ed 0 -buttonLabel "浏览.." -bc OnAssembleBrowse InfoCTL;
+         checkBox -label "组合后打开图像" -v 1 AutoOpenCTL;
+         checkBox -label "图像上添加水印" -v 0 AddMarkCTL;
+         rowLayout -numberOfColumns 2 -cw2 240 210;
+             button -w 120 -label "           开始组合" -en 0 -c OnAssemble AssembleBT;
+	     button -w 120 -label "           关闭" -c "deleteUI AssembleImageUI";
+	 setParent ..;
+         
+         columnLayout -vis 0 FeedbackCL ;
+             separator -style "in" -w 380;
+             scrollField -w 370 -h 100 -wordWrap 1 -editable false FeedbackCTL;
+         setParent..;
+      setParent..;
+    
+    showWindow;
+    window -e -h 170 AssembleImageUI;
+}
+
+
+global proc OnAssembleBrowse()
+{
+   string $filename = `fileDialog -directoryMask "*.ini"`;
+   if($filename != "")  
+   {
+       textFieldButtonGrp -e -text $filename InfoCTL;   
+       button -e -en 1 AssembleBT;
+       columnLayout -e -vis 1 FeedbackCL;
+       window -e -h 280 AssembleImageUI;
+       scrollField -e -text ""  FeedbackCTL;
+       
+       $fileID = `fopen $filename "r"`;
+       string $line = `fgetline $fileID`;
+       while(size($line) >0)
+       {
+       	  if(`gmatch $line "*Frame*"`) break;
+          scrollField -e -it $line FeedbackCTL;
+       	  $line = `fgetline $fileID`;      	  
+       }
+       fclose $fileID;
+       
+       string $buf[];
+       tokenize $filename "." $buf;
+       scrollField -e -it (" Frame = " + (int)$buf[1] ) FeedbackCTL;       
+   }
+}
+
+global proc OnAssemble()
+{
+    string $fn = `textFieldButtonGrp -q -text InfoCTL`;
+    string $buf1[];
+    tokenize $fn "." $buf1;
+    int $frame = $buf1[1];
+    string $buf2[];
+    int $pn = `tokenize $buf1[0] "/" $buf2`;
+    string $im = `substring $buf2[$pn -1] 1 (size($buf2[$pn -1]) -4)`;
+    string $rd = `substring $buf1[0] 1 (size($buf1[0]) - size($buf2[$pn -1]) - size($buf2[$pn-2]) - 2 )`;
+    
+    string $txt = `scrollField -q -text FeedbackCTL`;
+    
+    string $buf3[];
+    tokenize $txt "\n" $buf3; 
+ 
+    string $tmp[];
+    tokenize $buf3[1] " = " $tmp;
+    int $sx = $tmp[1];
+    tokenize $buf3[2] " = " $tmp;
+    int $sy = $tmp[1];
+    tokenize $buf3[3] " = " $tmp;
+    string $format = $tmp[1];
+    tokenize $buf3[4] " = " $tmp;
+    int $ResX = $tmp[1];   
+    tokenize $buf3[5] " = " $tmp;
+    int $ResY = $tmp[1];
+    
+  // 是否增加水印
+     int $mark = `checkBox -q -v AddMarkCTL`;
+    
+    string $cmd = " -sx " + $sx + " -sy " + $sy + " -resX " + $ResX + " -resY " + $ResY + " -mk " + $mark + " -as " + $frame + " -im " + $im + " -rd \"" + $rd + "\" -of " + $format;
+    string $splitPath = "\\\\192.168.0.17\\gdc\\Projects\\Thru_The_Moebius_Strip\\Production\\Scripts\\Maya\\Muster\\SplitRender.exe";
+    $cmd = $splitPath + $cmd;
+ 
+    scrollField -e -it "\n\n----------------------------------------------\n" FeedbackCTL;
+    scrollField -e -it "Try to assemble selected images, Please Wait....\n" FeedbackCTL;
+    scrollField -e -it ".............................\n" FeedbackCTL;
+    
+    string $result = `system($cmd)`;
+    scrollField -e -it $result FeedbackCTL;  
+    
+ //   print $cmd;
+    
+    if(`checkBox -q -v AutoOpenCTL`)
+    {
+       string $img = $rd + "/" + $im + "." + $buf1[1] + "." + $format;
+       string $fcmd = "fcheck " + $img;
+       system("shell " + $fcmd);  
+    }
+    
+}

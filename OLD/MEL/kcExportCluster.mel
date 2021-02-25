@@ -1,0 +1,227 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// Return cluster, clusterSet
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc string[] kcGetClusterInfo(string $clusterHandle)
+{
+	string $result[];
+
+	string $dest[] = `listConnections -source false -destination true -skipConversionNodes true ($clusterHandle + ".worldMatrix[0]")`;
+
+	if ((size($dest) > 0) && (`nodeType $dest[0]` == "cluster"))
+	{
+		$result[0] = $dest[0];
+		
+		string $nodes[] = `listConnections -source false -destination true -skipConversionNodes true ($dest[0] + ".message")`;
+		
+		if ((size($nodes) > 0) && (`nodeType $nodes[0]` == "objectSet"))
+			$result[1] = $nodes[0];
+	}
+
+	return $result;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc float[] kcGetClusterPivot(string $clusterHandle)
+{
+	return `xform -q -worldSpace -rotatePivot $clusterHandle`;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// Return parent and grandparent nodes of $clusterHandle
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc string[] kcGetClusterAncestors(string $clusterHandle)
+{
+	string $results[];
+
+	string $parents[] = `listRelatives -parent -path $clusterHandle`;
+
+	if (size($parents) > 0)
+	{
+		$results[0] = $parents[0];
+
+		string $grandparents[] = `listRelatives -parent -path $parents[0]`;
+
+		if (size($grandparents) > 0)
+			$results[1] = $grandparents[0];
+	}
+
+	return $results;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc string[] kcGetClusterDrivenKeyInfo(string $clusterHandle)
+{
+	string $result[];
+	int $count = 0;
+	
+	string $nodes[] = `listConnections -destination false -source true -skipConversionNodes true $clusterHandle`;
+	
+	for ($j = 0; $j < size($nodes); $j++)
+		if ((`nodeType $nodes[$j]` == "animCurveUA") || 
+			(`nodeType $nodes[$j]` == "animCurveUL") || 
+			(`nodeType $nodes[$j]` == "animCurveUT") || 
+			(`nodeType $nodes[$j]` == "animCurveUU"))
+		{
+			// is a set driven key node
+
+			string $driverNodeAttr[] = `listConnections -destination false -source true -plugs true -skipConversionNodes true ($nodes[$j] + ".input")`;
+			string $drivenNodeAttr[] = `listConnections -destination true -source false -plugs true -skipConversionNodes true ($nodes[$j] + ".output")`;
+
+			if ((`size $driverNodeAttr` > 0) && (`size $drivenNodeAttr` > 0))
+			{
+				int $keyCount = `keyframe -q -keyframeCount $nodes[$j]`;
+
+				float $time[] = `keyframe -float ":" -query -floatChange $nodes[$j]`;
+				float $key[] = `keyframe -float ":" -query -valueChange $nodes[$j]`;
+				string $inTangent[] = `keyTangent -float ":" -query -inTangentType $nodes[$j]`;
+				string $outTangent[] = `keyTangent -float ":" -query -outTangentType $nodes[$j]`;
+
+				$result[$count] = $driverNodeAttr[0] + " " + $drivenNodeAttr[0] + " " + $keyCount;
+
+				for ($i = 0; $i < size($time); $i++)
+					$result[$count] = $result[$count] + " " + $time[$i] + " " + $key[$i] + " " + $inTangent[$i] + " " + $outTangent[$i];
+
+				$count++;
+			}
+		}
+
+	return $result;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc string[] kcGetClusterWeights(string $cluster, string $clusterSet)
+{
+	string $result[];
+
+	string $members[] = `sets -q $clusterSet`;
+	string $vtxs[] = `filterExpand -ex 1 -sm 31 $members`;
+
+	for ($i = 0; $i < size($vtxs); $i++)
+	{
+		float $weights[] = `percent -q -v $cluster $vtxs[$i]`;
+
+		string $tokens[];
+
+		tokenize $vtxs[$i] "." $tokens;
+		string $obj = $tokens[0];						// extract node name
+
+		tokenize $vtxs[$i] "[]" $tokens;
+		string $ID = $tokens[size($tokens) - 1];		// extract ID
+
+		$result[size($result)] = $obj + " " + $ID + " " + $weights[0];
+	}
+
+	return $result;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc string[] kcGetActiveClusterHandle()
+{
+	string $result[];
+
+	string $selected[] = `ls -selection`;
+
+	for ($node in $selected)
+	{
+		string $children[] = `listRelatives -shapes $node`;
+
+		if ((size($children) > 0) && (`nodeType $children[0]` == "clusterHandle"))
+			$result[size($result)] = $node;
+	}
+
+	return $result;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc string kcCreateClusterFolder()
+{
+	string $root = `workspace -q -rootDirectory`;
+	string $clusterFolder = $root + "kcCluster/";
+
+	if (`filetest -d $clusterFolder`)
+	{
+		// "cluster" folder exists, delete its content
+
+		string $clusterFiles[] = `getFileList -folder $clusterFolder -filespec "*.clu"`;
+
+		for ($clusterFile in $clusterFiles)
+		{
+			sysFile -delete ($clusterFolder + $clusterFile);
+
+			print("delete old cluster file: " + $clusterFile + "\n");
+		}
+	}
+	else
+		sysFile -makeDir $clusterFolder;
+
+	return $clusterFolder;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+global proc kcExportCluster(string $filename)
+{
+	int $fileId = `fopen $filename "w"`;
+
+	if ($fileId == 0)
+		error("Cannot open " + $filename);
+
+	string $clusterHandles[] = kcGetActiveClusterHandle();
+
+	if (size($clusterHandles) > 0)
+	{
+		for ($clusterHandle in $clusterHandles)
+		{
+			float $pivot[3] = kcGetClusterPivot($clusterHandle);
+
+			string $nodes[2] = kcGetClusterAncestors($clusterHandle);
+
+			string $parent = $nodes[0];
+			string $grandparent = $nodes[1];
+
+			string $drivenKeyInfo[] = kcGetClusterDrivenKeyInfo($clusterHandle);
+
+			
+			string $nodes[2] = kcGetClusterInfo($clusterHandle);		// cluster, clusterSet
+
+			string $cluster = $nodes[0];
+			string $clusterSet = $nodes[1];
+
+			string $weights[] = kcGetClusterWeights($cluster, $clusterSet);
+
+			fprint $fileId ("// cluster info\n");
+			fprint $fileId ($clusterHandle + " " + $cluster + " " + $clusterSet + "\n");	// clusterHandle, cluster, clusterSet
+			fprint $fileId ($parent + " " + $grandparent + "\n");							// parent, grandparent
+			fprint $fileId ($pivot[0] + " " + $pivot[1] + " " + $pivot[2] + "\n");			// pivot
+				
+			fprint $fileId (size($drivenKeyInfo) + "\n");									// size of drivenKeyInfo
+
+			for ($i = 0; $i < size($drivenKeyInfo); $i++)
+				fprint $fileId ($drivenKeyInfo[$i] + "\n");									// drivenKeyInfo
+
+			fprint $fileId (size($weights) + "\n");											// size of weights
+
+			for ($i = 0; $i < size($weights); $i++)
+				fprint $fileId ($weights[$i] + "\n");										// weights
+
+			print($filename + ": write cluster info for " + $clusterHandle + "\n");
+		}
+
+		fclose $fileId;
+	}
+}

@@ -1,0 +1,303 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slRenderEnvironmentsToMasterLighting()
+{
+	/*string $wndName = `getPanel -withLabel "Reference Editor"` + "Window";
+	if (!`window -ex $wndName`)
+		error "请选择一个需要替换的参考场景!";
+	global string $gReferenceEditorPanel;
+	string $references[] = `sceneEditor -q -sr $gReferenceEditorPanel`;
+	if (size($references) != 1)
+		error "请选择一个需要替换的参考场景!";
+	
+	string $destFile =  "D:/0000/strawberry/scenes/ss004001/masterligting.mb";
+	string $ns = "masterlighting";
+	//file -import -type "mayaBinary" -ra true -namespace $ns -options "v=0;p=17"  -pr -loadReferenceDepth "all" $destFile;*/
+
+	global string $gReferenceEditorPanel;
+	string $references[] = `sceneEditor -q -si $gReferenceEditorPanel`;
+	if (size($references)!=2)
+	{
+		error "请先选择导出动画的参考，再选择需要导入动画的参考!";
+	}
+
+	string $sourceRef = `referenceQuery -rfn $references[0]`;
+
+	string $prefix = `file -q -rpr $references[1]`;
+	string $parentfix[] = `file -q -pns $references[1]`;
+	string $parent="";
+	if(size($parentfix)&&$parentfix[0]!="")
+	{
+		for($i=0;$i<size($parentfix);$i++)
+		{
+			$parent = $parent+$parentfix[$i]+":";
+		}
+	}
+	string $namespace = $parent+$prefix+":";
+
+	//string $replaceType[] ={"constraint"};
+	string $replaceType[] ={"animCurve","displayLayer","deformer"};
+	//string $replaceType[] ={"animCurve","displayLayer","deformer","constraint"};
+	for ($type in $replaceType)
+	{
+		slRenderETMSetReplace($sourceRef,$type,$namespace);
+	}
+}
+
+global proc  slRenderETMSetReplace(string $sourceRef,string $type,string $namespace)
+{
+	switch ($type)
+	{
+		case "animCurve" :
+			string $animCurves[] = `ls -type animCurve`;
+			for ($ac in $animCurves)
+			{
+				if ( `referenceQuery -inr $ac` == 0)
+				{
+					string $transform[] = `listConnections -s 0 -d 1 -p 1 $ac`;
+					if (size($transform) && `referenceQuery -inr $transform[0]` && `referenceQuery -rfn $transform[0]` == $sourceRef)
+					{
+						string $buff[];
+						int $num = `tokenize $transform[0] ":." $buff`;
+						string $object = $buff[$num-2];
+						string $attr = $buff[$num-1];
+						//clear $buff;
+						//$num = `tokenize $transform[0] "." $buff`;
+						//string $attr = $buff[$num-1];
+						
+						string $dt = $namespace+$object;
+						//print ($dt+"\n");
+						if (`objExists  ($dt+"."+$attr)` && `getAttr -k  ($dt+"."+$attr)`)
+						{
+							connectAttr -f ($ac+".output") ($dt+"."+$attr);
+						}
+					}
+				}
+			}
+			break;
+		case "displayLayer":
+			string $displayLayers[]  = `ls -type displayLayer`;
+			for ($dl in $displayLayers)
+			{
+				if (!endsWith($dl,"defaultLayer") && !`referenceQuery -inr $dl`)
+				{
+					string $objects[] = `listConnections -s false -d true $dl`;
+					for ($obj in $objects)
+					{
+						if (`referenceQuery -inr $obj` && `referenceQuery -rfn $obj` == $sourceRef)
+						{
+							string $buff[];
+							int $num = `tokenize $obj ":" $buff`;
+							string $object = $buff[$num-1];
+							
+							string $dt = $namespace+$object;
+							if (`objExists $dt`)
+							{
+								editDisplayLayerMembers -noRecurse $dl {$dt};
+							}
+						}
+					}
+				}
+			}
+			break;
+		case "deformer":
+			string $deformers[] = `ls -type cluster -type ffd`;
+			for ($def in $deformers)
+			{
+				if (!`referenceQuery -inr $def`)
+				{
+					string $dest[] = `listConnections -s false -d true $def`;
+					if (size($dest) && `referenceQuery -inr $dest[0]` && `referenceQuery -rfn $dest[0]` == $sourceRef)
+					{
+						string $shapes[] = `listConnections -s 0 -d 1 ($def+".outputGeometry")`;
+						for ($s in $shapes)
+						{
+							string $buff[];
+							int $num = `tokenize $s ":" $buff`;
+							string $object = $buff[$num-1];
+
+							string $attr[] = `listConnections -s 1 -d 0 -p 1 ($s+".inMesh")`;
+							
+							string $dt = $namespace+$object;
+							if (`objExists $dt`)
+							{
+								string $dtShape[] = `listHistory -lv 5 $dt`;
+								//print ($object+"------"+$dt+"====="+$dtShape[0]+"\n");
+								connectAttr -f $attr[0] ($dtShape[0]+".inMesh");
+							}
+						}
+					}
+				}
+			}
+			break;
+		case "constraint":
+			string $constraints[] = `ls -type constraint`;
+			for ($con in $constraints)
+			{
+				if (!`referenceQuery -inr $con`)
+				{
+					int $right = 0;
+					string $object;
+					string $replaceObj;
+					string $objects[] = `listConnections $con`;
+					$objects = stringArrayRemoveDuplicates($objects);
+					$objects = stringArrayRemove({$con},$objects);
+					for ($obj in $objects)
+					{
+						if (`referenceQuery -inr $obj` && `referenceQuery -rfn $obj` == $sourceRef)
+						{
+							$right = 1;
+							$objects = stringArrayRemove({$obj},$objects);
+
+							string $buff[];
+							int $num = `tokenize $obj ":" $buff`;
+							$object = $buff[$num-1];
+
+							$replaceObj = $obj;
+							break;
+						}
+					}
+					if ($right)
+					{
+						string $dt = $namespace+$object;
+						if (`objExists $dt`)
+						{
+							source slCustomLittleTools.mel;
+							string $connects[] = slListConnectionWithTwoObjects($replaceObj,$con);
+							for ($i=3;$i<size($connects);$i=$i+3)
+							{
+								string $attr = `substring $connects[$i]  (size($connects[0])+1) (size($connects[$i]))`;
+
+								print ($dt+$attr+$connects[$i+1]+$connects[$i+2]+"\n");
+								if ($connects[$i+1] == "->")
+								{
+									disconnectAttr $connects[$i] $connects[$i+2];
+									connectAttr -f ($dt+$attr) $connects[$i+2];
+								}
+								else if ($connects[$i+1] == "<-")
+								{
+									disconnectAttr $connects[$i+2] $connects[$i];
+									connectAttr -f $connects[$i+2] ($dt+$attr);
+								}
+							}
+
+							string $pairblend[] = `listConnections -type pairBlend $con`;
+							if (size($pairblend))
+							{
+								string $pobjects[] = `listConnections -s 0 -d 1 $pairblend`;
+								$pobjects = stringArrayRemoveDuplicates($pobjects);
+								if (size($pobjects) && $pobjects[0] == $replaceObj)
+								{
+									string $connects[] = slListConnectionWithTwoObjects($replaceObj,$pairblend[0]);
+									for ($i=3;$i<size($connects);$i=$i+3)
+									{
+										string $attr = `substring $connects[$i]  (size($connects[0])+1) (size($connects[$i]))`;
+
+										print ($dt+$attr+$connects[$i+1]+$connects[$i+2]+"\n");
+										if ($connects[$i+1] == "->")
+										{
+											disconnectAttr $connects[$i] $connects[$i+2];
+											connectAttr -f ($dt+$attr) $connects[$i+2];
+										}
+										else if ($connects[$i+1] == "<-")
+										{
+											disconnectAttr $connects[$i+2] $connects[$i];
+											connectAttr -f $connects[$i+2] ($dt+$attr);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			break;
+	}
+}
+
+
+global proc string[] slRenderETMGetReplace(string $sourceRef,string $type)
+{
+	string $replaced[];
+	
+	switch ($type)
+	{
+		case "animCurve":
+			string $animCurves[] = `ls -type animCurve`;
+			for ($ac in $animCurves)
+			{
+				if ( `referenceQuery -inr $ac` == 0)
+				{
+					string $transform[] = `listConnections -s 0 -d 1  $ac`;
+					if (size($transform) && `referenceQuery -inr $transform[0]` && `referenceQuery -rfn $transform[0]` == $sourceRef)
+					{
+						$replaced[size($replaced)] = $ac;
+					}
+				}
+			}
+			break;
+		case "displayLayer":
+			string $displayLayers[]  = `ls -type displayLayer`;
+			for ($dl in $displayLayers)
+			{
+				if (!endsWith($dl,"defaultLayer") && !`referenceQuery -inr $dl`)
+				{
+					string $objects[] = `listConnections -s false -d true $dl`;
+					for ($obj in $objects)
+					{
+						if (`referenceQuery -inr $obj` && `referenceQuery -rfn $obj` == $sourceRef)
+						{
+							$replaced[size($replaced)] = $dl;
+						}
+					}
+				}
+			}
+			break;
+		case "deformer":
+			string $deformers[] = `ls -type cluster -type ffd`;
+			for ($def in $deformers)
+			{
+				if (!`referenceQuery -inr $def`)
+				{
+					string $dest[] = `listConnections -s false -d true $def`;
+					if (size($dest) && `referenceQuery -inr $dest[0]` && `referenceQuery -rfn $dest[0]` == $sourceRef)
+					{
+						$replaced[size($replaced)] = $def;
+					}
+				}
+			}
+			break;
+		case "constraint":
+			string $constraints[] = `ls -type constraint`;
+			for ($con in $constraints)
+			{
+				if (!`referenceQuery -inr $con`)
+				{
+					string $objects[] = `listConnections $con`;
+					$objects = stringArrayRemoveDuplicates($objects);
+					for ($obj in $objects)
+					{
+						if (`referenceQuery -inr $obj` && `referenceQuery -rfn $obj` == $sourceRef)
+						{
+							$replaced[size($replaced)] = $con;
+						}
+					}
+				}
+			}
+			break;
+	
+	}
+	
+
+	return $replaced;
+}

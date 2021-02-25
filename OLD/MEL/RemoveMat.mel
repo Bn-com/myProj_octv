@@ -1,0 +1,196 @@
+global proc RemoveMat()
+{
+	//optionVar for menu items
+	int $Moebius_Delmat_uv;
+	int $Moebius_Delmat_shadingEng;
+
+	if (`optionVar -ex "Moebius_Opt_uv"`)
+		$Moebius_Delmat_uv = `optionVar -q "Moebius_Opt_uv"`; 
+	else 
+		$Moebius_Delmat_uv = 1; 
+	if (`optionVar -ex "Moebius_Opt_shadingEng"`)
+		$Moebius_Delmat_shadingEng = `optionVar -q "Moebius_Opt_shadingEng"`; 
+	else 
+		$Moebius_Delmat_shadingEng = 1; 
+
+
+	if (!`window -exists RematWin`)
+	{
+	window -retain -menuBar true -resizeToFitChildren true -title "Remove materials Options" RematWin;
+	//menu
+		menu -label "Edit";
+			menuItem -label "Save Settings"  -c "moe_saveset" sst;
+			menuItem -label "Reset Settings" -c "moe_reset" rst;
+		menu -label "Help" -helpMenu true;
+			menuItem -label "Help on Remove materials..." -command "OptHelp";
+	
+
+		formLayout -numberOfDivisions 100 formLayout1;
+		checkBox	-l "Remove UVs"
+				-v $Moebius_Delmat_uv 
+				-cc "$Moebius_Delmat_uv = #1"
+				deluv;
+    		separator -style "in" sep;
+		checkBox	-l "Remove Materials"
+				-v $Moebius_Delmat_shadingEng
+				-cc "$Moebius_Delmat_shadingEng = #1"
+				delshg;
+
+
+                button -label "Selected" -h 27 -command "Remselfunc" opt;
+                button -label "All"    -h 27 -command "Remallfunc" Apy;
+                button -label "Close"    -h 27 -command "deleteUI -window  RematWin" cancel;
+
+		formLayout -edit
+			-attachForm	  deluv	"top"		5
+			-attachForm	  deluv	"left"		120
+
+			-attachForm	  sep	        "left"		0
+			-attachControl	  sep		"top"		5	deluv
+			-attachPosition	  sep		"right"		0       100
+
+			-attachControl	  delshg	"top"		5	sep
+			-attachForm	  delshg	"left"		120
+
+			-attachForm	  opt	        "left"		0
+			-attachForm	  opt	        "bottom"	5	
+			-attachPosition	  opt      	"right"		0       33
+
+			-attachControl	  Apy	        "left"		5	opt
+			-attachForm	  Apy	        "bottom"	5	
+			-attachPosition	  Apy      	"right"		0       66
+
+			-attachControl	  cancel	"left"		5	Apy
+			-attachForm	  cancel	"bottom"	5
+			-attachPosition	  cancel      	"right"		0       100
+		formLayout1;
+	
+	showWindow RematWin;
+	}
+}
+global proc moe_saveset ()
+{
+	//save settings
+	int $Moebius_Delmat_uv=`checkBox -q -v deluv`;
+	optionVar -intValue "Moebius_Opt_uv" $Moebius_Delmat_uv;
+	int $Moebius_Delmat_shadingEng=`checkBox -q -v delshg`;
+	optionVar -intValue "Moebius_Opt_shadingEng" $Moebius_Delmat_shadingEng;
+}
+
+global proc moe_reset ()
+{
+	//reset settings
+	optionVar -remove "Moebius_Opt_uv";
+	$Moebius_Delmat_uv = 1; 
+	checkBox -e -v $Moebius_Delmat_uv deluv;
+	
+	optionVar -remove "Moebius_Opt_shadingEng";
+	$Moebius_Delmat_shadingEng = 1; 
+	checkBox -e -v $Moebius_Delmat_shadingEng delshg;
+
+}
+
+// To get the list of Shape nodes from a Transform:
+
+proc string[] getShapes( string $xform )
+{
+   string $shapes[];
+
+   $shapes[0] = $xform;
+
+   if ( "transform" == `nodeType $xform` )
+   // If given node is not a transform, assume it is a shape
+   // and pass it through
+   {
+      $shapes = `listRelatives -fullPath -shapes $xform`;
+   }
+
+   return $shapes;
+}
+
+proc remuv(string $obj[])
+{
+	for ($one in $obj)
+	{
+		if (`nodeType $one`=="mesh")
+		{
+			string $allUV[] =`polyUVSet -q -allUVSets $one`; 
+		   
+			for ($j=0;$j<size($allUV) ;$j++ )
+				if ($allUV[$j]!="map1")
+					polyUVSet -delete -uvSet $allUV[$j] $one; 	
+				else {
+					string $uv1[]=`listConnections -s true -d true -type "polyPlanarProj" $one`;
+					string $uv2[]=`listConnections -s true -d true -type "polyCylProj" $one`;
+					string $uv3[]=`listConnections -s true -d true -type "polySphProj" $one`;
+					string $uv4[]=`listConnections -s true -d true -type "polyAutoProj" $one`;
+					string $uvs[] = stringArrayCatenate(stringArrayCatenate(stringArrayCatenate ($uv1,$uv2),$uv3 ),$uv4);
+					string $shortuvs[] = stringArrayRemoveDuplicates($uvs);
+					delete $shortuvs;
+
+				}
+		}
+	}
+}
+proc delmat(string $obj[])
+{
+	for ($one in $obj)
+	{
+		sets -e -forceElement initialShadingGroup $one;
+	}
+}
+
+global proc Remselfunc()
+{
+	int $Moebius_Delmat_uv=`checkBox -q -v deluv`;
+	int $Moebius_Delmat_shadingEng=`checkBox -q -v delshg`;
+
+	string $selobjs[];
+	clear($selobjs);
+	string $Tobj[] = `selectedNodes -dagObjects`;
+	if (size($Tobj)>0)
+	{
+		for ($item in $Tobj)
+		{
+			if (`nodeType $item`=="transform")
+			{
+				string $shape[] = getShapes($item);
+				appendStringArray($selobjs, $shape, size($shape));
+			}
+			string $selobjs[] = stringArrayRemoveDuplicates($selobjs);
+		}
+		if ($Moebius_Delmat_uv)
+			remuv($selobjs);
+		if ($Moebius_Delmat_shadingEng)
+			delmat($selobjs);
+	}
+}
+
+global proc Remallfunc()
+{
+
+
+	int $Moebius_Delmat_uv=`checkBox -q -v deluv`;
+	int $Moebius_Delmat_shadingEng=`checkBox -q -v delshg`;
+	
+	
+	if ($Moebius_Delmat_uv)
+	{
+		string $allobj[] = `ls -type "mesh"`;
+		remuv($allobj);
+	}
+	if ($Moebius_Delmat_shadingEng)
+	{
+		hyperShadePanelMenuCommand("hyperShadePanel1", "deleteShadingGroupsAndMaterials");
+	}
+	print "Remove materials";
+
+}
+
+
+global proc OptHelp()
+{
+	string $file = "C:/Documents and Settings/zhaozhijie/My Documents/help/OptimizeScene SizeOptions.mht";
+	system ("load "+$file);
+}
+

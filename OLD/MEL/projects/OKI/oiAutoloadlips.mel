@@ -1,0 +1,279 @@
+//Auto set keyframes for character lip sync according to a data .txt file .
+//For Taowa project.
+//Update 04-6-2006.
+
+proc string[] ALLGetFilename()
+{
+	string $fileName = `file -q -sceneName`;
+	string $buffer[];
+	int $num = `tokenize $fileName "\/" $buffer`;
+	int $num2 = `tokenize $buffer[$num-1] "_" $buffer`;
+	int $sFrame = `playbackOptions -q -min`;
+	int $eFrame = `playbackOptions -q -max`;
+	int $tFrame = $eFrame - $sFrame + 1;
+	string $char[] = {$buffer[1],$buffer[2],$sFrame,$eFrame,$tFrame};
+	return $char;
+}
+
+proc string[] ALLGetCharName()
+{
+	string $charName[] = `ls  "*Master" "*:Master"` ;
+	return $charName;
+}
+
+global proc oiAutoloadlips()
+{
+	string $sceneShot[] = ALLGetFilename();
+	string $sceneNum = $sceneShot[0];
+	string  $shotNum = $sceneShot[1];
+	int $startFrame = $sceneShot[2];
+	int $endFrame = $sceneShot[3];
+	string $lipFilePath = `zwGetPath "repository" ""`+ "/Scratch/TD/audio/" + $sceneNum +  "/magpie_data/";
+	string $sceneChars[] = ALLGetCharName();
+
+	if(`window -exists w_ta_ALL_win`)
+		deleteUI w_ta_ALL_win;
+	window -title "Auto Load Character Lips"   -resizeToFitChildren true w_ta_ALL_win;
+
+		string $form = `formLayout`;
+				
+			string $columnLayout = `columnLayout -adjustableColumn true -rs 10`;
+							
+				string $sceneFrLayout = `frameLayout -label "Scenes Informations" -labelAlign "top" -cll true -borderStyle "etchedIn"`;
+					string $sceneFoLayout = `formLayout`;
+						textFieldGrp -label "Episode" -text $sceneNum -cw2 100 40   _Value_ALL_Shot_Input;
+						textFieldGrp -label "Scene" -text $shotNum -cw2 50 40 _Value_All_Scene_Input;
+						intFieldGrp -numberOfFields 2 -label "startFrame" -extraLabel "endFrame" -value1 $startFrame -value2  $endFrame -cw4 80  40 40 100 _Value_ALL_Start_Input;
+						setParent ..;
+					setParent ..;
+						formLayout -edit
+							-attachForm  _Value_ALL_Shot_Input         			"top" 5
+							-attachForm  _Value_ALL_Shot_Input				"left" 5	
+							-attachForm  _Value_ALL_Shot_Input				"bottom" 5				
+							-attachForm  _Value_ALL_Start_Input         			"top" 5
+							-attachForm  _Value_ALL_Start_Input				"right" 5
+							-attachForm _Value_All_Scene_Input				"top" 5
+							-attachControl _Value_All_Scene_Input				"left" 5 _Value_ALL_Shot_Input 
+						$sceneFoLayout;
+
+				string $charFrLayout = `frameLayout -label "Charactor Informations" -labelAlign "top" -cll true -borderStyle "etchedIn"`;
+					string $charFoLayout = `formLayout`;
+						textScrollList  -numberOfRows 6 -allowMultiSelection true   _List_ALL_Char_Input;
+						textScrollList -e -removeAll _List_ALL_Char_Input;
+						for($i=0;$i<`size $sceneChars`;$i++)
+							textScrollList -e -append ($sceneChars[$i]) _List_ALL_Char_Input;
+						textScrollList -e -sc "select -r `textScrollList -q -si _List_ALL_Char_Input`" _List_ALL_Char_Input;
+						setParent ..;
+					setParent ..;
+						formLayout -edit
+							-attachForm	_List_ALL_Char_Input			"top"		10
+							-attachForm	_List_ALL_Char_Input			"left"		10
+							-attachForm	_List_ALL_Char_Input			"right"		10
+							-attachForm	_List_ALL_Char_Input			"bottom"    10
+						$charFoLayout;
+				setParent ..;
+
+			string $form1 = `formLayout`;
+				radioButtonGrp -numberOfRadioButtons 2 -label "Load LipSync To" -labelArray2 "selected" "all" -sl 2 _Value_ALL_Object_Input;
+				textFieldButtonGrp -label "sync file path" -text $lipFilePath -buttonLabel "Browse" -cw3 90 300 100 -buttonCommand "findFilePath" _syncListPath;
+				string $loadButton = `button -l "Load" -w 80 -command "ta_LoadLipSyncButton"`;
+				string $cleanButton = `button -l "Clean sync" -w 80 -command "deleteSyncKeys"`;
+				string $loadSound = `button -l "Sound" -w 80 -command "loadSoundTrack"`;
+				string $abortButton = `button -l "Edit txt file" -w 80 -command "editSyncTxt 0"`;
+				formLayout -edit
+					-attachForm $loadButton                                                 "bottom" 10
+					-attachForm  $loadButton 						"left" 10
+					-attachPosition $loadButton						"right" 0  25
+					
+					-attachForm $cleanButton                                               "bottom" 10
+					-attachControl  $cleanButton 						"left" 5 $loadButton
+					-attachPosition $cleanButton						"right" 0  50
+					
+					-attachForm $loadSound                                                 "bottom" 10
+					-attachControl  $loadSound 						"left" 5 $cleanButton
+					-attachPosition $loadSound						"right" 0  75
+					
+					-attachForm $abortButton                                                "bottom" 10
+					-attachControl  $abortButton 						"left" 5 $loadSound
+					-attachPosition $abortButton						"right" 0  100
+					
+					-attachForm _syncListPath						"left" 50 
+					-attachControl _syncListPath						"bottom" 10 $loadButton
+					-attachControl  _Value_ALL_Object_Input			"bottom" 10 _syncListPath
+					-attachForm  _Value_ALL_Object_Input				"left" 100 
+				$form1;
+
+			
+			formLayout -edit
+				-attachForm $columnLayout							"top" 5
+				-attachForm  $columnLayout 							"left" 10
+				-attachForm $columnLayout							"right" 10
+				-attachControl $columnLayout                                                "bottom" 5 $form1
+
+				-attachForm  $form1 								"left" 10
+				-attachForm $form1									"right" 10
+				-attachForm $form1									"bottom" 10
+			$form;
+
+	showWindow w_ta_ALL_win;
+
+}
+
+global proc loadSyncFile(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _syncListPath;
+}
+
+
+global proc string findFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 0  -fileCommand "loadSyncFile"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+
+proc string loadLipsync(string $char)
+{
+	string $charControlPath = `zwGetPath "repository" ""`+ "/Scratch/TD/audio/char/";
+	string $charControlFiles[] = `getFileList -fld $charControlPath -fs "*.txt"`;
+	
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	//float $getAmplitude = `floatSliderGrp -q -value _Value_ALL_Amplitude_Input`;
+	//string $charSyncFile = $getSyncFolder + "/" + $getEpisodeNum+"_"+$getSceneNum + "_" + "v01m" + ".txt";
+	string $charSyncFile = editSyncTxt(1);
+	string $buffer[];
+	string $lineTxt;
+	string $wrongData[];
+	string $wrongFrame[];
+	string $warning;
+	if(`file -q -ex $charSyncFile`)
+	{
+		$fileId = `fopen $charSyncFile "r"`;
+		string $nextLine = `fgetline $fileId`;
+		$nextLine = `fgetline $fileId`;
+		int $lineNum = 1;
+		int $frameNum = 1;
+		int $dataNum = 0;
+		int $i=0;
+		while(size($nextLine)>0)
+		{
+			tokenize $nextLine " " $buffer;
+			//frame
+			$frameNum = (int)$buffer[0]+$getStartFrame-1;
+			$dataNum  = (int)$buffer[1];
+			clear $buffer;
+			tokenize $dataNum "_" $buffer;
+			//char
+			string $charName = $buffer[0];
+			//control
+			$dataNum = `substring $dataNum (size($charName)+1) size($dataNum)`;
+			
+			$nextLine = `fgetline $fileId`;
+		}	
+		fclose $fileId;
+		if ($i>0)
+		{
+			$warning = ("¿ÚÐÍ³¬¹ý·¶Î§£º "+$char+":\n");
+			for ($j=0;$j<$i ;$j++ )
+			{
+				$warning += ("wrongFrame---"+$wrongFrame[$j]+"     wrongData---"+$wrongData[$j]+"\n");
+			}
+		}
+		if ($warning!="")
+		{
+			confirmDialog -title "warning" -message $warning
+			-button "Check it"  -defaultButton "Check it";
+
+		}
+		else	print ("Successfully load lip file to:"+$char+"\n");
+	}
+	else	print ("No lip file match the character:"+$char+"\n");
+	return $warning;
+}
+
+global proc ta_LoadLipSyncButton()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+	for($char in $getChar)
+		loadLipsync($char);
+}
+
+
+
+global proc string editSyncTxt(int $return)
+{
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	//string $charSyncFile = $getSyncFolder + "/" + $getEpisodeNum+"_"+$getSceneNum + "_" + "v01m" + ".txt";
+	string $charSyncFiles[] = `getFileList -fld $getSyncFolder -fs ($getEpisodeNum+"_"+$getSceneNum+"*.txt")`;
+	if (size($charSyncFiles))
+	{
+		if (!$return)
+		{
+			system ("load " +$getSyncFolder+$charSyncFiles[size($charSyncFiles)-1]);
+			return "";
+		}
+		else
+		{
+			return ($getSyncFolder+$charSyncFiles[size($charSyncFiles)-1]);
+		}
+	}
+}
+
+global proc deleteSyncKeys()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+	for ($char in $getChar)
+	{
+		string $obj[]=`sets -q -nodesOnly $char`;
+		for ($objs in $obj )
+		{
+			if (`gmatch $objs "*Head_ANIM*"`)
+			{
+				if (`objExists ($objs + ".MouthShape")`)
+				{	
+					string $charCurve[]=`keyframe -q -name ($objs + ".MouthShape" )` ;
+					delete $charCurve;
+					setAttr ($objs + ".MouthShape" ) 1;
+					break;
+				}
+			}
+		}
+	}
+
+}
+
+global proc loadSoundTrack()
+{
+	string $audioTrack[] = `ls -type audio`;
+	if(`size $audioTrack` != 0)
+		delete $audioTrack;
+	string $getEpisodeNum = `textFieldGrp -q -text _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	string $soundFolder = "Z:/Projects/taowa/Reference/"+$getEpisodeNum+"/audio/scenes/part_01/";
+	string $soundFile = $soundFolder +$getEpisodeNum+"_"+$getSceneNum+"_v01"+".wav";
+	string $catchAudioFiles[] = `getFileList -filespec $soundFile`;
+	if(`size $catchAudioFiles` != 0)
+	{
+		$soundFile = $soundFolder + $catchAudioFiles[0];
+		timeControl -e -ds true -s `sound -o $getStartFrame -file $soundFile` timeControl1;		
+	}
+	else
+		print ("Sorry,not wav file found.\n");
+
+}

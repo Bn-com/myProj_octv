@@ -1,0 +1,182 @@
+//combine obj by selection keep skinning
+//by GD
+//pref COS
+
+global proc s100_CombineBySelectionUI()
+{
+	if(`window -ex s100_CombineBySelectionUI`)
+		deleteUI s100_CombineBySelectionUI ;
+
+	window s100_CombineBySelectionUI ;
+	menuBarLayout ;
+		menu -label "help" ;
+			menuItem -c s100_CombineBySelectionUI -label "refresh" ;
+	formLayout s100_CombineBySelectionUIFL;
+	$text = "1st part of this tools will select object by shading assignation, and the button will combine selection, and keep skinning";
+	$l = `scrollField -h 100 -en 0 -wordWrap 1 -text $text `;
+	$shadingT = `text -label "shading Group : " ` ;
+	$tsl = `textScrollList -selectCommand s100_COS_selectBySelect -ann "select text will select objects with this shading group" -allowMultiSelection 1  s100_CombineBySelectionUITL `;
+	$but = `button -label "combine Selection" -c  s100_COS_combineSelection`;
+	$butC = `button -label "combine all children of selection" -c  s100_COS_combineSelectionChildren`;
+
+		formLayout -e
+			-attachForm $l "top" 5
+			-attachForm $l "left" 5
+			-attachForm $l "right" 5
+
+			-attachControl $shadingT "top" 5 $l
+			-attachForm $shadingT "left" 5
+			-attachForm $shadingT "right" 5
+
+
+			-attachControl $tsl "top" 5 $shadingT
+			-attachControl $tsl "bottom" 10 $but
+			-attachForm $tsl "left" 5
+			-attachForm $tsl "right" 5
+
+			-attachControl  $but "bottom" 5 $butC
+			-attachForm $but "left" 5
+			-attachForm $but "right" 5
+
+			-attachForm $butC "bottom" 5
+			-attachForm $butC "left" 5
+			-attachForm $butC "right" 5
+
+		s100_CombineBySelectionUIFL ;
+
+	showWindow ;
+	s100_COS_refreshUI ;
+}
+
+global proc s100_COS_selectBySelect()
+{
+	string $sh[] = `textScrollList -q -selectItem   s100_CombineBySelectionUITL ` ;
+	if(size($sh) > 0)
+	{
+		select -cl ;
+		for($tmp in $sh)
+		{
+			if(`objExists $tmp  `)
+			{
+				$list = `listConnections -type "mesh" $tmp` ;
+				select -add $list ;
+            }
+        }
+    }
+}
+
+global proc s100_COS_selectByShading_grp(string $shad)
+{
+
+}
+
+global proc s100_COS_refreshUI()
+{
+	string $var[] = `ls -type "shadingEngine"`;
+	textScrollList -e -removeAll s100_CombineBySelectionUITL ;
+	for( $t in $var)
+		textScrollList -e -append $t s100_CombineBySelectionUITL ;
+}
+global proc s100_COS_combineSelectionChildren()
+{
+	string $var[] = `ls -sl`;
+	string $List[] = `listRelatives -allDescendents -type "mesh" $var `;
+	string $List2[] = `listRelatives -p $List `;
+	if(size($List2) > 0)
+	{
+		select $List2 ;
+		s100_COS_combineSelection ;
+    }else{
+		warning "nothing to combine";
+    }
+}
+
+
+global proc s100_COS_combineSelection()
+{
+	string $var[] = `ls -sl`;
+	if(size($var) > 0)
+	{
+		string $listS[] = `listRelatives -type "mesh" -s $var `;
+		string $listP[]= `listRelatives -p $listS  ` ;
+		string $clean[] = sort( stringArrayRemoveDuplicates($listP) );
+		$ch = 1 ;
+		for($tmp in $clean)
+		{
+			if(size(`findRelatedSkinCluster($tmp )`) ==0)
+			{
+				$ch = 0 ;
+				break ;
+			}
+        }
+
+		if($ch)
+		{
+			if(size($clean) > 0)
+			{
+				string $dup[] = `duplicate -renameChildren $clean ` ;
+				parent -world $dup ;
+				$result = `polyUnite -ch 0 $dup   `;
+				catch(`delete $dup  `) ;
+				string $jnt[] ;
+				for($j = 0; $j < size( $clean ) ; $j++)
+				{
+					$skinCl  = `findRelatedSkinCluster($clean[$j] ) `;
+					$jntTmp = `skinCluster -q -inf $skinCl `;
+					$jnt = stringArrayCatenate(	 $jntTmp , $jnt) ;
+				}
+
+				select $result $jnt ;
+				$skin = `skinCluster `;
+
+				//getParent
+				$listTmp = `listRelatives -p $clean`;
+
+				string $parent ;
+				if(`objExists "msh_grp"`)
+				{
+					$parent =  "msh_grp";
+					if(`objExists "deformed_grp"`)
+					{
+						$parent =  "deformed_grp";
+					}
+				}else{
+					$parent = $listTmp[0] ;
+				}
+
+				parent $result $parent ;
+				select $result ;
+				string $attr[] = {".tx",".ty",".tz"
+								,".rx",".ry",".rz",
+								".sx",".sy",".sz"};
+				for($tmpA in $attr)
+					setAttr -l 0 ($result[0] + $tmpA) ;
+
+				makeIdentity -apply true -t 1 -r 1 -s 1 -n 0;
+
+				select $clean $result ;
+				copySkinWeights  -noMirror -surfaceAssociation closestPoint -influenceAssociation closestJoint;
+				delete $clean ;
+				select $result ;
+				removeUnusedInfluences ;
+				rename $result $clean[0] ;
+
+				//check si le grp est vide et le supprime si oui
+				for($testP in $listTmp)
+				{
+					if(`objExists $testP`)
+						if(size(`listRelatives -c $testP  `) == 0)
+								delete $testP ;
+				}
+				cleanSkinCluster ;
+				cleanTweak ;
+            }
+
+        }else{
+			warning "some of the selection is not attached to a skinCluster" ;
+        }
+
+    }else{
+	warning "nothing to combine";
+    }
+}

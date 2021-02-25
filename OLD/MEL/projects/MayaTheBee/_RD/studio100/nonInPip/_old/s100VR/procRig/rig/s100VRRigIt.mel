@@ -1,0 +1,520 @@
+global proc s100VRRigIt()
+{
+
+int $check = `s100VRCheckRigIt`;
+setAttr -l 1 -k 0  ("root_ctrl.v");
+select "root_ctrl.v" ;
+DeleteHistory ;
+
+
+	if ($check ==1)
+	{
+	string $grpCreated[];
+	$grpCreated = sort(`s100VRCreateJoint`) ;
+	s100VRHideAllAR() ;
+	s100VRReparentHierarchy( $grpCreated);
+	s100VRcreateGrpMsh($grpCreated) ;
+	S100VRChooseToRig ;
+
+
+    }else{
+
+	warning "autoRig does not look good, check it";
+
+    }
+
+
+
+
+}
+
+
+
+global proc S100VRChooseToRig()
+{
+
+//check the attribut on each guide object to check how to rig
+string $allObj[] = s100VRFullGetHierarchy("autoRigCurve_grp","transform");
+int $checkCtrl ;
+int $checkWorld ;
+string $fGrpC[];
+string $fGrpW[];
+	for($i = 0 ; $i < size($allObj) ; $i++)
+	{
+	$checkCtrl = `getAttr ($allObj[$i] +".ctrlAnim")`;
+	$checkWorld = `getAttr ($allObj[$i] +".connectToWorld")`;
+
+	$fGrpC[$i] = s100VRAddCtrlForChaine($allObj[$i]) ;
+	$fGrpW[$i] = s100VRAddWorldLocForChaine($allObj[$i]) ;
+
+
+    }
+
+
+	for($i = 0 ; $i < size($allObj) ; $i++)
+	{
+	$checkCtrl = `getAttr ($allObj[$i] +".ctrlAnim")`;
+	$checkWorld = `getAttr ($allObj[$i] +".connectToWorld")`;
+
+	s100VRParentCtrlForChaine($fGrpC[$i]) ;
+	s100VRConnectVisCtrlForChaine($fGrpC[$i]) ;
+
+ 	s100VRParentGrpForChaine($fGrpW[$i]) ;
+
+
+	}
+
+}
+
+
+global proc string s100VRAddWorldLocForChaine(string $guide)
+{
+
+//create empty group to generat winds effect after
+//print $guide
+string $class;
+
+$class  = `addAttr  -q -enumName   ($guide +".class")`;
+$nameBase  = substituteAllString($guide,"_curv","" ) ;
+$nameBase  = substituteAllString($nameBase,"_loc","" ) ;
+$nameBase  = substituteAllString($nameBase,"VRAR_","VR_" ) ;
+
+$grp = "world_anim_grp";
+	if (`objExists $grp`)
+	{
+	$list = `listRelatives -p $grp`;
+		if($list[0] != "hidden_grp" )
+			parent $grp "hidden_grp" ;
+
+
+
+    }else{
+	createNode -n $grp transform ;
+	parent $grp "hidden_grp" ;
+
+    }
+
+
+$list = sort(`ls -type joint ($nameBase + "*_jnt") `);
+
+string $fLoc[] ;
+
+	for ($i = 0 ; $i < size($list)   ;$i++)
+	{
+	$sub = substituteAllString($list[$i] , "_jnt", "_wGrp") ;
+	$loc = `createNode -n $sub transform` ;
+	$fLoc[$i] = $loc ;
+	parent $fLoc[$i]   $grp;
+	$par = `pointConstraint $list[$i] $fLoc[$i]` ;
+	delete $par ;
+
+	$grpToConnect  =substituteAllString($list[$i] , "_jnt", "_world_grp") ;
+	connectAttr ($fLoc[$i]  +".rotate") ($grpToConnect +".rotate") ;
+		if($i > 0 )
+		{
+		$j = $i -1 ;
+		parent $fLoc[$i] $fLoc[$j] ;
+        }
+
+
+	}
+
+return $fLoc[0]  ;
+
+
+
+}
+
+
+global proc s100VRParentGrpForChaine(string $obj)
+{
+
+/*
+$obj = "VR_leaf01_01_wGrp";
+*/
+
+$nameBase= substituteAllString($obj ,"_wGrp","" ) ;
+$list = sort(`ls -type transform ($nameBase +"*_an_ctrl")`) ;
+$jntName = substituteAllString($list[0] , "_an_ctrl", "_jnt") ;
+$jntName = substituteAllString($jntName , "VRAR_", "VR_") ;
+
+
+$listP = `listRelatives -p $jntName`;
+$listP2 = `listRelatives -p $listP`;
+string $parent ;
+
+	if ($listP2[0] =="joint_grp")
+	{
+
+
+
+	}else{
+
+	$parent = substituteAllString($listP2[0]  , "_jnt", "_wGrp") ;
+
+    }
+
+parent $obj $parent ;
+
+}
+global proc s100VRParentCtrlForChaine(string $obj)
+{
+
+/*
+$obj = "VRAR_mainStern_an_fGrp";
+*/
+
+$nameBase= substituteAllString($obj ,"_an_fGrp","" ) ;
+$list = sort(`ls -type transform ($nameBase +"*_an_ctrl")`) ;
+$jntName = substituteAllString($list[0] , "_an_ctrl", "_jnt") ;
+$jntName = substituteAllString($jntName , "VRAR_", "VR_") ;
+
+
+$listP = `listRelatives -p $jntName`;
+$listP2 = `listRelatives -p $listP`;
+string $parent ;
+
+	if ($listP2[0] =="joint_grp")
+	{
+
+	$parent = "root_ctrl" ;
+
+	}else{
+
+	$parent = substituteAllString($listP2[0]  , "_jnt", "_an_ctrl") ;
+
+    }
+
+parent $obj $parent ;
+
+}
+
+global proc  s100VRConnectVisCtrlForChaine(string $obj)
+{
+// $obj = $fGrpC[$i]
+
+
+//print ("\n\n" + $obj +"\n" ) ;
+$nameBase= substituteAllString($obj ,"_an_fGrp","" ) ;
+$nameBase= substituteAllString($nameBase ,"VRAR_","VR_" ) ;
+
+$list = sort(`ls -type transform ($nameBase +"*_an_ctrl")`) ;
+select $list[0];
+$listP = `listRelatives -p $list[0]`;
+$listP2 = `listRelatives -p $listP`;
+$listP3 = `listRelatives -p $listP2`;
+$listP4 = `listRelatives -p $listP3`;
+
+string $parent = "root_ctrl";
+
+	if($listP4[0]!= "root_ctrl")
+	{
+	$parent = $listP4[0] ;
+	$sub = substituteAllString($parent , "_an_ctrl","") ;
+	$end =endString($sub,2) ;
+	$sub2 =substituteAllString($sub ,("_"+$end) ,"") ;
+
+	//select $parent ;
+
+	string $var[] = sort(`ls -type transform ($sub2 + "*_an_ctrl")`) ;
+
+	$parent = $var[0] ;
+
+
+	}
+$parent = "root_ctrl" ;
+setAttr -k 0 "root_ctrl.v";
+
+	if(`attributeExists CTRL "root_ctrl"`)
+	{
+
+
+
+
+    }else{
+
+	addAttr -ln "CTRL"  -at "enum" -en "####:"  root_ctrl;
+	setAttr -e-keyable true -l 1 root_ctrl.CTRL;
+
+
+
+    }
+
+
+
+
+$name = substituteAllString( $nameBase ,"VRAR_","") ;
+$curve = substituteAllString($obj ,"_an_fGrp","_curv" ) ;
+$curve = substituteAllString($curve ,"VR_","VRAR_" ) ;
+
+$def = 0 ;
+	if(`objExists $curve`)
+	{
+
+    }else{
+	$curve = substituteAllString($obj ,"_an_fGrp","_loc" ) ;
+
+    }
+$class  = `addAttr  -q -enumName   ($curve +".class")`;
+
+
+//print ("\n" +$class + "\n" ) ;
+	if ($class == "stern")
+	{
+
+		$def = 1 ;
+
+	}
+
+
+	if(`attributeExists $name $parent`)
+	{
+
+
+    }else{
+
+	addAttr -ln $name  -at bool  $parent;
+	setAttr -e-keyable true ($parent +"." + $name);
+	setAttr ($parent +"." + $name) $def;
+
+
+    }
+
+$var = `ls ($nameBase + "*_an_ctrl")`;
+	for ($tmp in $var)
+	{
+	$lsShape = `listRelatives -s $tmp` ;
+	connectAttr -f ($parent +"." + $name) ($tmp +".v" ) ;
+	//print ("\nconnect "+ $parent +"." + $name +" to " +$lsShape[0] +".v" );
+	}
+
+}
+
+
+global proc string s100VRAddCtrlForChaine(string $guide)
+{
+/*
+$guide = $allObj[$i];
+*/
+
+
+string $class;
+$class  = `addAttr  -q -enumName   ($guide +".class")`;
+$nameBase  = substituteAllString($guide,"_curv","" ) ;
+$nameBase  = substituteAllString($nameBase,"_loc","" ) ;
+$nameBase  = substituteAllString($nameBase,"VRAR_","VR_" ) ;
+
+
+$baseGrp = `group -em -n ($nameBase +"_an_fGrp") -p "root_ctrl" `;
+$list = sort(`ls -type joint ($nameBase + "*_jnt") `);
+string $color = "yellow";
+
+
+
+	switch ($class) {
+
+		case "flower":
+		$color = "red";
+		break;
+
+		case "stern":
+		$color = "yellow";
+		break;
+
+		case "leaf":
+		$color = "green";
+		break	;
+	}
+
+
+string $fGrp[] ;
+string $fCtrl[] ;
+
+
+	for ($i = 0 ; $i < size($list) ;$i++)
+	{
+	$nameJnt = substituteAllString(  $list[$i] , "_jnt", "") ;
+	$ctrlN = $nameJnt + "_an_ctrl"  ;
+
+	$grpN =  $nameJnt +  "_an_grp";
+	$grpWN =  $nameJnt +  "_world_grp";
+
+	$grpAN =  $nameJnt +  "_an_kGrp";
+
+	$grp = `group -em -n $grpN ` ;
+	$grpW = `group -em -n $grpWN -p  $grp ` ;
+
+
+	$grpK = `group -em -n $grpAN -p  $grpWN ` ;
+	$fGrp[$i]  = $grp ;
+	string $ctrl ;
+
+	$ctrl = s100VRcreateCtrl( $ctrlN, "test" ) ;
+	$fCtrl[$i] = $ctrl ;
+	parent $ctrl $grpK ;
+
+	color($color , $ctrl);
+
+	$pa = `pointConstraint $list[$i]  $fGrp[$i] `;
+
+	delete $pa ;
+	$pa = `parentConstraint $list[$i]  $grpK `;
+	delete $pa ;
+
+	$pa = `parentConstraint $fCtrl[$i]  $list[$i] `;
+	parent $grp $baseGrp ;
+
+		if($i > 0 )
+		{
+		$j = $i -1 ;
+		parent $fGrp[$i] $fCtrl[$j] ;
+        }
+	}
+
+return $baseGrp ;
+
+
+}
+
+global proc string s100VRcreateCtrl(string $name,string $type)
+{
+$cir = `circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 2 -d 3 -ut 0 -tol 0.01 -s 8 -ch 0  -n $name `;
+
+return $cir[0] ;
+}
+
+global proc string[] s100VRcreateGrpMsh(string $grpCreated[])
+{
+
+$allObj = s100VRFullGetHierarchy("autoRigCurve_grp","transform");
+$mGrp = "msh_grp";
+string $aGrp[] ;
+	if (`objExists $mGrp`)
+	{
+
+    }else{
+	$grpR = `group -em -n $mGrp -p "full_grp"`;
+    }
+
+$dGrp = "deformed_grp";
+
+	if (`objExists $dGrp`)
+	{
+
+    }else{
+	$grpR = `group -em -n $dGrp -p$mGrp`;
+    }
+
+	for($i = 0 ; $i < size($allObj) ; $i++)
+	{
+
+	$grp = substituteAllString($allObj[$i],"_curv", "_mGrp");
+	$grp = substituteAllString($allObj[$i],"VRAR_", "VR_");
+
+		if(`objExists $grp`)
+		{
+
+
+        }else{
+
+		$listP = `listRelatives -p $allObj[$i]` ;
+
+
+
+		$aGrp[$i]  = `group -em -n $grp -p $dGrp` ;
+        }
+
+
+    }
+
+	for($i = 0 ; $i < size($allObj) ; $i++)
+	{
+	$listP = `listRelatives -p $allObj[$i]` ;
+	string $grpPar ;
+
+		if($listP[0] == "autoRigCurve_grp" )
+		{
+		$grpPar = $dGrp;
+        }else{
+		$grpPar  = substituteAllString($allObj[$i],"_curv", "_mGrp");
+		$grpPar  = substituteAllString($grpPar,"_loc", "_mGrp");
+		}
+
+
+		if(`objExists $grpPar`)
+		{
+		$listP = `listRelatives -p $aGrp[$i] `;
+
+			if ($listP[0] != $grpPar )
+				parent $aGrp[$i] $grpPar;
+
+        }
+    }
+
+
+return $aGrp ;
+}
+
+
+global proc int s100VRCheckRigIt()
+{
+int $check = 0 ;
+
+	if(`objExists "autoRigCurve_grp"`)
+	{
+	$check = 1 ;
+    }else{
+	$check = 0 ;
+    }
+return $check ;
+}
+
+
+global proc string[] s100VRCreateJoint()
+{
+string $return[] ;
+$allObj = s100VRFullGetHierarchy("autoRigCurve_grp","transform");
+
+
+
+
+	for ($i = 0 ; $i < size($allObj);$i++)
+	{
+	//print $i ;
+	$return[$i] =  s100VRDefineTypeForCreateChaine($allObj[$i]) ;
+    }
+
+//print $grpCreated ;
+
+
+return $return ;
+}
+
+global proc s100VRReparentHierarchy(string $grpCreated[])
+{
+$reSortCreated  = sort($grpCreated) ;
+$allObj = s100VRFullGetHierarchy("autoRigCurve_grp","transform");
+$reSortAll  = sort($allObj) ;
+
+
+	for ($i = 0 ; $i < size($reSortAll) ; $i++)
+	{
+	$list = `listRelatives -p $reSortAll[$i] `;
+		if ($list[0] != "autoRigCurve_grp")
+		{
+		$jntN  = substituteAllString($list[0], "_curv", "_") ;
+		$jntN  = substituteAllString($jntN, "loc", "_") ;
+		$jntN  = substituteAllString($jntN, "VRAR_", "VR_") ;
+
+		$listCJ= `ls -type joint ($jntN + "*_jnt")`;
+		$child = `listRelatives -c $grpCreated[$i]`;
+		select $child ;
+		select $listCJ ;
+		string $getTheDaddy  =s100VRReturnClosestElement($child[0],$listCJ) ;
+		//print $getTheDaddy  ;
+		parent $grpCreated[$i] $getTheDaddy ;
+		}
+    }
+
+
+}

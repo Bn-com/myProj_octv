@@ -1,0 +1,350 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2009-6-30
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc eyRenderReplaceTeeth()
+{
+	string $proj = `getenv IDMT_PROJECTS`;
+	
+	string $filename = `file -q -sn -shn`;
+	string $buff[];
+	tokenize $filename "_" $buff;
+	string $episode = $buff[1];
+	string $sequence = $buff[2];
+	string $shot = $buff[3];
+
+	string $filepath = $proj+"/Enyo/Project/Scenes/Animation/episode_"+$episode+"/scene_"+$shot+"/anim/";
+	string $name = "ey_"+$episode+"_"+$sequence+"_"+$shot+"_fn_an_";
+
+	string $animfiles[] = `getFileList -fld $filepath -fs ($name+"*.mb")`;
+	//print $animfiles;
+
+	string $cmd = `getenv maya_location`+"/bin/mayabatch  -command \"source eyRenderReplaceTeeth.mel;eyRenderBakeTeeth(\\\""+$filepath+$animfiles[size($animfiles)-1]+"\\\");\"";
+	print $cmd;
+	$fileId = `fopen "d:/wslGoCommand.bat" "w"`;
+		fprint $fileId ($cmd+"\r\n");
+	fclose $fileId;
+	
+	system("d:/wslGoCommand.bat");
+
+	string $exfile = `internalVar -userTmpDir`+"teeth.ma"; 
+	if (`filetest -r $exfile`)
+	{
+		file -import -type "mayaAscii" -rpr "teeth" -options "v=0"  -pr -loadReferenceDepth "all" $exfile;
+		sysFile -del $exfile;
+
+		/*source "zjApplyMaterial.mel";
+		string $referencefiles[] = `file -q -r`;
+		for ($rf in $referencefiles)
+		{
+			string $replacechar[] = {"*c004001agaya*","*c006001enyo*","*c007001ito*"};
+			for ($rc in $replacechar)
+			{
+				string $buff[];
+				tokenize $rf "\/" $buff;
+				if (gmatch($buff[size($buff)-1],$rc))
+				{
+					string $upteeth[] = `ls ($rc+":MSH_teeth_UP_")`;
+					string $bakeupteeth[] = `ls ($rc+":MSH_teeth_UP__BAKED")`;
+					if (size($upteeth) && size($bakeupteeth))
+					{
+						select -r $upteeth[0];
+						select -add $bakeupteeth[0];
+						TransferUVMatSelProc(0,1);
+						setAttr ($upteeth[0]+".visibility") 0;
+
+					}
+					string $dwnteeth[] = `ls ($rc+":MSH_teeth_DWN_")`;
+					string $bakedwnteeth[] = `ls ($rc+":MSH_teeth_DWN__BAKED")`;
+					if (size($dwnteeth) && size($bakedwnteeth))
+					{
+						select -r $dwnteeth[0];
+						select -add $bakedwnteeth[0];
+						TransferUVMatSelProc(0,1);
+						setAttr ($dwnteeth[0]+".visibility") 0;
+
+					}
+				}
+			}
+		}*/
+		string $replacechar[] = {"c004001agaya","c006001enyo","c007001ito"};
+		string $filePath = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\projects\\Enyo\\lightingStyles\\";
+		if (`getenv OFFICE_LOCATION` != "")
+		{
+			$filePath = "//file-cluster/GDC/Resource/Support/Maya/projects/Enyo/lightingStyles/";
+		}
+		file -import -type "mayaAscii" -ra true -namespace "teeth" -options "v=0;p=17"  -pr -loadReferenceDepth "all" ($filePath+"teeth.ma");
+		
+		for ($rc in $replacechar)
+		{
+				string $upteeth[] = `ls ("*"+$rc+"*:MSH_teeth_UP_")`;
+				string $bakeupteeth[] = `ls ("*"+$rc+"*:MSH_teeth_UP__BAKED")`;
+				if (size($upteeth) && size($bakeupteeth))
+				{
+					//string $filePath = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\projects\\Enyo\\lightingStyles\\";
+					//if (`getenv OFFICE_LOCATION` != "")
+					//{
+					//	$filePath = "//file-cluster/GDC/Resource/Support/Maya/projects/Enyo/lightingStyles/";
+					//}
+					//file -import -type "mayaAscii" -ra true -namespace ($rc+"_teeth") -options "v=0;p=17"  -pr -loadReferenceDepth "all" ($filepath+$rc+"_teeth.ma");
+					
+					sets -e -forceElement  "teeth:SHD_gumsSG" ($bakeupteeth[0]+".f[0:2077]");
+					sets -e -forceElement  "teeth:SHD_teethSG" ($bakeupteeth[0]+".f[2078:5341]");
+
+					string $bakedwnteeth[] = `ls ("*"+$rc+"*:MSH_teeth_DWN__BAKED")`;
+					sets -e -forceElement  "teeth:SHD_gumsSG" ($bakedwnteeth[0]+".f[0:1653]");
+					sets -e -forceElement   "teeth:SHD_teethSG" ($bakedwnteeth[0]+".f[1654:4685]");
+
+					string $dwnteeth[] = `ls ("*"+$rc+"*:MSH_teeth_DWN_")`;
+					setAttr ($upteeth[0]+".visibility") 0;
+					setAttr ($dwnteeth[0]+".visibility") 0;
+				}
+		}
+	}
+}
+
+global proc eyRenderBakeTeeth(string $anim)
+{
+	file -f -options "v=0" -typ "mayaBinary" -o $anim;
+
+	source "eyRenderReplaceTeeth.mel";
+	eyReplaceMSRender();
+
+
+	string $referenceFiles[] = `file -q -r`;
+	for ($file in $referenceFiles )
+	{
+		if (gmatch($file,"*/scenes/sets*"))
+		{
+			string $referenceNode = `referenceQuery -rfn $file`;
+			file -ur $referenceNode;
+		}
+	}
+	string $teeth[] = `ls "*:MSH_teeth_UP_" "*:MSH_teeth_DWN_"`;
+	string $replaceTeeth[];
+	string $baked[];
+	for ($t in $teeth)
+	{
+		if (gmatch($t,"*c004001agaya*") || gmatch($t,"*c006001enyo*") || gmatch($t,"*c007001ito*"))
+		{
+			$replaceTeeth[size($replaceTeeth)] = $t;
+			$baked[size($baked)] = $t+"_BAKED";
+		}
+	}
+
+	select -r $replaceTeeth;
+	cyBakeCloth;
+
+	select -r $baked;
+	parent -w;
+	sets -e -forceElement initialShadingGroup;
+
+	string $exfile = `internalVar -userTmpDir`+"teeth.ma"; 
+	if (`filetest -r $exfile`)
+	{
+		sysFile -del $exfile;
+	}
+	file -op "v=0" -typ "mayaAscii" -pr -es $exfile;
+}
+
+global proc cyBakeCloth()
+{
+	string $frameNum ;
+	string $temp[];
+		
+	string $clothObj[] = `ls -selection -transforms`;
+	if ($clothObj[0] == "")
+	{
+		string $whatShouldiDo = `confirmDialog 
+					-title "Nothing is selected!" 
+					-message "You must first select your geometry before running this script.\nIf you would like the script to select the object named cloth, then click \"AutoSelect\""
+					-button "AutoSelect" -button "Cancel" -defaultButton "AutoSelect"
+					-cancelButton "Cancel" -dismissString "Cancel"`;
+
+		if ($whatShouldiDo == "Cancel")
+		{
+			print ("AutoSelect canceled. Select the cloth geometry first, then execute the script.");
+		}
+		
+		else if ($whatShouldiDo == "AutoSelect")
+		{
+			select "cloth\*";
+		}
+	}
+
+	int $minTime= int(`playbackOptions -query -minTime`);
+	int $maxTime= int(`playbackOptions -query -maxTime`);
+
+	int $index = 0;
+	string $blendShape, $base, $target, $buf[];
+
+	currentTime $minTime;
+	refresh;
+
+	string $nspace="";
+	string $mayVer= `about -v`;
+	for ($obj in $clothObj)
+	{
+		if (!size(`listRelatives -shapes $obj`))
+		{
+			continue;
+		}
+
+		string $name = `match "[^|]+$" $obj`;
+
+		if (($mayVer=="7.0.1")&&`referenceQuery -isNodeReferenced $obj`)
+		{
+			string $temp[];
+			tokenize $obj ":" $temp;
+			if (!`namespace -exists $temp[0]`)
+			{
+				namespace -add $temp[0];
+
+			}
+			$nspace = $temp[0];
+			$buf = `duplicate $obj`;
+			$base = `rename $buf[0] ($name + "_BAKED")`;
+			$blendShape = $name + "_BlendShape";
+			if (`objExists $blendShape`)
+				delete $blendShape;
+			blendShape -name $blendShape $base;
+
+			hide $obj;
+		}
+		else
+		{
+			$buf = `duplicate $obj`;
+			$base = `rename $buf[0] ($name + "_BAKED")`;
+			$blendShape = $name + "BS";
+			if (`objExists $blendShape`)
+				delete $blendShape;
+			blendShape -name $blendShape $base;
+
+			hide $obj;
+		}
+
+	}
+
+
+	for ($i=$minTime; $i<($maxTime+1); $i++)
+	{
+		currentTime $i;
+		refresh;
+		for ($each in $clothObj)
+		{
+			if (!size(`listRelatives -shapes $each`))
+			{
+				continue;
+			}
+
+			string $name = `match "[^|]+$" $each`;
+
+			if (($mayVer=="7.0.1")&&`referenceQuery -isNodeReferenced $each`)
+			{
+				$buf = `duplicate $each`;
+				$base = $each + "_BAKED";
+
+				$target = `rename $buf[0] ($name + "_baked_frame_" + $i)`;
+				$blendShape = $name + "_BlendShape";
+				print ("\n $base "+$base);
+				print ("\n $index "+$index);
+				print ("\n $target "+$target);
+				print ("\n $blendShape "+$blendShape);
+																
+				blendShape -edit -target $base $index $target 1.0 $blendShape;
+
+				delete $target;
+ 
+			}
+			else
+			{
+				$buf = `duplicate $each`;
+		
+				$base = $each + "_BAKED";
+				$target = `rename $buf[0] ($name + "baked_frame_" + $i)`;
+				$blendShape = $name + "BS";
+				blendShape -edit -target $base $index $target 1.0 $blendShape;
+
+				delete $target;
+
+
+			}
+			if ($i != $minTime)
+				setKeyframe -time ($i-1) -value 0 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+			setKeyframe -time $i -value 1 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+			if ($i != $maxTime)
+				setKeyframe -time ($i+1) -value 0 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+		}
+		$index ++;
+		flushUndo;
+	}
+	flushUndo;
+	refresh;
+}
+
+
+global proc eyReplaceMSRender()
+{
+	string $referenceFiles[] = `file -q -r`;
+	for ($file in $referenceFiles )
+	{
+		string $referenceNode = `referenceQuery -rfn $file`;
+
+		string $buff[];
+		int $num = `tokenize $file "{}" $buff`;
+		string $old = $buff[0];
+		
+		$num = `tokenize $old "\/" $buff`;
+		string $fileName = $buff[$num-1];
+		string $filePath = `substring $old 1 (size($old)-size($fileName))`;
+
+		$num = `tokenize $fileName "_." $buff`;
+		string $type = $buff[$num-2];
+
+		if ($type == "anim")
+		{
+			string $newFile =  substituteAllString($fileName,"_l_","_h_");
+			$newFile = substituteAllString($newFile,"_anim.","_render.");
+
+			if (endsWith($newFile,".ma"))
+			{
+				$newFile = substituteAllString($newFile,".ma",".mb");
+			}
+
+			if (`filetest -r ($filePath+$newFile)`)
+			{
+				//file -lrd "none" -lr $referenceNode ($filePath+$newFile);
+				file  -lr $referenceNode ($filePath+$newFile);
+			}
+		}
+		else if ($type == "mo" || $type == "rg" || $type == "tx")
+		{
+			string $newFile =  substituteAllString($fileName,"_l_","_h_");
+			$newFile = substituteAllString($newFile,("_"+$type+"."),"_ms_render.");
+			if (endsWith($newFile,".ma"))
+			{
+				$newFile = substituteAllString($newFile,".ma",".mb");
+			}
+
+			string $buff[];
+			int $num = `tokenize $filePath "\/" $buff`;
+			string $newPath = `substring $filePath 1 (size($filePath)-size($buff[$num-1])-1)`;
+			$newPath = $newPath+"master/";
+
+			if (`filetest -r ($newPath+$newFile)`)
+			{
+				//print ($newPath+$newFile+"----\n");
+				//file -lrd "none" -lr $referenceNode ($newPath+$newFile);
+				file -lr $referenceNode ($newPath+$newFile);
+			}
+		}
+	}
+}

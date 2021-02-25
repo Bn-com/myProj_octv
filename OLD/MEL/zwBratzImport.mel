@@ -1,0 +1,101 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ª∆÷ŸŒ¨
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwPanshelImport()
+{
+	fileBrowserDialog -mode 0 -fileCommand "zwPanshelImportProc" -fileType "mayaBinary" -actionName "Import";
+}
+
+global proc zwPanshelImportProc(string $filename, string $fileType)
+{
+	string $namespace = "zwPanshelImport";
+
+	catch(`zwPanshelImportImport $filename $namespace`);
+	catch(`zwPanshelImportRemoveNamespace "zwPanshelImport"`);
+	
+	print "Removing unused rendering nodes\n";
+	print "-------------------------------\n";
+	MLdeleteUnused();
+	print "\n";
+}
+
+global proc zwPanshelImportImport(string $file, string $namespace)
+{
+	string $buf2[];
+
+	file -import -renamingPrefix $namespace -renameAll true $file;
+	string $buf[] = `ls -type shadingEngine`;
+	for ($shadingEngine in $buf)
+	{
+		if (!`gmatch $shadingEngine ($namespace + "*_*")`)
+		{
+			string $buf1[] = `sets -query $shadingEngine`;
+			for ($obj in $buf1)
+			{
+				tokenize $obj "|" $buf2;
+				string $oldObj = $buf2[size($buf2)-1];
+
+				tokenize $oldObj "." $buf2;
+
+				string $buf3[] = `listRelatives -shapes $obj`;
+				if (size($buf3))
+				{
+					for ($oldShape in $buf3)
+					{
+						string $buf4[] = `ls -long ($namespace + "*_" + $oldShape)`;
+						for ($newShape in $buf4)
+						{
+							string $buf5[] = `listRelatives -fullPath -allParents $newShape`;
+							for ($newObj in $buf5)
+							{
+								$newObj = `substitute $buf2[0] $oldObj $newObj`;
+								sets -edit -forceElement $shadingEngine $newObj;
+							}
+						}
+					}
+				}
+				else
+				{
+					string $buf4[] = `ls -long ($namespace + "*_" + $buf2[0])`;
+					for ($newObj in $buf4)
+					{
+						$newObj = `substitute $buf2[0] $oldObj $newObj`;
+						sets -edit -forceElement $shadingEngine $newObj;
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc zwPanshelImportRemoveNamespace(string $namespace)
+{
+	string $buf1[], $buf2[];
+
+	string $buf[] = `ls -long ($namespace + "*_*")`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		for ($j=$i+1; $j<size($buf); $j++)
+		{
+			if (`tokenize $buf[$j] "|" $buf1`  > `tokenize $buf[$i] "|" $buf1`)
+			{
+				string $temp = $buf[$i];
+				$buf[$i] = $buf[$j];
+				$buf[$j] = $temp;
+			}
+		}
+	}
+	for ($i=0; $i<size($buf); $i++)
+	{
+		tokenize $buf[$i] "|" $buf1;
+		tokenize $buf1[size($buf1)-1] "_" $buf2;
+		rename $buf[$i] `substitute ($buf2[0] + "_") $buf1[size($buf1)-1] ""`;
+	}
+}

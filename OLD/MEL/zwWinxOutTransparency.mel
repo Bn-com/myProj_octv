@@ -1,0 +1,103 @@
+global proc zwWinxOutTransparency()
+{
+	string $files[] = `ls -sl -type "file"`;
+	for ($file in $files)
+	{
+		string $connections[] = `listConnections -plugs true -connections true ($file + ".outTransparency")`;
+		if (size($connections) == 0)
+		{
+			continue;
+		}
+
+		string $path = `getAttr ($file + ".fileTextureName")`;
+		$path = `workspace -expandName $path`;
+		$path = `zwWinxOutTransparencyGetLargest $path`;
+		if (!`filetest -f $path`)
+		{
+			continue;
+		}
+		if (`zwWinxOutTransparencyGetAlpha $path`)
+		{
+			continue;
+		}
+		
+		string $reverse = `evalEcho "shadingNode -asUtility reverse"`;
+		evalEcho ("connectAttr \"" + $file + ".outColor\" \"" + $reverse + ".input\"");
+		for ($i=0; $i<size($connections); $i+=2)
+		{
+			evalEcho ("connectAttr -force \"" + $reverse + ".output\" \"" + $connections[$i+1] + "\"");
+		}
+	}
+}
+
+global proc string zwWinxOutTransparencyGetLargest(string $source)
+{
+	string $dest = "";
+
+	string $levels[] = {"4k", "2k", "1k", "512", "256"};
+
+	string $filename = `match "[^/\\]+$" $source`;
+	string $ext = `substitute "^[^.]+" $filename ""`;
+	
+	string $title = `match "^[^.]+" $filename`;
+	string $levelFilename = `match "[^_]+$" $title`;
+
+	for ($i=0; $i<size($levels); $i++)
+	{
+		string $folder = `substitute "[/\\][^/\\]+$" $source ""`;
+		string $levelFolder = `match "[^/\\]+$" $folder`;
+		$folder = `substitute "[^/\\]+$" $folder $levels[$i]`;
+		$title = `substitute "[^_]+$" $title $levels[$i]`;
+		string $destFile = $folder + "/" + $title + $ext;
+		if (`filetest -f $destFile`)
+		{
+			$dest = $destFile;
+			break;
+		}
+	}
+
+	return $dest;
+}
+
+global proc int zwWinxOutTransparencyGetAlpha(string $path)
+{
+	int $rs = true;
+
+	if (!`filetest -f $path`)
+	{
+		return $rs;
+	}
+
+	string $imf_info = "imf_info.exe";
+	string $version = `about -version`;
+	if (`match "^2008" $version` != "")
+	{
+		$imf_info = "D:/Alias/MAYA2009/bin/imf_info.exe";
+		if (!`filetest -f $imf_info`)
+		{
+			$imf_info = "D:/Alias/MAYA8.5/bin/imf_info.exe";
+			if (!`filetest -f $imf_info`)
+			{
+				$imf_info = `getenv "DEV_PATH"` + "/bin/imf_info.exe";
+				if (!`filetest -f $imf_info`)
+				{
+					$imf_info = `internalVar -userScriptDir` + "imf_info.exe";
+					if (!`filetest -f $imf_info`)
+					{
+						$wh = `idmtImage -size $path`;
+						return $wh;
+					}
+				}
+			}
+		}
+	}
+		
+	string $cmd = "\"\"" + `substituteAllString $imf_info "/" "\\"` + "\" \"" + `substituteAllString $path "/" "\\"` + "\"\"";
+	chdir "C:";
+	waitCursor -state on;
+	string $str = `system $cmd`;
+	waitCursor -state off;
+	$rs = (`match " rgba " $str` != "");
+
+	return $rs;
+}

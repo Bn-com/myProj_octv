@@ -1,0 +1,180 @@
+// buildShot.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Takes an xml "builder" file, and builds a shot
+Use:
+	buildShot xml
+Options:
+	xml (string)	- Name of the xml file
+	
+Dependancies:
+
+	rfxCameras
+	parseXML
+	syncPointCacheNodes
+	performAssetSync
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	08/22/05
+Revisions:	09/16/05	Rev 1.0
+		- Adding a call to syncPointCacheNodes for shots that use point caching.
+		
+		
+		01/13/06	Rev 1.1
+		- If an fx or cloth shot set "animCachePreserveAnimCurves" fileInfo - this tells animCache to keep keys outside of the cache range.
+
+		08/21/06	Rev 1.2
+		- Switched to getPath to resolve filenames
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source rfxCameras.mel;
+source parseXML.mel;
+
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global int $TMP_a = 1;
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+proc string resolveFilename (string $filename)
+{
+	/*
+	string $resolved = `workspace -q -act`;
+	string $buf[];
+	tokenize ($filename,"\\/",$buf);
+	int $startCopying = 0;
+	for ($i=0;$i<size($buf);$i++)
+	{
+		if ($buf[$i] == "cpsv")
+			$startCopying = 1;
+		if ($startCopying)
+			$resolved += "/"+$buf[$i];	
+	}
+	return $resolved;
+	*/
+	string $resolved = getPath ("ConformPath",{$filename});
+	return $resolved;
+}
+// ---------------------------------------------------------------------------------------------------
+proc unlockCamera (string $top)
+{
+	string $nodes[] = `listRelatives -ad -pa $top`;
+	$nodes[size($nodes)] = $top;
+	for ($node in $nodes)
+		lockNode -l 0 $node;	
+}
+// ---------------------------------------------------------------------------------------------------
+proc lockCamera (string $top)
+{
+	string $nodes[] = `listRelatives -ad -pa $top`;
+	$nodes[size($nodes)] = $top;
+	for ($node in $nodes)
+		lockNode -l 1 $node;	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc buildShot( string $file) 
+{
+	loadPlugins();
+	eval ("source \"parseXML.mel\"");
+
+	string $xml = readXML($file,0);
+	string $cacheDir = xml_getVar ($xml,"cacheDir");
+	string $cacheXML[] = xml_getTag ($xml,"Cache");
+	
+	// store the sequence and shot group in fileInfo variables
+	string $seq = xml_getVar ($xml,"Sequence");
+	string $shotGroup = xml_getVar ($xml,"ShotGroup");
+	string $sceneType = xml_getVar ($xml,"SceneType");
+	
+	string $shot = xml_getVar ($xml,"ShotNumber");	// take the first instance of a ShotNumber attribute.
+	
+	
+	fileInfo "sequence" $seq;
+	fileInfo "shotGroup" $shotGroup;
+	fileInfo "shot" $shot;
+	fileInfo "sceneType" $sceneType;
+	fileInfo "shotBuilder" (basename ($file,""));
+	
+	fileInfo "assetSynching" "enabled";
+	fileInfo "cacheSynching" "enabled";
+	fileInfo "pointCacheSynching" "enabled";
+	
+	// 10/31/05 - switching to animCache as the primary cache baker
+	fileInfo "cacheBaker" "animCache";
+	
+	if ($sceneType == "lighting")
+	{
+		fileInfo "enforcePointCachingAssetSelection" 1;
+		// if it's lighting, and point caching is specified for an asset, asset synching choices to the point caching asset.	
+	}
+	
+	// insert the script node to trigger the asset and cache sync on file open
+	scriptNode -n "RFXCachingFileOpen" -st 1 -bs "cachingFileOpen";
+	lockNode "RFXCachingFileOpen";
+	
+	// Sync assets and cameras
+	performAssetSync ($file);
+	
+	// retrieve the animCache options from the xml
+	string $cacheDir = xml_getVar ($cacheXML[0],"CacheDir");
+	string $cache_itt = xml_getVar ($cacheXML[0],"BakeInTangentType");
+	string $cache_ott = xml_getVar ($cacheXML[0],"BakeOutTangentType");
+	string $cache_pre = xml_getVar ($cacheXML[0],"BakePreInfinityType");
+	string $cache_pst = xml_getVar ($cacheXML[0],"BakePostInfinityType");
+	string $cache_bakeShot = xml_getVar ($cacheXML[0],"BakeShot");
+	
+	// create the fileInfo which will store the timestamp of the last cache bake.
+	fileInfo "animCacheBakeTime" "0";	// set to 1/1/1970 initially.
+	fileInfo "animCacheBakeStart" "0";	// start frame of the last cache bake
+	fileInfo "animCacheBakeEnd" "0";	// end frame of the last cache bake
+	fileInfo "animCacheDirty" "1";		// a setting of 1, will force a re-bake regardless
+	fileInfo "animCacheBakeShot" $cache_bakeShot;	// which shot to bake. Or "all"
+	fileInfo "animCacheDir" $cacheDir;	// where to find the cache.
+	// cache keyframe options
+	fileInfo "animCacheBakeItt" $cache_itt;
+	fileInfo "animCacheBakeOtt" $cache_ott;
+	fileInfo "animCacheBakePre" $cache_pre;
+	fileInfo "animCacheBakePst" $cache_pst;
+	
+	// if an FX or Cloth shot, set animCache to re-use animCurves (so that curves set by artist are preserved if outside cache range)
+	if (tolower ($sceneType) == "fx" || tolower ($sceneType) == "cloth")
+		fileInfo "animCachePreserveAnimCurves" "1";
+	else
+		fileInfo "animCachePreserveAnimCurves" "0"; 
+	
+	// sync the cache
+	syncCache (!`about -batch`);
+	
+	// sync point cache nodes
+	syncPointCacheNodes "" "";
+}

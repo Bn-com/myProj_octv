@@ -1,0 +1,339 @@
+// buildExportPlaylist.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Calculates a distribution strategy for a cache export (point or control) of a shot, and generates an xml playlist
+Use:
+	buildExportPlaylist args ... 
+Options:
+	see main proc
+	
+Dependancies:
+
+	parseXML.mel
+	xml_parser plug-in
+	stringArrayFindIndex
+	getPath
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	09/14/06
+Revisions:	03/05/07	Rev 1.1
+		- Adding support for versioning
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// 
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+// ---------------------------------------------------------------------------------------------------
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+// getPointCachingData - get a list of assets for the show that are to be pointCache exporters
+// ---------------------------------------------------------------------------------------------------
+proc string [] getPointCachingData ()
+{
+	// get the point caching assets for the show
+	string $namesAndExporters[];
+
+	string $file = getPath ("ProjectGlobals",{})+"/PointCache.xml";
+	if (!`filetest -f $file`)
+	{
+		warning ($file+" doesn't exist.\n");
+		return {};
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $filename = xml_getVar ($nodes[$i],"filename");
+		string $assetName = getPath ("AssetNameFromFilename",{$filename});
+		$namesAndExporters[size($namesAndExporters)] = $assetName;
+		$namesAndExporters[size($namesAndExporters)] = getPath ("ConformPath",{$filename});
+	}
+
+	return $namesAndExporters;
+}
+// ---------------------------------------------------------------------------------------------------
+// getDistributionCriteria - parse the config and retrieve the distribution criteria
+// ---------------------------------------------------------------------------------------------------
+/*
+	Criteria are as follows:
+	Combined control count
+	Combined file size
+	Combined point cache geo count (jobs of type PointCachePreExport only)
+*/
+// ---------------------------------------------------------------------------------------------------
+proc int [] getDistributionCriteria (string $config, string $taskType)
+{
+	string $xml = readXML ($config,0);
+/*
+	The xml will look something like this:
+
+	<Distribution enabled="1" controlCount="1500" objectCount="475" fileSize="750" />
+*/
+	string $node[] = xml_getTag ($xml,"Distribution");
+	int $outputData[];	// element 0 - enabled, 1 = controlCount, 2 = filesize, 3 = objectCount
+	
+	if (!size($node))
+	{
+		$outputData[0] = 0;	// not enabled
+		return $outputData;
+	}
+
+	string $enabled = xml_getVar ($node[0],"enabled");
+	string $controlCount = xml_getVar ($node[0],"controlCount");
+	string $objectCount = xml_getVar ($node[0],"objectCount");
+	string $fileSize = xml_getVar ($node[0],"fileSize");
+
+	$outputData[0] = (int)$enabled;
+	$outputData[1] = (int)$controlCount;
+	$outputData[2] = (int)$fileSize;
+	if ($taskType == "PointCachePreExport")
+	{
+		$outputData[3] = (int)$objectCount;
+	}
+	return $outputData;
+}
+// ---------------------------------------------------------------------------------------------------
+// getControlCount - read the supplied controls file and return the number of controls
+// ---------------------------------------------------------------------------------------------------
+proc int getControlCount (string $file)
+{
+	if (!`filetest -f $file`)
+		return 0;
+	string $xml = readXML ($file,0);
+	return size(xml_getTag ($xml,"control"));
+}
+// ---------------------------------------------------------------------------------------------------
+// getObjectCount - read the supplied controls file and return the number of controls
+// ---------------------------------------------------------------------------------------------------
+proc int getObjectCount (string $file)
+{
+	if (!`filetest -f $file`)
+		return 0;
+	string $xml = readXML ($file,0);
+	return size(xml_getTag ($xml,"Object"));
+}
+// ---------------------------------------------------------------------------------------------------
+// getAssetData - get the data for an asset that is needed to determine a distribution strategy
+// ---------------------------------------------------------------------------------------------------
+/*
+	isPointCaching - (jobs of type PointCachePreExport only)
+	controlCount - taken from the controls.xml in assetInfo
+	fileSize - 
+	objectCount - taken from pointCacheGeo.xml (jobs of type PointCachePreExport only)
+	
+*/
+proc int [] getAssetData (string $filename, string $taskType, string $pointCacheData[])
+{
+	string $file_to_query = $filename;
+	string $assetName = getPath ("AssetNameFromFilename",{$filename});
+	string $assetType = getPath ("AssetTypeFromFilename",{$filename});
+	string $assetInfoDir = getPath ("AssetInfoDir",{$assetType,$assetName});
+	int $outputData[];
+
+	if ($taskType == "PointCachePreExport")
+	{
+		int $index = stringArrayFindIndex ($assetName,$pointCacheData);
+		if ($index == -1)
+		{
+			$outputData[0] = 0;	// not pointCaching
+			return $outputData;
+		}
+		$outputData[0] = 1;	// pointCaching
+		$file_to_query = $pointCacheData[$index+1];	// the actual exporter (may be different from filename)
+	}
+
+	// get control count
+	
+	// lookup finds the suffix of the controls file we are interested in, depending on task type
+	string $lookup[] = {
+		"PointCachePreExport","animationRig",
+		"LayoutSubmission","layoutRig",
+		"PostLayout","layoutRig",
+		"AnimationSubmission","animationRig"
+	};
+	int $index = stringArrayFindIndex ($taskType,$lookup);
+	string $controls = $assetInfoDir+"/"+$assetName+"_"+$lookup[$index+1]+"_controls.xml";
+
+	$outputData[1] = getControlCount ($controls);
+
+	// get file size
+	if (!`filetest -f $file_to_query`)
+	{
+		$outputData[2] = 0;
+	}
+	int $size = getFileSize ($file_to_query);	// size in bytes
+	float $MB = (float)$size/1024.0/1024.0;
+	$outputData[2] = (int)$MB;
+
+	// PointCachePreExport only - get object count
+	if ($taskType == "PointCachePreExport")
+	{
+		string $objects = $assetInfoDir+"/pointCacheGeo.xml";
+		$outputData[3] = getObjectCount ($objects);
+	}
+	return $outputData;
+}
+// ---------------------------------------------------------------------------------------------------
+/*
+$seq		// The sequence
+$shot		// The shot
+$taskType	// The task type. Possibilities are LayoutSubmission, PostLayout, AnimationSubmission, and PointCachePreExport
+$config		// xml config file containing distribution criteria
+$assets		// List of assets in the shot (filenames)
+$namespaces	// List of namespaces corresponding to those assets
+$refNodes	// List of corresponding reference nodes
+$deferred	// Whether each reference is deferred or not
+$xml		// this is populated with result
+*/
+// ---------------------------------------------------------------------------------------------------
+global proc int buildExportPlaylist(
+	string $seq,		
+	string $shot,		
+	string $taskType,	
+	string $config,		
+	string $assets[],	
+	string $namespaces[],	
+	string $refNodes[],	
+	int $deferred[],	
+	string $xml[]	
+) 
+{
+	// globals set by calling process
+	global int $gIncrementPointCacheVersion;
+
+	// load plugins and source scripts
+	loadPlugins;
+	eval ("source \"parseXML.mel\"");
+
+	// get point cache asset data if necessary
+	string $pointCacheData[];
+	if ($taskType == "PointCachePreExport")
+		$pointCacheData = getPointCachingData();
+
+	// get distribution criteria
+	int $data[] = getDistributionCriteria($config,$taskType);	// element 0 - enabled, 1 = controlCount, 2 = filesize, 3 = objectCount
+	int $enabled = $data[0];
+	if (!$enabled && $taskType != "PointCachePreExport")
+		return 1;
+
+	int $maxControlCount = $data[1];
+	int $maxFileSize = $data[2];
+	int $maxObjectCount = $data[3];	// only used when task type is PointCachePreExport
+
+	int $controlTally = 0;
+	int $fileSizeTally = 0;
+	int $objectTally = 0;
+
+	// start building the data
+	int $numPasses = 1;
+	int $newPass = true;
+	string $job_type = ($taskType == "PointCachePreExport")?"PointCacheExport":$taskType;
+	string $outputXML = "<Playlist>\n";
+	string $xmlOutputBase = getPath ("ShotInfoDir",{$seq,$shot});
+	string $cacheOutputBase = getPath ("ShotBase",{$seq,$shot})+"/cache";
+	
+
+	for ($i=0;$i<size($assets);$i++)
+	{
+		string $cur_asset = getPath ("ConformPath",{$assets[$i]});
+		// get data for this asset
+		int $data[] = getAssetData ($cur_asset,$taskType,$pointCacheData);
+		int $isPointCacheAsset = $data[0];
+		if ($taskType == "PointCachePreExport" && !$isPointCacheAsset)
+			continue;
+		
+		int $controlCount = $data[1];
+		int $fileSize = $data[2];
+		int $objectCount = $data[3];
+
+		string $file_to_add = $cur_asset;
+		if ($taskType == "PointCachePreExport")
+		{
+			// look up the exporter path
+			string $assetName = getPath ("AssetNameFromFilename",{$cur_asset});
+			int $index = stringArrayFindIndex ($assetName,$pointCacheData);
+			$file_to_add = $pointCacheData[$index+1];
+		}
+		
+		if ($newPass)
+		{
+			$outputXML += "\t<Job name=\""+$job_type+"\" >\n";
+			if ($taskType == "PointCachePreExport")
+			{
+				$outputXML += "\t\t<CacheOutput location=\""+$cacheOutputBase+"/point\" />\n";
+			}
+			else
+			{
+				$outputXML += "\t\t<CacheOutput location=\""+$cacheOutputBase+"/animation/"+$numPasses+"\" />\n";
+				$outputXML += "\t\t<XmlOutput location=\""+$xmlOutputBase+"/"+$numPasses+"\" />\n";
+				if ($numPasses == 1)
+				{
+					$outputXML += "\t\t<Cache exportCameras=\"1\" />\n";
+				}
+				else
+				{
+					$outputXML += "\t\t<Cache exportCameras=\"0\" />\n";
+				}
+			}
+			$newPass = false;
+		}
+		print ("buildExportPlaylist: Adding "+getPath("ToProjectRelative",{$file_to_add})+" to playlist item "+($numPasses)+", controls: "+$controlCount+", file size: "+$fileSize+", objects: "+$objectCount+"\n");
+		
+		// get versioning info
+		string $version = getVersion ("ShotPointCache",{$seq,$shot,$namespaces[$i]});
+		int $newVer = ((int)$version)+($gIncrementPointCacheVersion>0 || $version == "0000");
+
+		$outputXML += "\t\t<Asset ";
+		$outputXML += "namespace=\""+$namespaces[$i]+"\" ";
+		$outputXML += "refNode=\""+$refNodes[$i]+"\" ";
+		$outputXML += "deferred=\""+$deferred[$i]+"\" ";
+		$outputXML += "exportVersion=\""+padNumber ($newVer,4)+"\" ";
+		$outputXML += "filename=\""+$file_to_add+"\" />\n";
+
+		// figure out what we should do next
+		$controlTally += $controlCount;
+		$fileSizeTally += $fileSize;
+		$objectTally +=  $objectCount;
+
+		if ($i == size($assets)-1 || $controlTally > $maxControlCount || $fileSizeTally > $maxFileSize || ($taskType == "PointCachePreExport" && $objectTally > $maxObjectCount))
+		{
+			// end this pass
+			$outputXML += "\t</Job>\n";
+			$newPass = true;
+			$numPasses ++;
+			$controlTally = $fileSizeTally = $objectTally = 0;
+			print ("\n");
+		}
+	}
+	// end playlist
+	$outputXML += "</Playlist>\n";
+	$xml[0] = $outputXML;
+
+	return ($numPasses-1);
+}
+

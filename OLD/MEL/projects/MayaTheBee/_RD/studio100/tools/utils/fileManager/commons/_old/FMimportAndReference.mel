@@ -1,0 +1,508 @@
+global proc string FMAbuildNameByKindWithSelectedTab()
+{
+	string $textSc ;
+	string $textFd ;
+	string $return ;
+    string $select = ` tabLayout -q -selectTab s100FileManagerUITLMain `;
+	string $kind ;
+	if($select == "s100FileManagerUIFLShot")
+	{
+		$textSc = "s100FileManagerUITSInc";
+		$textFd = "s100FileManagerUITFpath";
+		$kind = "Shots" ;
+    }
+	if($select == "s100FileManagerUIFLAsset")
+	{
+		$textSc = "s100FileManagerUITSExplore";
+		$textFd = "s100FileManagerUITFPathAsset";
+		$kind = "Assets" ;
+    }
+	if($select == "s100FMIAFL")
+	{
+		$textSc = "s100FMIASLName";
+		$textFd = "s100FMIATEXTFIELDPATH";
+		$kind = "Assets" ;
+    }
+
+	string $getPath = `textField -q -tx $textFd `;
+
+	string $selects[]= `textScrollList -q -si $textSc`;
+	string $arra[] = stringToStringArray($selects[0] , ":") ;
+
+	string $arrPat[] = stringToStringArray($getPath,"/") ;
+	//modifie le chemin pour les ref
+
+	//niveau du chemin ou s'arrete la recherche
+	$minus = 1 ;
+
+
+	if($arra[0] == "ref" ||$arra[0] == "_subRef_")
+	{
+		if(`gmatch $getPath "*_V_*"`)
+		{
+			$minus = 2 ;
+		}
+		$getPath = "";
+		for($i = 0 ; $i < size($arrPat) -$minus ; $i++)
+			$getPath+= 	$arrPat[$i] + "/" ;
+    }
+
+	if($arra[0] == "_subRef_")
+		$getPath+=  "00_subRefs/" ;
+
+
+	//print $getPath
+	if( size($arra) == 2 )
+	{
+		if(`gmatch $arra[0] "wip*" `)
+		{
+			if($kind == "Shots" )
+			{
+				string $textSc2[] = `textScrollList -q -si "s100FileManagerUITSTake"`;
+				$getPath +=  "WIP_Archives/" + $textSc2[0] +"/";
+            }
+			else
+			{
+				$getPath += "_wip/";
+            }
+        }
+
+		$getPath += $arra[1] ;
+		if(!`gmatch $getPath "*.ma"`)
+		{
+			$getPath += ".ma";
+        }
+    }
+
+	return $getPath ;
+}
+
+
+global proc string FMGetNameByKind(string $kind )
+{
+	int $s = 1 ;
+	int $e = 3 ;
+	string $textSc = "s100FileManagerUITSInc";
+	if($kind == "Assets")
+	{
+		$s = 0 ;
+		$e = 4 ;
+		$textSc = "s100FileManagerUITSExplore";
+    }
+
+	string $selects[]= `textScrollList -q -si $textSc`;
+	string $arraT[] = stringToStringArray($selects[0],":") ;
+	string $arra[] = stringToStringArray($arraT[1],"_") ;
+	string $name;
+
+	for($i = $s ; $i < $e ; $i++)
+	{
+		$name += $arra[$i] ;
+		if($i < $e -1 )
+			$name += "_" ;
+    }
+
+	return $name ;
+}
+
+global proc string FMGetNameForShots()
+{
+	return (`FMGetNameByKind("Shots" )`);
+}
+
+global proc string FMGetNameForAssets()
+{
+	return (`FMGetNameByKind("Assets" )`);
+}
+
+global proc int FMCreateRef()
+{
+	return `FMimportOrReference("reference")`;
+}
+
+global proc int FMimport()
+{
+	return `FMimportOrReference("import")`;
+}
+
+
+global proc int FMimportOrReference(string $choice) // string $choice = "reference"
+{
+	if($choice == "import")
+	{
+		print "\nimport :" ;
+	}
+	else
+	{
+		print "\nreference :" ;
+	}
+
+    string $select = ` tabLayout -q -selectTab s100FileManagerUITLMain `;
+	string $kind ;
+	string $name ;
+	$ch = 0 ;
+	string $textScrollList ;
+	//recupere la selection
+	if($select == "s100FileManagerUIFLShot")
+	{
+		$textScrollList ="s100FileManagerUITSInc";
+    }
+
+	if($select == "s100FileManagerUIFLAsset")
+	{
+		$textScrollList ="s100FileManagerUITSExplore";
+    }
+
+	string $sel[] = `textScrollList -q -selectItem s100FileManagerUITSExplore`;
+	if(size($sel) > 0)
+	{
+		if($select == "s100FileManagerUIFLShot")
+		{
+			$name = `FMGetNameForShots` ;
+			$ch = 1 ;
+		}
+		if($select == "s100FileManagerUIFLAsset")
+		{
+			$name = `FMGetNameForAssets` ;
+			$ch = 1 ;
+		}
+
+		if($ch )
+		{
+			string $path = `FMAbuildNameByKindWithSelectedTab`;
+			$arr = stringToStringArray($name , "." ) ;
+			$name = $arr[0] ;
+
+			print ("\npath :" + $path ) ;
+			print ("\nname :" + $name ) ;
+
+			if($choice == "import")
+			{
+				$start  = startString( $name , 2 ) ;
+				$sub = substituteAllString( $name , ($start +"_") , "" );
+				FMimportWithArg($path, $sub)	;
+			}
+			else
+			{
+				s100FMIACreateRefImport($path, $name)	;
+			}
+		}
+    }
+	else
+	{
+		warning "select one element for this operation";
+    }
+	return $ch ;
+}
+
+
+
+global proc string FMimportWithArg(string $path, string $name)
+{
+	return FMimportOrRefWithArg($path , $name , "import" );
+}
+
+// Returns base asset name to be used to build groups or else :
+// ex: from string $file = "Y:/000_3D_BANK/01_Characters/Aphid/MA_C_AphidLowOriginal_01/MA_C_AphidLowOriginal_01.ma";
+// will return  "C_AphidLowOriginal_01"
+//
+global proc string s100FM_returnAssetBaseNameFromFile(string $file)
+{
+	string $filepart = `match "[^/\\]*$" $file`;
+	string $usableFilePart = `match "^[^\.]*" $filepart ` ;
+	if (startsWith($usableFilePart,"MA_"))
+		$usableFilePart = substring($usableFilePart,4,size($usableFilePart)) ;
+	return $usableFilePart;
+}
+
+
+
+
+global proc string[] FMgetCleanNameSpace(string $name)
+{
+	// QA adding (in case namespace is NOT asked, for INSTANCE subRefs for instance)
+	if ($name=="")
+		return {"", 0, 0 };
+
+	$i = 1 ;
+	$pad =padNumber($i ,2) ;
+
+	//suppression de la particule devant le nom
+	if(`gmatch $name "??_?_*"`|| `gmatch $name "??_??_*"`)
+	{
+		string $array[] = stringToStringArray($name,"_") ;
+		$sub =substituteAllString($name, ($array[0]+"_"),"") ;
+		$name = $sub;
+    }
+
+	$cleanN  = $name + "_" + $pad ;
+	$cleanNRN = $cleanN + "RN" ;
+	string $nameS[] = `namespaceInfo -listNamespace `;
+	$ch = 0 ;
+
+	for($tmp in $nameS)
+	{
+		if($tmp == $cleanN)
+		{
+			$ch = 1 ;
+			print ("// FMgetCleanNameSpace >> namespace '"+$tmp+"' already exists\n") ;
+			break ;
+        }
+    }
+	$chcancel = 0;
+
+	while($ch)
+	{
+		$ch = 0 ;
+
+		if(`s100checkIfNameSpaceIsEmpty($cleanN)`)
+		{
+			$conf = `confirmDialog -title "namespace conflict" -message ("namespace " +$cleanN + " already exists and is empty, do you want to force replacement?"  )
+			-button "replace" -button "ignore" -button "Cancel" -defaultButton "ignore"
+			-cancelButton "Cancel" -dismissString "No"`;
+			if($conf == "Cancel")
+			{
+				$chcancel = 1;
+				$ch = 0 ;
+				break ;
+			}
+			if($conf == "replace")
+			{
+				FMDeleteNameSpaceAndAllInside({	$cleanN}) ;
+				$ch = 0 ;
+				break ;
+			}
+		}
+
+		$i ++;
+		$pad =padNumber($i ,2) ;
+		$cleanN  = $name + "_" + $pad ;
+		for($tmp in $nameS)
+		{
+			if($tmp == $cleanN)
+			{
+				$ch = 1 ;
+				print "exists" ;
+				break ;
+			}
+		}
+	}
+
+	//retourne le nom du namespace
+	// le choix de l'user si il a annule l'operation
+	// et le ch
+	return {$cleanN , $chcancel , $ch };
+}
+
+// string $name = "";
+//
+global proc string FMimportOrRefWithArg(string $path, string $name, string $choice)
+{
+	// QA adds : if no namespace is asked at all!  WIP
+	//if ($name=="")
+	//		$get
+
+	string $subRef = s100FMAgetSubRefTypeFromName($path);
+
+	print ("// subref : \""+$subRef+"\"\n");
+	string $assetBaseName = s100FM_returnAssetBaseNameFromFile($path) ; // like "C_AphidLowOriginal_01"
+
+
+	// now getting namespace (if no name, no namespace => importation)
+	string $get[] = FMgetCleanNameSpace($name) ;
+
+	string $cleanN = $get[0] ;
+	string $cleanNRN = $get[0] +"RN";
+	int $ch =  $get[2]  ;
+	int $chcancel = $get[1] ; ;
+
+	//check this l'user a appuye sur cancel
+	if(!$chcancel)
+	{
+		//print $cleanNRN;
+		$full_grp = "full_grp" ;
+
+		if(`objExists $full_grp`)
+		{
+
+		}
+		else
+		{
+			createNode -n $full_grp transform ;
+			lockAndHiddeAll($full_grp) ;
+		}
+
+
+		string $arrayTmp[] = stringToStringArray($path,"/") ;
+		string $typeTmp ="";
+		for($i = 0 ; $i < size($arrayTmp) ; $i++)
+		{
+			if(`gmatch $arrayTmp[$i] ("??_*")`)
+			{
+				$typeTmp = 	$arrayTmp[$i] ;
+				//print  ("\n\n "+$typeTmp +"\n" );
+				break ;
+			}
+		}
+
+		$type[0] = $typeTmp;
+		$ty  = stringToStringArray($type[0] , "_") ;
+
+		string $typ ;
+		if(size($ty) > 1 )
+		{
+			$typ = $ty[1] ;
+		}
+		else
+		{
+			$typ = $type[0]	 ;
+		}
+
+		$typ += "_grp" ;
+
+		if(`objExists $typ`)
+		{
+
+		}
+		else
+		{
+			createNode -n $typ -p $full_grp transform ;
+			lockAndHiddeAll($typ) ;
+		}
+
+
+		string $subTmp ="";
+		for($i = 0 ; $i < size($arrayTmp) ; $i++)
+		{
+			if(`gmatch $arrayTmp[$i] ("*_*_*_*")`)
+			{
+				$subTmp = 	$arrayTmp[$i] ;
+				//print  ("\n\n "+$typeTmp +"\n" );
+				break ;
+			}
+		}
+
+		$sub[0] = $subTmp;
+		$ty  = stringToStringArray($sub[0] , "_") ;
+		string $subG  ;
+		if(size($ty) > 1 )
+		{
+			$subG = $ty[2] ;
+		} else
+		{
+			$subG = $sub[0]	 ;
+		}
+
+		$subG += "_grp" ;
+		if(`objExists $subG`)
+		{
+
+		}
+		else
+		{
+			createNode -n $subG -p $typ transform ;
+			lockAndHiddeAll($typ) ;
+		}
+
+		// force les locations a etre importe
+		if(`gmatch $cleanN "L_*"` ||`gmatch $cleanN "LM_*"`  )
+			$choice = "import" ;
+
+		if($choice =="import")
+		{
+			if ($cleanN=="") // only simply import it, no rename :
+				$return = `file -import -type "mayaAscii" -pr -loadReferenceDepth "all" $path ` ;
+			else
+				$return = `file -import -type "mayaAscii" -ra true -namespace $cleanN -options "v=0"  -pr -loadReferenceDepth "all" $path ` ;
+		}
+		else
+		{
+			$return = `file -r -type "mayaAscii" -gl -loadReferenceDepth "all"  -namespace $cleanN -options "v=0;p=17" $path ` ;
+			//$return = `file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -shd "shadingNetworks"  -namespace $cleanN -options "v=0;p=17" $path ` ;
+		}
+
+		// now tries to find top nodes with same namespace (if any) to parent it to correct group :
+		if ($cleanN!="")
+		{
+			$test = `ls  -long -type "transform" ($cleanN +":*")`;
+			if(size($test) > 0)
+			{
+				string $returnGrp[] = {} ;
+				$j = 0 ;
+				for($i = 0 ; $i < size($test) ; $i++)
+				{
+					string $tmpSt[] = stringToStringArray( $test[$i] , "|" ) ;
+					if(size( $tmpSt ) == 1)
+					{
+						$returnGrp[$j] = $test[$i] ;
+						$j++ ;
+					}
+				}
+				parent $returnGrp $subG ;
+			}
+        }
+		else if ($subRef=="INSTANCE")// if no namespace (assuming it's an INSTANCE)
+		{
+			string $INSTbaseName = s100FM_exportSubRef_returnINSTANCEbaseName();
+			print ("// asset name  : \""+$assetBaseName+"_???\":\n");
+
+			string $insts[] = `ls -tr ($assetBaseName+"_???")`;
+			print $insts;
+			print ("// $subG  : \""+$subG+"\":\n");
+
+			for ($inst in $insts)
+			{
+				// showing local rotation axis on it :
+					setAttr ($inst+".displayLocalAxis") 1;
+
+				// parenting it to related group :
+				if (firstParentOf($inst)!=$subG)
+				{
+					string $newInst[] = {};
+					int $error = catch($newInst = `parent $inst $subG`);
+					if ($error)
+						print ("// => instance '"+shortNameOf($inst)+"' already existed under '"+$subG+"' : it was automatically renammed (suffix number increment) \n");
+                }
+            }
+        }
+	}
+	else
+	{
+		warning ("user cancelled operation," + $cleanN + " is not imported");
+    }
+	return $cleanN ;
+}
+
+//FMDeleteNameSpaceAndAllInside({"C_BenOriginal_01_01"})
+//$nameStoD = {"C_BenOriginal_01_01"}
+//supprime le namespace pour le cas ou il est vide !
+global proc FMDeleteNameSpaceAndAllInside(string $nameStoD[])
+{
+	for($i = 0 ; $i < size($nameStoD) ; $i++)
+	{
+
+		namespace -setNamespace  ":" ;
+		namespace -setNamespace $nameStoD[$i] ;
+		$sel = `namespaceInfo -listOnlyDependencyNodes ` ;
+		if(size($sel) > 0)
+			delete $sel ;
+
+			string $nsInside[] = `namespaceInfo -listNamespace ` ;
+		for($tmp in $nsInside)
+		{
+			namespace -setNamespace  ":" ;
+
+			namespace -setNamespace $tmp ;
+			$sel = `namespaceInfo -listOnlyDependencyNodes ` ;
+			if(size($sel) > 0)
+					delete $sel ;
+
+			namespace -setNamespace  ":" ;
+			namespace -f -removeNamespace $tmp  ;
+			namespace -setNamespace $nameStoD[$i] ;
+		}
+
+		namespace -setNamespace  ":" ;
+		namespace -f -removeNamespace $nameStoD[$i] ;
+    }
+}

@@ -1,0 +1,312 @@
+global proc rnd_wxII_setupRenderLayer()
+{
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}
+
+	string $curRender = `currentRenderer`;
+	if($curRender == "mayaSoftware")
+	{
+		setAttr defaultRenderGlobals.imageFormat 4;
+		setAttr "defaultRenderGlobals.composite" 1;
+	}
+	if($curRender == "mentalRay")
+	{
+		setAttr miDefaultFramebuffer.datatype 3;
+		setAttr "miDefaultFramebuffer.premultiply" 0;
+	}
+
+	//Get file name
+	string $currentFileName = `file -query -sceneName`;
+//	global string $beautyPassName = "beautyPass";
+	global string $beautyPassName = "sq_026_sc_005_bloomRoyalBalldress_GDCcolor";
+//	global string $specularPassName = "specularPass";
+	global string $specularPassName = "sq_026_sc_005_bloomRoyalBalldress_GDCspc";
+	if(`gmatch $currentFileName "*env*"`)
+	{
+		$beautyPassName = "sq_026_sc_005_env_GDCcolor";
+		$specularPassName = "sq_026_sc_005_env_GDCspc";
+	}
+	if((`gmatch $currentFileName "*chr*"`)||
+		 (`gmatch $currentFileName "*char*"`))
+	{
+		$beautyPassName = "sq_026_sc_005_char_GDCcolor";
+		$specularPassName = "sq_026_sc_005_char_GDCspc";
+	}
+
+	//Create layers for pass
+	string $beautyPass = `createRenderLayer -name $beautyPassName`;
+	string $specularPass = `createRenderLayer -name $specularPassName`;
+
+	// Put All geometry into render layers
+	string $allLayers[] = `ls -type renderLayer`;
+	string $defaultLayer[] = {"defaultRenderLayer"};
+	string $layers[] = stringArrayRemove($defaultLayer, $allLayers);
+	string $objShape[] = `ls -geometry`;
+
+	int $i = 0;
+	int $layerCount = size($layers);
+	for($i; $i<$layerCount; $i++)
+	{
+		editRenderLayerMembers -noRecurse $layers[$i] $objShape `ls -lights`;
+	}
+
+	string $allLights[] = `ls -lights`;
+
+	//Set up beauty pass
+	editRenderLayerGlobals -currentRenderLayer $beautyPassName;
+	for($item in $allLights)
+	{
+		if(objExists ($item + ".emitSpecular"))
+		{
+			int $spec = `getAttr ($item + ".emitSpecular")`;
+			if($spec == 1)
+			{
+				editRenderLayerAdjustment ($item + ".emitSpecular");
+				setAttr ($item + ".emitSpecular") 0;
+			}
+		}
+
+		if((`gmatch $item "*key*"`)||
+			 (`gmatch $item "*Key*"`))
+		{
+			int $depthShadow = `getAttr ($item + ".useDepthMapShadows")`;
+			int $rayShadow = `getAttr ($item + ".useRayTraceShadows")`;
+
+			if($depthShadow == 1)
+			{
+				editRenderLayerAdjustment ($item + ".useDepthMapShadows");
+				setAttr ($item + ".useDepthMapShadows") 0;
+			}
+			if($rayShadow == 1)
+			{
+				editRenderLayerAdjustment ($item + ".useRayTraceShadows");
+				setAttr ($item + ".useRayTraceShadows") 0;
+			}
+		}
+	}
+
+	//Set up specular pass
+	editRenderLayerGlobals -currentRenderLayer $specularPassName;
+	 for($item in $allLights)
+	{
+		if(objExists ($item + ".emitDiffuse"))
+		{
+			int $diff = `getAttr ($item + ".emitDiffuse")`;
+			if($diff == 1)
+			{
+				editRenderLayerAdjustment ($item + ".emitDiffuse");
+				setAttr ($item + ".emitDiffuse") 0;
+			}
+		}
+	}
+
+	// set up Alpha off
+	string $cams[] = `listCameras -perspective`;
+	for($item in $cams)
+	{
+		int $on = `getAttr ($item + ".renderable")`;
+		if($on == 1)
+		{
+			editRenderLayerAdjustment ($item + ".mask");
+			setAttr ($item + ".mask") 0;
+		}
+	}
+
+	if($curRender == "mayaSoftware")
+	{
+		editRenderLayerAdjustment "defaultRenderQuality.reflections";
+		setAttr "defaultRenderQuality.reflections" 0;
+		editRenderLayerAdjustment "defaultRenderQuality.refractions";
+		setAttr "defaultRenderQuality.refractions" 0;
+	}
+
+	if($curRender == "mentalRay")
+	{
+		editRenderLayerAdjustment "miDefaultFramebuffer.datatype";
+		setAttr miDefaultFramebuffer.datatype 1;
+		editRenderLayerAdjustment "miDefaultOptions.maxReflectionRays";
+		setAttr "miDefaultOptions.maxReflectionRays" 0;
+		editRenderLayerAdjustment "miDefaultOptions.maxRefractionRays";
+		setAttr "miDefaultOptions.maxRefractionRays" 0;
+		int $fg = `getAttr "miDefaultOptions.finalGather"`;
+		if( $fg == 1)
+		{
+			editRenderLayerAdjustment "miDefaultOptions.finalGather";
+			setAttr "miDefaultOptions.finalGather" 0;
+		}
+	}
+}
+
+global proc rnd_wxII_setupReflectionLayer()
+{
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}
+
+	string $allShape[] = `ls -geometry`;
+	string $sel[] = `ls -sl`;
+	string $sel[] = `listRelatives -shapes $sel`;
+	int $count = `size($sel)`;
+	if($count != 0)
+	{
+		createRenderLayer -name "reflection";
+		editRenderLayerGlobals -currentRenderLayer "reflection";
+		editRenderLayerMembers -noRecurse reflection $allShape `ls -lights`;
+		string $visiOff[] = stringArrayRemove($sel, $allShape);
+
+		//Create reflection shader
+		string $ref = `shadingNode -asShader useBackground -name "reflection"`;
+		setAttr ($ref + ".reflectivity") 1;
+		setAttr ($ref + ".reflectionLimit") 2;
+		setAttr ($ref + ".shadowMask") 0;
+		string $refSG = `sets -renderable true -noSurfaceShader true -empty -name ($ref+"SG")`;
+		connectAttr ($ref +".outColor") ($refSG +".surfaceShader");
+
+		//Setup objects which is in reflection by turn off primary visibility
+		for($item in $visiOff)
+		{
+			setAttr ($item + ".primaryVisibility") 0;
+		}
+
+		//Assign reflection shader to objects
+		select $sel;
+		hyperShade -assign $ref;
+	}
+}
+
+// Set up LGT pass and shadow pass
+global proc rnd_wxII_setupLGT()
+{
+	//Get file name
+	string $currentFileName = `file -query -sceneName -shn`;
+	string $sceneName[]=stringToStringArray($currentFileName ,"_");
+
+	global string $firstName = "";
+	global string $secondName="";
+
+	if (`gmatch $currentFileName "*_GDCexlights*"`)
+	{
+		$firstName="sq_"+$sceneName[1]+"_sc_"+$sceneName[2]+"_"+$sceneName[5]+"_GDCextra";
+		$secondName = "sq_"+$sceneName[1]+"_sc_"+$sceneName[2]+"_"+$sceneName[5]+"_GDCexhd";
+	}
+	if(`gmatch $currentFileName "*_GDClights*"`)
+	{
+		$firstName="sq_"+$sceneName[1]+"_sc_"+$sceneName[2]+"_"+$sceneName[5]+"_GDClgt";
+		$secondName = "sq_"+$sceneName[1]+"_sc_"+$sceneName[2]+"_"+$sceneName[5]+"_GDClshd";
+	}
+
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}
+
+	string $allShape[] = `ls -geometry`;
+	string $allLights[] = `ls -lights`;
+
+	// layer for LGT
+	string $ltgPass = `createRenderLayer -name $firstName`;
+	editRenderLayerGlobals -currentRenderLayer $ltgPass;
+	editRenderLayerMembers -noRecurse $firstName $allShape `ls -lights`;
+	for($item in $allLights)
+	{
+		string $colorMap[] = `listConnections -source on -destination off ($item + ".color")`;
+		if(size($colorMap) == 0)
+		{
+				//set up key light to red color
+				if(`gmatch $item "*key*"`)      //lowercase
+				{
+					editRenderLayerAdjustment ($item + ".color");
+					setAttr ($item + ".color")	-type double3 1 0 0;
+
+				}
+
+				//set up fill light to blur color
+				if((`gmatch $item "*fill*"`)||
+					 (`gmatch $item "*rc*dome*"`)||
+					 (`gmatch $item "*amb*"`))      	//lowercase
+
+				{
+					editRenderLayerAdjustment ($item + ".color");
+					setAttr ($item + ".color")	-type double3 0 0 1;
+
+				}
+
+				//set up bounce and rim light to green color
+				if((`gmatch $item "*bounce*"`)||
+						(`gmatch $item "*rim*"`))      //lowercase
+				{
+					editRenderLayerAdjustment ($item + ".color");
+					setAttr ($item + ".color")	-type double3 0 1 0;
+
+				}
+		}
+	}
+
+	//Layer for shadow of LGT
+	string $lgtShadowPass = `createRenderLayer -name $secondName `;
+	editRenderLayerGlobals -currentRenderLayer $lgtShadowPass;
+	editRenderLayerMembers -noRecurse $secondName $allShape `ls -lights`;
+	for($item in $allLights)
+	{
+		string $colorMap[] = `listConnections -source on -destination off ($item + ".color")`;
+		if(size($colorMap) == 0)
+		{
+			editRenderLayerAdjustment ($item + ".color");
+			setAttr ($item + ".color") -type double3 0 0 0;
+		}
+
+		if(`objExists ($item + ".useDepthMapShadows")`)
+		{
+			int $depthShadow = `getAttr ($item + ".useDepthMapShadows")`;
+			int $rayShadow = `getAttr ($item + ".useRayTraceShadows")`;
+
+			if(($depthShadow == 1)||
+			   ($rayShadow == 1))
+			{
+				//set up key light shadow to red color
+				if(`gmatch $item "*key*"`)      //lowercase
+				{
+					editRenderLayerAdjustment ($item + ".shadowColor");
+					setAttr ($item + ".shadowColor")	-type double3 1 0 0;
+
+				}
+
+				//set up fill shadow light to blur color
+				if((`gmatch $item "*fill*"`)||
+						(`gmatch $item "*amb*"`)) //lowercase
+				{
+					editRenderLayerAdjustment ($item + ".shadowColor");
+					setAttr ($item + ".shadowColor")	-type double3 0 0 1;
+				}
+				string $skydomes[] = `ls "*aks_Light*"`;
+				for($a in $skydomes)
+				{
+					if(`objExists ($a + ".shadowColor")`)
+					{
+						editRenderLayerAdjustment ($a + ".shadowColor");
+						setAttr ($a + ".shadowColor") -type double3 0 0 1;
+					}
+				}
+
+				//set up bounce and rim shadow light to green color
+				if((`gmatch $item "*bounce*"`)||
+						(`gmatch $item "*rim*"`))      //lowercase
+				{
+					editRenderLayerAdjustment ($item + ".shadowColor");
+					setAttr ($item + ".shadowColor")	-type double3 0 1 0;
+
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,124 @@
+global proc ysPrepRendering()
+{
+// check renderer 
+if  (`pluginInfo -query -loaded "Mayatomr"`==0)
+	loadPlugin Mayatomr;
+	setAttr -type "string" "defaultRenderGlobals.currentRenderer" "mentalRay" ;
+		
+	if (!`objExists miDefaultOptions`)
+	{
+		createNode  mentalrayOptions -name "miDefaultOptions";
+	}
+	
+	setAttr "perspShape.renderable" 0;
+	setAttr "topShape.renderable" 0;
+	setAttr "frontShape.renderable" 0;
+	setAttr "sideShape.renderable" 0;
+
+string $array[] = `listCameras -p`;
+for($item in $array)
+{
+	if((`gmatch $item "*:*CAM*"`)||(`gmatch $item "*:*cam*"`)||(`gmatch $item "*cam*"`))
+		setAttr ($item+".renderable") 1;
+	
+	string $cam[] =`ls -type "camera" `;
+	if(`size($cam)`==4)
+	{
+		warning "没有可用于渲染的摄像机";
+		return;
+	}
+}
+
+string $lights[] =`ls -lights`;
+string $lights[] = `listRelatives -parent $lights`;
+if(`size($lights)`!=0)
+{
+	for($item in $lights)
+	{
+	string $key[] = `ls -lights "*Key*"`;
+	string $key[] = `listRelatives -parent $key`;
+	$i=0;
+	for($item in $key)
+	{
+	 	$i++;
+	} 
+	if($i==1)
+	{
+		ysCreateUserBuffers;
+		ysSetUpAllshader;
+		break;
+	}
+	if($i>1)
+	{
+		warning "场景里有多个光源叫做\"Key*\",只能有一个。";
+		return;
+	}
+	if($i==0)
+	{
+		warning "场景里没有一个叫做\"Key*\"的光源,请创建一个。";
+		return;
+	}
+	}
+}else if (`size($lights)`==0)
+{
+	warning "场景里没有任何灯光！";
+	return;
+}
+}
+
+//Create unavaiable buffer nodes for render global and camera.
+global proc ysCreateUserBuffers ()
+{
+	// check camera
+	string $cams[] = `ls -type "camera"`;
+	string $renderableCam;
+	string $outputPass[] = `ls -type "mentalrayOutputPass"`;
+	for($renderableCam in $cams)
+	{
+		if((`getAttr ($renderableCam+".renderable")`)&&(size($outputPass)==0))
+		{
+
+		// Create mental ray user buffers 
+		createNode mentalrayUserBuffer -name "mentalrayUserBuffer0";
+		connectAttr -force mentalrayUserBuffer0.message miDefaultOptions.frameBufferList[0];
+		//Create mentay ray user outout pass
+		createNode mentalrayOutputPass -name "mentalrayOutputPass0";
+		// Make connection to renderable camera 
+		connectAttr -force mentalrayOutputPass0.message ($renderableCam+".miOutputShaderList[0]");
+		}
+	}
+}
+
+// Create buffer_store and link it between sureface shaders and origin materials
+global proc ysSetUpAllshader()
+{
+	string $buffers[] = `ls -type "buffer_store"`;
+	if(size($buffers)!=0)
+	{
+		return;
+	}
+	string $shadingGrps[] = `ls -type shadingEngine`;
+	for ($item in $shadingGrps)
+	{
+		if ($item != "initialParticleSE"&&$item != "initialShadingGroup"&&$item != "initialParticleSE")
+		{
+			string $objs[] = `sets -query $item`;
+			if (size($objs))
+			{
+				//create buffer_store and link the new shader
+				string $Lshader[]= `listConnections -s on -d off ($item+".surfaceShader")`; 
+				string $surface = `shadingNode -asShader surfaceShader`;				            
+				string $bs = `shadingNode -asShader buffer_store`;                          
+												
+				connectAttr -f ($surface + ".outColor") ($item+ ".surfaceShader");
+				connectAttr -f ($bs + ".outValue") ($surface+ ".outColor");
+							
+			  // Connect object's shader to store_buffers Nodes
+				for ($mat in $Lshader)
+				{
+				connectAttr -f ($mat + ".outColor") ($bs+ ".primarybuffer");  
+				}
+			}
+		}
+	}
+}

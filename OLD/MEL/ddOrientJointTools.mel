@@ -1,0 +1,438 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddOrientJointTools
+//	Verision: 0.97 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: July XX 2003
+//	Changed Projcet Date:
+//	Last Updated: September 13 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note: durdur's Orient Joint use Constrain
+//
+//////////////////////////////////////////////////////////
+
+
+//全局变量
+global string $ddJointFS1[],$ddJointFS2[],$multiplesubobject[],$ddJointEnd[];
+//$ddJointFS1放入父joint,$ddJointFS2放入子joint有多少对关系就有多少对数组。$multiplesubobject为有多个子物体的joint,$ddJointEnd为终joint.
+
+/////////////////////////////////////////////////////////////////////////////////
+// Procedure Name: ddOJTAll_Child
+// 遍历层级 ddOJTAll_Child 此为递归函数
+// all over joint tree
+// return string array
+// 
+// Arguments: 此为递归函数
+/////////////////////////////////////////////////////////////////////////////////
+global proc ddOJTAll_Child(string $inputnode)
+{
+ string $add[],$tmp,$swap[];
+ global string $ddJointFS1[],$ddJointFS2[],$multiplesubobject[],$ddJointEnd[];
+ 
+ $add = `listRelatives $inputnode` ;
+ 
+ $swap[0] = $inputnode;
+ if(size($add) == 0) appendStringArray($ddJointEnd,$swap,1);
+ if(size($add) > 1)  appendStringArray($multiplesubobject,$swap,1);
+ 
+ for($tmp in $add)
+ {
+  $swap[0] = $inputnode;
+  appendStringArray($ddJointFS1,$swap,1);
+  $swap[0] = $tmp;
+  appendStringArray($ddJointFS2,$swap,1);
+  ddOJTAll_Child($tmp);
+ }
+
+}
+
+/////////////////////////////////////////////////////////////////////////////////
+// Procedure Name: ddOJTAll_Child
+// Display Local Axis
+// 显示本地坐标
+// 
+/////////////////////////////////////////////////////////////////////////////////
+global proc ddOJTDisplayLocalAxis()
+{
+ setAttr "joint1.displayLocalAxis" 1;
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+//ddOJTOptionFieldCon
+//
+//
+/////////////////////////////////////////////////////////////////////////////////
+global proc ddOJTOptionFieldCon()
+{
+ if(`optionMenuGrp -q -sl ddOJTorientSecondAxis` == 8)
+ {
+  textFieldGrp -edit -editable true ddOJTaimObjectField ;
+ }
+ else
+ {
+  textFieldGrp -edit -editable false ddOJTaimObjectField ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddOrientJoint
+// Orint joint 
+// 旋转joint 轴向
+// 
+// Arguments:
+// 参数      作用
+// $orientOptions
+//     "ddOJT_xyz"
+//     "ddOJT_yzx"
+//     "ddOJT_zxy"
+//     "ddOJT_zyx"
+//     "ddOJT_yxz"
+//     "ddOJT_xzy"
+//     "ddOJT_none"
+// $secondAxisOptions 第二轴方向
+//     1  +x 
+//     2  -x
+//     3  +y
+//     4  -y
+//     5  +z
+//     6  -z
+//     7  none
+//     8  object
+//
+// $secondAxisAimObject
+//     如果$secondAxisOptions 第二轴方向为8，则需要指定指向的物体
+// $childrenOptions 是否调整子物体
+//     0 否
+//     1 是
+// $locatScaleAxis 暂时无用
+// $multiSub 有多个子物体时，当前joint是否同上一级方向一致
+//     0 否
+//     1 是
+// $endJointOrient 根joint是否同上一级方向一致
+//     0 否
+//     1 是
+//////////////////////////////////////////////////////////
+global proc ddOrientJoint
+(
+ string $orientOptions,
+ int $secondAxisOptions,
+ string $secondAxisAimObject,
+ int $childrenOptions,
+ int $locatScaleAxis,
+ int $multiSub,
+ int $endJointOrient
+)
+{
+ int $looptemp = 0,$sign = 1,$i;
+ float $pos[2],$curvestart[2],$curveend[2],$jointAxisOrient[3];//$x,$y,$z,
+ vector $coordinatelist[],$array;
+ string $bootjoint,$bootjointfather,$selectlist[],$jointarray[],$temp,$tmp[],$tmp01,$tmp02;
+ string $cho,$lsao,$oc[],$ac[],$aimVectorOptions,$upVectorOptions,$aimObjectOptions;//,$tempLoc;
+ global string $ddJointFS1[],$ddJointFS2[],$multiplesubobject[],$ddJointEnd[];
+ 
+ //convert options
+ if($orientOptions == "ddOJT_xyz") $aimVectorOptions = " 1 0 0 " ;//$aimVectorOptions = "xyz";
+ else if($orientOptions == "ddOJT_yzx") $aimVectorOptions = " 0 1 0 " ;//$aimVectorOptions = "yzx";
+ else if($orientOptions == "ddOJT_zxy") $aimVectorOptions = " 0 0 1 " ;//$aimVectorOptions = "zxy";
+ else if($orientOptions == "ddOJT_zyx") $aimVectorOptions = " 0 0 1 " ;//$aimVectorOptions = "zyx";
+ else if($orientOptions == "ddOJT_yxz") $aimVectorOptions = " 0 1 0 " ;//$aimVectorOptions = "yxz";
+ else if($orientOptions == "ddOJT_xzy") $aimVectorOptions = " 1 0 0 " ;//$aimVectorOptions = "xzy";
+ else if($orientOptions == "ddOJT_none") $aimVectorOptions = "" ;//$aimVectorOptions = "none";
+ 
+// if($childrenOptions == 1) $cho = " -ch";
+// if($locatScaleAxis == 1) $lsao = " -zso";
+ 
+ 
+ switch ($secondAxisOptions)
+ {
+  case 1:$upVectorOptions = "  1  0  0 " ;
+         break;//+x
+  case 2:$upVectorOptions = " -1  0  0 " ;
+         break;//-x
+  case 3:$upVectorOptions = "  0  1  0 " ;
+         break;//+y
+  case 4:$upVectorOptions = "  0 -1  0 " ;
+         break;//-y
+  case 5:$upVectorOptions = "  0  0  1 " ;
+         break;//+z
+  case 6:$upVectorOptions = "  0  0 -1 " ;
+         break;//-z
+  case 7:$upVectorOptions = "" ;
+         //none
+  case 8:$aimObjectOptions = $secondAxisAimObject ;
+         //object
+ }
+
+ if($secondAxisOptions == 8)
+ {
+  if($orientOptions == "ddOJT_xyz") $upVectorOptions = " 0 1 0 " ;
+  else if($orientOptions == "ddOJT_yzx") $upVectorOptions = " 0 0 1 " ;
+  else if($orientOptions == "ddOJT_zxy") $upVectorOptions = " 1 0 0 " ;
+  else if($orientOptions == "ddOJT_zyx") $upVectorOptions = " 0 1 0 " ;
+  else if($orientOptions == "ddOJT_yxz") $upVectorOptions = " 1 0 0 " ;
+  else if($orientOptions == "ddOJT_xzy") $upVectorOptions = " 0 0 1 " ;
+  else if($orientOptions == "ddOJT_none")$upVectorOptions = " 0 0 0 " ;
+ }
+
+ //print ($aimObjectOptions + "\nok!\n") ;
+
+ $selectlist = `ls -sl`;
+ $bootjoint = $selectlist[0];
+ 
+ //取得起始joint的上一级物体
+ $tmp = `listRelatives -p $bootjoint` ;
+ $bootjointfather = $tmp[0];
+ 
+
+ //取得所有joint的世界坐标
+ //select -hi;
+ $jointarray[0] = $bootjoint ;
+ $selectlist = `listRelatives -ad $bootjoint` ;
+ appendStringArray($jointarray,$selectlist,size($selectlist));
+ 
+ for($temp in $jointarray)
+ {
+  $sign = $sign && (`nodeType $temp` == "joint");
+ }
+ 
+ if($sign == 0)error "Object not joint!";
+ 
+ for($temp in $jointarray)
+ {
+  $pos = `joint -q -p $temp`;
+  $coordinatelist[$looptemp++] = <<$pos[0],$pos[1],$pos[2]>>;
+  //print($coordinatelist[$looptemp]+"\n");
+ }
+ 
+ 
+ //取得joint拓朴; get joint analysissitus 
+ clear $ddJointFS1 ;
+ clear $ddJointFS2 ;
+ clear $multiplesubobject ;
+ clear $ddJointEnd ;
+ ddOJTAll_Child($bootjoint) ;
+ 
+ 
+ //纠正joint; Revise Joint
+ //delete $bootjoint ;
+ $looptemp = 0 ;
+
+ //rebulid joint
+ /*for($array in $coordinatelist)
+ {
+  //print($array);print("\n");
+  select -d;
+  joint -n $jointarray[$looptemp++] -p ($array.x) ($array.y) ($array.z);
+ }*/
+ 
+ if($bootjointfather != "")
+ {
+  select -r $bootjoint ;
+  parent -w ;
+ }
+ makeIdentity -apply true -t 1 -r 1 -s 1 -n 0 -jointOrient ;
+ 
+ $tmp = `listRelatives -children $bootjoint` ;
+ select -r $tmp ;
+ select -hi ;
+ parent -w ;
+
+ //orient joint
+ if($aimVectorOptions != "")
+ {
+  for($looptemp=0;$looptemp<size($ddJointFS2);$looptemp++)
+  {
+    
+   if($secondAxisOptions == 8)
+   {
+    //print ($aimObjectOptions + "\nNow ok!\n") ;
+    if(`objExists $secondAxisAimObject`)
+    {
+     //aimConstraint -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject $aimObjectOptions $ddJointFS2[$looptemp] $ddJointFS1[$looptemp] ;
+     //print ("aimConstraint -aimVector " +$aimVectorOptions +" -upVector " + $upVectorOptions + " -worldUpType "+"\"" + "object" +"\"" + " -worldUpObject " + $secondAxisAimObject + " $ddJointFS2[" + $looptemp+ "] $ddJointFS1[" + $looptemp + "] ;" );
+     eval("aimConstraint -aimVector " +$aimVectorOptions +" -upVector " + $upVectorOptions + " -worldUpType "+"\"" + "object" +"\"" + " -worldUpObject " + $secondAxisAimObject + " $ddJointFS2[" + $looptemp+ "] $ddJointFS1[" + $looptemp + "] ;" );
+    }
+    else
+    {
+     error "Orient Aim Object Not Exists" ;
+    }
+    //aimConstraint -offset 0 0 0 -weight 1 -aimVector 0 1 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject locator1;
+   }
+   else
+   {
+    eval("aimConstraint -aimVector"+$aimVectorOptions +"-upVector" + $upVectorOptions + "-worldUpType "+"\"" + "vector" +"\"" + " -worldUpVector 0 1 0 $ddJointFS2[" + $looptemp+ "] $ddJointFS1[" + $looptemp + "] ;" );
+   }
+   //print(aimConstraint -aimVector"+$aimVectorOptions +"-upVector" + $upVectorOptions + "-worldUpType "+"\"" + "vector" +"\"" + " -worldUpVector 0 1 0 $ddJointFS2[" + $looptemp+ "] $ddJointFS1[" + $looptemp + "] ;" );
+   $oc = `listRelatives $ddJointFS1[$looptemp]` ;
+   //print ($oc[0]+"test\n");
+   delete $oc[0];
+   $jointAxisOrient[0] = `getAttr ($ddJointFS1[$looptemp] + ".rx")` ;
+   $jointAxisOrient[1] = `getAttr ($ddJointFS1[$looptemp] + ".ry")` ;
+   $jointAxisOrient[2] = `getAttr ($ddJointFS1[$looptemp] + ".rz")` ;
+   setAttr ($ddJointFS1[$looptemp] + ".jox") $jointAxisOrient[0];
+   setAttr ($ddJointFS1[$looptemp] + ".joy") $jointAxisOrient[1];
+   setAttr ($ddJointFS1[$looptemp] + ".joz") $jointAxisOrient[2];
+   setAttr ($ddJointFS1[$looptemp] + ".rx") 0 ;
+   setAttr ($ddJointFS1[$looptemp] + ".ry") 0 ;
+   setAttr ($ddJointFS1[$looptemp] + ".rz") 0 ;
+
+   //print($ddJointFS2[$looptemp]+" "+$ddJointFS1[$looptemp]+"\n");
+  }
+ }
+ 
+
+ //rebuild relationship
+ for($looptemp=0;$looptemp<size($ddJointFS2);$looptemp++)
+ {
+  parent $ddJointFS2[$looptemp] $ddJointFS1[$looptemp];
+  //print($ddJointFS2[$looptemp]+" "+$ddJointFS1[$looptemp]+"\n");
+ }
+
+ select -r $bootjoint;
+
+ //处理根joint
+ if($endJointOrient == 1)
+ {
+  for($i=0;$i<size($ddJointEnd);$i++)
+  {
+   joint -e -oj none $ddJointEnd[$i];
+  }
+ }
+ 
+ //print($ddJointEnd);print("\n");
+ 
+ if($bootjointfather != "")
+  {
+   select -r $bootjoint;
+   select -tgl $bootjointfather;
+   parent;
+  }
+  
+
+ select -r $bootjoint;
+}
+/////////////////////////////////////////////////////////////////////////////////
+//ddOJTGetSelect
+//
+//
+/////////////////////////////////////////////////////////////////////////////////
+global proc ddOJTGetSel()
+{
+ string $selected[] ;
+ $selected = `ls -sl` ;
+ textFieldGrp -edit -text $selected[0] ddOJTaimObjectField ;
+}
+/////////////////////////////////////////////////////////////////////////////////
+//ddOrientJointTools UI
+//
+//
+/////////////////////////////////////////////////////////////////////////////////
+global proc ddOrientJointToolsUI()
+{
+
+ //建立窗口
+ if (`window -exists ddOrientJointToolsWin`)
+ {
+  deleteUI ddOrientJointToolsWin ;
+  if (`window -exists ddOrientJointToolsWin`)
+  {
+   windowPref -remove ddOrientJointToolsWin ;
+  }
+ }
+ 
+ window -widthHeight 460 220
+        -title "durdur 's Orient Joint Tools v0.97 beta"
+        ddOrientJointToolsWin;
+
+
+
+//string $window = `ddOrientJointToolsWin`;
+ menuBarLayout;
+ menu -label "Edit" editmenu;
+      menuItem -label "Save Settings";
+      menuItem -label "Reset Settings";
+ menu -label "Help" helpmenu;
+      menuItem -label "Help on orient joint tools...";
+ setParent ..;
+
+ columnLayout -w 460 -adjustableColumn true ;
+
+ radioCollection ddOJTCollection1 ;
+            string $rb1, $rb2, $rb3, $rb4, $rb5, $rb6, $rb7;
+        rowLayout -numberOfColumns 5 
+                -columnWidth5 100 80 80 80 90;
+                text -label "Orientation" ;
+                $rb1 = `radioButton -label "XYZ" ddOJT_xyz` ;
+                $rb2 = `radioButton -label "YZX" ddOJT_yzx` ;
+                $rb3 = `radioButton -label "ZXY" ddOJT_zxy` ;
+                $rb4 = `radioButton -label "ZYX" ddOJT_zyx` ;
+        setParent.. ;
+        rowLayout -numberOfColumns 4
+                 -columnWidth4 100 80 80 80 ;
+                text -label "" ;
+                $rb5 = `radioButton -label "YXZ"  ddOJT_yxz`  ;
+                $rb6 = `radioButton -label "XZY"  ddOJT_xzy`  ;
+                $rb7 = `radioButton -label "NONE" ddOJT_none` ;
+        setParent.. ;
+
+ optionMenuGrp -label "Second Axis World Orientation"
+               -annotation "Specifies which world axis the second orientation axis should align with."
+               ddOJTorientSecondAxis ;
+                menuItem -label "+ x";
+                menuItem -label "- x";
+                menuItem -label "+ y";
+                menuItem -label "- y";
+                menuItem -label "+ z";
+                menuItem -label "- z";
+                menuItem -label "none";
+                menuItem -label "object";
+
+ rowLayout -numberOfColumns 2
+           -columnWidth2 390 80;
+	textFieldGrp -label "Orient object"
+		     -editable false
+		     -annotation "Second Axis World Orientation Object."
+		     ddOJTaimObjectField ;
+	button -label "Get"
+	       -width 36
+	       -command "ddOJTGetSel()" ;
+ setParent.. ;
+
+ optionMenuGrp -edit -changeCommand "ddOJTOptionFieldCon" ddOJTorientSecondAxis ;
+ checkBoxGrp -w 400 -numberOfCheckBoxes 1  -label1 "Orient child joints" ddOJTCheckbox0;
+ checkBoxGrp -w 400 -numberOfCheckBoxes 1  -label1 "Reorient the local scale axes" ddOJTCheckbox1;
+ checkBoxGrp -w 400 -numberOfCheckBoxes 1  -label1 "Multiple subobject none" ddOJTCheckbox2;
+ checkBoxGrp -w 400 -numberOfCheckBoxes 1  -label1 "End joint Orient" ddOJTCheckbox3;
+
+ //set defaul options
+ radioCollection -e -sl ddOJT_xyz ddOJTCollection1;
+ optionMenuGrp -e -sl 3 ddOJTorientSecondAxis;
+ checkBoxGrp -e -v1 1 ddOJTCheckbox0;
+ checkBoxGrp -e -v1 1 ddOJTCheckbox1;
+ //checkBoxGrp -e -v1 1 ddOJTCheckbox2;
+ checkBoxGrp -e -v1 1 ddOJTCheckbox3;
+ rowLayout -numberOfColumns 4
+           -columnWidth4 90 90 90 90 ;
+  button -label "Orient"
+         -width 90
+         -height 30
+         -command "ddOrientJoint(`radioCollection -q -sl ddOJTCollection1`,`optionMenuGrp -q -sl ddOJTorientSecondAxis`,`textFieldGrp -query -text ddOJTaimObjectField`,`checkBoxGrp -q -v1 ddOJTCheckbox0`,`checkBoxGrp -q -v1 ddOJTCheckbox1`,`checkBoxGrp -q -v1 ddOJTCheckbox2`,`checkBoxGrp -q -v1 ddOJTCheckbox3`);deleteUI ddOrientJointToolsWin" ;
+  button -label "Apply"
+         -command "ddOrientJoint(`radioCollection -q -sl ddOJTCollection1`,`optionMenuGrp -q -sl ddOJTorientSecondAxis`,`textFieldGrp -query -text ddOJTaimObjectField`,`checkBoxGrp -q -v1 ddOJTCheckbox0`,`checkBoxGrp -q -v1 ddOJTCheckbox1`,`checkBoxGrp -q -v1 ddOJTCheckbox2`,`checkBoxGrp -q -v1 ddOJTCheckbox3`)"
+         -w 90
+         -h 30;
+  button -label "Rotate Reset"  -c "ddOrientJoint($st1,$st2,$st3)" -w 90 -h 30;
+  button -label "Close"  -c "deleteUI ddOrientJointToolsWin;" -w 90 -h 30;
+
+ setParent ..;
+ setParent .. ;
+
+ showWindow ddOrientJointToolsWin ;//$window;
+}
+
+//ddOrientJointToolsWin();
+
+//end of this script.
+
+//End of file.

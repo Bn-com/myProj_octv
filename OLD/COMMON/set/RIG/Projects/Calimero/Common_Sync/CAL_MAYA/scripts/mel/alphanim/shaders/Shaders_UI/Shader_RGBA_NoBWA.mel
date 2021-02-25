@@ -1,0 +1,151 @@
+// procedure pour creer un shader lambert avec sa map RGBA
+//    - prend en argument : un base name + le shader d'AO a connecter dans son ambient
+//    - retourne le nom du shader cree
+// -----------------------------------------------------------------------------------------
+global proc string createShdRgbaNoBWA(string $_baseName, string $_shdAO)
+{
+    
+    hyperShadePanelGraphCommand("hyperShadePanel1", "clearGraph");
+    
+    //////////// Shader RGBA ///////////
+    
+    string $shadName;
+    string $shaderRGBA;
+    string $fileName;
+    string $fileRGBA;
+    string $fileName2;
+    string $NodeColorID;
+    string $utilMult;
+    string $shaderId;
+    
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_" + $_baseName + "_RGBA" );
+
+    // creer le shader
+    $shaderRGBA = `shadingNode -asShader lambert -name $shadName`;
+    setAttr ($shaderRGBA + ".ambientColor") -type double3 1 1 1 ;
+    setAttr ($shaderRGBA + ".shadowAttenuation") 0 ;
+    setAttr ($shaderRGBA + ".diffuse") 0.4 ;
+  
+    // creer le nom du fileNode a partir de celui du shader pour la map RGBA
+    $fileName = `substitute "SHD_" $shadName "MAP_"`;
+    // Create File RGBA
+    $fileRGBA = `shadingNode -asTexture file -name $fileName`;
+    setAttr ($fileRGBA + ".filterType") 0;
+    
+    // genere un nom pour le shader d'id red
+    string $shadName =  genShaderName("_" + $_baseName + "_ColorIDA" );
+
+    // creer le shader et set ses attributs par defaut
+    $shaderId = `shadingNode -asShader surfaceShader -n $shadName`;
+    setAttr ($shaderId + ".outColor") -type double3 0 0 0;
+    
+    // creer le nom du MultiplyDivide a partir de celui du shader
+    $fileName = genShaderName("_" + $_baseName + "_multDivID" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create MultiplyDivide
+    $utilMult = `createNode multiplyDivide -n $fileName`;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName("_" + $_baseName + "_ColorID" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorID = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+  
+    // Connections
+    connectAttr -f ($fileRGBA + ".outColor") ($shaderRGBA + ".color");
+    connectAttr -f ($fileRGBA + ".outTransparency") ($shaderRGBA + ".transparency");
+    connectAttr -f ($shaderRGBA + ".outMatteOpacity") ($utilMult + ".input2");
+    connectAttr -f ($shaderId + ".outColor") ($utilMult + ".input1");
+    connectAttr -f ($utilMult + ".output") ($NodeColorID + ".color");
+    connectAttr -f ($shaderRGBA + ".outColor") ($NodeColorID + ".evaluationPassThrough");
+        
+    //////////// Shader LIGHT ///////////
+    
+    string $shadName;
+    string $shaderLIGHT;
+    
+	// genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_" + $_baseName + "_LIGHT" );
+
+    // creer le shader
+    $shaderLIGHT = `shadingNode -asShader lambert -n $shadName`;
+    setAttr ($shaderLIGHT + ".color") -type double3 1 1 1 ;
+    setAttr ($shaderLIGHT + ".shadowAttenuation") 0 ;
+    
+    // Connections
+    
+    connectAttr -f ($fileRGBA + ".outTransparency") ($shaderLIGHT + ".transparency");
+    
+    //////////// Shader ZDEPTH ///////////
+    
+    string $shadName;
+    string $shaderZ;
+    string $fileName;
+    string $utilSRange;
+    string $utilMult;
+    string $utilSInfo;
+   
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_" + $_baseName + "_ZDEPTH" );
+
+    // creer le shader
+    $shaderZ = `shadingNode -asShader lambert -n $shadName`;
+    setAttr ($shaderZ + ".ambientColor") -type double3 1 1 1 ;
+  
+    // creer le nom du SetRange a partir de celui du shader
+    $fileName = genShaderName("_" + $_baseName + "_setRangeZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create setRange
+    $utilSRange = `createNode setRange -n $fileName`;
+    setAttr ($utilSRange + ".minX") 1;
+    
+    // creer le nom du MultiplyDivide a partir de celui du shader
+    $fileName = genShaderName("_" + $_baseName + "_multDivZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create MultiplyDivide
+    $utilMult = `createNode multiplyDivide -n $fileName`;
+    setAttr ($utilMult + ".input2X") -1;
+    
+    // creer le nom du SamplerInfo a partir de celui du shader
+    $fileName = genShaderName("_" + $_baseName + "_sampInfoZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create SamplerInfo
+    $utilSInfo = `createNode samplerInfo -n $fileName`;
+    addAttr -ln "NearClipCalimero" -nn "Near Clip Calimero" -at double  -dv 0.1 $utilSInfo;
+    addAttr -ln "FarClipCalimero" -nn "Far Clip Calimero" -at double  -dv 1000 $utilSInfo;
+  
+    // Connections
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorR");
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorG");
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorB");
+    connectAttr -f ($utilSInfo + ".NearClipCalimero") ($utilSRange + ".oldMinX");
+    connectAttr -f ($utilSInfo + ".FarClipCalimero") ($utilSRange + ".oldMaxX");
+    connectAttr -f ($utilSInfo + ".pointCameraZ") ($utilMult + ".input1X");
+    connectAttr -f ($utilMult + ".outputX") ($utilSRange + ".valueX");
+    connectAttr -f ($fileRGBA + ".outTransparency") ($shaderZ + ".transparency");
+    
+    //////////// Shader BLACK ///////////
+    
+    string $shadName;
+    string $shaderBLACK;
+    
+	// genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_" + $_baseName + "_BLACK" );
+
+     // creer le shader
+    $shaderBLACK = `shadingNode -asShader lambert -n $shadName`;
+    setAttr ($shaderBLACK + ".color") -type double3 0 0 0 ;
+    setAttr ($shaderBLACK + ".shadowAttenuation") 0 ;
+    
+    // Connections
+    
+    connectAttr -f ($fileRGBA + ".outTransparency") ($shaderBLACK + ".transparency");
+    
+    hyperShadePanelGraphCommand("hyperShadePanel1", "rearrangeGraph");
+        
+    return $shaderBLACK;
+    return $shaderZ;
+    return $shaderLIGHT;
+    return $shaderRGBA;
+}

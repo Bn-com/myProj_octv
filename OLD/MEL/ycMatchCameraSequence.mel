@@ -1,0 +1,132 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 尹晟
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc CameraPosition4411()
+{
+	float $LocatorPositionX=10;
+	float $LocatorPositionY=20;
+	float $LocatorPositionZ=30;
+	CreateEmptyGroup;
+	rename ycCameraGroup;
+	spaceLocator -p $LocatorPositionX $LocatorPositionY $LocatorPositionZ;
+	rename "locatorAim";
+	int $num=0;
+
+	for ($i=0;$i<181;$i+=9)
+	{
+		for ($j=-90;$j<91;$j+=9)
+		{
+			float $xValue;
+			float $yValue;
+			float $zValue;
+			
+				$xValue=(cosd($i)*cosd($j))*10+$LocatorPositionX;
+				$yValue=-(sind($j)*10)+$LocatorPositionY;
+				$zValue=(sind($i)*cosd($j))*10+$LocatorPositionZ;
+			joint  -p $xValue $yValue $zValue;
+			rename ("CameraPos"+$num);
+			$num++;
+		}
+	}
+}
+CameraPosition4411;
+
+
+global proc particleImage2( )
+{
+	
+//Initialize!
+	int $runX = 0;
+	int $runY = 0;
+	int $currentTimeVar;
+
+	int $progressAmount = 0;
+
+	int $maxX = 0;
+	int $maxY = 0;
+
+	string $particleName[];
+	string $tempAryStrg[];
+
+	string $shadingNodeName = "";
+	string $rampName = "";
+	string $arrayMapperName = "";
+	string $imagePath = "";
+	string $workspace = "";	
+	string $expressionStrg;	
+	
+	global int $runXExpr = 0;
+	global int $runYExpr = 0;
+
+	
+//Initialize End!
+
+
+ source AEfileTemplate.mel;
+ $shadingNodeName = `shadingNode -asTexture file`;
+ 	$workspace = `workspace -q -fn`;
+	setWorkingDirectory $workspace "image" "sourceImages";
+ 	fileBrowser (("AEassignTextureCB  "+$shadingNodeName+".fileTextureName"), "Open", "image", 0);
+	
+ $maxX = `getAttr($shadingNodeName+".outSizeX")`;
+ $maxY = `getAttr($shadingNodeName+".outSizeY")`;
+ $imagePath = `getAttr($shadingNodeName+".fileTextureName")`;
+ 
+if($maxX>0)
+ {
+
+ $particleName = `particle -ll 0.1 0 0.1 -ur ($maxY/10.0) 0 ($maxX/10.0) -grs 0.1 -c 1 `;
+ CenterPivot;
+ move -rpr 0 0 0 ;
+ 
+ setAttr ($particleName[0]+".scaleZ") -1;
+ 
+ addAttr -ln "rgbPP"      -dt vectorArray $particleName[1];
+ addAttr -ln "rgbPP0"     -dt vectorArray $particleName[1];
+ addAttr -ln "opacityPP"  -dt doubleArray $particleName[1];
+ addAttr -ln "opacityPP0" -dt doubleArray $particleName[1];
+ 
+ addAttr -ln xCoord0 	  -dt doubleArray  $particleName[1];
+ addAttr -ln xCoord 	  -dt doubleArray  $particleName[1];
+ setAttr -e -keyable true ($particleName[1]+".xCoord");
+
+ addAttr -ln yCoord0 	   -dt doubleArray  $particleName[1];
+ addAttr -ln yCoord   	   -dt doubleArray  $particleName[1];
+ setAttr -e -keyable true ($particleName[1]+".yCoord");
+
+ $rampName = `shadingNode -asTexture ramp`;
+
+ $tempAryStrg = `arrayMapper -target $particleName[1] -destAttr rgbPP -inputU xCoord -inputV yCoord -mapTo $rampName`;
+ $arrayMapperName = $tempAryStrg[0];
+ connectAttr -f ($shadingNodeName+".message")  ($arrayMapperName+".computeNode");
+ connectAttr -f ($shadingNodeName+".outColor") ($arrayMapperName+".computeNodeColor");
+ 
+ saveInitialState $particleName[0];
+ 
+ $runXExpr = 0;
+ $runYExpr = 0;
+ $expressionStrg = "int $maxX = "+$maxX+";\r\nint $maxY = "+$maxY+";\r\nglobal int $runXExpr;\r\nglobal int $runYExpr;\r\nif (id==0) {$runXExpr =0;$runYExpr=0;}\r\nif ($runYExpr<$maxY)\r\n{\r\n\r\n if ($runXExpr ==  $maxX)\r\n {\r\n\t$runXExpr = 0;\r\n\t$runYExpr++;\r\n\r\n }\r\n\r\n if ($runXExpr > 0) xCoord0 = $runXExpr/($maxX-1.0);\r\n\telse $runXExpr =0;\r\n if ($runYExpr > 0) yCoord0 = $runYExpr/($maxY-1.0);\r\n\telse $runYExpr =0;\r\n $runXExpr++;\r\n}\r\n";
+ dynExpression -s $expressionStrg -r $particleName[1];
+
+ // Change time to take Effect
+
+ $currentTimeVar = `currentTime -q`;
+ currentTime -e  ($currentTimeVar+1);
+ currentTime -e  ($currentTimeVar);
+ $runXExpr = 0;
+ $runYExpr = 0;
+
+ // Delete it!
+ dynExpression -s "" -r $particleName[1];
+
+ }
+select -cl;
+}//这段函数是用来生成粒子图的：任选目录下的一张iff图片来生成空间中的粒子色彩分布。
+

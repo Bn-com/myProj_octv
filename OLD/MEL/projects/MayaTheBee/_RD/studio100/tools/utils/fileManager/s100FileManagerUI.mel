@@ -1,0 +1,265 @@
+global proc s100FileManagerUI()
+{
+	global string  $base_script_path;
+	global string $base_prodFilesSystem ;
+	$path = substituteAllString ($base_script_path , ";","");
+
+	$base_prodFilesSystem = $path + "/prodFilesSystem/" ;
+	$pas = $base_prodFilesSystem  + "password.s100" ;
+	$fileList = `getFileList -fld $base_prodFilesSystem -filespec "*.s100"`;
+
+	if(size($fileList) > 0)
+	{
+		if(`window -ex 	s100FileManagerUI`)
+			deleteUI s100FileManagerUI;
+		if(`window -ex s100FM_exportSubRef_importRefUI`)
+			deleteUI s100FM_exportSubRef_importRefUI;
+
+		window -minimizeButton 1 -title "studio 100 Animation Files Manager"  -h 400  s100FileManagerUI;
+	//	columnLayout -adjustableColumn true s100FileManagerUICLMain;
+		s100FileManagerUIMenu ;
+		s100FileManagerUIFormLayout ;
+
+		window -e  -h 590 -w 680   s100FileManagerUI;
+		showWindow;
+    }
+	else
+	{
+		s100FileManagerCreatePasswordUI ;
+    }
+}
+
+
+
+global proc s100FileManagerUIFormLayout()
+{
+	$form = `formLayout s100FileManagerUIFLMain`;
+
+		$txLibray = `text -l "PROD"`;
+		$prodMenu = `optionMenu -cc "s100FileManagerUIChangeProd;s100FMsaveOptionVar"  s100FileManagerUIOMProd`;
+
+	$tab = `tabLayout -innerMarginWidth 5 -innerMarginHeight 5 s100FileManagerUITLMain`;
+	formLayout -edit
+		 //Prod
+		-attachForm $txLibray "top"    10
+		-attachForm $txLibray "left"   10
+		-attachForm $prodMenu "top"    5
+		-attachForm $prodMenu "left"   60
+		// tabs
+		-attachControl 	$tab "top"   5 $prodMenu
+		-attachForm 	$tab "left"   0
+		-attachForm 	$tab "bottom" 0
+		-attachForm 	$tab "right"  0
+		 $form;
+
+
+	s100FileManagerUIShootLayout ;
+	s100FileManagerUIAssetLayout ;
+	s100FMIAUI;
+	s100FileManagerUIRefreshProd ;
+	s100FileManagerUIChangeProd ;
+
+	 tabLayout -edit -cc "s100FileManagerRefreshUI; s100FMASsetFileIdOnOptionMenu; s100FMrefreshMenuFromSceneName; s100FMsaveTabOptionVar;"
+		 -tabLabel s100FileManagerUIFLShot "Shots" -tabLabel s100FileManagerUIFLAsset "Assets"
+		 s100FileManagerUITLMain;
+
+	//	tabLayout -e -selectTab s100FileManagerUIFLAsset s100FileManagerUITLMain;
+		setParent ..;
+
+	s100FMloadTabOptionVar;
+	s100FMrefreshMenuFromSceneName;
+}
+
+
+
+
+global proc s100FileManagerUIMenu()
+{
+	global string $gS100_associatedRefFileTag ;
+
+	menuBarLayout s100FileManagerUIMLMain;
+	menu -label "File";
+        menuItem -c s100ProdManagerUI -label "Prod Manager";
+	    menuItem -c s100FileManagerUI -label "refreshUI" -ann "re-launch fileManagerUI";
+
+    menu -label "Edit";
+        menuItem -en 0  -label "Preference";
+
+	menu -tearOff 1 -label "Tools";
+        menuItem -l ("PrevizManager...") //-bgc 1.0 1.0 0.4
+			 -ann "Launches MayaTheBee's PrevizManager..."
+			 -c ("s100EXPUI();");
+
+		menuItem -l ("PrevizLayoutToolsUI...") //-bgc 1.0 1.0 0.4
+			 -ann "Launches MayaTheBee's PrevizLayoutToolsUI..."
+			 -c ("s100FMlaunchPrevizlayoutTools();");
+
+		menuItem -d true  ; // divider
+
+		menuItem -l ("Switching Sub Refs UI...") //-bgc 1.0 1.0 0.4
+			 -ann "switching and bake tools..."
+			 -c ("s100FM_exportSubRef_importRefUI();");
+
+		menuItem -d true  ; // divider
+
+		menuItem -l ("Analyse Current Scene UI...") //-bgc 1.0 1.0 0.4
+			 -ann "Analyse content of the scene and prompt it in a window to be edited/saved"
+			 -c ("s100FMsceneAnalyser(1);");
+
+		menuItem -l ("Show Analyse of current scene from FILE (if any)...") //-bgc 1.0 1.0 0.4
+			 -ann "Search for file containing the last Analyse of the current scene and prompt it in a window to be edited/saved/compared"
+			 -c ("s100FMac_promptSceneAnalyseFromFile();");
+
+		menuItem -l ("Analyse Current Scene And Save it ") //-bgc 1.0 1.0 0.4
+			 -ann "Analyse content of the scene and save it in a file without any prompt (apart from ScriptEditor)"
+			 -c ("s100FMsceneAnalyser(0);");
+
+		menuItem -d true  ; // divider
+
+		menuItem -l (">.< Associate selected Xforms with Asset picked in [Import Asset] tab") //-bgc 1.0 1.0 0.4
+			 -ann "Associates selected transforms with the file selected in [ImportAsset] tab of UI by creating an attribute on them, filled with the proper paths (taking 'subRef' choice into account).."
+			 -c ("s100FMassociateObjsWithRefFromUI();");
+
+		menuItem -l (">!!< Replace ALL  Xforms with Associated Assets !!! \"NOT Undoable!!\"") //-bgc 1.0 1.0 0.4
+			 -ann ("Replaces ALL transforms with referenced file written in their \""+$gS100_associatedRefFileTag+"\" attribute if any. CAUTION : this is NOT undoable!")
+			 -c ("s100FMforceReplaceAllLinkedAssociatedRefs(1, \"Keep\");");
+
+
+		menuItem -l (">!< Replace selected Xforms with Associated Assets !!! \"NOT Undoable!!\"") //-bgc 1.0 1.0 0.4
+			 -ann ("Replaces selected transforms with referenced file written in their \""+$gS100_associatedRefFileTag+"\" attribute if any. CAUTION : this is NOT undoable!")
+			 -c ("s100FMreplaceObjsWithAssociatedRef(`ls -sl -tr`);");
+
+		menuItem -l ("--> Select all Asset-Associated-Xforms in Scene") //-bgc 1.0 1.0 0.4
+			 -ann ("Selects all non-ref'd objects carrying attribute \""+$gS100_associatedRefFileTag+"\" found in scene")
+			 -c ("s100FMselectRefAssociatedObjsInScene(\""+$gS100_associatedRefFileTag+"\");");
+
+			 menuItem -l ("   <-(Select Already imported Refs from these selected Xforms)") //-bgc 1.0 1.0 0.4
+			 	-ann ("If selected transforms are supposed to be replaced by a ref thatare already imported, selecting them!...")
+			 	-c ("s100FMselectAssociatedImportedRefFromSel()" ) ;
+
+		menuItem -l ("---  Prints Asset-Association of selected Xforms") //-bgc 1.0 1.0 0.4
+			 -ann ("Prints paths of associated Asset of all non-ref'd selected tranforms in the ScriptEditor...")
+			 -c ("s100FMprintRefAssociationOnSel(`ls -sl -tr`);");
+
+		menuItem -l (">o< Clean up Association on selected Objs ") //-bgc 1.0 1.0 0.4
+			 -ann ("Deletes attribute \""+$gS100_associatedRefFileTag+"\" if found on selected transforms")
+			 -c ("s100FMdeleteRefAssociationOnSel(`ls -sl -tr`);");
+
+		menuItem -d true  ; // divider
+
+		menuItem -l ("Unlock Current Scene")
+				 -ann "Sets 'lock' state of current scene to 0 so that it won't be definitely locked if Imported in Reference ('file -lf 0;')"
+				 -c ("s100_unlockCurrentScene();");		// ();
+
+
+	// HELP menu :
+	//
+    menu -en 1 -tearOff 1 -label "Help" -helpMenu true;
+        menuItem -en 0   -label "Help";
+        menuItem -en 0  -label "About...";
+
+		// QA addendum :
+
+		menuItem -d true  ; // divider
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfAllSceneTo(0);")
+				 -label "Make all Meshes in Scene Selectable"
+				 -ann "Set every '.meshDisplay' of root controllers to 0 (Normal)";
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfAllSceneTo(2);")
+				 -label "Make all Meshes in Scene Un-Selectable"
+				 -ann "Set every '.meshDisplay' of root controllers to 2 (Reference)";
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfAllSceneTo(1);")
+				 -label "Make all Meshes in Scene displayed as Template"
+				 -ann "Set every '.meshDisplay' of root controllers to 1 (Template)";
+
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfSelTo(0);")
+				 -label "Make all Meshes among selection Selectable"
+				 -ann "Set '.meshDisplay' of root controllers among SELECTION to 0 (Normal)";
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfSelTo(2);")
+				 -label "Make all Meshes among selection Un-Selectable"
+				 -ann "Set '.meshDisplay' of root controllers among SELECTION to 2 (Reference)";
+		menuItem -en 1 -c ("s100FMsetMeshDisplayOfSelTo(1);")
+				 -label "Make all Meshes among selection displayed as Template"
+				 -ann "Set '.meshDisplay' of root controllers among SELECTION to 1 (Template)";
+
+		menuItem -d true  ; // divider
+		menuItem -en 1 -c ("s100_findAndImportAssetsInBankUI();")
+				 -label "Find asset(s) by name in BANK (and try import?)"
+				 -ann "Tries to find in the BANK (and reference) asset whose names are supplied in UI or thru text file";
+
+		menuItem -d true  ; // divider
+
+		menuItem -en 1 -c ("s100FileManagerUI;")
+				 -label "re-run me"
+				 -ann "Re-launch 's100FileManagerUI()' without re-sourcing related procs.";
+		menuItem -en 1 -c ("string $list[]=s100_returnFileManagerProcs(); for ($l in $list) s100sourceOnlyFile($l); s100FileManagerUI;")
+				 -label "re-source me"
+				 -ann "Source again all procs related to that tool and re-launch it";
+
+    setParent ..;
+}
+
+
+// QA addendum , to be able to re-source all fileManager procs anytime:
+//
+global proc string[] s100_returnFileManagerProcs()
+{
+	//file Manager procs
+	// list taken from sourceAll.mel
+
+	string $list[]={};
+
+	$list[size($list)] 			= "/utils/fileManager/";
+		$list[size($list)] 		= "/utils/fileManager/commons/";
+		$list[size($list)] 		= "/utils/fileManager/filesManager/";
+			$list[size($list)]	= "/utils/fileManager/filesManager/procedures/";
+			$list[size($list)] 	= "/utils/fileManager/filesManager/s100EXP/";
+			$list[size($list)] 	= "/utils/fileManager/filesManager/UI/";
+		$list[size($list)] 		= "/utils/fileManager/prodManager/";
+			$list[size($list)] 	= "/utils/fileManager/prodManager/createProc/";
+			$list[size($list)] 	= "/utils/fileManager/prodManager/UI/";
+			$list[size($list)] 	= "/utils/fileManager/s100PRC/";
+
+	return $list;
+}
+
+// QA addendum : to launch tools to fix/tweak previz
+global proc s100FMlaunchPrevizlayoutTools()
+{
+	// tools for previz/layout tasks
+	global string $gStudio100ToolsPath;
+	if (size($gStudio100ToolsPath)==0)
+		error ("Global var '$gStudio100ToolsPath' seems empty... Unable to launch 'S100MTB_previzLayoutToolsUI'");
+	else
+	{
+		string $scriptPath = ($gStudio100ToolsPath+"/previzLayoutTools");
+		string $scriptName = "S100MTB_previzLayoutToolsUI.mel";
+		menuDLC_runScript($scriptPath, $scriptName);
+	}
+}
+
+global proc s100FMsaveTabOptionVar()
+{
+	global string $s100FMTabSelect;
+
+	//$s100FMTabSelect = `tabLayout -q -selectTab s100FileManagerUITLMain`;
+	$prodMenu = `tabLayout -q -selectTab s100FileManagerUITLMain`;
+	$optionvar =`optionVar -iv "menuSelected" 4 -sv "selectedTabOption" $prodMenu`;
+	optionVar -q  "selectedOption";
+}
+
+
+global proc s100FMloadTabOptionVar()
+{
+	global string $s100FMTabSelect;
+	//if($s100FMTabSelect !="")
+	//	tabLayout -e -selectTab $s100FMTabSelect s100FileManagerUITLMain;
+
+	string $tab[];
+	string $list[];
+	if(`optionVar -exists "menuSelected"`)
+	{
+		string $optionVar2 = `optionVar -q "selectedTabOption"`;
+		tabLayout -e -selectTab $optionVar2 s100FileManagerUITLMain;
+    }
+}
+

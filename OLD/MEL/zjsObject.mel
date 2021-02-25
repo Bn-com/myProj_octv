@@ -1,0 +1,157 @@
+//zjsObject.mel  
+
+//null  ////////////////////////////////////////
+global proc zjsObject()
+{	;	}	//do nothing
+
+//zjsPipeUI()  //////////////////////////////////////////////
+// This feature create pipes from selected curves.
+global proc zjsPipeUI()
+{	zjsPipe(0.5);
+	if(`window -ex zjsPipeWindow`) deleteUI zjsPipeWindow;
+	window -t "Create Pipe" zjsPipeWindow;	columnLayout -adj 1;
+	floatSliderGrp -l "Radius" -f 1 -min 0.1 -max 1.0 -fmn 0.00001 -fmx 10000 -v 0.5 r;
+	string $commands;
+	$commands="undo;float $r=`floatSliderGrp -q -v r`;zjsPipe($r);";
+	floatSliderGrp -e -cc $commands r;
+	//floatSliderGrp -e -cc $commands s;
+	showWindow zjsPipeWindow;
+}
+global proc zjsPipe(float $r)
+{	int $i=0;
+	string $curves[]=`filterExpand -sm 9`;
+	if($curves[0]=="") error "No curve(s) selected.";
+	string $circle[]=`circle -r $r -nr 0 1 0 -n pipeCircle`;
+	do 
+	{	string $pipe[]=`extrude -ch 1 -rn 0 -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1.0 -rsp 1 -n guPipe $circle[0] $curves[$i] `;
+		$i++;
+	}
+	while($curves[$i]!="");
+	select -r $circle[0];
+}
+//zjsBallStick  ///////////////////////////////////////////////////////
+//This feature creates BallSticks from selected polygon edges.  ///////
+global proc zjsBallStickUI()
+{	zjsBallStick(0.8,0.4);
+	if(`window -ex zjsBallStickWindow`) deleteUI zjsBallStickWindow;
+	window -t "Create Ballstick" zjsBallStickWindow;	columnLayout;
+	text -l "Ajust any ball of the balls to adjust all the balls;\nAdjust the circle at origin to adjust sticks.";
+	showWindow zjsBallStickWindow;
+}
+global proc zjsBallStick(float $ballRadius,float $stickRadius)
+{
+	string $edges[]=`filterExpand -sm 32`;
+	if($edges[0]=="")
+		error "Please select polygon edges first.";
+	ConvertSelectionToVertices;
+	string $vtxs[]=`filterExpand -sm 31`;
+	string $sphere[]=`sphere -r $ballRadius`;
+	string $circle[]=`circle -r $stickRadius -n stickCircle`;
+	string $resultSpheres[];
+	string $resultSticks[];
+	string $resultLines[];
+	int $i,$j;
+	float $vtxPos[];	//2 vertex positions
+	int $size=size($vtxs);
+	for($i=0;$i<$size;$i++)		//create spheres
+	{	float $pos[]=`eval("pointPosition "+$vtxs[$i])`;
+		string $tmpSphere[]=`instance $sphere[0]`;
+		move ($pos[0]) ($pos[1]) ($pos[2]) $tmpSphere[0];
+		$resultSpheres[$i]=$tmpSphere[0];
+	}
+	$size=size($edges);
+	for($i=0;$i<$size;$i++)		//create sticks
+	{	select -r $edges[$i];
+		ConvertSelectionToVertices;
+		string $tmpVtxs[]=`filterExpand -sm 31`;
+		$vtxPos=`eval("pointPosition "+$tmpVtxs[0])`;
+		$resultLines[$i]=`curve -d 1 -p ($vtxPos[0]) ($vtxPos[1]) ($vtxPos[2])`;
+		$vtxPos=`eval("pointPosition "+$tmpVtxs[1])`;
+		curve -a -p ($vtxPos[0]) ($vtxPos[1]) ($vtxPos[2]) $resultLines[$i];
+		string $tmpStick[]=`extrude -ch true -rn false -po 0 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 $circle[0] $resultLines[$i]`;
+		$resultSticks[$i]=$tmpStick[0];
+	}
+	delete $sphere[0];
+	select -r $resultSpheres;
+	string $ballsGrp=`group`;
+	select -r $resultLines;
+	string $linesGrp=`group`;
+	select -r $resultSticks;
+	string $sticksGrp=`group`;
+	select -r $ballsGrp $linesGrp $sticksGrp;
+	group -n ballStick;
+}
+
+//zjs Wall  /////////////////////////////////////////////////////////
+// This feature create walls from select curves which degree is 1 and lie on the XY grid.
+global proc zjsWallUI()
+{	zjsWall(0.4,8.0,-1);
+	if(`window -ex zjsWallWindow`) deleteUI zjsWallWindow;
+	window -t "Create Wall" zjsWallWindow;	columnLayout -adj 1;
+	floatSliderGrp -l "Thickness:" -f 1 -min 0.1 -max 1.0 -fmn 0.01 -fmx 50 -v 0.4 thickness;
+	floatSliderGrp -l "Height:" -f 1 -min 1.0 -max 10.0 -fmn 0.1 -fmx 100 -v 8.0 height;
+	intSliderGrp -l "In-Mid-Out:" -f 1 -min -1 -max 1 -v -1 inMidOut;
+	string $commands="undo;float $thickness=`floatSliderGrp -q -v thickness`;float $height=`floatSliderGrp -q -v height`;int $inMidOut=`intSliderGrp -q -v inMidOut`;zjsWall($thickness,$height,$inMidOut);";
+	floatSliderGrp -e -cc $commands	thickness;
+	floatSliderGrp -e -cc $commands	height;
+	intSliderGrp -e -cc $commands	inMidOut;
+	showWindow zjsWallWindow;
+}
+global proc zjsWall(float $wallThickness,float $wallHeight,int $direction)
+{	string $curves[]=`filterExpand -sm 9`;
+	if($curves[0]=="")
+		error "Please select curves(degree:1) first";
+	float $offDist;		//offset distance
+	int $i,$j,$n,$size;
+	string $tmpCurve[],$tmpCurve1[],$thirdCurve,$allWalls[];
+	float $pos1[],$pos2[];
+	$size=size($curves);
+	if($direction!=0)
+	{	$offDist=$wallThickness*$direction;
+		for($i=0;$i<$size;$i++)
+		{	select -r $curves[$i];
+			$tmpCurve=`offsetCurve -cl 1 -d $offDist`;
+			delete -ch $tmpCurve;
+			$pos1=`eval("pointPosition "+$curves[$i]+".u[0]")`;
+			$pos2=`eval("pointPosition "+$tmpCurve[0]+".u[0]")`;
+			$thirdCurve=`curve -d 1 -p $pos1[0] $pos1[1] $pos1[2] -p $pos2[0] $pos2[1] $pos2[2]`;
+			select -r $curves[$i] $thirdCurve;
+			attachCurve  -ch 1 -rpo 1 -kmk 1 -m 0 -bb 0.5 -bki 0 -p 0.1;
+			select -r $curves[$i] $tmpCurve[0];
+			attachCurve  -ch 1 -rpo 1 -kmk 1 -m 0 -bb 0.5 -bki 0 -p 0.1;
+			closeCurve -rpo 1 $curves[$i];
+			delete -ch $curves[$i];
+			string $wall[]=`extrude -ch true -rn false -po 1 -et 0 -upn 1 -length $wallHeight -rotation 0 -scale 1 -dl 1 $curves[$i]`;
+			int $edges[]=`polyEvaluate -e $wall[0]`;
+			string $command="polySoftEdge -a 0 -ch 1 "+$wall[0]+".e[0:"+$edges[0]+"]";
+			eval($command);
+			$allWalls[$i]=$wall[0];
+		}
+	}
+	else
+	{	$offDist=$wallThickness/2.0;
+		for($i=0;$i<$size;$i++)
+		{	
+			$tmpCurve=`offsetCurve -cl 1 -d $offDist $curves[$i]`;
+			$tmpCurve1=`offsetCurve -cl 1 -d (-$offDist) $curves[$i]`;
+			delete -ch $tmpCurve $tmpCurve1;
+			$pos1=`eval("pointPosition "+$tmpCurve[0]+".u[0]")`;
+			$pos2=`eval("pointPosition "+$tmpCurve1[0]+".u[0]")`;
+			$thirdCurve=`curve -d 1 -p $pos1[0] $pos1[1] $pos1[2] -p $pos2[0] $pos2[1] $pos2[2]`;
+			attachCurve -ch 1 -rpo 1 -kmk 1 -m 0 -bb 0.5 -bki 0 -p 0.1 $tmpCurve[0] $thirdCurve;
+			attachCurve -ch 1 -rpo 1 -kmk 1 -m 0 -bb 0.5 -bki 0 -p 0.1 $tmpCurve[0] $tmpCurve1[0];
+			closeCurve -rpo 1 $tmpCurve[0];
+			delete -ch $tmpCurve[0];
+			string $wall[]=`extrude -ch true -rn false -po 1 -et 0 -upn 1 -length $wallHeight -rotation 0 -scale 1 -dl 1 $tmpCurve[0]`;
+			int $edges[]=`polyEvaluate -e $wall[0]`;
+			string $command="polySoftEdge -a 0 -ch 1 "+$wall[0]+".e[0:"+$edges[0]+"]";
+			eval($command);
+			$allWalls[$i]=$wall[0];
+		}
+	}
+	select -r $allWalls;
+	group -n walls;
+}
+
+
+// End of zjsObjects.mel  /////////////////////////////////////////////////////

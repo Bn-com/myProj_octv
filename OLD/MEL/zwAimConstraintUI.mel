@@ -1,0 +1,85 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwAimConstraint(string $checkBoxGrp)
+{
+	string $attrArray[] = {"rotateX", "rotateY", "rotateZ"};
+
+	int $valueArray[];
+	$valueArray[0] = `checkBoxGrp -query -value1 $checkBoxGrp`;
+	$valueArray[1] = `checkBoxGrp -query -value2 $checkBoxGrp`;
+	$valueArray[2] = `checkBoxGrp -query -value3 $checkBoxGrp`;
+	
+	string $buf[] = `ls -long -sl`;
+	if (size($buf) < 2)
+		error "请先选Camera，然后再选物体";
+	
+	string $camera = $buf[0];
+	string $buf1[] = `listRelatives -fullPath -children $camera`;
+	if (!size($buf1))
+		error "请先选Camera，然后再选物体";
+	if (`nodeType $buf1[0]` != "camera")
+		error "请先选Camera，然后再选物体";
+	
+	$buf = `ls -long -type "mesh" -dagObjects $buf`;
+	for ($shape in $buf)
+	{
+		$buf1 = `listRelatives -fullPath -parent $shape`;
+		string $transform = $buf1[0];
+		float $buf2[] = `xform -query -worldSpace -rotation $transform`;
+
+		$buf1 = `listRelatives -fullPath -parent $transform`;
+		string $grp = $buf1[0];
+		setAttr -lock false ($grp + ".rotateX");
+		setAttr -lock false ($grp + ".rotateY");
+		setAttr -lock false ($grp + ".rotateZ");
+		print `aimConstraint -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 $camera $grp`;
+
+
+		// KC: remove constraint on rx and rz
+
+		for ($i = 0; $i<size($attrArray); $i++)
+		{
+			if (!$valueArray[$i])
+			{
+				string $temp[] = `listConnections -source true -destination false -plugs true ($grp + "." + $attrArray[$i])`;
+
+				if (size($temp) > 0)
+				{
+					disconnectAttr $temp[0] ($grp + "." + $attrArray[$i]);
+					setAttr ($grp + "." + $attrArray[$i]) 0;
+				}
+			}
+		}
+
+		setAttr -lock true ($grp + ".rotateX");
+		setAttr -lock true ($grp + ".rotateY");
+		setAttr -lock true ($grp + ".rotateZ");
+
+		setAttr -lock false ($transform + ".rotateX");
+		setAttr -lock false ($transform + ".rotateY");
+		setAttr -lock false ($transform + ".rotateZ");
+		xform -worldSpace -rotation $buf2[0] $buf2[1] $buf2[2] $transform;
+		setAttr -lock true ($transform + ".rotateX");
+		setAttr -lock true ($transform + ".rotateY");
+		setAttr -lock true ($transform + ".rotateZ");
+	}
+}
+
+global proc zwAimConstraintUI()
+{
+	if(`window -exists zwAimConstraintUI`)
+		deleteUI zwAimConstraintUI;
+	window -title "Aim Constraint Tool" -resizeToFitChildren true zwAimConstraintUI;
+		columnLayout -adjustableColumn true;
+			string $checkBoxGrp = `checkBoxGrp -label "Constraint" -numberOfCheckBoxes 3 -label1 "Rotate X" -label2 "Rotate Y" -label3 "Rotate Z" -value2 true`;
+			button -label "Constraint" -command ("zwAimConstraint \"" + $checkBoxGrp + "\"");
+	showWindow zwAimConstraintUI;
+}

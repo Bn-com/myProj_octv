@@ -1,0 +1,102 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 马昊
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mhGetParticleMat()
+{
+	$selParticle = `ls -sl`;
+	if (size($selParticle) != 1 )
+	{
+		error "Please select a particle point";
+	}
+	string $ptN = $selParticle[0];
+	if (`gmatch $ptN "*.pt[[]*[]]"` != 1)
+	{
+		error "Please select a particle point";
+	}
+
+	string $particle, $instancer;
+
+	string $tokens[];
+	tokenize $ptN "." $tokens;
+	$particle = $tokens[0];
+
+	// check particle connected to an instancer
+
+	string $nodes[] = `particleInstancer -q -name $particle`;
+
+	if (size($nodes) > 0)
+		$instancer = $nodes[0];
+	else
+		error "Particle is not connected to an instancer. Cannot use this tool";
+
+
+	// list all instanced objects
+
+//	string $instanceIndex[] = `particleInstancer -name $instancer -q -object $particle`;
+//
+//  the above code returns object name without path, so error when there exists duplicate name
+
+	string $instanceIndex[] = `listConnections -source true -destination false ($instancer + ".inputHierarchy")`;
+
+	int $size = size($instanceIndex);
+
+
+	// compute the instancer index for the particle point
+
+	string $objIndex = `particleInstancer -name $instancer -q -objectIndex $particle`;
+	float $temp[] = `getParticleAttr -at $objIndex $selParticle[0]`; // objIndex 是 群组的mel为粒子添加的属性
+	float $index = floor($temp[0]);
+	$index = max(0, min($size - 1, $index));	// clamp between 0 to $size
+
+	print ("index >>>"+$index+"\n");
+
+
+	string $allChild[] = `listRelatives -fullPath -allDescendents $instanceIndex[(int)$index]`;
+
+	string $origSelection[] = `ls -selection`;
+
+	select -clear;
+	string $allShad[];
+	for ($ainstanceGrp in $allChild)
+	{
+		 if (`nodeType $ainstanceGrp` == "mesh" || `nodeType $ainstanceGrp` == "nurbsSurface" )
+		 {
+			$SG = `listConnections -type shadingEngine -s 0 -d 1 $ainstanceGrp`;
+			if ($SG[0] != "" )
+			{
+				$shader = `listConnections -s 1 -d 0 $SG[0]`;
+				$allShad[size($allShad)] = $shader[0];
+			}
+		 } 
+	}
+
+	HypershadeWindow;
+	select $allShad;
+	hyperShadePanelGraphCommand("hyperShadePanel1", "showUpAndDownstream");
+	//hyperShadePanelMenuCommand("hyperShadePanel1", "frameAll");
+
+	clear $allShad;
+
+	select $origSelection;
+}
+
+global proc mhGetParticleMatGUI()
+{
+	if (!`window -exists mhGetParticleMatWnd`)
+	{
+		window -title "Locate Crowd Particle Material" -resizeToFitChildren true mhGetParticleMatWnd;
+			columnLayout -rowSpacing 5;
+				button -label "Locate Crowd Material" -command mhGetParticleMat;
+			setParent ..;
+
+		showWindow mhGetParticleMatWnd;
+	}
+}
+

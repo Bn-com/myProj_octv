@@ -1,0 +1,445 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwSnapNuPoly()
+{
+	$tmp = `ls -sl`;
+	string $shape[] = `listRelatives -s $tmp`;
+
+	float $tolerance = 1.0;
+
+	//SPLIT ALL VERTICES AND SEPARATE POLYS
+	print ("EXPLODING: "+$tmp[0]+"\n");
+	print "PLEASE WAIT\n\n";
+	waitCursor -state on;
+	polySplitVertex ($tmp[0]+".vtx[*]");
+	string $poly_list[] = `polySeparate -ch 0 $shape`;
+
+	//CREATE NODES TO CHECK ANGLES TO DETERMINE VERTEX SEQUENCE
+	string $angleNode = `createNode angleBetween`;
+	$angleNode = `rename $angleNode "angle1"`;
+	string $pma1 = `createNode plusMinusAverage`;
+	$pma1 = `rename $pma1 vector1`;
+	setAttr ($pma1+".operation") 2;
+	string $pma2 = `createNode plusMinusAverage`;
+	$pma2 = `rename $pma2 vector2`;
+	setAttr ($pma2+".operation") 2;
+	string $pma3 = `createNode plusMinusAverage`;
+	$pma3 = `rename $pma3 vector3`;
+	setAttr ($pma3+".operation") 2;
+
+	string $nu_polys[], $qPolys[];	//qPolys are for questionable polys
+	int $qp = 0;
+	for($i=0;$i<`size $poly_list`;$i++)
+	{
+		//IS POLY QUAD OR TRI
+		print ("CHECKING POLY: "+$poly_list[$i]+"\n");
+		string $quad_check[] = `ls ($poly_list[$i]+".vtx[*]")`;
+		string $check_pts[] = `filterExpand -sm 31 $quad_check[0]`;
+		string $vertex_seq[];
+		if(`size $check_pts`==4)
+		{
+			//FIND VERTEX SEQUENCE
+			float $p0[3] = `xform -q -ws -translation ($poly_list[$i]+".vtx[0]")`;
+			float $p1[3] = `xform -q -ws -translation ($poly_list[$i]+".vtx[1]")`;
+			float $p2[3] = `xform -q -ws -translation ($poly_list[$i]+".vtx[2]")`;
+			float $p3[3] = `xform -q -ws -translation ($poly_list[$i]+".vtx[3]")`;
+
+			//GET 3 VECTORS
+			setAttr ($pma1+".input3D[0].input3Dx") $p1[0];
+			setAttr ($pma1+".input3D[0].input3Dy") $p1[1];
+			setAttr ($pma1+".input3D[0].input3Dz") $p1[2];
+			setAttr ($pma1+".input3D[1].input3Dx") $p0[0];
+			setAttr ($pma1+".input3D[1].input3Dy") $p0[1];
+			setAttr ($pma1+".input3D[1].input3Dz") $p0[2];
+
+			setAttr ($pma2+".input3D[0].input3Dx") $p2[0];
+			setAttr ($pma2+".input3D[0].input3Dy") $p2[1];
+			setAttr ($pma2+".input3D[0].input3Dz") $p2[2];
+			setAttr ($pma2+".input3D[1].input3Dx") $p0[0];
+			setAttr ($pma2+".input3D[1].input3Dy") $p0[1];
+			setAttr ($pma2+".input3D[1].input3Dz") $p0[2];
+
+			setAttr ($pma3+".input3D[0].input3Dx") $p3[0];
+			setAttr ($pma3+".input3D[0].input3Dy") $p3[1];
+			setAttr ($pma3+".input3D[0].input3Dz") $p3[2];
+			setAttr ($pma3+".input3D[1].input3Dx") $p0[0];
+			setAttr ($pma3+".input3D[1].input3Dy") $p0[1];
+			setAttr ($pma3+".input3D[1].input3Dz") $p0[2];
+
+			//GET ANGLE BETWEEN VERTEX 1 AND 2
+			int $angle = 12;
+			if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+			{
+				connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+			}
+			if(`isConnected ($pma2+".output3D") ($angleNode+".vector2")`==0)
+			{
+				connectAttr -f ($pma2+".output3D") ($angleNode+".vector2");
+			}
+			float $angle1 = `getAttr ($angleNode+".angle")`;
+			float $max_angle = $angle1;
+			print ("ANGLE BETWEEN 1 AND 2: "+$angle1+"\n");
+
+			//GET ANGLE BETWEEN VERTEX 1 AND 3
+			if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+			{
+				connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+			}
+			if(`isConnected ($pma3+".output3D") ($angleNode+".vector2")`==0)
+			{
+				connectAttr -f ($pma3+".output3D") ($angleNode+".vector2");
+			}
+			float $angle2 = `getAttr ($angleNode+".angle")`;
+			if($angle2>$max_angle)
+			{
+				$angle = 13;
+				$max_angle = $angle2;
+			}
+			print ("ANGLE BETWEEN 1 AND 3: "+$angle2+"\n");
+
+			//GET ANGLE BETWEEN VERTEX 2 AND 3
+			if(`isConnected ($pma2+".output3D") ($angleNode+".vector1")`==0)
+			{
+				connectAttr -f ($pma2+".output3D") ($angleNode+".vector1");
+			}
+			if(`isConnected ($pma3+".output3D") ($angleNode+".vector2")`==0)
+			{
+				connectAttr -f ($pma3+".output3D") ($angleNode+".vector2");
+			}
+			float $angle3 = `getAttr ($angleNode+".angle")`;
+			if($angle3>$max_angle)
+			{
+				$angle = 23;
+				$max_angle = $angle3;
+			}
+			print ("ANGLE BETWEEN 2 AND 3: "+$angle3+"\n");
+
+			string $num;
+			switch($angle)
+			{
+				case 12:	if($angle2>$max_angle-$tolerance||$angle3>$max_angle-$tolerance)
+						{
+							$qPolys[$qp] = $poly_list[$i];
+							$qp++;
+							setAttr ($pma1+".input3D[0].input3Dx") $p0[0];
+							setAttr ($pma1+".input3D[0].input3Dy") $p0[1];
+							setAttr ($pma1+".input3D[0].input3Dz") $p0[2];
+							setAttr ($pma1+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma1+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma1+".input3D[1].input3Dz") $p1[2];
+
+							setAttr ($pma2+".input3D[0].input3Dx") $p2[0];
+							setAttr ($pma2+".input3D[0].input3Dy") $p2[1];
+							setAttr ($pma2+".input3D[0].input3Dz") $p2[2];
+							setAttr ($pma2+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma2+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma2+".input3D[1].input3Dz") $p1[2];
+
+							setAttr ($pma3+".input3D[0].input3Dx") $p3[0];
+							setAttr ($pma3+".input3D[0].input3Dy") $p3[1];
+							setAttr ($pma3+".input3D[0].input3Dz") $p3[2];
+							setAttr ($pma3+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma3+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma3+".input3D[1].input3Dz") $p1[2];
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 2
+							int $nu_angle = 2;
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma2+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma2+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle1 = `getAttr ($angleNode+".angle")`;
+							float $nu_max_angle = $nu_angle1;
+							print ("NU_ANGLE BETWEEN 0 AND 2: "+$nu_angle1+"\n");
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 3
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma3+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma3+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle2 = `getAttr ($angleNode+".angle")`;
+							if($nu_angle2>$nu_max_angle)
+							{
+								$nu_angle = 3;
+								$nu_max_angle = $nu_angle2;
+							}
+							print ("NU_ANGLE BETWEEN 0 AND 3: "+$nu_angle2+"\n");
+
+							switch($nu_angle)
+							{
+								case 2: $num = "0 1 2 3";
+									print ("NU_MAX_ANGLE IS BETWEEN 1 AND 3: "+$max_angle+"\n");
+									break;
+								case 3: $num = "0 1 3 2";
+									print ("NU_MAX_ANGLE IS BETWEEN 1 AND 2: "+$max_angle+"\n");
+									break;
+							}
+						}
+						else
+						{
+							$num = "0 1 3 2";
+							print ("MAX_ANGLE IS BETWEEN 1 AND 2: "+$max_angle+"\n");
+						}
+						break;
+				case 13:	if($angle1>$max_angle-$tolerance||$angle3>$max_angle-$tolerance)
+						{
+							$qPolys[$qp] = $poly_list[$i];
+							$qp++;
+							setAttr ($pma1+".input3D[0].input3Dx") $p0[0];
+							setAttr ($pma1+".input3D[0].input3Dy") $p0[1];
+							setAttr ($pma1+".input3D[0].input3Dz") $p0[2];
+							setAttr ($pma1+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma1+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma1+".input3D[1].input3Dz") $p1[2];
+
+							setAttr ($pma2+".input3D[0].input3Dx") $p2[0];
+							setAttr ($pma2+".input3D[0].input3Dy") $p2[1];
+							setAttr ($pma2+".input3D[0].input3Dz") $p2[2];
+							setAttr ($pma2+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma2+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma2+".input3D[1].input3Dz") $p1[2];
+
+							setAttr ($pma3+".input3D[0].input3Dx") $p3[0];
+							setAttr ($pma3+".input3D[0].input3Dy") $p3[1];
+							setAttr ($pma3+".input3D[0].input3Dz") $p3[2];
+							setAttr ($pma3+".input3D[1].input3Dx") $p1[0];
+							setAttr ($pma3+".input3D[1].input3Dy") $p1[1];
+							setAttr ($pma3+".input3D[1].input3Dz") $p1[2];
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 2
+							int $nu_angle = 2;
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma2+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma2+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle1 = `getAttr ($angleNode+".angle")`;
+							float $nu_max_angle = $nu_angle1;
+							print ("NU_ANGLE BETWEEN 0 AND 2: "+$nu_angle1+"\n");
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 3
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma3+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma3+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle2 = `getAttr ($angleNode+".angle")`;
+							if($nu_angle2>$nu_max_angle)
+							{
+								$nu_angle = 3;
+								$nu_max_angle = $nu_angle2;
+							}
+							print ("NU_ANGLE BETWEEN 0 AND 3: "+$nu_angle2+"\n");
+
+							switch($nu_angle)
+							{
+								case 2: $num = "0 1 2 3";
+									print ("NU_MAX_ANGLE IS BETWEEN 1 AND 3: "+$max_angle+"\n");
+									break;
+								case 3: $num = "0 1 3 2";
+									print ("NU_MAX_ANGLE IS BETWEEN 1 AND 2: "+$max_angle+"\n");
+									break;
+							}
+						}
+						else
+						{
+							$num = "0 1 2 3";
+							print ("MAX_ANGLE IS BETWEEN 1 AND 3: "+$max_angle+"\n");
+						}
+						break;
+				case 23:	if($angle1>$max_angle-$tolerance||$angle2>$max_angle-$tolerance)
+						{
+							$qPolys[$qp] = $poly_list[$i];
+							$qp++;
+							setAttr ($pma1+".input3D[0].input3Dx") $p0[0];
+							setAttr ($pma1+".input3D[0].input3Dy") $p0[1];
+							setAttr ($pma1+".input3D[0].input3Dz") $p0[2];
+							setAttr ($pma1+".input3D[1].input3Dx") $p2[0];
+							setAttr ($pma1+".input3D[1].input3Dy") $p2[1];
+							setAttr ($pma1+".input3D[1].input3Dz") $p2[2];
+
+							setAttr ($pma2+".input3D[0].input3Dx") $p1[0];
+							setAttr ($pma2+".input3D[0].input3Dy") $p1[1];
+							setAttr ($pma2+".input3D[0].input3Dz") $p1[2];
+							setAttr ($pma2+".input3D[1].input3Dx") $p2[0];
+							setAttr ($pma2+".input3D[1].input3Dy") $p2[1];
+							setAttr ($pma2+".input3D[1].input3Dz") $p2[2];
+
+							setAttr ($pma3+".input3D[0].input3Dx") $p3[0];
+							setAttr ($pma3+".input3D[0].input3Dy") $p3[1];
+							setAttr ($pma3+".input3D[0].input3Dz") $p3[2];
+							setAttr ($pma3+".input3D[1].input3Dx") $p2[0];
+							setAttr ($pma3+".input3D[1].input3Dy") $p2[1];
+							setAttr ($pma3+".input3D[1].input3Dz") $p2[2];
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 1
+							int $nu_angle = 1;
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma2+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma2+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle1 = `getAttr ($angleNode+".angle")`;
+							float $nu_max_angle = $nu_angle1;
+							print ("NU_ANGLE BETWEEN 0 AND 1: "+$nu_angle1+"\n");
+
+							//GET ANGLE BETWEEN VERTEX 0 AND 3
+							if(`isConnected ($pma1+".output3D") ($angleNode+".vector1")`==0)
+							{
+								connectAttr -f ($pma1+".output3D") ($angleNode+".vector1");
+							}
+							if(`isConnected ($pma3+".output3D") ($angleNode+".vector2")`==0)
+							{
+								connectAttr -f ($pma3+".output3D") ($angleNode+".vector2");
+							}
+							float $nu_angle2 = `getAttr ($angleNode+".angle")`;
+							if($nu_angle2>$nu_max_angle)
+							{
+								$nu_angle = 3;
+								$nu_max_angle = $nu_angle2;
+							}
+							print ("NU_ANGLE BETWEEN 0 AND 3: "+$nu_angle2+"\n");
+
+							switch($nu_angle)
+							{
+								case 1: $num = "0 2 1 3";
+									print ("NU_MAX_ANGLE IS BETWEEN 2 AND 3: "+$max_angle+"\n");
+									break;
+								case 3: $num = "0 2 3 1";
+									print ("NU_MAX_ANGLE IS BETWEEN 2 AND 1: "+$max_angle+"\n");
+									break;
+							}
+						}
+						else
+						{
+							$num = "0 2 1 3";
+							print ("MAX_ANGLE IS BETWEEN 2 AND 3: "+$max_angle+"\n");
+						}
+						break;
+			}
+			tokenize($num, $vertex_seq);
+			print ("QUAD: "+$poly_list[$i]+"\n");
+			print ("CV SEQ:\n");
+			print $vertex_seq;
+			print "\n";
+		}
+		else
+		{
+			int $v;
+			for($v=0;$v<3;$v++)
+			{
+				$vertex_seq[$v] = $v;
+			}
+			print ("TRI: "+$poly_list[$i]+"\n");
+			print ("CV SEQ:\n");
+			print $vertex_seq;
+			print "\n";
+		}
+
+		//CREATE NU POLY
+		string $cmd = "polyCreateFacet -ch 0 -tx 1 -s 1 ";
+		int $z = 4;
+		if(`size $check_pts`!=4)
+		{
+			$z = 3;
+		}
+		for($p=0;$p<$z;$p++)
+		{
+			int $q = $vertex_seq[$p];
+			float $p1[3] = `xform -q -ws -translation ($poly_list[$i]+".vtx["+$q+"]")`;
+			$cmd = ($cmd+"-p "+$p1[0]+" "+$p1[1]+" "+$p1[2]+" ");
+		}
+		string $nuPoly[] = `eval $cmd`;
+		$nu_polys[$i] = `rename $nuPoly[0] ("nu_poly"+$i)`;
+		print ("CREATED NU POLY: "+$nu_polys[$i]+"\n");
+
+		//CHECK NORMALS
+		print ("CHECKING NORMALS FOR ORIGINAL: "+$poly_list[$i]+"\n");
+		string $orig_pts[] = `ls ($poly_list[$i]+".vtx[*]")`;
+		float $normal1[] = `polyNormalPerVertex -q -xyz $orig_pts`;
+		float $avgX = 0.0;float $avgY = 0.0;float $avgZ = 0.0;
+		for($n=0;$n<$z;$n++)
+		{
+			int $m = 3*$n;
+			int $k = $m+1;
+			int $l = $m+2;
+			$avgX = $avgX+$normal1[$m];
+			$avgY = $avgY+$normal1[$k];
+			$avgZ = $avgZ+$normal1[$l];
+		}
+		$avgX = $avgX/$z;
+		$avgY = $avgY/$z;
+		$avgZ = $avgZ/$z;
+		print ("NORMAL: "+$avgX+" "+$avgY+" "+$avgZ+"\n");
+
+		print ("CHECKING NORMALS FOR NU POLY: "+$nu_polys[$i]+"\n");
+		string $nu_pts[] = `ls ($nu_polys[$i]+".vtx[*]")`;
+		float $normal2[] = `polyNormalPerVertex -q -xyz $nu_pts`;
+		float $avgX1 = 0.0;float $avgY1 = 0.0;float $avgZ1 = 0.0;
+		for($n=0;$n<$z;$n++)
+		{
+			int $m = 3*$n;
+			int $k = $m+1;
+			int $l = $m+2;
+			$avgX1 = $avgX1+$normal2[$m];
+			$avgY1 = $avgY1+$normal2[$k];
+			$avgZ1 = $avgZ1+$normal2[$l];
+		}
+		$avgX1 = $avgX1/$z;
+		$avgY1 = $avgY1/$z;
+		$avgZ1 = $avgZ1/$z;
+		print ("NORMAL: "+$avgX1+" "+$avgY1+" "+$avgZ1+"\n");
+
+		if($avgX!=$avgX1)
+		{
+			print ("REVERSING NORMALS: "+$nu_polys[$i]+"\n\n");
+			polyNormal -normalMode 0 -ch 0 ($nu_polys[$i]+".f[0]");
+		}
+		else
+		{
+			print "\n";
+		}
+	}
+
+	//COMBINE NU POLYS
+	string $combine[] = `polyUnite -ch 0 $nu_polys`;
+	string $edges[] = `ls ($combine[0]+".e[*]")`;
+	polySewEdge -t 0 -tx 1 -ws 1 -ch 0 $edges;
+
+	delete $angleNode $pma1 $pma2 $pma3;
+	print "FINISHED SNAPPING NU POLYS\n";
+
+	if($qp>0)
+	{
+		print "PLEASE CHECK THE FOLLOWING POLYS.\n";
+		print $qPolys;
+		print "\n";
+		select -r $qPolys;
+	}
+	waitCursor -state off;
+}

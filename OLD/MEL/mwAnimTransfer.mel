@@ -1,0 +1,70 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwAnimTransfer()
+{
+	$tmp = `ls -sl`;
+	string $orig_master = $tmp[0];
+	string $new_master = $tmp[1];
+
+	//GET ALL TRANSFORM AND JOINT NODES
+	string $orig_nodes[] = `listRelatives -ad -pa -type transform -type joint $orig_master`;
+	$orig_nodes[`size $orig_nodes`] = $orig_master;
+
+	//CHECK FOR KEYABLE CHANNELS
+	for($node in $orig_nodes)
+	{
+		string $attrs[] = `listAttr -keyable -output -unlocked $node`;
+		if(`size $attrs`)
+		{
+			//CHECK FOR CONNECTIONS
+			for($attr in $attrs)
+			{
+				string $new_node = `substitute $orig_master $node $new_master`;
+				if(`objExists ($new_node+"."+$attr)`)
+				{
+					if(`connectionInfo -id ($node+"."+$attr)`)
+					{
+						//CHECK FOR ANIM CURVES AND IF NEW NODE IS KEYABLE
+						string $animCheck[] = `listConnections -type animCurve ($node+"."+$attr)`;
+						if(`size $animCheck`&&`getAttr -k ($new_node+"."+$attr)`)
+						{
+							print ("ANIMATED CHANNEL: "+$attr+"\n");
+							//COPY AND PASTE
+							print ("COPYING ANIMATION FROM: "+$node+"\n");
+							print ("PASTING ANIMATION TO: "+$new_node+"\n");
+							copyKey -time ":" -float ":" -at $attr -hierarchy none -controlPoints 0 -shape 1 $node;
+							pasteKey -at $attr -option replaceCompletely -copies 1 -connect 1 -timeOffset 0 -floatOffset 0 -valueOffset 0 $new_node;
+
+							//IF TRANSLATE ATTRIBUTE, SCALE BY 0.01
+							if(`gmatch $attr "translate*"`)
+							{
+								print "**********SCALING ANIMATION CURVE**************\n\n";
+								scaleKey -scaleSpecifiedKeys 1 -time ":" -float ":" -at $attr -timeScale 1 -timePivot 0 -floatScale 1 -floatPivot 0 -valueScale 0.01 -valuePivot 0 -hierarchy none -controlPoints 0 -shape 1 $new_node;
+							}
+						}
+					}
+					else
+					{
+						//IF NO CONNECTIONS, GET VALUE IF NOT LOCKED
+						if(`connectionInfo -id ($new_node+"."+$attr)`==0)
+						{
+							float $val = `getAttr ($node+"."+$attr)`;
+							setAttr ($new_node+"."+$attr) $val;
+							print ("SETTING NON-ANIMATED CHANNEL: "+$attr+"\n");
+							print ("VALUE: "+$val+"\n");
+						}
+					}
+				}
+			}
+		}
+	}
+	print "ALL FINISHED COPYING AND PASTING ANIMATION\n\n";
+}

@@ -1,0 +1,361 @@
+/// Copyright (C) 2000-2006 IDMT. All rights reserved.
+/// reference:<mwWristSnap.mel>/Author: mw/Modify: JuliiFreeMAN
+
+/// Author: liang
+///
+/// Creation Date: 2007/01/23
+///
+/// Description: ik&fk互换器
+/// Modify: liang
+
+global proc ezIKFKSwitch()
+{
+////////////////////////////////////////////////////////////////////////////////
+	//获得三个部位的名字字符串
+	////$rePreFix 参考前缀
+	////$char 角色名(角色完成名字的最前字符串)
+	////$side 左右方位(角色完整名字的最后字符串)
+	string $tmp[] = `ls -sl`;
+	if (!`objExists $tmp[0]`)
+		error "请选择需要转换的FK或IK";
+	string $sel = $tmp[0];
+	string $nameParts[];
+	string $nameSpaces[];
+	string $rePrefix = "";	//参考前缀
+	string $char = "";		//角色名
+	string $side = "";		//左右方位
+	int $tokNameSpace;
+	int $tokNameParts;
+	float $oreint[3],$position[3] ;
+	float $frame = `currentTime -q`;//GET CURRENT FRAME
+	
+	$tokNameSpace = (tokenize($sel, ":", $nameSpaces));
+	
+	$tokNameParts = (tokenize($nameSpaces[$tokNameSpace-1], "_", $nameParts));
+	
+	//取得参考名字空间
+	int $add;
+	for($add=0;$add < $tokNameSpace-1;$add++)
+	{
+	$rePrefix = $rePrefix + $nameSpaces[$add]+":";
+	}
+	
+	$char = $nameParts[0];
+	$side = $nameParts[$tokNameParts-1];
+	print ("char = " + $char + "\n" + "side = " + $side + "\n" + "rePrefix = " + $rePrefix + "\n");
+	//print ("选择物体全名 = " + $rePrefix + $char + "_部件描述_" + $side);
+
+	////////////////////////////////////////////////////////////////////////////////
+	liIKFKSwitch($sel,$rePrefix,$char,$side,$oreint,$position,$frame);
+}
+
+global proc liIKFKSwitch(string $sel,string $rePrefix,string $char,string $side,float $oreint[],float $position[],float $frame)
+{
+	if(objExists ($rePrefix + $char + "_armPoleVecterCon_" + $side) ==1)
+		liWristSnap_new($sel,$rePrefix,$char,$side,$oreint,$position,$frame);
+	else
+		liWristSnap_old($sel,$rePrefix,$char,$side,$oreint,$position,$frame);
+}
+//---------------------------------------------------------------------------------------//
+//控制添加极向量后的角色ikfk转换的过程
+global proc liWristSnap_new(string $sel,string $rePrefix,string $char,string $side,float $oreint[],float $position[],float $frame)
+{
+
+//旧命名规则分支
+
+	if(`gmatch $sel ($rePrefix + $char + "_world_wristCon_" + $side)`==1 && `getAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable")`==1)
+	{
+		print "ik控制转换fk控制\n\n";
+
+		//ik控制转换fk控制分支
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_armPoleVecterCon_" + $side);
+		
+		//建立临时组tempGrp
+		group -em -n tempGrp;
+		parent tempGrp ($rePrefix + $char + "_world_wristConGrp_" + $side);
+		$oreint = `xform -query -worldSpaceDistance -rotation ($rePrefix + $char + "_world_wristCon_" + $side)` ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] tempGrp ;
+		
+		parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+		$oreint = `xform -query -worldSpaceDistance -rotation tempGrp` ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] ($rePrefix + $char + "_wristCon_" + $side) ;
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_wristCon_" + $side);
+		delete tempGrp;
+		
+		//关闭ik解算器
+		setAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable") 0;
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_wristCon_" + $side);
+		refresh;
+		select -r ($rePrefix + $char + "_wristCon_" + $side);
+		
+	}
+	else
+	{
+		if(`gmatch $sel ($rePrefix + $char + "_wristCon_" + $side)`==1 && `getAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable")`==0)
+		{
+		print "fk控制转换ik控制";
+		
+		//fk控制转换ik控制分支
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_wristCon_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+		
+		//调整极向量约束器的位置
+		$oreint = `getAttr ($rePrefix + $char+"_arm_"+$side + ".rotate")` ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".rx") $oreint[0] ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".ry") $oreint[1] ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".rz") $oreint[2] ;
+
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char+"_armPoleVecterCon_"+$side);
+		refresh;
+
+		//建立临时组tempGrp
+		group -em -n tempGrp;
+		parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+		$position = `xform -query -worldSpace -translation ($rePrefix + $char + "_wristCon_" + $side)` ;
+		$oreint = `xform -query -worldSpaceDistance -rotation ($rePrefix + $char + "_wristCon_" + $side)` ;
+		xform -worldSpace -translation $position[0] $position[1] $position[2] tempGrp ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] tempGrp ;
+		
+		parent tempGrp ($rePrefix + $char + "_world_wristConGrp_" + $side);
+		$position = `xform -query -worldSpace -translation tempGrp` ;
+		$oreint = `xform -query -worldSpaceDistance -rotation tempGrp` ;
+		xform -worldSpace -translation $position[0] $position[1] $position[2] ($rePrefix + $char + "_world_wristCon_" + $side) ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] ($rePrefix + $char + "_world_wristCon_" + $side) ;
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side );
+		setAttr($rePrefix + $char + "_world_wristCon_" + $side + ".twist") 0;
+		delete tempGrp;
+		
+		//打开ik解算器
+		setAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable") 1;
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_wristCon_" + $side);
+		refresh;
+		select -r ($rePrefix + $char + "_world_wristCon_" + $side);
+		}
+		else
+		{
+		print "请选择此时生效的locator控制器（另一个locator控制器）";
+		}
+	}
+
+//新命名规则分支
+
+	if(`gmatch $sel ($rePrefix + $char + "_IKWristCon_" + $side)`==1 && `getAttr ($rePrefix + $char + "_FKWristCon_" + $side +".solverEnable")`==1)
+	{
+		print "ik控制转换fk控制\n\n";
+
+		//ik控制转换fk控制分支
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_IKWristCon_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_armPoleVecterCon_" + $side);
+		
+		//建立临时组tempGrp
+		group -em -n tempGrp;
+		parent tempGrp ($rePrefix + $char + "_world_wristConGrp_" + $side);
+		$oreint = `xform -query -worldSpaceDistance -rotation ($rePrefix + $char + "_IKWristCon_" + $side)` ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] tempGrp ;
+		
+		parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+		$oreint = `xform -query -worldSpaceDistance -rotation tempGrp` ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] ($rePrefix + $char + "_FKWristCon_" + $side) ;
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_FKWristCon_" + $side);
+		delete tempGrp;
+		
+		//关闭ik解算器
+		setAttr ($rePrefix + $char + "_FKWristCon_" + $side +".solverEnable") 0;
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_FKWristCon_" + $side);
+		refresh;
+		select -r ($rePrefix + $char + "_FKWristCon_" + $side);
+		
+	}
+	else
+	{
+		if(`gmatch $sel ($rePrefix + $char + "_FKWristCon_" + $side)`==1 && `getAttr ($rePrefix + $char + "_FKWristCon_" + $side +".solverEnable")`==0)
+		{
+		print "fk控制转换ik控制";
+		
+		//fk控制转换ik控制分支
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_FKWristCon_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+		
+		//调整极向量约束器的位置
+		$oreint = `getAttr ($rePrefix + $char+"_arm_"+$side + ".rotate")` ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".rx") $oreint[0] ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".ry") $oreint[1] ;
+		setAttr ($rePrefix + $char+"_armPoleVecterCon_"+$side + ".rz") $oreint[2] ;
+
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char+"_armPoleVecterCon_"+$side);
+		refresh;
+
+		//建立临时组tempGrp
+		group -em -n tempGrp;
+		parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+		$position = `xform -query -worldSpace -translation ($rePrefix + $char + "_FKWristCon_" + $side)` ;
+		$oreint = `xform -query -worldSpaceDistance -rotation ($rePrefix + $char + "_FKWristCon_" + $side)` ;
+		xform -worldSpace -translation $position[0] $position[1] $position[2] tempGrp ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] tempGrp ;
+		
+		parent tempGrp ($rePrefix + $char + "_world_wristConGrp_" + $side);
+		$position = `xform -query -worldSpace -translation tempGrp` ;
+		$oreint = `xform -query -worldSpaceDistance -rotation tempGrp` ;
+		xform -worldSpace -translation $position[0] $position[1] $position[2] ($rePrefix + $char + "_IKWristCon_" + $side) ;
+		xform -worldSpaceDistance -rotation $oreint[0] $oreint[1] $oreint[2] ($rePrefix + $char + "_IKWristCon_" + $side) ;
+		
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_IKWristCon_" + $side );
+		setAttr($rePrefix + $char + "_IKWristCon_" + $side + ".twist") 0;
+		delete tempGrp;
+		
+		//打开ik解算器
+		setAttr ($rePrefix + $char + "_FKWristCon_" + $side +".solverEnable") 1;
+		setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_FKWristCon_" + $side);
+		refresh;
+		select -r ($rePrefix + $char + "_IKWristCon_" + $side);
+		}
+		else
+		{
+		print "请选择此时生效的locator控制器（另一个locator控制器）";
+		}
+	}
+
+}
+
+//---------------------------------------------------------------------------------------//
+//控制没有极向量后的角色ikfk转换的过程
+global proc liWristSnap_old(string $sel,string $rePrefix,string $char,string $side,float $oreint[],float $position[],float $frame)
+{
+	//GET WRIST CON
+	$tmp = `ls -sl`;
+	string $sel = $tmp[0];
+	string $name_parts[];
+	string $nameSpace[];
+	string $char;
+	string $side;
+	int $tok;
+
+	$tok = tokenize($sel, ":", $nameSpace);
+	if ( $tok == 2)
+	{
+		tokenize($nameSpace[1], "_", $name_parts);
+		$char = ($nameSpace[0] + ":" + $name_parts[0]);
+		$side = $name_parts[2];
+	}
+	else
+	{
+		tokenize($sel, "_", $name_parts);
+		$char = $name_parts[0];
+		$side = $name_parts[2];
+	}
+	print ($char + "\n" + $side + "\n") ;
+
+	//GET CURRENT FRAME
+	float $frame = `currentTime -q`;
+
+	if(`gmatch $sel "*world*"`)
+	{
+		print "SNAPPING FK TO IK\n\n";
+
+		//SNAP WORLD WRIST CON TO LOCAL WRIST CON
+		string $local = `substitute "_world" $sel ""`;
+		string $local_group = ($local+"_group");
+
+		//float $p[3] = `xform -q -ws -rp $sel`;
+
+		//move -a $p[0] $p[1] $p[2] $local_group;
+
+		//DUPLICATE LOCAL WRIST CON AND ORIENT CONSTRAIN TO WORLD CON
+		string $dup[] = `duplicate -rr $local`;
+		string $oc[] = `orientConstraint -weight 1 $sel $dup[0]`;
+		refresh;
+
+		//SET KEYFRAME FOR LOCAL WRIST CON
+		float $rot[3] = `getAttr ($dup[0]+".rotate")`;
+		setAttr ($local+".rotate") $rot[0] $rot[1] $rot[2];
+		setKeyframe -time $frame -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $local;		
+
+		delete $oc;
+		delete $dup;
+
+		//SET KEYFRAME FOR WORLD WRIST CON
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $sel;
+
+		//SET KEYFRAME FOR ARM JOINTS
+		string $arm = `substitute "wristCon" $local "arm"`;
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $arm;
+
+		//SET SOLVER ENABLE OFF AND SET KEYFRAME ON NEXT FRAME
+		setAttr ($local+".solverEnable") 0;
+		setKeyframe -time ($frame+1) -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" $local;
+
+		//SELECT LOCAL WRIST CON
+		select -r $local;
+	}
+	else
+	{
+		print "SNAPPING IK TO FK\n\n";
+
+		//SNAP WORLD WRIST CON TO LOCAL WRIST CON
+		//string $world = `substitute "_wrist" $sel "_world_wrist"`;
+		string $world = ($char+"_world_wristCon_"+$side);
+		string $local = ($char+"_wristCon_"+$side);
+		string $handle = ($char+"_armHandle_"+$side);
+
+		float $p[3] = `xform -q -ws -rp $local`;
+
+		move -a $p[0] $p[1] $p[2] $world;
+
+		//DUPLICATE WORLD CON
+		string $dup[] = `duplicate -rr $world`;
+		string $oc[] = `orientConstraint -weight 1 $local $dup[0]`;
+		float $rot[3] = `getAttr ($dup[0]+".rotate")`;
+		setAttr ($world+".rotate") $rot[0] $rot[1] $rot[2];
+
+		refresh;
+
+		delete $oc;
+		delete $dup;
+
+		//SET KEYFRAME FOR LOCAL WRIST CON
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $local;
+
+		//SET KEYFRAME FOR ARM JOINTS
+		string $arm = `substitute "wristCon" $local "arm"`;
+		string $pole = `substitute "wristCon" $local "poleLoc"`;
+
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $arm;
+		float $arm_p[3] = `xform -q -ws -rp $arm`;
+		float $pole_p[3] = `xform -q -ws -rp $pole`;
+		float $x = $pole_p[0] - $arm_p[0];
+		float $y = $pole_p[1] - $arm_p[1];
+		float $z = $pole_p[2] - $arm_p[2];
+
+		//SET POLE VECTOR KEYFRAMES
+		setKeyframe -v $x ($handle+".poleVectorX");
+		setKeyframe -v $y ($handle+".poleVectorY");
+		setKeyframe -v $z ($handle+".poleVectorZ");
+		setAttr ($handle+".poleVectorX") $x;
+		setAttr ($handle+".poleVectorY") $y;
+		setAttr ($handle+".poleVectorZ") $z;
+
+		//SET SOLVER ENABLE ON AND SET KEYFRAME ON NEXT FRAME
+		setAttr ($local+".solverEnable") 1;
+		setKeyframe -time ($frame+1) -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" $local;
+
+		//SET KEYFRAME FOR WORLD WRIST CON 
+		setKeyframe -time $frame -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $world;
+
+		//SELECT WORLD WRIST CON
+		select -r $world;
+	}
+}

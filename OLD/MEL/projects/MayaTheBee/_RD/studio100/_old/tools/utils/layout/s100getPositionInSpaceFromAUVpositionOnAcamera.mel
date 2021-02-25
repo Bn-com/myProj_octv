@@ -1,0 +1,148 @@
+global proc vector  s100getPositionInSpaceFromAUVpositionOnAcamera(string $cam, float $cX, float $cY, float $z)
+{
+float $cs = `camera -q -cs $cam`;
+
+float $lsr = `camera -q -lsr $cam`;
+
+//The camera's film aspect, expressed as a ratio between its horizontal and vertical fields of view, represents the area shown as the film gate. These two angles start our calculation.
+
+
+// Get the camera's horizontal field of view
+float $hfv = `camera -q -hfv $cam`;
+
+
+// Get the camera's vertical field of view
+float $vfv = `camera -q -vfv $cam`;
+
+
+//Now use these to express the field of view angles in radians.
+
+$hfv = angle_to_internal( $hfv );
+$vfv = angle_to_internal( $vfv );
+
+
+float $x = (tan($hfv/2));
+
+$x = $x * $lsr;
+
+
+
+
+// Apply the camera's scale
+$x = $x * $cs;
+
+
+
+
+// Determine the Y coordinate in 2D
+float $y = (tan($vfv/2)) ;
+
+
+
+
+// Apply the camera's scale
+$y = $y * $cs;
+
+
+
+
+//The Z component for the vector will be 1.0, which is one unit in front of the camera. If Z was not 1.0, then the X and Y coordinates would have to be multiplied by the Z coordinate. For example, if we used a Z of l.618034 then the X and Y coordinates we calculate would both be multiplied by l.618034.
+
+
+
+// Maintain homogenous coordinates.
+$x = $x * $z * $cX;
+$y = $y * $z * $cY;
+
+
+
+
+
+//Here's our vector. This vector represents the position - in camera-space - at the top-right corner of the camera's film gate. Initially this vector is expressed using our UI units, so we use the procedure we defined earlier to convert it to Maya's internal (cm) units.
+
+// Z is negated here because the camera's local view axis is {0.0,0.0,-1.0}.
+//vector $camera_space = << $x, $y, -$z >>;
+vector $camera_space = << $x, $y, -$z >>;
+
+
+// Result: <<0.788092, 0.333845, -1>>  //
+
+$camera_space = $camera_space * linear_to_internal( 1.0 );
+// Result: <<78.809246, 33.384472, -100>>  //
+
+//Now we'll employ a couple of procedures borrowed from 185vfx. These take care of querying our camera's matrix attributes, and multiplying our vector by this matrix.
+
+// Get a matrix
+
+
+// Query the camera's inclusive matrix.
+matrix $camera_matrix[4][4] = screenSpaceGetMatrix($cam +".worldMatrix");
+
+// And apply it to our vector.
+vector $world_space = screenSpaceVecMult( $camera_space, $camera_matrix );
+// Result: <<78.809253, 247.057664, 509.212149>>  //
+
+//Convert our vector to our linear unit preference:
+
+// Convert back from (cm) units to Maya's unit preference.
+$world_space = $world_space * linear_to_ui( 1.0 );
+// Result: <<0.788093, 2.470577, 5.092121>>  //
+
+//Let's plot a locator at this point to test our results:
+
+return 	$world_space ;
+}
+
+global proc float angle_to_internal( float $angle )
+{
+  string $pref = `currentUnit -q -a`;
+  if ( "deg" == $pref )
+  {
+    $angle = $angle * 0.0174532925;
+  }
+
+  return $angle;
+}
+
+global proc float linear_to_internal( float $linear )
+{
+  float $factor = 1.0;
+  string $pref = `currentUnit -q -l`;
+  if ( "mm" == $pref ) $factor = 0.1;
+  if ( "m" == $pref ) $factor = 100.0;
+  if ( "inch" == $pref ) $factor = 2.54;
+  if ( "ft" == $pref ) $factor = 30.48;
+  if ( "yard" == $pref ) $factor = 91.44;
+
+  return ( $linear * $factor );
+}
+
+global proc float linear_to_ui( float $linear )
+{
+  float $factor = 1.0;
+  string $pref = `currentUnit -q -l`;
+  if ( "mm" == $pref ) $factor = 10.0;
+  if ( "m" == $pref ) $factor = 0.01;
+  if ( "inch" == $pref ) $factor = 0.3937007874;
+  if ( "ft" == $pref ) $factor = 0.03280839895;
+  if ( "yard" == $pref ) $factor = 0.01093613298;
+
+  return ( $linear * $factor );
+}
+
+global proc matrix screenSpaceGetMatrix(string $attr)
+{
+  float $v[]=`getAttr $attr`;
+  matrix $mat[4][4]=<< $v[ 0], $v[ 1], $v[ 2], $v[ 3];
+                       $v[ 4], $v[ 5], $v[ 6], $v[ 7];
+                       $v[ 8], $v[ 9], $v[10], $v[11];
+                       $v[12], $v[13], $v[14], $v[15] >>;
+ return $mat;
+}
+
+global proc vector screenSpaceVecMult(vector $v, matrix $m)
+{
+  matrix $v1[1][4]=<<$v.x, $v.y, $v.z, 1>>;
+  matrix $v2[1][4]=$v1*$m;
+  return <<$v2[0][0], $v2[0][1],  $v2[0][2]>>;
+}

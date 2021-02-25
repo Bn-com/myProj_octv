@@ -1,0 +1,159 @@
+global proc HHCamReplaceRender()
+{
+	HHCamReplace;
+	string $outputPath=`file -q -sn `;
+	idmtProject -checkin $outputPath -description "修改立体摄像机";
+
+}
+global proc HHCamReplace()
+{
+	HHDelRenCam;
+	HHImCamReference;
+	HHDelCam;
+	ot_HHReRendercam();
+	HHfilesave();
+	
+
+}
+global proc HHfilesave()
+{
+	string $filenameshort= `file -q -sn -shn`;
+	string $filename=`file -q -sn `;
+	string $newpath =substituteAllString($filename,$filenameshort,"new/");
+	string $newfd=$newpath+$filenameshort;
+	sysFile -md $newpath;
+	file -rn $newfd;
+	file -f -save -options "v=0" -type "mayaBinary" ;
+}
+global proc HHDelRenCam()
+{
+	string $CamSs[]=`ls -ca`;
+	for($CShape in $CamSs)
+	{
+		if(`match "RenderCAM" $CShape`!="")
+		{
+			string $CamS[]=`listRelatives -p $CShape`;
+			delete $CamS[0];
+		}
+	}
+}
+
+global proc HHImCamReference()
+{
+	string $refPath[]=`file -q -r`;
+	if(size($refPath)!=0)
+	{
+		for ($r in $refPath)
+		{
+			string $refRN = `file -q -rfn $r`;
+			if(`match "CAM" $refRN`!="")
+			{
+				if (`file -q -dr $r`)	file -loadReference $refRN;
+				file -ir $r;
+			}
+		}
+	}
+}
+global proc HHDelCam()
+{
+	string $CamSs[]=`ls -ca`;
+	for($CShape in $CamSs)
+	{
+		if(`match "CAM_B" $CShape`!=""||`match "cam_B" $CShape`!="")
+		{
+			string $CamS[]=`listRelatives -p $CShape`;
+			if(size($CamS)>0)
+			{
+				delete $CamS[0];
+			}
+		}
+	}
+}
+global proc ot_HHReRendercam()
+{
+	string $oldcam[]=`ls -type camera`;
+	HHImportRepCam;
+	string $newcam[]=`ls -type camera`;
+	string $cams[]=stringArrayRemove($oldcam,$newcam);
+	string $camshape=$cams[0];
+	string $camdf[]=`listRelatives -p $camshape`;
+	select -r $camdf[0];
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/projects/JT/HbJtRenderCam.py\")");
+	ot_HHCamSet;
+	setAttr "defaultRenderGlobals.modifyExtension" 0;
+}
+global proc HHImportRepCam()
+{
+	string $longShotName=`file -q -sn `;
+	
+	string $shortShotName=`match "[^//]*$" $longShotName`;
+	string $shotName[]=stringToStringArray($shortShotName,"_");
+	string $cam_name=$shotName[0]+"_"+$shotName[1]+"_"+$shotName[2]+"_"+$shotName[3]+"_cam.mb";
+	string $bakedCam[] = `ls -type camera	"*bakedShape" "*:*bakedShape" "*:*:*bakedShape"`;
+	if (`size $bakedCam`)
+	{
+		for ($c in $bakedCam)
+		{
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-2]==$shotName[3] &&$bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				print "文件中已经存在正确的摄像机";
+				ReImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+	string $root_path= "//file-cluster/gdc/Projects/OTTO/OTTO_Scratch/Animation/replace/";
+	string $file_list[]=`getFileList -fld $root_path -filespec "*.mb" `;
+	
+//	print $file_list;
+
+	
+	int $if_exist_cam = 0;
+	for ($cam in $file_list)
+	{
+		if ($cam == $cam_name)
+		{
+			$if_exist_cam=1;
+			break;
+		}	
+	}
+	
+	if ($if_exist_cam ==0 )	error "没有找到相应的摄像机，请检查maya文件名";
+	
+	string $cam_path = $root_path + $cam_name;
+//	print $cam_path;
+//	file -import -type "mayaAscii" -rpr $cam_name -options "v=0"  $cam_path;
+	file -r -type "mayaBinary" -namespace "CAM"  $cam_path;
+	
+	string $bakedCam[] = `ls -type camera	"*bakedShape" "*:*bakedShape" "*:*:*bakedShape"`;
+	if (`size $bakedCam`)
+	{
+		for ($c in $bakedCam)
+		{
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-2]==$shotName[3] &&$bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				ReImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+		
+}
+
+global proc ReImportRenderCam_RenderableSet(string $cam)
+{
+	string $allCam[] = `ls -type camera`;
+	for ($c in $allCam)
+	{
+		if ($c ==$cam)	setAttr ($c+".renderable") 1;
+		else setAttr ($c+".renderable") 0;
+	}
+}

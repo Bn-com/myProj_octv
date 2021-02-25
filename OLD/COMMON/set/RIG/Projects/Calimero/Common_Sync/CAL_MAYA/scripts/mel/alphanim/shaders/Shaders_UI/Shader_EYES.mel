@@ -1,0 +1,309 @@
+// procedure pour creer un shader lambert avec sa map RGB
+//    - prend en argument : un base name + le shader d'AO a connecter dans son ambient
+//    - retourne le nom du shader cree
+// -----------------------------------------------------------------------------------------
+global proc string createShdEYES()
+{
+    
+    hyperShadePanelGraphCommand("hyperShadePanel1", "clearGraph");
+    
+    /////////// Shader Iris ///////////
+    
+    string $shadName;
+    string $shaderIris;
+    string $fileName;
+    string $fileIRIS;
+    string $fileName2;
+    string $NodeColorID;
+    string $utilp2dt;
+    string $shaderRamp;
+    string $samplerInfo;
+    string $shaderRIM;
+    
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName( "_Iris_RGBA" );
+
+    // creer le shader
+    $shaderIris = `shadingNode -asShader blinn -name $shadName`;
+    setAttr ($shaderIris + ".color") -type double3 0.64 0.501867 0.4032;
+    setAttr ($shaderIris + ".transparency") -type double3 1 1 1 ;
+    setAttr ($shaderIris + ".ambientColor") -type double3 1 1 1 ;
+    setAttr ($shaderIris + ".diffuse") 0 ;
+    setAttr ($shaderIris + ".eccentricity") 0.350 ;
+    setAttr ($shaderIris + ".specularRollOff") 0.150 ;
+    setAttr ($shaderIris + ".specularColor") -type double3 1 1 1 ;
+    setAttr ($shaderIris + ".reflectivity") 0 ;
+    setAttr ($shaderIris + ".shadowAttenuation") 0 ;
+        
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_Iris_ColorID" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorID = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorID + ".color") -type double3 1 0 0 ; 
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_Iris_ColorID_CHR" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorIDChr = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorIDChr + ".color") -type double3 0 0 1 ;
+    
+    // genere un nom pour le shader de RIM
+    string $shadName =  genShaderName( "_Iris_RIM" );
+    // creer le nom du fileNode a partir de celui du shader
+    // create RIM shader
+    $shaderRIM = `shadingNode -asShader rampShader -name $shadName`;
+    
+    setAttr ($shaderRIM + ".colorInput") 2;
+    setAttr ($shaderRIM + ".color[0].color_Position") 0.21;
+    setAttr ($shaderRIM + ".color[0].color_Color") -type double3 0 0 0 ;
+    setAttr ($shaderRIM + ".color[1].color_Interp") 1;
+    setAttr ($shaderRIM + ".color[1].color_Position") 0.380;
+    setAttr ($shaderRIM + ".diffuse") 1;
+    setAttr ($shaderRIM + ".specularity") 0;
+	setAttr ($shaderRIM + ".translucenceDepth") 1000;
+	setAttr ($shaderRIM + ".reflectivity[0].reflectivity_FloatValue") 0;
+    
+    // genere un nom pour le ramp
+    string $shadName =  genShaderName( "_Iris_ramp" );  
+    // creer le nom du fileNode a partir de celui du shader
+    $fileName = `substitute "SHD_" $shadName ""`;
+    // create ramp shader
+    $shaderRamp = `shadingNode -asTexture ramp -name $fileName`;
+    
+    setAttr ($shaderRamp + ".type") 1;
+    removeMultiInstance -break true ($shaderRamp + ".colorEntryList[2]");
+    setAttr ($shaderRamp + ".colorEntryList[0].position") 0.16;
+    setAttr ($shaderRamp + ".colorEntryList[0].color") -type double3 0.215 0.179783 0.174365 ;
+    setAttr ($shaderRamp + ".colorEntryList[1].position") 0.420;
+    setAttr ($shaderRamp + ".colorEntryList[1].color") -type double3 0 0 0 ;
+    
+    // genere un nom pour le samplerinfo
+    string $shadName =  genShaderName( "_Iris_sampInforamp" );  
+    // creer le nom du fileNode a partir de celui du shader
+    $fileName = `substitute "SHD_" $shadName ""`;
+    // create ramp shader
+    $samplerInfo = `shadingNode -asUtility samplerInfo -name $fileName`;
+  
+    // Connections RGBA
+    connectAttr -f ($shaderIris + ".outColor") ($NodeColorID + ".evaluationPassThrough");
+    connectAttr -f ($shaderIris + ".outColor") ($NodeColorIDChr + ".evaluationPassThrough");
+    // For RIM
+    connectAttr -f ($samplerInfo + ".facingRatio") ($shaderRamp + ".uCoord");
+    connectAttr -f ($shaderRamp + ".outColor") ($shaderRIM + ".color[1].color_Color");
+    connectAttr -f ($shaderRIM + ".outColor") ($shaderIris + ".incandescence");
+    
+    //////////// Shader ZDEPTH ///////////
+    
+    string $shadName;
+    string $shaderZ;
+    string $fileName;
+    string $utilSRange;
+    // string $utilMult;
+    string $utilSInfo;
+   
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_Iris_ZDEPTH" );
+
+    // creer le shader
+    $shaderZ = `shadingNode -asShader lambert -n $shadName`;
+    setAttr ($shaderZ + ".ambientColor") -type double3 1 1 1 ;
+  
+    // creer le nom du SetRange a partir de celui du shader
+    $fileName = genShaderName("_Iris_setRangeZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create setRange
+    $utilSRange = `createNode setRange -n $fileName`;
+    setAttr ($utilSRange + ".minX") 1;
+    
+    // creer le nom du MultiplyDivide a partir de celui du shader
+    $fileName = genShaderName("_Iris_multDivZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create MultiplyDivide
+    $utilMult = `createNode multiplyDivide -n $fileName`;
+    setAttr ($utilMult + ".input2X") -1;
+    
+    // creer le nom du SamplerInfo a partir de celui du shader
+    $fileName = genShaderName("_Iris_sampInfoZ" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // Create SamplerInfo
+    $utilSInfo = `createNode samplerInfo -n $fileName`;
+    addAttr -ln "NearClipCalimero" -nn "Near Clip Calimero" -at double  -dv 0.1 $utilSInfo;
+    addAttr -ln "FarClipCalimero" -nn "Far Clip Calimero" -at double  -dv 1000 $utilSInfo;
+  
+    // Connections
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorR");
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorG");
+    connectAttr -f ($utilSRange + ".outValueX") ($shaderZ + ".colorB");
+    connectAttr -f ($utilSInfo + ".NearClipCalimero") ($utilSRange + ".oldMinX");
+    connectAttr -f ($utilSInfo + ".FarClipCalimero") ($utilSRange + ".oldMaxX");
+    connectAttr -f ($utilSInfo + ".pointCameraZ") ($utilMult + ".input1X");
+    connectAttr -f ($utilMult + ".outputX") ($utilSRange + ".valueX");
+    connectAttr -f ($shaderIris + ".outTransparency") ($shaderZ + ".transparency");
+    
+    //////////// Shader LIGHT ///////////
+    
+    string $shadName;
+    string $shaderLIGHT;
+    
+	// genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName("_Iris_LIGHT" );
+
+    // creer le shader
+    $shaderLIGHT = `shadingNode -asShader lambert -n $shadName`;
+    setAttr ($shaderLIGHT + ".color") -type double3 1 1 1 ;
+    setAttr ($shaderLIGHT + ".shadowAttenuation") 0 ;
+    
+    // Connections
+    
+    connectAttr -f ($shaderIris + ".outTransparency") ($shaderLIGHT + ".transparency");
+    
+    /////////// Shader White ///////////
+    
+    string $shadName;
+    string $shaderEyes;
+    string $fileName;
+    string $fileEyes;
+    string $NodeColorID;
+    
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName( "_White_RGB" );
+
+    // creer le shader
+    $shaderEyes = `shadingNode -asShader blinn -name $shadName`;
+    setAttr ($shaderEyes + ".color") -type double3 0.64 0.501867 0.4032;
+    setAttr ($shaderEyes + ".ambientColor") -type double3 1 1 1 ;
+    setAttr ($shaderEyes + ".diffuse") 0.1 ;
+    setAttr ($shaderEyes + ".specularColor") -type double3 0 0 0 ;
+  
+    // creer le nom du fileNode a partir de celui du shader
+    $fileName = genShaderName( "_White_ramp" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // create ramp shader
+    $shaderRamp = `shadingNode -asTexture ramp -name $fileName`;
+    setAttr ($shaderRamp + ".colorEntryList[2].position") 0.805;
+    setAttr ($shaderRamp + ".colorEntryList[2].color") -type double3 1 1 0.972 ;
+    setAttr ($shaderRamp + ".colorEntryList[1].position") 0.385;
+    setAttr ($shaderRamp + ".colorEntryList[1].color") -type double3 0.7644 0.98 0.890167 ;
+    setAttr ($shaderRamp + ".colorEntryList[0].position") 0.02;
+    setAttr ($shaderRamp + ".colorEntryList[0].color") -type double3 1 0.773 0.546 ;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_White_ColorID_CHR" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorIDChr = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorIDChr + ".color") -type double3 0 0 1 ;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_White_ColorID" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorID = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorID + ".color") -type double3 1 0 0 ;
+  
+    // Connections RGBA
+    connectAttr -f ($shaderRamp + ".outColor") ($shaderEyes + ".color");
+    connectAttr -f ($shaderEyes + ".outColor") ($NodeColorIDChr + ".evaluationPassThrough");
+    connectAttr -f ($shaderEyes + ".outColor") ($NodeColorID + ".evaluationPassThrough");
+    
+    /////////// Shader Pupils ///////////
+    
+    string $shadName;
+    string $shaderPupils;
+    string $fileName;
+    string $filePupils;
+    string $NodeColorID;
+    
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName( "_Pupils_RGB" );
+
+    // creer le shader
+    $shaderPupils = `shadingNode -asShader blinn -name $shadName`;
+    setAttr ($shaderPupils + ".color") -type double3 0.64 0.501867 0.4032;
+    setAttr ($shaderPupils + ".ambientColor") -type double3  0.83 0.83 0.83 ;
+    setAttr ($shaderPupils + ".diffuse") 0.4 ;
+    setAttr ($shaderPupils + ".eccentricity") 0.300 ;
+    setAttr ($shaderPupils + ".specularRollOff") 0.100 ;
+    setAttr ($shaderPupils + ".specularColor") -type double3 0.244 0.244 0.244 ;
+    setAttr ($shaderPupils + ".reflectivity") 0 ;
+  
+    // creer le nom du fileNode a partir de celui du shader
+    $fileName = genShaderName( "_Pupils_ramp" );
+    $fileName = `substitute "SHD_" $fileName ""`;
+    // create ramp shader
+    $shaderRamp = `shadingNode -asTexture ramp -name $fileName`;
+	setAttr ($shaderRamp + ".type") 4;
+	setAttr ($shaderRamp + ".colorEntryList[2].position") 0.115;
+	setAttr ($shaderRamp + ".colorEntryList[2].color") -type double3 0.119364 0.261023 0.686 ;
+	setAttr ($shaderRamp + ".colorEntryList[1].position") 0.465;
+	setAttr ($shaderRamp + ".colorEntryList[1].color") -type double3 0.00375372 0.172519 0.446281 ;
+	    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_Pupils_ColorID" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorID = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorID + ".color") -type double3 1 0 0 ;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_Pupils_ColorID_CHR" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorIDChr = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorIDChr + ".color") -type double3 0 0 1 ;
+  
+    // Connections RGBA
+    connectAttr -f ($shaderRamp + ".outColor") ($shaderPupils + ".color");
+    connectAttr -f ($shaderPupils + ".outColor") ($NodeColorID + ".evaluationPassThrough");
+    connectAttr -f ($shaderPupils + ".outColor") ($NodeColorIDChr + ".evaluationPassThrough");
+    
+    /////////// Shader EyeSpec ///////////
+    
+    string $shadName;
+    string $shaderIris;
+    string $fileName;
+    string $fileIRIS;
+    string $fileName2;
+    string $NodeColorID;
+    string $utilp2dt;
+    string $shaderRamp;
+    string $samplerInfo;
+    string $shaderRIM;
+    string $shaderEyeSpec;
+    
+    // genere un nom pour le shader d'occlu
+    string $shadName =  genShaderName( "_EyeSpec_RGB" );
+
+    // creer le shader
+    $shaderEyeSpec = `shadingNode -asShader lambert -name $shadName`;
+    setAttr ($shaderEyeSpec + ".color") -type double3 0.5 0.5 0.5;
+    setAttr ($shaderEyeSpec + ".diffuse") 0.8 ;
+    setAttr ($shaderEyeSpec + ".ambientColor") -type double3 1 1 1 ;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_EyeSpec_ColorID" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorID = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorID + ".color") -type double3 1 0 0 ;
+    
+    // creer le nom du fileNode a partir de celui du shader pour le writeToColorBuffer
+    string $shadName =  genShaderName( "_EyeSpec_ColorID_CHR" );
+    $shadName = `substitute "SHD_" $shadName ""`; 
+    // Create writeToColorBuffer
+    $NodeColorIDChr = `shadingNode -asUtility writeToColorBuffer -name $shadName`;
+    setAttr ($NodeColorIDChr + ".color") -type double3 0 0 1 ;
+    
+    // Connections RGBA
+    connectAttr -f ($shaderEyeSpec + ".outColor") ($NodeColorID + ".evaluationPassThrough");
+    connectAttr -f ($shaderEyeSpec + ".outColor") ($NodeColorIDChr + ".evaluationPassThrough");
+    
+    hyperShadePanelGraphCommand("hyperShadePanel1", "rearrangeGraph");
+        
+    return $shaderEyeSpec;
+    return $shaderIris;
+    return $shaderEyes;
+    return $shaderPupils;
+}

@@ -1,0 +1,1036 @@
+//	qa_regenerateAndReconnectBlendShapes ( int $replaceBShapeNode, int $connectInConns, int $connectOutConns )
+//	-------------------------------------------------------------------------------------------------------
+    //  User interface : qa_regenerateAndReconnectBlendShapesUI()
+    //
+    //
+    //  Author :    Quentin Auger
+    //  Creation :  June 2006
+    //  Last modif.: June 2010 (keepLocked, freezeSource)
+    //
+    //
+    // Synopsis:
+    //	qa_regenerateAndReconnectBlendShapes ( string $sel[], int $replaceBShapeNode, int $connectInConns, int $connectOutConns )
+    //
+    //
+    // Return Value:
+    //	none. Only error messages if necessary (but that script is very loquacious...)
+    //
+    //
+    // Description:
+    //
+    //      Works on the current selection if 2 transforms and deformable nodes maximum are selected (one minimum).
+    //	The first one is considered as the source object (from which blendShapes nodes will be searched)
+    //	The last one will be the "toDuplicate" object. If only one is selected, it's gonna be duplicated.
+    //	Find every blendShape node in history of the first one, and regenerates every target by duplicating the second one (that can be the same).
+    //	(named from their weight names) and finally select those targets.
+    //
+    //	If $replaceBShapeNode = true (and "from object" = "toDuplicate object", i-e only one object selected),
+    //	then try to delete the previous blendShape node(s),
+    //	and recreate a new one with these targets (even the old node was undeletable).
+    //	Then, try to make the same incoming connections and weight settings...
+    //
+    //	If $replaceBShapeNode = false, only generates the targets and select them.
+    //
+    //		If $connectInConns = true, will find previous incoming connections and reconnect them
+    //		into new blendShape node's Weight attributes. Only possible if $replaceBShapeNode = true.
+    //
+    //		If $connectOutConns = true, will find previous outgoing connections and reconnect them
+    //		from new blendShape node's Weight attributes. Only possible if $replaceBShapeNode = true.
+    //
+    //	If $keepLocked = true, if a weight is locked, won't be unlocked to be set to 0.0 before
+    //	duplicating the model => the dupls will keep the deformation induced by these locked shapes
+    //
+    //		If $freezeMainObj = true, (if $keepLocked as well): will recreate source object (the last one selected)
+    //		by deleting its history (with Locked Shapes still active!) => these shapes are now taken into account.
+    //
+    //	HISTORY MANAGEMENT!!!!
+    //	>>> That script will manage with blendShape nodes enveloppe attributs ONLY.
+    //	But, be sure that every other deformer or influence on the object are disabled (set to Zero)
+    //	before launching that script !!!!!!
+    //
+    //
+    //	Main proc:
+    //		qa_regenerateAndReconnectBlendShapes( 	string $sel[],
+    //												int $replaceBShapeNode,
+    //												int $connectInConns, int $connectOutConns,
+    //												int $keepLocked, int $freezeMainObj )
+    // 	UI proc:
+    //		qa_regenerateAndReconnectBlendShapesUI() ;
+    //
+    //
+/////////////////////////////////////////////////////////////////////////
+//
+
+// Utils:
+//
+	global proc string[] qa_separatedStringAsArray( string $theList, string $theSeparator )
+	{
+		string $theArray[];
+
+		if ($theList != "")
+			tokenize $theList $theSeparator $theArray;
+
+		if ((size($theArray) == 1) && (size($theArray[0]) == 0))
+			clear $theArray;
+
+		return $theArray;
+	}
+
+	global proc string[] qa_listToStringArray( string $theList )
+	{
+		return qa_separatedStringAsArray( $theList, " \t\n" );
+	}
+
+	global proc string qa_stringArrayAsSeparatedString( string $theArray[], string $theSeparator )
+	{
+		string $theList = "";
+
+		for ($element in $theArray)
+			if ($element != "")
+			{
+				if ($theList == "")
+					$theList = $element;
+				else
+					$theList += $theSeparator + $element;
+			}
+
+		return $theList;
+	}
+
+	global proc string qa_stringArrayToList( string $theArray[] )
+	{
+		return qa_stringArrayAsSeparatedString($theArray, " " );
+	}
+
+
+
+	global proc string[] findRelated( string $retType, string $cmd, string $Obj, string $ObjType )
+	{
+		string $Shape;
+		string $ShapeWithPath;
+		string $cpTest[] = `ls -type $ObjType $Obj`;
+		string $stRet[];
+		if (size($cpTest)) {
+			$Shape = $Obj;
+		} else {
+			string $rels[] = `listRelatives $Obj`;
+			for ($r in $rels) {
+				$cpTest = `ls -type $ObjType ($Obj+"|"+$r)`;
+				if (0 == size($cpTest)) {
+					continue;
+				}
+				int $io = `getAttr ($Obj+"|"+$r+".io")`;
+				if ($io) {
+					continue;
+				}
+				$Shape = $r;
+				$ShapeWithPath = ($Obj+"|"+$r);
+				break;
+			}
+		}
+
+		if (0 == size($Shape)) {
+			return $stRet;
+		}
+
+		string $clusters[] = `ls -type $retType`;
+		for ($c in $clusters) {
+			string $tmp = $cmd + " " + $c;
+			string $geom[] = eval( $tmp );
+			for ($g in $geom) {
+				if ($g == $Shape || $g == $ShapeWithPath)
+				{
+					int $iSize = size( $stRet );
+					$stRet[$iSize] = $c;
+				}
+			}
+		}
+		return $stRet;
+	}
+
+	global proc string[] qalShp_renameShapesWithNamesFromTransform(string $transform, string $method, int $verbose)
+	// $method = "endWithNum" (default) or "endWithShape"
+	{
+		string $shpsNewNames[]={};
+		string $shortName = qalNm_returnShortName($transform);
+			string $noSuffix = `match ".*[^0-9]" $shortName`;
+			string $numericSuffix = `match "[0-9]+$" $transform`;
+
+		string $shapeProperName = ($noSuffix+"Shape"+$numericSuffix);
+		if ($method == "endWithShape" )
+			$shapeProperName = ($noSuffix+$numericSuffix+"Shape");
+
+		string $shps[] = `listRelatives -s -f -ni $transform`;
+		for ($shp in $shps) {
+			if ($verbose==1)
+				print ("// Renaming shape \""+$shp+"\" with \""+$shapeProperName+"\" - ");
+			int $ok =!catch($shpsNewNames[size($shpsNewNames)]= `rename $shp $shapeProperName`);
+			if ($ok && $verbose)
+				print ("Done : \""+$shpsNewNames[size($shpsNewNames)-1]+"\" now is its name.\n");
+			else if ($verbose)
+				print "Failed.\n";
+		}
+		return $shpsNewNames;
+	}
+
+	// qalNm_returnShortName ( "toto:rr|toto:uu" ) ;
+	//// Result: toto:uu //
+	global proc string qalNm_returnShortName(string $longName) {
+			string $shortName = `match "[^|]*$" $longName`;
+			return $shortName;
+	}
+
+	global proc int qalShp_DeleteUnusedShapesVerboseOnList( string $listObjectSelected[], int $verbozState  )
+	{
+		//scriptEditorInfo -ch ;
+		//int $verbozState = 1;
+
+		if ($verbozState>0)
+			print "\n------------ Shape cleaning ------------\n";
+
+		int $compteur = 0 ;
+		int $compteurAllIntermShapes = 0 ;
+		int $compteurInterm = 0 ;
+		int $compteurMultiShapedObj= 0 ;
+
+		if (size($listObjectSelected))
+		{
+			for ( $j = 0 ; $j < size($listObjectSelected) ; $j++  ) // int $j = 0;
+			{
+				string $lesShap[] =` listRelatives -s -f $listObjectSelected[$j] ` ; //print $lesShap ;
+				if (size($lesShap) > 1)
+				{
+					if ($verbozState>1) {
+						print ("\n- Working on shapes found under \""+ $listObjectSelected[$j] + "\"... \n") ;  //print $lesShap ;
+						print "\n";
+					}
+					int $io ;
+
+					for ($i = 0 ; $i < size($lesShap) ; $i++) // int $i = 0 ;
+					{
+						$io = `getAttr ($lesShap[$i]+".io")` ;
+
+						// if it's an intermediate object Shape :
+						if ($io) {
+							$compteurAllIntermShapes+=1;
+
+							if ($verbozState>1)
+								print ("\n  \""+ $lesShap[$i] +"\" IS an Intermediate Object.\n");
+
+							// check the outgoing connections:
+							string $lesConec[] = `listConnections -d 1 -s 0 -sh 1 $lesShap[$i] `;
+							if (size($lesConec) == 0 ) {
+								int $localDel = !catch(`delete $lesShap[$i] `);
+								if ($verbozState>0 && $localDel==1)
+									print ("   interm. shape \""+ $lesShap[$i] +"\" is NOT connected to anything => it's DELETED.\n") ;
+								else if ( $localDel==0 ) // not conditionned to verbose because it is important...
+									print ("   interm. shape \""+ $lesShap[$i] +"\" is NOT connected to anything => must be Deleted but COULDN'T do that ! (reference?)\n") ;
+								$compteur += $localDel;
+							}
+							else // if (size($lesConec) != 0 )
+							{
+								for ($conec in $lesConec) {
+									string $typeConnec = `objectType($conec)` ;
+									if ( ($typeConnec == "mesh") || ($typeConnec == "nurbsSurface")  || ($typeConnec == "nurbsCurve")  ) {
+
+										//deleting those shapes :
+										if ( `objExists $lesShap[$i]` ) {
+											int $deleteOK = !catch (`delete $lesShap[$i]`) ;
+											$compteur += $deleteOK ;
+											if ($verbozState>0) {
+													print ("  \""+ $lesShap[$i] +"\" connected to \""+$conec+"\" which is a \""+$typeConnec+"\" type node: incoming object's DELETED.\n") ;
+													//print ("      => \""+$lesShap[$i]+"\" is DELETED.\n") ;
+											}
+										}
+									}
+									else if ($verbozState>1)
+											print ("    \""+ $lesShap[$i] +"\" connected to \""+$conec+"\" which is NOT another Shape, so it's OK :-) \n") ;
+								}
+								if ($verbozState>1)
+									print ("\n      ... end of \""+$lesShap[$i]+"\"'s treatment. \n");
+							}
+						}
+						else
+						{
+							if ($verbozState>1)
+								print ("  \""+ $lesShap[$i] +"\" is NOT an intermediate object.");
+							string $nishapes[] =` listRelatives -s -ni $listObjectSelected[$j] ` ; //print $nishapes ;
+							if (size($nishapes)>1) {
+								print ("And "+$listObjectSelected[$j]+" has several Non Intermediate Shapes !...\n");
+								$compteurMultiShapedObj +=1;
+
+								string $lesConec[] = `listConnections -d 1 -s 0 -sh 1 -scn 1 ($lesShap[$i]+".worldMesh[0]") `;
+								if (size($lesConec) > 0 ) {
+									int $intermOK = !catch (`setAttr ($lesShap[$i]+".intermediateObject") 1`) ;
+									$compteurInterm += $intermOK ;
+									warning (" \""+ $lesShap[$i] +".worldMesh[0]\" is connected (to \""+$lesConec[0]+"\"...) => is switched to INTERMEDIATE !....") ;
+								}
+							}
+							else if ($verbozState>1)
+								print (" And is a single shape (not deleted). \n");
+						}
+						// end if ($io)
+					} //end for ($i = 1 ; $i < size($lesShap) ; $i++)
+				} //end if (size($lesShap)
+				else
+					if ($verbozState>1)
+						print ("\n- The object \""+$listObjectSelected[$j]+"\" has no Intermediate Object shape.\n") ;
+			} // end for ( $j = 0 ; $j < size($listObjectSelected) ; $j++  )
+		} //end if (size($sel))
+		else
+			warning " qalShp_DeleteUnusedShapesVerboseOnList: No object passed. You must select a mesh or surface..." ;
+
+		if ($verbozState>0 ) {
+			print ("\n// Cleaned Shapes: "+$compteur+" / "+$compteurInterm+" / "+$compteurMultiShapedObj+" (out of "+size($listObjectSelected)+" obj./ "+$compteurAllIntermShapes+" interm.shapes) \n");
+			print (  "// => "+$compteur+" unused Intermediate shape(s) deleted / "+$compteurInterm+" non-intermediate switched to Intermediate / "+$compteurMultiShapedObj+" multi-shaped object(s) found.\n") ;
+		}
+
+		return ($compteur +  $compteurInterm + $compteurMultiShapedObj );
+
+	} //end global proc qalShp_DeleteUnusedShapesVerboseOnList()
+
+
+
+//
+// User Interface procs:
+//
+	global proc qa_regenerateAndReconnectBlendShapesUI()
+	{
+		string $mainWindow = "qa_regenerateAndReconnectBlendShapesUI";
+
+		//// DEBUG config:
+		int $resetPrefs = 1;
+
+		// Reset the window:
+		if(`window -q -ex $mainWindow`)
+			deleteUI $mainWindow;
+		if (`windowPref -exists $mainWindow` && ($resetPrefs) )
+			windowPref -r $mainWindow;
+
+
+
+		window -title $mainWindow  -sizeable false -resizeToFitChildren true -w 320 -h 180 $mainWindow;
+
+            columnLayout -adjustableColumn true qaRARBsMainLayout ;
+                text -font "boldLabelFont" -label "\nPlease select at least 1 blendShap'd object" -align "center";
+                text -label "(+ a 2nd one to recreate shapes from - Optionnal)" -align "center";
+                separator -h 20;
+
+                checkBox -label "* RECREATE blendShape deformer(s) on last object selected *" -align "left" -value on -changeCommand "qa_RARBsMainLayoutCallBack()" qaRARBsRecreate;
+
+
+                checkBox -label "- Reconnect IN-coming connections INTO new b-Shape(s)" -align "left" -value on qaRARBsReconnIN;
+                checkBox -label "- Reconnect OUT-going connections FROM new b-Shape(s)" -align "left" -value on qaRARBsReconnOUT;
+                separator -h 15 -style "none";
+                text -align "left" -l " -> In case 2 different objects were selected :" qaRARBsConnWeightsText;
+                checkBox
+                    -cc "qa_RARBsMainLayoutCallBack()"
+                    -label "- Connect Weights of 1rst one into newly created b-Shape Weights of last one"
+                    -align "left" -value off qaRARBsConnWeights;
+
+                separator -h 15 -style "none";
+                text -align "left" -l " -> Change new blendShape TARGETS names :" qaRARBsSrchRplcText;
+                rowColumnLayout -nc 4 -cw 1 60 -cw 2 120 -cw 3 60 -cw 4 120 ;
+                    text -l "Search:" qaRARBsSrchText;
+                        textField -tx "" -en 1 qaRARBsSrchInOrigName;
+                    text -l "Replace:" qaRARBsRplcText;
+                        textField -tx "" -en 1 qaRARBsRplcByInNewName;
+                setParent..;
+
+                separator -h 10;
+                checkBox -label "Disgard every Locked Weight" -align "left" -value off -changeCommand "qa_RARBsMainLayoutCallBack()" qaRARBsKeepLoked;
+                text -al "left" -l "     -> when duplicating/regenerating locked weights are not zero'd out\n ";
+                checkBox -label "Freeze last selected geometry, keeping influence of original locked weights" -en off -align "left" -value off qaRARBsFreezMain;
+                separator -h 10;
+                checkBox -label "Conform Shapes Names (\"toto2\"->\"toto2Shape\")" -align "left" -value on qaRARBsConformShape;
+                text -l "   (default is \"toto2\"->\"totoShape2\", usual Maya behaviour)";
+
+                separator -h 10;
+                rowLayout  -nc 3 -cw 1 160 -cw 2 100 -cw 3 60;
+                    button -bgc 0.5 0.5 0.5 -width 160 -label "Generate Shapes!" -align "center"
+						-ann ("Last selected geometry will be duplicated as many times as its own bendShape weights number, each of them being activated each time.\n"
+							+"If 'Recreate' blendShape options are ON, blendShape will be regenerated on it, and connections remade acc. to options too.\n"
+                        	+"If Locked Weights options are used one can disgard them, even if they have non-zero value (for derivation for ex.)\n"
+							+"Shape names of newly created objects can be conformed acc. to specified options")
+                        -command (  "int $val[]=qa_RARBsMainLayoutGetValues() ; "
+                                +   "string $searchReplace[]=qa_RARBsGetSearchAndReplaceFromUI() ;"
+                                +   "qa_regenerateAndReconnectBlendShapes(`ls -sl`, $val[0],$val[1],$val[2],$val[3],$val[4],$val[5],$val[6], $searchReplace[0], $searchReplace[1]);"
+                                ) ;
+                    text -l "";
+                    button -width 100 -label "Cancel" -align "center"
+                        -command ("deleteUI \""+$mainWindow+"\";") ;
+                setParent ..;
+            setParent ..;
+
+		showWindow $mainWindow;
+	}
+
+
+	global proc qa_RARBsMainLayoutCallBack()
+	{
+		// Recreate bShape / keep connections part:
+
+		    // getting current key status:
+			int $recreateVal = `checkBox -q -v qaRARBsRecreate`;
+			int $connTwo = `checkBox -q -v qaRARBsConnWeights`;
+			float $InOutVal = max(0,($recreateVal-$connTwo));
+
+			// changing display:
+			checkBox -e -en $InOutVal qaRARBsReconnIN;
+			checkBox -e -en $InOutVal qaRARBsReconnOUT;
+
+			checkBox -e -en $recreateVal qaRARBsConnWeights;
+			text -e -en $recreateVal qaRARBsConnWeightsText;
+
+			text -e -en $recreateVal  qaRARBsSrchRplcText;
+                text -e -en $recreateVal  qaRARBsSrchText;
+                textField -e -en $recreateVal  qaRARBsSrchInOrigName;
+                text -e -en $recreateVal  qaRARBsRplcText;
+                textField -e -en $recreateVal  qaRARBsRplcByInNewName;
+
+
+		// Keep Locked / Freeze Obj part:
+			int $keepLocked = `checkBox -q -v qaRARBsKeepLoked`;
+			checkBox -e -en $keepLocked qaRARBsFreezMain;
+	}
+
+	global proc int[] qa_RARBsMainLayoutGetValues()
+	{
+		int $recreateVal = `checkBox -q -v qaRARBsRecreate`;
+		    int $enableInOut = `checkBox -q -en qaRARBsReconnIN`;
+
+        int $connIN = 0;
+        int $connOUT = 0;
+        int $connTwo = 0;
+
+        if ($recreateVal)
+        {
+            $connTwo = `checkBox -q -v qaRARBsConnWeights`;
+            if ($enableInOut) {
+                $connIN = `checkBox -q -v qaRARBsReconnIN`;
+                $connOUT = `checkBox -q -v qaRARBsReconnOUT`;
+            }
+        }
+
+
+		int $keepLocked = `checkBox -q -v qaRARBsKeepLoked`;
+			int $freezeMainObj = 0;
+			if ($keepLocked)
+			    $freezeMainObj = `checkBox -q -v qaRARBsFreezMain`;
+
+		int $conformShapeName = `checkBox -q -v qaRARBsConformShape`;
+
+		return { $recreateVal , $connIN, $connOUT, $keepLocked, $freezeMainObj, $conformShapeName, $connTwo };
+	}
+
+	global proc string[] qa_RARBsGetSearchAndReplaceFromUI()
+	{
+        string $search = `textField -q -tx qaRARBsSrchInOrigName`;
+        string $replace = `textField -q -tx qaRARBsRplcByInNewName`;
+
+		return { $search, $replace };
+	}
+
+
+	/*
+	// test lines:
+		string $sel[] = `ls -sl`;
+		int $replaceBShapeNode = false ;
+		int $connectInConns = false ;
+		int $connectOutConns = false ;
+
+		int $replaceBShapeNode = true ;
+		int $connectInConns = true ;
+		int $connectOutConns = true ;
+	*/
+
+//
+// Main proc:
+//
+	global proc qa_regenerateAndReconnectBlendShapes( 	string $sel[], int $replaceBShapeNode, int $connectInConns, int $connectOutConns,
+														int $keepLocked, int $freezeMainObj, int $conformShapeName, int $connectTwoBSnodes,
+														string $searchInOrig, string $replaceBy )
+	{
+		int $success = true;
+		int $unlockSuccess = true;
+		int $wholeConnSuccess = true;
+		int $wholeDiscoSuccess  = true;
+
+		string $relatedBShapeNodes[]={};
+		string $secondObjRelatedBShapeNode = "";
+		string $relatedGroupPerBS[] = {};
+		float $previousBshpEnvVal[]={};
+		string $finalBShapeNodes[]={};
+
+		string $createdObj[];
+		string $everyCreatedObj[]={};
+
+		string $frozenDupl = "";
+		string $conformMethod = "endWithNum";
+		if ($conformShapeName)
+			$conformMethod = "endWithShape";
+
+		print "\n\n -------------------- 'qa_regenerateAndReconnectBlendShapes()' --------------------\n\n";
+
+		if ( ( size($sel) >= 1 ) && ( size($sel) <= 2 ) && (`objExists ($sel[1]+".cp")`) )
+		{
+			string $objToDuplicate = $sel[0];
+
+			if ( (size($sel)==2) && (`objExists ($sel[1]+".cp")`) )
+				$objToDuplicate  = $sel[1];
+			else if (size($sel)==2)
+				error ("Can NOT duplicate object \""+$sel[1]+"\ as it has no point!");
+
+			// Default behaviour: NEW blendShape 'creation':
+			string $replaceOrCreate = "creation";
+			// If only one object is selected: bshape 'replacement':
+			if (`gmatch $sel[0] $objToDuplicate`)
+				$replaceOrCreate = "replacement";
+			// If 2 geometries are selected and last one already has a bshape : 'update'
+			else if ((size($sel)==2) &&  `gmatch $sel[1] $objToDuplicate`)
+			{
+			    string $secondObjRelatedBShapeNodes[] = findRelated( "blendShape", "blendShape -q -g", $sel[1], "controlPoint" );
+			    if (size($secondObjRelatedBShapeNodes))
+			    {
+			        $replaceOrCreate = "update";
+			        $secondObjRelatedBShapeNode = $secondObjRelatedBShapeNodes[0];
+			    }
+			}
+
+
+			$relatedBShapeNodes = findRelated( "blendShape", "blendShape -q -g", $sel[0], "controlPoint" );
+			if (size($relatedBShapeNodes)>0)
+			{
+
+				if (size($relatedBShapeNodes)>1)
+					warning (size($relatedBShapeNodes)+" blendShape node(s) found for '"+$sel[0]+"'!");
+
+				// First we make every blendShape Node inactive and remember previous .env values
+				//
+				print "\n-- Inactivation of every blendshape node...\n";
+				clear $previousBshpEnvVal;
+				for ($b=0; $b<size($relatedBShapeNodes); $b++)
+				{
+					$previousBshpEnvVal[$b] = `getAttr ($relatedBShapeNodes[$b]+".envelope")`;
+
+					$unlockSuccess = !catch (`setAttr ($relatedBShapeNodes[$b]+".envelope") -l 0`);
+					if (!$unlockSuccess )
+						print ("  Unable to unlock '"+$relatedBShapeNodes[$b]+".envelope' !\n");
+
+					$success = !catch (`setAttr ($relatedBShapeNodes[$b]+".envelope") 0.0`);
+					if (!$success)
+						print ("Unable to set '"+$relatedBShapeNodes[$b]+".envelope' to 0.0 !\n");
+					else print ("  > '"+$relatedBShapeNodes[$b]+".envelope' set to 0.0 \n");
+				}
+
+
+
+				for ($b=0; $b<size($relatedBShapeNodes); $b++)
+				{ // int $b = 0;
+					print ("\n\n\n--- NOW TREATING '"+$relatedBShapeNodes[$b]+"' BLENDSHAPE NODE :\n");
+
+					// Make that one active:
+					$success = !catch (`setAttr ($relatedBShapeNodes[$b]+".envelope") 1.0`);
+					if (!$success) {
+						warning ("Unable to set '"+$relatedBShapeNodes[$b]+".envelope' to 1.0 !\n");
+						break;
+					}
+					else  {
+						$relatedGroupPerBS[$b] = `createNode transform -n ($objToDuplicate+"_"+$relatedBShapeNodes[$b])`;
+						print ("  > '"+$relatedBShapeNodes[$b]+".envelope' set to 1.0 \n");
+					}
+
+					int $shpsNum = `blendShape -q -wc $relatedBShapeNodes[$b]`;
+					float $shpsOrigW[] = `blendShape -q -w $relatedBShapeNodes[$b]`;
+					float $shpOrigLockVal[] = {}; // will be filled afterwards...
+					string $shpsTgt[] = `listAttr -m ($relatedBShapeNodes[$b]+".w")`;
+
+
+					// Filling the list of incoming/outcoming connections and disconnect them before Setting every weights to Zero:
+					//
+					print "\n\n-- Disactivation of each shape (and filling the list of incoming connections if any):\n";
+					print ("\n  - '"+$relatedBShapeNodes[$b]+"\" has "+$shpsNum+" blendShape weight(s) :\n");
+
+					string $incomingCon[] = {};
+					string $outgoingCon[] = {};
+					string $skippedWeightIndices[]={};
+					string $lockedShapeName = "";
+
+					for ($i=0; $i<$shpsNum ; $i++)  {
+					// int $i = 23 ;
+
+						// Lock issue: in case $keepItLocked is asked and weights IS locked ==> skipped:
+							int $keepItLocked = false;
+							$shpOrigLockVal[$i] = ` getAttr -l ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])`;
+							if ($keepLocked==false) {
+								$unlockSuccess = !catch (`setAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) -l 0`);
+								if (!$unlockSuccess )
+									print ("     Unable to unlock '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' !\n");
+							}
+							else if (`getAttr -l ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])`==true) {
+								print ("\n// Trying to keep \""+$relatedBShapeNodes[$b]+"."+$shpsTgt[$i]+"\" LOCKED as asked! (no regeneration for it) \n");
+								$skippedWeightIndices[size($skippedWeightIndices)] = $i;
+								$lockedShapeName = $shpsTgt[$i];
+								continue;
+							}
+
+						// In connections listing:
+							string $cons[] = `listConnections -scn 1 -source 1 -d 0 -plugs 1 -exactType 1 ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])` ;
+							if (size($cons)==1)
+								$incomingCon[$i] = $cons[0];
+							else if (size($cons)==0)
+								print ("\n  ..'"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' has no incoming connection.\n");
+							else
+								error ("'"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' seems to have several incoming connections!!!!????");
+
+						// print $success ; int $success = true;
+						if ($success)
+						{
+							// Disconnection from incoming attr./setting to zero
+							//
+							if (size($incomingCon[$i]))
+							{ // int $discoSuccess = true;
+								int $discoSuccess = !catch (`disconnectAttr $incomingCon[$i] ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])`) ;
+								//print ("discoSuccess : "+$discoSuccess +"\n");
+								int $zeroValSuccess = $discoSuccess + !$shpsOrigW[$i];
+								if (!$zeroValSuccess )
+								{
+									if (!$discoSuccess )
+										warning ("  ..Can NOT disconnect '"+$incomingCon[$i]+"' from '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' !!\n");
+									else
+										error ("  ..Can NOT set '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' to 0.0!!");
+								}
+								else
+									print ("\n  ..'"+$incomingCon[$i]+"' disconnected from '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' !!\n");
+								$wholeDiscoSuccess *= $discoSuccess ;
+							}
+
+
+							int $successZero = !catch (`setAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) 0.0`);
+							if (!$successZero) {
+								float $prevVal = `setAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])`;
+								if ($prevVal == 0.0)
+									warning ("Unable to set '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' to 0.0 ! (but actual value = "+$prevVal+")\n");
+								else
+									error ("Unable to set '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' to 0.0 ! (actual value = "+$prevVal+")\n");
+							}
+							else
+								print ("    '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' set to 0.0 \n");
+
+
+
+							//  Disconnecting outgoing connections and keeping them in memory (array of array)
+							//
+							string $cons[] = {};
+							if ($connectOutConns)
+							{
+								print "  ( Disconnecting outgoing connections and keeping them in memory (array of array) )\n";
+								$cons = `listConnections -scn 1 -source 0 -d 1 -plugs 1 -exactType 1 ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])` ;
+							}
+
+							if (size($cons)>0)
+							{
+								$outgoingCon[$i] = qa_stringArrayToList($cons);
+								print ("  ( Outgoing connections from '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' are : '"+$outgoingCon[$i]+"' )\n");
+								for ($con in $cons)
+								{
+									int $connSuccess = !catch (`disconnectAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) $con`) ;
+									if (!$connSuccess )
+										warning ("  .. Can NOT disconnect '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' from '"+$con+"'!!");
+									else
+										print ("  ..'"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' disconnected from '"+$con+"'.\n");
+									$wholeConnSuccess *= $connSuccess ;
+								}
+							}
+							else if ( (size($cons)==0) && ($connectOutConns) )
+								print ("  ...'"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' has no outgoing connection.\n");
+						}
+
+					} // end for ($i=0; $i<$shpsNum ; $i++)
+
+
+					// ACTION!!
+					// Re-Activation/duplication (/re-connection) of each shape:
+					//
+					print "\n\n-- Re-Activation/duplication/re-connection of each shape:\n\n";
+
+					if (size($skippedWeightIndices)==1 && $keepLocked && $freezeMainObj)
+					{
+						print ("// Freezing shape of \""+$objToDuplicate+"\": del.History with locked shaped ON ("+$lockedShapeName+")... \n\n");
+						string $dupl[] = `duplicate -n ($objToDuplicate+"FrozenDupl")  $objToDuplicate `;
+						$frozenDupl = $dupl[0];
+
+						// cleaning up its potentialenty superfluous intermediate shapes
+						qalShp_DeleteUnusedShapesVerboseOnList( {$frozenDupl}, 0  );
+					}
+
+					for ($i=0; $i<$shpsNum ; $i++) {
+					// int $i=0;
+
+						if ( stringArrayContains($i,$skippedWeightIndices) ) {
+							print ("// --> \""+$relatedBShapeNodes[$b]+"."+$shpsTgt[$i]+"\" hasn't been regenerated and connected (was locked)\n");
+							continue;
+						}
+
+
+						// Reactivation/Duplicatiom:
+						//
+						$success = !catch (`setAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) 1.0`);
+						if (!$success)
+							error ("Unable to set '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' to 1.0 !");
+						else {
+							print ("\n  ..Treating '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' (set to 1.0) \n");
+
+							string $dupl[] = `duplicate -n $shpsTgt[$i]  $objToDuplicate `;
+							if ( size( $dupl) ) {
+
+								// cleaning up its potentialenty superfluous intermediate shapes
+								qalShp_DeleteUnusedShapesVerboseOnList( $dupl, 0  );
+
+								// Grouping every target in the same group - previously created
+								// and ensuring they are correctly named (warning otherwise)
+								//
+								string $newReparentedName[];
+								int $doParent = !catch($newReparentedName=`parent $dupl[0] $relatedGroupPerBS[$b]`);
+								if ($doParent)
+								{
+								    // Finding which name to give to newly created target: orignal one or using search&replace pattern?
+								    string $toRenameShapeIn = ` match "[^|]*$" $shpsTgt[$i] `; // shortName of it
+								    // if there's something valid to search (not empty) in original short name:
+								    if ( isValidString($searchInOrig,"([a-zA-Z0-9_])*") )
+								    {
+								        // if the string to replace with is empty or valid:
+								        if ( isValidString($replaceBy,"([a-zA-Z0-9_])*") || size($replaceBy)==0 )
+								            $toRenameShapeIn = ` substitute $searchInOrig $toRenameShapeIn $replaceBy `;
+								    }
+
+									//$newReparentedName[0] = `rename $newReparentedName[0] $shpsTgt[$i]`;
+									$newReparentedName[0] = `rename $newReparentedName[0] $toRenameShapeIn `;
+									string $shortReparentedName = `match "[^|]*$" $newReparentedName[0]`;
+									//if ( $shortReparentedName == $shpsTgt[$i] ) {
+									if ( $shortReparentedName == $toRenameShapeIn ) {
+										print ("  ('"+$newReparentedName[0]+"' well renamed into : '"+$shortReparentedName+"')\n");
+										qalShp_renameShapesWithNamesFromTransform( $newReparentedName[0],$conformMethod, 1) ; // or "endWithNum" or ""
+									}
+									else
+										warning ($newReparentedName[0]+" couldn't be named '"+$toRenameShapeIn+"' (but '"+$shortReparentedName+"') !");
+								}
+								else
+									error ("Unable to parent "+$dupl[0]+" to "+$relatedGroupPerBS[$b]+" !");
+
+								$createdObj[$i] = $newReparentedName[0];
+
+								print ("    > object '"+$createdObj[$i]+"' was generated \n");
+
+								$everyCreatedObj[size($everyCreatedObj)] = $newReparentedName[0];
+							}
+							$success = !catch (`setAttr ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) 0.0`);
+							if (!$success)
+								error ("Unable to set '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' to 0.0 !\n");
+							else
+								print ("     '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' set to 0.0 again.\n");
+						}
+					}
+
+					// Make that current blendShape node inactive (end of treatment):
+					//
+					print ("\n- '"+$relatedBShapeNodes[$b]+"' blendShape node treatment complete :\n");
+					$success = !catch (`setAttr ($relatedBShapeNodes[$b]+".envelope") 0.0`);
+					if (!$success)
+						error ("Unable to set '"+$relatedBShapeNodes[$b]+".envelope' to 0.0 !\n");
+					else
+						print ("  '"+$relatedBShapeNodes[$b]+".envelope' set to 0.0 again... \n");
+
+
+					// If a blendShape node replacement or creation is asked...
+					// Let's (re)create and (re)connect the blend shape node :
+					//
+					$finalBShapeNodes[$b] = $relatedBShapeNodes[$b] ;
+
+					if ($replaceBShapeNode)
+					{
+					    print ("\n-  A blendShape "+$replaceOrCreate+" is asked...\n");
+
+						if ($replaceOrCreate == "replacement")
+						{
+							// Old BS node deletion:
+							$successDel = !catch(`delete $relatedBShapeNodes[$b]`);
+							if (!$successDel)
+							{
+								warning ("  ..Can NOT delete '"+$relatedBShapeNodes[$b]+"' node !!!!");
+								// forcing old replaced BS node still existing not to behave (env=0)
+								int $successSet = !catch(`setAttr ( $relatedBShapeNodes[$b]+".envelope") 0.0`);
+								if ($successSet )
+									print ("  ..'"+ $relatedBShapeNodes[$b]+".envelope' on original node set to 0.0 (as it must NOT act anymore!...)\n");
+							}
+							else
+								print ("  ..'"+$relatedBShapeNodes[$b]+"' node DELETED.\n");
+						}
+						else if ($replaceOrCreate == "creation")
+							print ("\n- A new blendShape on object \""+$objToDuplicate+"\" will be created...\n");
+						else if ($replaceOrCreate == "update")
+							print ("\n- Current blendShape \""+$secondObjRelatedBShapeNode+"\" on object \""+$objToDuplicate+"\" will be updated...\n");
+
+						// New BS node generation:
+						//
+						string $newBSnames[] = {};
+						string $newBShapeNodeName = $relatedBShapeNodes[$b];
+						if ($replaceOrCreate == "creation")
+							 $newBShapeNodeName = ($relatedBShapeNodes[$b]+"Transfered");
+
+
+						// CREATING new blendShape node :
+						if (size($secondObjRelatedBShapeNode)==0)
+						{
+						    print ".. BlendShape Creation ..\n";
+
+						    select -cl ;
+						    for ($i=0; $i<$shpsNum ; $i++)
+						        if (`objExists $createdObj[$i]`)
+								    select -add $createdObj[$i] ;
+
+                            if (size($frozenDupl))
+                                select -add $frozenDupl ;
+                            else
+                                select -add $objToDuplicate ;
+
+                            $newBSnames = `blendShape -frontOfChain -n $newBShapeNodeName`;
+						}
+						// ADDING target to existing blendShape node $secondObjRelatedBShapeNode
+						else if (size($secondObjRelatedBShapeNode))
+						{
+						    print ".. BlendShape update ..\n";
+						    string $shpsAlias[] = `listAttr -m ($secondObjRelatedBShapeNode+".w")`;
+
+						    for ($i=0; $i<$shpsNum ; $i++)
+						    {
+						        //print (".. $createdObj[$i] : "+$createdObj[$i]+" : ");
+						        if (`objExists $createdObj[$i]`)
+						        {
+						            //print (" exists :) \n");
+
+						            string $BSobj = $createdObj[$i];
+
+                                    // Is current BS already listed in shapes ?
+
+                                    print ("//\t Checking if \""+shortNameOf($BSobj)+"\" seems to be a target of \""+$secondObjRelatedBShapeNode+"\" - searching alias: ");
+                                    int $foundAlias = false;
+                                    for ($alias in $shpsAlias)
+                                    {
+                                        string $shortBSobj = shortNameOf($BSobj);
+                                        if ($alias == $shortBSobj)
+                                        {
+                                            $foundAlias = true;
+                                            print ("'"+$alias+"'\n");
+                                            error ("Can NOT add shape \""+shortNameOf($BSobj)+"\" onto blendShape \""+$secondObjRelatedBShapeNode+"\" as it already has one!\n"
+                                            +"You might want to lock related one on source object's blendShape and use 'Keep locked weight as is' option... (see ScriptEditor)");
+                                        }
+                                    }
+                                    if ($foundAlias==false)
+                                    {
+                                        print "not found...\n";
+
+                                        int $shpsNumSecondBSnode = `blendShape -q -wc $secondObjRelatedBShapeNode`;
+
+                                        print ("//\t Adding target \""+shortNameOf($BSobj)+"\" on existing \""+$secondObjRelatedBShapeNode+"\" at index "+$shpsNumSecondBSnode+".\n");
+                                        blendShape -e  -t $objToDuplicate $shpsNumSecondBSnode $BSobj 1 $secondObjRelatedBShapeNode;
+                                    }
+                                }
+                                //else print (" DOESN'T EXIST!\n");
+                            }
+						}
+
+
+
+						string $action = "CREATED to replace the previous:";
+						if ($replaceOrCreate == "creation")
+							$action = "CREATED based on that one:";
+						if ($replaceOrCreate == "update")
+							$action = "UPDATED based on that one:";
+						if (size($newBSnames)==1) {
+							$finalBShapeNodes[$b] = $newBSnames[0];
+							print ("  > BlendShape node '"+ $finalBShapeNodes[$b]+"' was "+$action+" \""+$relatedBShapeNodes[$b]+"\".\n");
+						}
+						else if (size($secondObjRelatedBShapeNode))
+						{
+							$finalBShapeNodes[$b] = $secondObjRelatedBShapeNode;
+							print ("  > BlendShape node '"+ $secondObjRelatedBShapeNode+"' was "+$action+" \""+$relatedBShapeNodes[$b]+"\".\n");
+						}
+						else
+							warning ("  > NO BlendShape node could be "+$action+" "+$relatedBShapeNodes[$b]+" !!...");
+
+						if ($replaceOrCreate == "replacement") {
+							int $successSet = !catch(`setAttr ( $finalBShapeNodes[$b]+".envelope") 0.0`);
+							if ($successSet )
+								print ("  ..'"+ $finalBShapeNodes[$b]+".envelope' successfully set to 0.0\n");
+						}
+					}
+
+
+					// Re-connection/reseting of the shapes
+					//
+					print ("\n\n--> BlendShape node to reconnect : '"+$finalBShapeNodes[$b]+"' :\n");
+
+					for ($i=0; $i<$shpsNum ; $i++) {  // int $i = 0
+
+						string $shortTargetName = `match "[^|]*$"  $createdObj[$i] `;
+
+						// Locking issue:
+						if ( stringArrayContains($i,$skippedWeightIndices) ) {
+							print ("// --> \""+$finalBShapeNodes[$b]+"."+$lockedShapeName+"\" hasn't been regenerated and connected (was locked)\n");
+							continue;
+						}
+
+						// INcomming connections:
+						//
+						if ( (size($incomingCon[$i])) && ( $connectInConns) )  {
+							int $connSuccess = !catch (`connectAttr -f $incomingCon[$i] ($finalBShapeNodes[$b]+"."+ $shortTargetName)`) ;
+							if (!$connSuccess )
+								warning ("  .. Can NOT re-connect '"+$incomingCon[$i]+"' to '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"' !!");
+							else
+								print ("  ..'"+$incomingCon[$i]+"' re-connected into '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"'.\n");
+							$wholeConnSuccess *= $connSuccess ;
+						}
+						else {
+							print ("  .. No re-connection to make on '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"'.\n");
+							int $successSet = !catch(`setAttr ($finalBShapeNodes[$b]+"."+ $shortTargetName) $shpsOrigW[$i]`);
+							if ($successSet)
+								print ("    '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"' reset to original weight "+$shpsOrigW[$i]+"\n");
+							catch(`setAttr ($finalBShapeNodes[$b]+"."+ $shortTargetName) -l $shpOrigLockVal[$i]`);
+						}
+
+
+						// In case of new blendShape created/updated on different object that the source one:
+						//
+						if ( $replaceOrCreate=="creation" || $replaceOrCreate=="update" )
+						{
+                            // Reconnecting the original in-connections in ORIGINAL blendShape anyway:
+                            if ( (size($incomingCon[$i])) )
+                            {
+                                int $connSuccess = !catch (`connectAttr -f $incomingCon[$i] ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i] )`) ;
+                                if (!$connSuccess )
+                                    warning ("  .. Can NOT re-connect '"+$incomingCon[$i]+"' to '"+($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i] )+"' !!");
+                                else
+                                    print ("  ..'"+$incomingCon[$i]+"' re-connected into '"+($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i])+"'.\n");
+                                $wholeConnSuccess *= $connSuccess ;
+                            }
+                            else
+                            {
+                                print ("  .. No re-connection to make on '"+($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i])+"'.\n");
+                                int $successSet = !catch(`setAttr ($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i]) $shpsOrigW[$i]`);
+                                if ($successSet)
+                                    print ("    '"+($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i])+"' reset to original weight "+$shpsOrigW[$i]+"\n");
+                                catch(`setAttr ($relatedBShapeNodes[$b]+"."+ $shpsTgt[$i]) -l $shpOrigLockVal[$i]`);
+                            }
+
+                            // IF CONNECTION OF WEIGHTS ASKED BETWEEN TWO DIFFERENT OBJECTS'BLENDSHAPE, making it:
+                            if ( $connectTwoBSnodes )
+                            {
+                                int $connSuccess = !catch (`connectAttr -f ($relatedBShapeNodes[$b]+"."+$shpsTgt[$i]) ($finalBShapeNodes[$b]+"."+$shortTargetName) `) ;
+                                if (!$connSuccess )
+                                    warning ("  .. Can NOT re-connect '"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' into '"+($finalBShapeNodes[$b]+"."+$shortTargetName)+"'!!");
+                                else
+                                    print ("  ..'"+($relatedBShapeNodes[$b]+"."+$shpsTgt[$i])+"' connected into '"+($finalBShapeNodes[$b]+"."+$shortTargetName)+"'.\n");
+                                $wholeConnSuccess *= $connSuccess ;
+                            }
+                        }
+
+
+
+						// OUTgoing connections (from weights attr):
+						//
+						if ( (size($outgoingCon[$i]))  && ($connectOutConns) ) {
+							string $everyCons[] = qa_listToStringArray($outgoingCon[$i]);
+							for ($con in $everyCons) {
+								int $connSuccess = !catch (`connectAttr -f ($finalBShapeNodes[$b]+"."+ $shortTargetName) $con`) ;
+								if (!$connSuccess )
+									warning ("  .. Can NOT re-connect '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"' into '"+$con+"'!!");
+								else
+									print ("  ..'"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"' re-connected into '"+$con+"'.\n");
+								$wholeConnSuccess *= $connSuccess ;
+							}
+						}
+						else
+							print ("  .. No out re-connection to make from '"+($finalBShapeNodes[$b]+"."+ $shortTargetName)+"'.\n");
+
+						// In case of new blendShape created on different object that the source one, reconnecting the original out-connections :
+						//
+						if ( ($replaceOrCreate == "creation" || $replaceOrCreate=="update") && (size($outgoingCon[$i])) ) {
+							string $everyCons[] = qa_listToStringArray($outgoingCon[$i]);
+							for ($con in $everyCons) {
+								int $connSuccess = !catch (`connectAttr -f ($relatedBShapeNodes[$b]+"."+ $shortTargetName) $con`) ;
+								if (!$connSuccess )
+									warning ("  .. Can NOT re-connect '"+($relatedBShapeNodes[$b]+"."+ $shortTargetName)+"' into '"+$con+"'!!");
+								else
+									print ("  .'"+($relatedBShapeNodes[$b]+"."+ $shortTargetName)+"' re-connected into '"+$con+"'.\n");
+								$wholeConnSuccess *= $connSuccess ;
+							}
+						}
+
+					} // end of for ($i=0; $i<$shpsNum ; $i++) {
+
+				}
+				 // end of for ($b=0; $b<size($relatedBShapeNodes); $b++)
+
+
+				// Setting every blendShape Node to their previous .env values
+				// (except if old ones were replaced but not deleted - remain a .env=0.0)
+				//
+				print "\n\n--- END OF SHAPE GENERATION ---";
+				print "\n-- Setting every blendShape Node to their previous .env values...\n";
+
+				for ($b=0; $b<size($finalBShapeNodes); $b++) {
+					$success = !catch (`setAttr ($finalBShapeNodes[$b]+".envelope") $previousBshpEnvVal[$b]`);
+					if (!$success)
+						print ("Unable to set '"+$finalBShapeNodes[$b]+".envelope' to its previous value !\n");
+					else print ("  '"+$finalBShapeNodes[$b]+".envelope' set to "+$previousBshpEnvVal[$b]+" \n");
+
+					if ($replaceOrCreate == "creation" || $replaceOrCreate=="update") {
+						$success = !catch (`setAttr ($relatedBShapeNodes[$b]+".envelope") $previousBshpEnvVal[$b]`);
+						if (!$success)
+							print ("Unable to set '"+$relatedBShapeNodes[$b]+".envelope' to its previous value !\n");
+						else print ("  '"+$relatedBShapeNodes[$b]+".envelope' set to original value "+$previousBshpEnvVal[$b]+" \n");
+					}
+				}
+
+				// ending with Freezing up main model in case of locked weight in purpose:
+				if (size($frozenDupl)) {
+					print ("// Original \""+$objToDuplicate+"\" object deleted and Frozen Duplicate was created with same name\n");
+					delete $objToDuplicate;
+					string $newMainObjName = `rename $frozenDupl $objToDuplicate `;
+					string $shortNewMainObjName = `match "[^|]*$" $newMainObjName`;
+					if ( $shortNewMainObjName == $objToDuplicate )
+						qalShp_renameShapesWithNamesFromTransform( $newMainObjName,$conformMethod, 1) ; // or "endWithNum" or ""
+					else
+						warning ($frozenDupl+" couldn't be named '"+$objToDuplicate+"' (but '"+$shortNewMainObjName+"')!");
+				}
+			}
+			else
+				warning ("No blendShape node was found for '"+$sel[0]+"'!");
+
+		}
+		else
+			error "Please select at least 1 transform with blendShapes in history (another object to duplicate is optionnal)...";
+
+		if (size($everyCreatedObj))
+			select -r $everyCreatedObj;
+		else
+			print "\n - No new object was created... - \n";
+
+		print "\n\n";
+		$success = $success * $wholeConnSuccess * $wholeDiscoSuccess ;
+
+		if (!$wholeDiscoSuccess )
+			warning "Every disconnection from blendShape node weights attributes could not be made. See scriptEditor for details...";
+		if (!$wholeConnSuccess)
+			warning "Every re-connection to/from blendShape node weights attributes could not be made. See scriptEditor for details...";
+
+		if (!$success)
+			warning "Some problems occured. See scriptEditor for details...";
+		else
+			print "-------------- qa_regenerateAndReconnectBlendShapes() complete... --------------------\n";
+
+	}
+	// end of qa_regenerateAndReconnectBlendShapes()
+
+

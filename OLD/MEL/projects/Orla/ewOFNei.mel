@@ -1,0 +1,226 @@
+global proc ewOFNei()
+{
+	if (`window -q -ex OFNeiWnd`) deleteUI OFNeiWnd;
+
+	string $window = `window -title "Scene Infomation" -widthHeight 500 200 OFNeiWnd`;
+	columnLayout -adjustableColumn true -rowSpacing 5;
+	button -label "Export" -command OFNexport;
+	text -label "" OFNtext1;
+	button -label "Import" -command OFNimport;
+	text -label "" OFNtext2;
+	button -label "Close" -command ("deleteUI -window " + $window);
+	setParent ..;
+	showWindow $window;
+}
+global proc OFNexport()
+{
+	fileBrowserDialog -mode 4 -fileCommand OFNdesign  -actionName "open";
+	string $path = fromNativePath(`text -q -l OFNtext1`);//$path = "f:/temp/";
+
+	//string $filename = basenameEx(`file -q -sceneName`);
+	string $infofile = ($path+"info.txt");
+	string $refnfile = ($path+"refn.txt");
+	string $layerfile = ($path+"layer.txt");
+
+	int $i,$j;
+	string $buffer[],$rn[],$parent[],$mparent[];
+	string $sel[] = `ls -sl`;
+	for($i=0;$i<`size $sel`;$i++)
+	{
+		$rn[$i] = `referenceQuery -referenceNode $sel[$i]`;
+		string $mc = `substitute "RN" $rn[$i] ""`;
+		string $con[] = `ls ($mc+":*_masterCon")`;
+		string $pa[] = `listRelatives -p $con[0]`;
+		if($pa[0]=="") $pa[0]="w";
+		$parent[$i] = $pa[0];
+		string $master[] = `ls ($mc+":*_master")`;
+		string $mpa[] = `listRelatives -p $master[0]`;
+		if($mpa[0]=="") $mpa[0]="w";
+		$mparent[$i] = $mpa[0];
+	}
+
+	int $refnId = `fopen $refnfile "w"`;
+	for($i=0;$i<`size $rn`;$i++)
+	{
+		string $rfile = `referenceQuery -filename $rn[$i]`;
+		fprint $refnId ($rn[$i]+" "+$rfile+" "+$parent[$i]+" "+$mparent[$i]+"\n");
+	}
+	fclose $refnId;
+
+
+	string $attr_list[]= {"tx","ty","tz","rx","ry","rz","sx","sy","sz","v"};
+	string $masterCon[] = `ls "*_masterCon" "*:*_masterCon" "*:*:*_masterCon"`;
+
+	$fileId = `fopen $infofile "w"`;
+	for($i=0;$i<`size $masterCon`;$i++)
+	{
+		string $cmd = "";
+		for ($j=0;$j<`size $attr_list`;$j++)
+		{
+			float $val = `getAttr ($masterCon[$i]+"."+$attr_list[$j])`;
+			$cmd += (" "+$val);
+		}
+		fprint $fileId ($masterCon[$i]+$cmd+"\n");
+	}
+	fclose $fileId;
+
+	source xxu_String.mel;
+	xxu_StringLoadPlugin(1);
+
+	string $layer[] = `ls -type "displayLayer"`;
+	string $defautLayer[] = `ls "*defaultLayer" "*:*defaultLayer" "*:*:*defaultLayer"`;
+	string $layers[] = xxu_stringArrayRemove($defautLayer,$layer);
+
+	$fileId = `fopen $layerfile "w"`;
+	for ($i=0;$i<`size $layers`;$i++)
+	{
+		int $vis = `getAttr ($layers[$i]+".v")`;
+		string $member[] = `editDisplayLayerMembers -q $layers[$i]`;
+		string $cmd = stringArrayToString($member," ");
+		fprint $fileId ($layers[$i]+" "+$vis+" "+$cmd+"\n");
+	}
+	fclose $fileId;
+
+	confirmDialog -message "finish!" -button "ok";
+}
+
+global proc OFNimport()
+{
+	fileBrowserDialog -mode 4 -fileCommand importdesign  -actionName "open";
+	string $path = fromNativePath(`text -q -l OFNtext2`);
+	//$path = "f:/temp/"
+	string $infofile = ($path+"info.txt");
+	string $refnfile = ($path+"refn.txt");
+	string $layerfile = ($path+"layer.txt");
+
+	if (!`file -q -ex $infofile`) return;
+	if (!`file -q -ex $refnfile`) return;
+	if (!`file -q -ex $layerfile`) return;
+
+	//source xxu_String.mel;
+	//xxu_StringLoadPlugin(1);
+
+	string $rn[],$rnf[],$parent[],$mparent[],$buffer[];
+	int $i=0,$j;
+
+	int $refnId = `fopen $refnfile "r"`;
+	string $nextLine = `fgetline $refnId`;
+
+	while (size($nextLine)>0)
+	{
+		tokenize $nextLine "\n" $buffer;
+		$nextLine = $buffer[0];
+		tokenize $nextLine " " $buffer;
+		$rn[$i]=$buffer[0];
+		$rnf[$i]=$buffer[1];
+		$parent[$i]=$buffer[2];
+		$mparent[$i]=$buffer[3];
+		$i++;
+		$nextLine=`fgetline $refnId`;
+	}
+	fclose $refnId;
+
+	string $namespace[];
+	for($i=0;$i<`size $rn`;$i++)
+	{
+		if($rn[$i]=="") continue;
+		$namespace[$i]=`substitute "RN" $rn[$i] ""`;
+
+		int $t = `tokenize $namespace[$i] ":" $buffer`;
+		string $ns = $buffer[$t-1];
+
+		string $obj[] = `ls ($namespace[$i]+":*") ($ns+":*")`;
+		if(`size $obj`!=0)
+			delete $obj;
+
+		if(`namespace -ex $namespace[$i]`)
+			namespace -f -rm $namespace[$i];
+		if(`namespace -ex $ns`)
+			namespace -f -rm $buffer[$t-1];
+
+		string $nrnf = `file -r -namespace $ns $rnf[$i]`;
+		
+		string $con[]= `ls ($ns+":*_masterCon")`;
+		if($parent[$i]!="w")
+			parent $con[0] $parent[$i];
+		string $master[] =`ls ($ns+":*_master")`;
+		if($mparent[$i]!="w")
+			parent $master[0] $mparent[$i];
+	}
+
+	//print $namespace;print $parent
+	//ls -type "reference"
+
+	string $attr_list[]= {"tx","ty","tz","rx","ry","rz","sx","sy","sz","v"};
+	int $fileId = `fopen $infofile "r"`;
+	$nextLine = `fgetline $fileId`;
+	while (size($nextLine)>0)
+	{
+		tokenize $nextLine "\n" $buffer;
+		$nextLine = $buffer[0];
+		tokenize $nextLine " " $buffer;
+		string $cmd="";
+		string $stringbuffer[];
+		int $to = `tokenize $buffer[0] ":" $stringbuffer`;
+		string $temp = $stringbuffer[$to-2]+":"+$stringbuffer[$to-1];
+		string	$mcon[]= `ls $temp ("*:"+$temp)`; 
+		for($j=0;$j<10;$j++)
+			$cmd += ("setAttr "+$mcon[0]+"."+$attr_list[$j]+" "+$buffer[$j+1]+";\n");
+		if(`objExists $mcon[0]`) eval($cmd);
+		$nextLine=`fgetline $fileId`;	
+		print $cmd;	
+	}
+	fclose $fileId;
+
+	int $layerId = `fopen $layerfile "r"`;
+	$nextLine = `fgetline $layerId`;
+	while (size($nextLine)>0)
+	{
+		tokenize $nextLine "\n" $buffer;
+		$nextLine = $buffer[0];
+		string $layerInfo[];
+		tokenize $buffer[0] " " $layerInfo;
+		if(`objExists $layerInfo[0]`)
+		{
+			$nextLine = `fgetline $layerId`;
+			continue;
+		}
+		createDisplayLayer -n $layerInfo[0];
+		string $cmd = ("setAttr "+$layerInfo[0]+".v "+$layerInfo[1]);
+		eval($cmd);
+		string $into[];
+		$i=0;
+		progressWindow -progress 0 -min 0 -max `size $layerInfo`;
+		for($j=2;$j<`size $layerInfo`;$j++)
+		{
+			string $stringbuffer[];
+			int $to = `tokenize $layerInfo[$j] ":" $stringbuffer`;
+			string $temp = $stringbuffer[$to-2]+":"+$stringbuffer[$to-1]; 
+			string $node[] = `ls $temp ("*:"+$temp)`;
+			if(`objExists $node[0]`)
+			{
+				$into[$i] = $node[0];
+				$i++;
+			}
+			progressWindow -e -min 0 -max `size $layerInfo` -pr $j;
+		}
+		progressWindow -ep ;
+		editDisplayLayerMembers $layerInfo[0] $into;
+		$nextLine = `fgetline $layerId`;
+	}
+	fclose $layerId;
+
+	confirmDialog -message "finish!" -button "ok";
+}
+global proc int OFNdesign(string $filename,string $filetype)
+{
+	$filename = toNativePath($filename)+"\\";
+	text -e -label $filename OFNtext1;
+	return 1;
+}
+global proc int importdesign(string $filename,string $filetype)
+{
+	$filename = toNativePath($filename)+"\\";
+	text -e -label $filename OFNtext2;
+	return 1;
+}

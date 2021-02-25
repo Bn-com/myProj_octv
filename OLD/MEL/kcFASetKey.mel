@@ -1,0 +1,206 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// Rotate about Z axis for elevation, then rotate about Y axis for azimuth
+//
+
+global proc float[] kcFARotate(string $object, float $elevation, float $azimuth)
+{
+	$elevation -= 90;	// to simulate joint which is already rotated 90 degree along Z
+
+	vector $Y = <<0, 1, 0>>;
+	vector $Z = <<0, 0, 1>>;
+
+	float $elevation = deg_to_rad($elevation);
+	float $azimuth = deg_to_rad($azimuth);
+
+	vector $pt = <<1, 0, 0>>;
+	vector $p1 = `rot $pt $Z $elevation`;
+	vector $xx = `rot $p1 $Y $azimuth`;
+
+	vector $pt = <<0, 1, 0>>;
+	vector $p1 = `rot $pt $Z $elevation`;
+	vector $yy = `rot $p1 $Y $azimuth`;
+
+	vector $pt = <<0, 0, 1>>;
+	vector $p1 = `rot $pt $Z $elevation`;
+	vector $zz = `rot $p1 $Y $azimuth`;
+
+	string $locator[] = `spaceLocator -name kcFAlocator`;
+
+//string $locator[];
+//$locator[0] = "curve1";
+
+	xform -matrix ($xx.x) ($xx.y) ($xx.z) 0 ($yy.x) ($yy.y) ($yy.z) 0 ($zz.x) ($zz.y) ($zz.z) 0 0 0 0 1 $locator[0];
+	
+	float $rot[3];
+
+	// reverse rotX with rotY for the joints
+
+	$rot[1] = `getAttr ($locator[0] + ".rx")`;
+	$rot[0] = `getAttr ($locator[0] + ".ry")`;
+	$rot[2] = `getAttr ($locator[0] + ".rz")`;
+
+	delete $locator[0];
+
+	return $rot;
+}
+
+global proc kcFurAttractorSetkey(string $item, int $startKey, int $endKey, float $elevation, float $azimuth)
+{
+	// set a key at the startKey position 
+
+	setKeyframe -time $startKey ($item + ".rx");
+	setKeyframe -time $startKey ($item + ".ry");
+	setKeyframe -time $startKey ($item + ".rz");
+
+	// compute rotation
+		
+	float $rot[] = kcFARotate($item, $elevation, $azimuth);
+
+//	currentTime -edit $endKey -update false;
+	
+//	setAttr ($item + ".rx") $rot[0];
+//	setAttr ($item + ".ry") $rot[1];
+//	setAttr ($item + ".rz") $rot[2];
+
+	// set a key at the endKey position 
+
+//	setKeyframe ($item + ".rx");
+//	setKeyframe ($item + ".ry");
+//	setKeyframe ($item + ".rz");
+
+	setKeyframe -time $endKey -value $rot[0] ($item + ".rx");
+	setKeyframe -time $endKey -value $rot[1] ($item + ".ry");
+	setKeyframe -time $endKey -value $rot[2] ($item + ".rz");
+}
+
+global proc kcFurAttractorApplyCB()
+{
+	float $elevation = `floatSliderGrp -q -value kcFAelevationCtrl`;
+	float $elevationRand = `floatSliderGrp -q -value kcFArandElevationCtrl`;
+
+	float $azimuth = `floatSliderGrp -q -value kcFAazimuthCtrl`;
+	float $azimuthRand = `floatSliderGrp -q -value kcFArandAzimuthCtrl`;
+
+	int $speed = `intSliderGrp -q -value kcFAspeedCtrl`;
+	
+	int $startFrame = `intSliderGrp -q -value kcFAstartFrameCtrl`;
+	int $endFrame = `intSliderGrp -q -value kcFAendFrameCtrl`;
+
+	string $selection[] = `ls -selection`;
+
+	if (`size $selection` > 0)
+	{
+		string $origSelection[] = $selection;
+
+		select -hi;
+		$selection = `ls -selection "attractorBase"`;
+
+		// restore selection
+
+		select $origSelection;
+	}
+	else
+		$selection = `ls -long "attractorBase"`;
+
+	float $animStart = `playbackOptions -q -minTime`;
+	float $animEnd = `playbackOptions -q -maxTime`;
+
+	for ($item in $selection)	
+	{
+		cutKey -time ($animStart + ":" + $animEnd) -attribute rx $item;
+		cutKey -time ($animStart + ":" + $animEnd) -attribute ry $item;
+		cutKey -time ($animStart + ":" + $animEnd) -attribute rz $item;
+
+		setAttr ($item + ".rx") 0;
+		setAttr ($item + ".ry") 0;
+		setAttr ($item + ".rz") 0;
+
+		float $rand1 = `rand (-$elevationRand) $elevationRand`;
+		float $rand2 = `rand (-$azimuthRand) $azimuthRand`;
+
+		float $rand3;
+
+		if (($speed - 5) > 1)
+			$rand3 = `rand ($speed - 5) $speed`;
+		else
+			$rand3 = `rand 1 $speed`;
+
+		int $startKey = `rand $startFrame ($endFrame - $rand3)`;
+		int $endKey = $startKey + $rand3;
+
+//print($startKey + "\n");
+//print($endKey + "\n");
+
+		kcFurAttractorSetkey($item, $startKey, $endKey, $elevation + $rand1, $azimuth + $rand2);
+	}
+}
+
+global proc kcFASetKey()
+{
+	if (`window -q -exists kcFurAttractorWnd`)
+		deleteUI -window kcFurAttractorWnd;
+
+	string $window = `window -title "Set Fur Attractor Keys" kcFurAttractorWnd`;
+		string $formLayout = `formLayout`;
+
+			string $kcFAelevationCtrl = `floatSliderGrp -adjustableColumn 3 -label "Elevation" -field true -minValue -180 -maxValue 180 -value -70 kcFAelevationCtrl`;
+			string $kcFArandElevationCtrl = `floatSliderGrp -columnWidth 1 50 -adjustableColumn 3 -label "Rand" -field true -minValue 0 -maxValue 90 -value 10 kcFArandElevationCtrl`;
+
+			string $kcFAazimuthCtrl = `floatSliderGrp -adjustableColumn 3 -label "Azimuth" -field true -minValue -180 -maxValue 180 -value 0 kcFAazimuthCtrl`;
+			string $kcFArandAzimthCtrl = `floatSliderGrp -columnWidth 1 50 -adjustableColumn 3 -label "Rand" -field true -minValue 0 -maxValue 90 -value 0 kcFArandAzimuthCtrl`;
+
+			string $kcFAspeedCtrl = `intSliderGrp -adjustableColumn 3 -label "Key Range" -field true -minValue 1 -maxValue 300 -value 24 kcFAspeedCtrl`;
+
+			string $kcFAstartFrameCtrl = `intSliderGrp -adjustableColumn 3 -label "Start Frame" -field true -value 0 -fieldMinValue -1000 -fieldMaxValue 10000 kcFAstartFrameCtrl`;
+			string $kcFAendFrameCtrl = `intSliderGrp -adjustableColumn 3 -label "End Frame" -field true -value 100 -fieldMinValue -1000 -fieldMaxValue 10000 kcFAendFrameCtrl`;
+
+			string $button = `button -label "Apply" -command kcFurAttractorApplyCB`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$kcFAelevationCtrl	"top"	5
+			-attachForm		$kcFAelevationCtrl	"left"	5
+			-attachPosition	$kcFAelevationCtrl	"right"	5	60
+
+			-attachForm		$kcFArandElevationCtrl	"top"	5
+			-attachControl	$kcFArandElevationCtrl	"left"	5	$kcFAelevationCtrl
+			-attachForm		$kcFArandElevationCtrl	"right"	5
+
+			-attachControl	$kcFAazimuthCtrl	"top"	5	$kcFAelevationCtrl
+			-attachForm		$kcFAazimuthCtrl	"left"	5
+			-attachPosition	$kcFAazimuthCtrl	"right"	5	60
+
+			-attachControl	$kcFArandAzimthCtrl	"top"	5	$kcFAelevationCtrl
+			-attachControl	$kcFArandAzimthCtrl	"left"	5	$kcFAazimuthCtrl
+			-attachForm		$kcFArandAzimthCtrl	"right"	5
+
+			-attachControl	$kcFAspeedCtrl	"top"	5	$kcFAazimuthCtrl
+			-attachForm		$kcFAspeedCtrl	"left"	5
+			-attachForm		$kcFAspeedCtrl	"right"	5
+
+			-attachControl	$kcFAstartFrameCtrl	"top"	5	$kcFAspeedCtrl
+			-attachForm		$kcFAstartFrameCtrl	"left"	5
+			-attachForm		$kcFAstartFrameCtrl	"right"	5
+
+			-attachControl	$kcFAendFrameCtrl	"top"		5	$kcFAstartFrameCtrl
+			-attachForm		$kcFAendFrameCtrl	"left"		5
+			-attachForm		$kcFAendFrameCtrl	"right"		5
+
+			-attachForm		$button	"bottom"	5	
+			-attachForm		$button	"left"		5
+			-attachForm		$button	"right"		5
+		$formLayout;
+
+	showWindow $window;
+}

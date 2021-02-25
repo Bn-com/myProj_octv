@@ -1,0 +1,425 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//make sure that in the new scene there is no lights with the same names as the imported lights.
+//the path name can not include character "."
+
+global proc zjTransferLights()
+{
+	int $i;
+	string $child[];
+
+	if (`window -q -exists transLightWin`)
+		return;
+
+	window -title "Transfer Lights" -resizeToFitChildren true transLightWin;
+
+		columnLayout -adjustableColumn true;
+
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Transfer Lights..." -command "zjHelpCallback zjTransferLights";
+				setParent ..;
+			frameLayout -label "Export Light" -borderStyle "etchedOut";
+			
+				$i = 0;
+
+				string $formLayout = `formLayout`;
+ 					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Export to:" -editable false -text "" lighttext1`;
+					$child[$i++] = `button -label "Export" -w 80 -command ("exLight_fileBrowser " + $child[0])`;
+					$child[$i++] = `button -label "Export List" -command ("export_LightList " + $child[0])`;
+					$child[$i++] = `button -label "Export Light" -command ("export_Light")`;
+				setParent ..;
+
+				formLayout -edit
+
+					-attachForm		$child[1]	"top"		10
+					-attachForm		$child[1]	"right"		5
+
+					-attachForm		$child[0]	"top"		10
+					-attachForm		$child[0]	"left"		0
+					-attachControl		$child[0]	"right"		5	$child[1]
+
+					-attachControl		$child[2]	"top"		10	$child[0]
+					-attachForm		$child[2]	"left"		5
+					-attachPosition		$child[2]	"right"		0	50
+
+					-attachControl		$child[3]	"top"		10	$child[0]
+					-attachControl		$child[3]	"left"		5	$child[2]
+					-attachPosition		$child[3]	"right"		0	100
+				$formLayout;
+
+			setParent ..;
+		setParent ..;
+			frameLayout -label "Import Light" -borderStyle "etchedOut";
+			
+				$i = 0;
+
+				string $formLayout = `formLayout`;
+ 					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Mapping File:" -editable false -text "" lighttext2`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("exLight_fileBrowser1 " + $child[0])`;
+ 					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Light Scene:" -editable false -text "" lighttext3`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("exLight_fileBrowser2 " + $child[2])`;
+					$child[$i++] = `button -label "Import" -command ("apply_LightList " + $child[0] + " " + $child[2])`;
+				setParent ..;
+
+				formLayout -edit
+
+					-attachForm		$child[1]	"top"		10
+					-attachForm		$child[1]	"right"		5
+
+					-attachForm		$child[0]	"top"		10
+					-attachForm		$child[0]	"left"		0
+					-attachControl		$child[0]	"right"		5	$child[1]
+
+
+					-attachControl		$child[3]	"top"		10	$child[1]
+					-attachForm		$child[3]	"right"		5
+
+					-attachControl		$child[2]	"top"		10	$child[1]
+					-attachForm		$child[2]	"left"		0
+					-attachControl		$child[2]	"right"		5	$child[3]
+
+					-attachControl		$child[4]	"top"		10	$child[2]
+					-attachForm		$child[4]	"left"		5
+					-attachForm		$child[4]	"right"		5
+
+				$formLayout;
+
+			setParent ..;
+		setParent ..;
+
+
+	showWindow transLightWin;
+}
+
+//process the browse thing
+global proc int light_browProc(string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename lighttext1;
+
+	return true;
+}
+global proc exLight_fileBrowser(string $control)
+{
+	fileBrowserDialog -mode 1 -fileCommand light_browProc -fileType "mel" -actionName "Export" -operationMode "Reference";
+}
+
+global proc int light_browProc1(string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename lighttext2;
+
+	return true;
+}
+global proc exLight_fileBrowser1(string $control)
+{
+	fileBrowserDialog -mode 0  -fileCommand light_browProc1 -fileType "mel" -actionName "Browse" -operationMode "Reference";
+}
+
+global proc int light_browProc2(string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename lighttext3;
+
+	return true;
+}
+global proc exLight_fileBrowser2(string $control)
+{
+	fileBrowserDialog -mode 0  -fileCommand light_browProc2 -fileType "mayaBinary" -actionName "Browse" -operationMode "Reference";
+}
+
+//export light to a scene
+global proc export_Light()
+{
+	string $lights[] = `ls -lights`;
+	select -r $lights;
+	ExportSelection;
+}
+
+//export light list to a mel, export light parent list to a txt file
+global proc export_LightList(string $filenameCtrl)
+{
+	string $filename = `textFieldGrp -q -text $filenameCtrl`;
+	if (size($filename)>0)
+	{
+		//output to a file
+		$fileID = `fopen $filename w`;
+
+		if ($fileID == 0)
+		{
+			// cannot open the file
+
+			error("Fail to open " + $filename);
+		}
+
+		float $lightcurrentframe = `currentTime -q`;
+		
+		string $meshes[] = `ls -l -geometry -noIntermediate`;
+		string $ALLlightshapes[] = `ls -lights`;
+
+		fprint $fileID ($lightcurrentframe + "\n");
+		for ($j = 0; $j < size($meshes); $j++)		
+		{
+			string $linklights[] = `lightlink -q -hierarchy false -sets false -transforms false -shapes true -object $meshes[$j]`;
+			string $breaklights[] = stringArrayRemove($linklights,$ALLlightshapes);
+			string $part = "";
+			for ($i = 0; $i < size($breaklights); $i++)
+			{
+				$part += $breaklights[$i]+ " ";
+			}
+			if (`strip($part)` != "")
+				fprint $fileID ($meshes[$j] + "#" + $part + "\n");
+		}
+
+		fclose $fileID;
+		
+		$parent = $filename+".txt";
+		$fileID = `fopen $parent w`;
+
+		string $lights[] = `ls -l -lights`;
+		string $lighttrans[];
+
+		for ($j = 0; $j < size($lights); $j++)		
+		{
+			string $lts[] = `listRelatives -path -parent $lights[$j]`;
+			$lighttrans[$j] = $lts[0];
+		}
+		$lighttrans = stringArrayRemoveDuplicates($lighttrans);
+		for ($lt in $lighttrans)
+		{
+			string $light[] = `listRelatives -fullPath -parent -type "transform" $lt`;
+			if (size($light)>0)
+				fprint $fileID ($light[0] + " " + $lt + "\n");
+		}
+		fclose $fileID;
+		print "Output Light List";
+	}
+}
+
+//get namespace of imported light
+proc string getnamespace()
+{
+	string $namesp;
+	string $imobj[] = `ls -lights "ImLight*:*"`;
+	string $buf[];
+	tokenize $imobj[0] ":" $buf;
+	$namesp = $buf[0];
+	return $namesp;
+		
+}
+
+//remove namespace
+proc string mySubstitute(string $source, string $old, string $new)
+{
+
+	string $buf[];
+	
+	if (`tokenize $source "|" $buf`)
+	{
+		return ` substitute $old $buf[size($buf)-1]  ""`;
+	}
+	return "";
+
+}
+proc docleannamespace()
+{
+	string $namesp[] = `ls -long "ImLight*:*"`;
+	for ($j=0;$j<size($namesp);$j++)
+	{
+		string $buff[];
+		tokenize $namesp[$j] "|" $buff;
+		string $obj = $buff[size($buff) - 1];
+
+		string $buf[];
+		tokenize $obj ":" $buf;
+		string $sp = $buf[0]+":";
+
+		string $new = mySubstitute($obj,$sp,"");
+		if (`objExists($namesp[$j])`)
+			rename $namesp[$j] $new;
+	}
+
+}
+
+//import light and relationship
+global proc apply_LightList(string $filenameCtrl1, string $filenameCtrl2)
+{
+	/*string $confresult = `confirmDialog -title "Confirm" -message "Please make sure that imported light name will not collide with current scene's light name."
+		-button "Continue" -button "Cancel" -defaultButton "Continue"
+		-cancelButton "Cancel" -dismissString "Cancel"`;*/
+	//if ($confresult == "Continue")
+	//{
+		string $filename = `textFieldGrp -q -text $filenameCtrl1`;
+		string $scene = `textFieldGrp -q -text $filenameCtrl2`;
+		if (size($filename)>0&&size($scene)>0)
+		{
+			//string $oldlights[] = `ls -lights`;
+
+			file -import -namespace "ImLight" -renameAll true -groupReference $scene;
+
+			string $prefix = getnamespace()+":";
+
+			$fileID = `fopen $filename r`;
+
+			if ($fileID == 0)
+			{
+				// cannot open the file
+
+				error("Fail to open " + $filename);
+				return;
+			}
+
+			/*string $allObjs[] = `ls -geometry -noIntermediate`;
+			string $imLights[] = `ls -lights "ImLight*:*"`;
+			//string $imLights[] = stringArrayRemove($oldlights,$lights);
+
+			for ($o in $allObjs)
+			{
+				for ($l in $imLights)
+					lightlink -break -light $l -object $o;
+			}*/
+
+			string $buffer = `fgetline $fileID`;
+			$buffer = substituteAllString($buffer, "\n", "");
+
+			float $lightcurrentframe = $buffer;	//current frame of scene with saved light 
+			currentTime $lightcurrentframe;
+		
+			string $buffer = `fgetline $fileID`;
+			$buffer = substituteAllString($buffer, "\n", "");
+			while (size($buffer) > 0) 
+			{
+				string $buf[];
+
+				if (`tokenize $buffer "#" $buf` == 2)
+				{
+					string $Lt = $buf[1];
+					string $partbuf[];
+					tokenize $Lt " " $partbuf;
+					/*string $lbuf[];
+					int $lnum = `tokenize $Lt "|" $lbuf`;
+					$light = $prefix + $lbuf[$lnum-1];
+
+					if (!`objExists $light`)
+					{
+						if ($light != "")
+							warning($light + " does not exist");
+
+						$buffer = `fgetline $fileID`;
+						$buffer = substituteAllString($buffer, "\n", "");
+
+						continue;
+					}*/
+					string $Obj = $buf[0];
+					string $sbuf[];
+					tokenize $Obj "|" $sbuf;
+					$shape = $sbuf[size($sbuf) - 1];
+					
+					string $matchmesh[] = `ls -long -geometry -noIntermediate $shape`;
+					if (size($matchmesh)>0)
+					{
+						for ($curmesh in $matchmesh)
+						{	
+							for ($k =0; $k<size($partbuf); $k++)
+							{
+								string $lbuffer[];
+								tokenize $partbuf[$k] "|" $lbuffer;
+								$drbuf = $lbuffer[size($lbuffer) - 1];
+
+								string $matchlight[] = `ls -long -lights ($prefix+$drbuf+"*")`;
+					
+								//here it should be a maya bug.when I use "ls $light",note $light include a namespace, an error appears.
+								for ($thelight in $matchlight)
+									lightlink -break -object $curmesh -light $thelight;
+							}
+						}
+					}
+					else 
+					{
+						warning($shape + " does not exist.");
+
+						$buffer = `fgetline $fileID`;
+						$buffer = substituteAllString($buffer, "\n", "");
+
+						continue;
+					}
+
+					
+				}
+				
+				$buffer = `fgetline $fileID`;
+				$buffer = substituteAllString($buffer, "\n", "");
+			}
+
+			fclose $fileID;
+
+			$partxt = $filename+".txt";
+
+			$pfileID = `fopen $partxt r`;
+
+			if ($pfileID == 0)
+			{
+				// cannot open the file
+
+				error("Fail to open " + $partxt);
+				return;
+			}
+			string $buffer = `fgetline $pfileID`;
+			$buffer = substituteAllString($buffer, "\n", "");
+
+			while (size($buffer) > 0) 
+			{
+				string $buf[];
+
+				if (`tokenize $buffer " " $buf` == 2)
+				{
+					string $par = $buf[0];
+					if (!`objExists $par`)
+					{
+						warning($par + " does not exist.");
+
+						$buffer = `fgetline $pfileID`;
+						$buffer = substituteAllString($buffer, "\n", "");
+
+						continue;
+					}
+					string $Lt = $buf[1];
+					string $lbuf[];
+					int $lnum = `tokenize $Lt "|" $lbuf`;
+					$light = $prefix + $lbuf[$lnum-1];
+					if (!`objExists $light`)
+					{
+						//warning($light + " does not exist.");
+
+						$buffer = `fgetline $pfileID`;
+						$buffer = substituteAllString($buffer, "\n", "");
+
+						continue;
+					}
+					string $matchlight[] = `ls -long -tr -lights ($light + "*")`;
+					//here it should be a maya bug.when I use "ls $light",note $light include a namespace, an error appears.
+					string $thelight = $matchlight[0];
+					parent $thelight $par;
+					
+				}
+				
+				$buffer = `fgetline $pfileID`;
+				$buffer = substituteAllString($buffer, "\n", "");
+			}
+
+			fclose $pfileID;
+
+			print "Import Light.";
+		}
+		docleannamespace();
+		docleannamespace();
+	//}
+
+}
+

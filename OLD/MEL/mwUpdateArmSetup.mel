@@ -1,0 +1,79 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwUpdateArmSetup()
+{
+	$tmp = `ls -sl`;
+	string $pts[] = `filterExpand -sm 31 $tmp`;
+
+	string $master[] = `ls "*_MASTER"`;
+	string $name_parts[];
+	tokenize($master[0], "_", $name_parts);
+	string $char = $name_parts[0];
+	print ("UPDATING ARM FOR: "+$char+"\n");
+
+	tokenize($pts[0], ".", $name_parts);
+	string $shape[] = `listRelatives -type mesh $name_parts[0]`;
+	string $history[] = `listHistory -il 1 $shape[0]`;
+	int $hSize = `size $history`;
+	string $skinCluster;
+	for($h=0;$h<$hSize;$h++)
+	{
+		int $j = $hSize-$h;
+		string $type[] = `ls -st $history[$j]`;
+		if(`strcmp "skinCluster" $type[1]`==0)
+		{
+			$skinCluster = $history[$j];
+			break;
+		}
+	}
+	print ("SKINCLUSTER: "+$skinCluster+"\n");
+
+	//LOCK WEIGHTS
+	setAttr ($skinCluster+".normalizeWeights") 0;
+
+	//ADD INFLUENCE
+	skinCluster -e -ai ($char+"_forearm_l1") -lockWeights 1 -weight 0 $skinCluster;
+
+	//GET WEIGHT VALUE OF OLD JOINT
+	string $side = "r";
+	float $p[3] = `xform -q -ws -translation $pts[0]`;
+	if($p[0]>0)
+	{
+		$side = "l";
+		print "DOING LEFT SIDE\n";
+	}
+	else
+	{
+		print "DOING RIGHT SIDE\n";
+	}
+	int $size = `size $pts`;
+	int $i = 0;
+	print "PLEASE WAIT\n";
+	waitCursor -state on;
+	for($pt in $pts)
+	{
+		print ("SETTING PT: "+$i+" OF "+$size+"\n");
+	    	float $val = `skinPercent -t ($char+"_forearm_"+$side) -q $skinCluster $pt`;
+
+    		//SET WEIGHT FOR NEW JOINT
+    		skinPercent -tv ($char+"_forearm_"+$side+"1") $val $skinCluster $pt;
+    		skinPercent -tv ($char+"_forearm_"+$side) 0.0 $skinCluster $pt;
+		$i++;
+	}
+
+	//REMOVE OLD JOINT FROM SKINCLUSTER
+	skinCluster -e -ri ($char+"_forearm_"+$side) $skinCluster;
+	setAttr ($skinCluster+".normalizeWeights") 1;
+	skinCluster -e -lockWeights 0 -influence ($char+"_forearm_"+$side+"1") $skinCluster;
+
+	waitCursor -state off;
+	print ("ALL FINISHED UPDATING ARM SETUP FOR: "+$char+"\n");
+ }

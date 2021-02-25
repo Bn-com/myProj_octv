@@ -1,0 +1,516 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 李锐
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:    lr_dailie_convert.mel
+//     
+//   Description:    Convert to dailies image format  UVYV(4:2:2)
+//                                  
+//    Created By:    Larry
+//
+//  Last Updated:    2002.4.16
+//     
+//////////////////////////////////////////////////////////////
+
+
+//    History:
+//              2002.4.28    Add function to convert to low-res jpeg file.
+//              2002.5.31    Add function to create slate.txt
+//              2002.9.6     Update UI
+//
+//
+//
+//
+
+global proc lr_dailie_convert()
+{
+       global string $exec;
+       $exec  = `getenv "DEV_PATH"` + "/Others/ImageMagick-5.4.6-Q16/convert.exe ";
+	
+	// Create The UI 
+	 if(`window -ex DailieConverterUI `) deleteUI DailieConverterUI;
+	 window -title "Dailies File Convert" -sizeable 1 -widthHeight 420 470 DailieConverterUI;
+	         menuBarLayout mubar;
+                       menu -p mubar -label "Help";
+                              menuItem -label "Help on Daily Convert Tool..." -command "zjHelpCallback lr_dailie_convert";
+                 setParent ..;
+                
+	        columnLayout;
+	            textFieldButtonGrp -label "Start Frame:" -text "" 
+				       -buttonLabel "Browse.." -editable 0
+				       -cw3 100 250 80 -buttonCommand onstartBrowse 
+				       StartframeCTL;
+	       	       
+		    intFieldGrp  -label "End Frame:" 
+		                 -numberOfFields 1
+		                 -value1 100
+		                 -cw2 100 50
+		                 endIntCTL;	  
+				          
+		    textFieldButtonGrp -label "Target Path:" -text "E:/" 
+				       -buttonLabel "    Set..    " -editable 0
+				       -cw3 100 250 80 -buttonCommand ontargetset 
+				       TargetFolderCTL;
+		    textFieldGrp -label "Folder Name" 
+		                 -text ""
+		                 -cw2 100 100
+		                  targetfoldernameCTL;
+
+    	            checkBoxGrp -numberOfCheckBoxes  2
+    	                        -cw3 100 100 200
+    	                        -label "Options:"
+    	                        -labelArray2 "Low-res jpeg" "uyvy(For DSR-E)"
+    	                        -value1 1
+    	                        -value2 1
+    	                        -vis 0
+    	                        optionCTL;
+    	            optionMenu -label "          Resolution:" ResCTL;
+    	                  menuItem -label "1920x1080";
+    	                  menuItem -label "720x405";
+    	                  menuItem -label "Other";
+ 
+		    separator -style "in" -h 10 -w 400;	
+		    text  -label "      1. 支持文件格式：jpg tga iff";
+		    text  -label "      2. 把转换后的jpg和uyvy文件都放到Dailies目录";
+		    text  -label "      3. 文件名及目录名不要包含空格或特殊字符";
+		    text  -label "      4. Slate全部要填上，不能留空白. 日期格式为:YYYY-MM-DD";
+		    
+		    separator -style "in" -h 10 -w 400;	
+		    
+	    
+		    rowColumnLayout -numberOfColumns 4 -cw 1 180 -cw 2 20 -cw 3 180 -cw 4 20;
+                         //  first row 
+                          textFieldGrp -label "Date:" 
+		                   -text "2002-"
+		                   -cw2 100 80
+		                   SlateCTL1;
+		          text -label "";
+                          textFieldGrp -label "Due:" 
+		                   -text "2002-"
+		                   -cw2 100 80
+		                   SlateCTL2;
+		          text -label "";
+		        		                   
+		        // 2nd row
+                          textFieldGrp -label "Department:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   -ed 0
+		                 SlateCTL3;
+		          button -label "...";
+		              popupMenu -button 1 DeppopCTL;
+                          textFieldGrp -label "Artist(Staff ID):" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL4;
+		          text -label "";          
+                          
+                          // 3rd row 
+                           textFieldGrp -label "Scene:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   -ed 0
+		                   SlateCTL5;
+		            button -label "...";
+		                popupMenu -button 1 ScenepopCTL;
+                            textFieldGrp -label "Shot:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   -ed 0
+		                   SlateCTL6;
+		            button -label "...";
+		                popupMenu -button 1 ShotpopCTL;
+		          
+		          //  4th row
+		               	
+                          textFieldGrp -label "Version:" 
+		                   -text ""
+		                   -cw2 100 80
+		                  
+		                   SlateCTL7;
+                          text -label "";
+                          textFieldGrp -label "With Story Camera:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   -ed 0
+		                   SlateCTL8;
+		            button -label "...";    
+		                popupMenu -button 1;
+		                   menuItem -label "YES" -c "textFieldGrp -e -text \"YES\" SlateCTL8";
+		                   menuItem -label "NO"  -c "textFieldGrp -e -text \"NO\" SlateCTL8";
+		                     			                 	                  
+                    setParent ..;
+                    
+                    text -label "Write Comment here";
+                    scrollField -wordWrap true -w 400 -h 60 -text "" SlateCTL9;
+            
+                    separator -style "in" -h 20 -w 400;
+                 //   setParent ..;
+   
+		    text -label "Progress .." convertmsg1CTL;
+		    progressBar -maxValue 500 -width 400 -h 10 convertprogressCTL;		    			           
+		    
+		    separator -style "none" -h 20 -w 400;
+		    	
+		    rowLayout -numberOfColumns 4 -cw4 100 150 150 20;
+		        text -label "";
+		        button -w 80 -label "     Convert" -c onconvert;
+		        button -w 80 -label "      Close" -c ("deleteUI DailieConverterUI");
+		        text -label ""; 
+		   setParent ..;
+		   			           
+	        setParent ..;
+	 showWindow;	
+	 
+	 DailyinitUI(); 	
+}
+
+global proc DailyinitUI()
+{
+    // Department List:    DeppopCTL
+    
+        menuItem -p DeppopCTL -label "3D Effect"           -c "textFieldGrp -e -text \"3D Effect\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Animation"           -c "textFieldGrp -e -text \"Animation\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Compositing"         -c "textFieldGrp -e -text \"Compositing\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Setup"               -c "textFieldGrp -e -text \"Setup\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Character"           -c "textFieldGrp -e -text \"Character\" SlateCTL3";
+        menuItem -p DeppopCTL -label "SceneSet&Prop"       -c "textFieldGrp -e -text \"SceneSet&Prop\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Layout"              -c "textFieldGrp -e -text \"Layout\" SlateCTL3";
+        menuItem -p DeppopCTL -label "Texture&Lighting"    -c "textFieldGrp -e -text \"Texture&Lighting\" SlateCTL3";
+        menuItem -p DeppopCTL -label "R&D"                 -c "textFieldGrp -e -text \"R&D\" SlateCTL3";
+        
+    // Scene List:     ScenepopCTL
+     
+        menuItem -p ScenepopCTL -label "none" -c "textFieldGrp -e -text \"none\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "004"  -c "textFieldGrp -e -text \"004\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "006"  -c "textFieldGrp -e -text \"006\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "030"  -c "textFieldGrp -e -text \"030\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "033"  -c "textFieldGrp -e -text \"033\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "067D" -c "textFieldGrp -e -text \"067D\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "052"  -c "textFieldGrp -e -text \"052\" SlateCTL5";
+        menuItem -p ScenepopCTL -label "054"  -c "textFieldGrp -e -text \"054\" SlateCTL5";
+    
+   //  Shot List:    ShotpopCTL
+   
+        int $i = 1;
+        string $cmd;
+        menuItem -p ShotpopCTL -label "none" -c "textFieldGrp -e -text \"none\" SlateCTL6";
+        for($i; $i <= 25; $i ++)
+        {
+           if($i < 10)
+           {
+           	$cmd = "textFieldGrp -e -text \"00"+ $i + "\" SlateCTL6";
+                menuItem -p ShotpopCTL -label ("00" + $i) -c $cmd;
+           }else{
+                $cmd = "textFieldGrp -e -text \"0"+ $i + "\" SlateCTL6";
+                menuItem -p ShotpopCTL -label ("0" + $i) -c $cmd;
+           }
+        }     
+}
+
+global proc onstartBrowse()
+{
+    string $filename = `fileDialog -directoryMask "*"`;
+	if($filename != "")
+	{
+             textFieldButtonGrp -e -text $filename StartframeCTL;
+	}
+}
+
+global proc ontargetset()
+{    
+     string $oldworkdir = `workspace -q -dir`;
+     string $dailyDir = "e://";
+     workspace -dir $dailyDir; 
+     fileBrowserDialog -mode 4 -fc settargetpath -an "Select Target Path: ";
+      	
+//set back the workspace dir	
+     workspace -dir $oldworkdir; 	
+}
+
+global proc settargetpath(string $filename, string $fileType)
+{
+    if($filename !="")
+    {
+        textFieldButtonGrp -e -text $filename TargetFolderCTL;
+    }
+}
+
+global proc onconvert()
+{
+    
+
+    string $startname = `textFieldButtonGrp -q -text StartframeCTL`;
+    string $targetpath = `textFieldButtonGrp -q -text TargetFolderCTL`;
+    string $foldername = `  textFieldGrp -q -text targetfoldernameCTL`; 
+    
+    if($startname == "" || $targetpath == "" || $foldername =="")
+    {
+        warning "Make sure to select the start frame,target path or folder name!";
+        return; 
+    }
+    
+    
+    string $namebuf[];
+    string $partbuf[];
+    int $lh = `tokenize $startname "/" $namebuf`;
+    int $sh = `tokenize $namebuf[$lh - 1] "." $partbuf`;   
+    if($sh != 3 || size($partbuf[1]) != 4)
+    {
+    	warning "Wrong frame padding or type";
+    	return;
+    }
+
+    string $inpath = `substring $startname 1 (size($startname) - size($namebuf[$lh -1]))`;
+    string $outpath = $targetpath + "/" + $foldername + "/";
+       
+    string $outjpeg = $outpath + "/jpeg/";
+    string $outuyvy = $outpath + "/uyvy/";
+    
+    int $ef = `intFieldGrp -q -value1 endIntCTL`;
+    int $sf = $partbuf[1];
+    string $ext = $partbuf[2];
+
+    if($sf > $ef)
+    {
+    	warning "Start frame number large than End frame";
+    	return;
+    }
+
+    int $i;
+    int $state = 1;
+    string $inname;
+    string $uyvyname;
+    string $jpegname;
+    
+//  Create target folder if needed
+    
+    if(!`filetest -d $outjpeg`)
+    {
+        if(!`sysFile -makeDir $outjpeg`)
+    	{
+    	    error ("Can not create target out put folder " + $outjpeg);
+    	    return;
+    	}
+    }
+    if(!`filetest -d $outuyvy`)
+    {
+        if(!`sysFile -makeDir $outuyvy`)
+    	{
+    	    error ("Can not create target out put folder " + $outuyvy);
+    	    return;
+    	}
+    }
+
+// Create Slate
+   string $slatefile = $outpath + "/slate.txt";
+   if(!CCreate_slate($slatefile)) return;    
+
+
+////   
+    for($i = $sf; $i < $ef +1; $i ++)
+    {
+    	 if($i < 10)
+    	 {
+    	    $inname =   $partbuf[0] + ".000" + $i + "." + $partbuf[2];
+    	    $uyvyname =  $partbuf[0] + ".000" + $i + ".uyvy";
+    	    $jpegname =  $partbuf[0] + ".000" + $i + ".jpg";     	    
+    	 }else if($i < 100)
+    	 {
+    	    $inname =  $partbuf[0] + ".00" + $i + "." + $partbuf[2];
+    	    $uyvyname =  $partbuf[0] + ".00" + $i + ".uyvy";   
+    	    $jpegname =  $partbuf[0] + ".00" + $i + ".jpg";    	 	
+    	 }else if($i < 1000)
+    	 {
+    	    $inname =  $partbuf[0] + ".0" + $i + "." + $partbuf[2];
+    	    $uyvyname =  $partbuf[0] + ".0" + $i + ".uyvy"; 
+    	    $jpegname =  $partbuf[0] + ".0" + $i + ".jpg";      	 	
+    	 }
+    	 
+         int $steps = 500*($i - $sf)/(($ef-$sf) + 1);
+    	 progressBar -e -progress $steps convertprogressCTL;
+    	 text -e -label ("Progress ..      Converting " + $inname) convertmsg1CTL;
+    	 
+    	 $inname = $inpath + $inname;
+    	 $uyvyname = $outuyvy + $uyvyname;
+    	 $jpegname = $outjpeg + $jpegname;
+    	
+   	 
+    	 if($ext == "iff") 
+    	 {
+    	   if(!convert_JPEG($inname,$jpegname,$ext)) $state =0;
+    	   
+    	   if(`checkBoxGrp -q -value2 optionCTL`)
+    	   {
+    	       if(!convert_UYVY($jpegname,$uyvyname)) $state =0; 
+    	   }
+    	 }else{
+    	 
+    	   if(`checkBoxGrp -q -value2 optionCTL`)
+    	   {
+    	   	if(!convert_UYVY($inname,$uyvyname)) $state =0;
+    	   }
+	   
+    	   if(`checkBoxGrp -q -value1 optionCTL`)
+    	   {
+    	   	if(!convert_JPEG($inname,$jpegname,$ext)) $state =0; 
+    	   }
+    	                    	   
+    	 } 	
+             	
+    }
+
+    progressBar -e -progress 0 convertprogressCTL;
+    
+    if($state == 1)
+    {
+    	text -e -label "Progress ..      Finished!" convertmsg1CTL;
+    }else{
+        text -e -label "Progress ..      Finished with error! Plz check script editor for details" convertmsg1CTL;
+    }
+}
+
+
+global proc int convert_JPEG(string $input,string $output,string $ext)
+{
+   chdir "c:/";
+
+   string $cmd = "imgcvt -f " + $ext + " -t jpg \"" + $input + "\" \"" + $output + "\"";
+ 
+   string $result = `system($cmd)`;
+   if($result != "")
+   {
+      warning ("Error convert jpg file " + $output);
+      return 0;
+   }
+  
+   return 1;	
+}
+
+
+global proc int convert_UYVY(string $input,string $output)
+{
+   chdir "c:/";
+   global string $exec;
+
+   $cmd = $exec + "\"" + $input + "\" \"" + $output + "\"";
+   $cmd = substituteAllString($cmd, "/", "\\");
+   
+   if(!`filetest -f $input`)
+   {
+     warning ("Can not find file " + $input);
+     return 0;
+   }
+   string $result = `system($cmd)`;
+   if($result != "")
+   {
+      warning ("Can not convert" + $input); 	
+      return 0;
+   }
+   return 1;
+}
+
+
+global proc int CCreate_slate(string $slatename)
+{
+    if(!slateCheck1())
+    {
+        confirmDialog -title "Warning" -message "Slate Not Ready!" -button "Close";
+        return 0;
+    }	
+
+    string $slate = getSlate1();
+    $fileID = `fopen $slatename "w"`;
+    fprint $fileID $slate;
+    fclose $fileID;
+    
+    return 1;   	
+	
+}
+
+
+global proc int slateCheck1()
+{
+    int $result = 1;
+    
+    int $i = 1;
+    for($i; $i <= 9 ; $i ++)
+    {
+    	
+    	string $content;
+    	if($i <=8)
+    	{
+    	    $content =  `textFieldGrp -q -text ("SlateCTL" + $i)`;
+    	}else{
+    	    $content =  `scrollField -q -text SlateCTL9`;
+    	}
+    	if(size($content) == 0) 
+    	{	
+    	    return 0;
+    	}
+    }
+    
+    string $version = `textFieldGrp -q -text SlateCTL7`;
+    if(!`gmatch $version "[0-9][0-9][0-9]"`)
+    {
+        confirmDialog -title "Warning" -message "Version Number Error! (eg: 001)" -button "Close";
+        return 0;
+    }     
+     
+     
+ // Date format check
+ 
+    string $date1 = `textFieldGrp -q -text SlateCTL1`;
+    string $date2 = `textFieldGrp -q -text SlateCTL2`;
+    
+    string $buf1[];
+    string $buf2[];
+    int $flag = 1;
+    
+        
+    if((`tokenize $date1 "-" $buf1` != 3) || (`tokenize $date2 "-" $buf2` != 3))  $flag = 0;
+    
+    if(!`gmatch $buf1[0] "[0-9][0-9][0-9][0-9]"`) $flag = 0;
+    if(!`gmatch $buf1[1] "[0-9][0-9]"`)  $flag = 0;
+    if(!`gmatch $buf1[2] "[0-9][0-9]"`)   $flag = 0;
+    
+    if(!`gmatch $buf2[0] "[0-9][0-9][0-9][0-9]"`) $flag = 0;
+    if(!`gmatch $buf2[1] "[0-9][0-9]"`)  $flag = 0;
+    if(!`gmatch $buf2[2] "[0-9][0-9]"`)   $flag = 0;
+    
+    if($flag == 0)
+    {
+        confirmDialog -title "Warning" -message "Date Format Error! (eg: 2002-09-15)" -button "Close";
+        return 0;
+    }
+    	   
+
+    return 1;
+}
+
+
+global proc string getSlate1()
+{
+    string $comment = `scrollField -q -text SlateCTL9`;
+    string $slate ;
+           $slate =
+                    "Resolution       : "  +  `optionMenu   -q -value ResCTL`   + "\n"
+                  + "Date             : "  +  `textFieldGrp -q -text SlateCTL1` + "\n"   
+                  + "Due Date         : "  +  `textFieldGrp -q -text SlateCTL2` + "\n"
+                  + "Department       : "  +  `textFieldGrp -q -text SlateCTL3` + "\n"
+                  + "Artist (Staff ID): "  +  `textFieldGrp -q -text SlateCTL4` + "\n"
+                  + "Scene            : "  +  `textFieldGrp -q -text SlateCTL5` + "\n"
+                  + "Shot             : "  +  `textFieldGrp -q -text SlateCTL6` + "\n"
+                  + "Version          : "  +  `textFieldGrp -q -text SlateCTL7` + "\n"
+                  + "With Story Camera: "  +  `textFieldGrp -q -text SlateCTL8` + "\n"
+                  + "Comment          :\n" +  $comment + "\n"
+                  ;                  
+     return $slate;   
+}

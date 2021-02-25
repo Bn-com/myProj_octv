@@ -1,0 +1,327 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc maAnimManagerDynHair()
+{
+	/*string $sel[] = `ls -sl`;
+	for ($s in $sel)
+	{
+		string $buff[] = stringToStringArray($s,":");
+		string $char = substring($s,1,(size($s)-size($buff[size($buff)-1])-1));
+		//print $char;
+		string $isDynamic[] = maDMreturnSettableIsDynamicAttrs($char);
+
+
+	}*/
+
+	if (`window -ex maAnimManagerDynHairUI`)
+		deleteUI maAnimManagerDynHairUI;
+	
+	window -title "Manage Dynamique Hair System"  -h 300 -mxb false  maAnimManagerDynHairUI;
+		columnLayout -adjustableColumn true;
+			$sep =  `separator -h 10`;
+			radioButtonGrp -numberOfRadioButtons 2 -label "" -labelArray2 "Selected" "All" -cw 1 1 -sl 1 maAnimManagerDynHairUI_type;
+			$sep1 = `separator -h 10`;
+			rowColumnLayout -nc 3 -cw 1 200 -cw 2 60 -cw 3 60;
+				$txtOnOff = `text -l "Set Dynamics attributes in scene :" `;
+				$chOff = `button -c ("maDMCBSetIntValue(0)") -bgc 0.5 0.5 0.5  -l "dynOFF" `;
+				$chOn = `button -c ("maDMCBSetIntValue(1)") -bgc 1 1 1   -l "dynON" `;
+			setParent ..;
+			$sep2 = `separator -h 10`;
+			rowColumnLayout -nc 4 -cw 1 100 -cw 2 60 -cw 3 60 -cw 4 100;
+				$text1 = `text -l "Start Frame : " `;
+				$int = `intField -value 100 maAnimManagerDynHairUI_sf`;
+				$button = `button -l "set Value" -c maDMsetStartFrame `;
+				$buttonSETFRAME = `button -l "set key on attr "  -c maDMsetKeyFrameStartFrame `;
+			setParent ..;
+			$sep3 = `separator -h 10`;
+			rowColumnLayout -nc 2 -cw 1 160 -cw 2 160;
+				$buttonBake = `button -bgc 0.7 0.2 0.2 -c "s100DMbakeDyn"  -l "bake all dyn joint" `;
+				$buttonUnBake = `button -bgc 0.2 0.6 0.2  -c "s100DMUnbakeDyn"  -l "unbake all dyn joint" `;
+			setParent ..;
+		setParent ..;
+
+	window -e -h 155 -w 330 -sizeable 0  maAnimManagerDynHairUI;
+	showWindow maAnimManagerDynHairUI;
+}
+
+global proc string[] maAnimManagerDynHairSeleteType()
+{
+	string $chars[]={};
+	string $type = `radioButtonGrp -q -sl maAnimManagerDynHairUI_type`;
+	if ($type == "1")
+	{
+		string $sel[] = `ls -sl`;
+		if (size($sel)==0)
+			error "请选择至少一个角色控制器!";
+		for ($s in $sel)
+		{
+			string $buff[] = stringToStringArray($s,":");
+			string $char = substring($s,1,(size($s)-size($buff[size($buff)-1])-1));
+			$chars[size($chars)] = $char;
+		}
+		$chars = stringArrayRemoveDuplicates($chars);
+	}
+	else
+		$chars[0] = "*";
+	
+	return $chars;
+
+}
+
+global proc string[] maDMreturnSettableIsDynamicAttrs(string $chars[])
+{
+	string $attrs[]={};
+	string $var[]={};// = `ls  ($char+":*.isDynamic") ($char+":*.IsDynamic")`;
+	for ($char in $chars)
+	{
+		string $buff[]= `ls  ($char+":*.isDynamic") ($char+":*.IsDynamic")`;
+		$var = stringArrayCatenate($var, $buff);
+	}
+	$var = stringArrayRemoveDuplicates($var);
+
+	for($i=0 ; $i < size($var) ; $i++)
+	{
+		if ( `getAttr -l $var[$i]`==0)
+		{
+			if( (`connectionInfo -ied $var[$i]` && size(`listConnections -type "animCurve" -s 1 -d 0 $var[$i]`) )
+            || !(`connectionInfo -ied $var[$i]`) )
+				$attrs[size($attrs)] = $var[$i];
+        }
+		else
+			print ("// '"+$var[$i]+"' doesn't seem settable (locked or connected) - skipped\n");
+    }
+	return $attrs;
+}
+
+global proc maDMCBSetIntValue(int $value)
+{
+	int $v = 0  ;
+	if($value==1)
+		$v = 3;
+	maSetDynValueSimMethod($v) ;
+}
+
+global proc maSetDynValueSimMethod(int $stat) 
+{
+	string $attrs[] = {};
+	string $chars[] = maAnimManagerDynHairSeleteType();
+
+	string $attrTypes[] = maDyn_returnSimMethodAttrsAndTypes($attrs, "simulationMethod",$chars);
+	string $dynAttrs[] = maDMreturnSettableIsDynamicAttrs($chars);
+
+	$attrs = stringArrayCatenate($attrs, $dynAttrs);
+	$attrs = stringArrayRemoveDuplicates($attrs);
+
+	for ($i=0; $i<size($attrs);$i++)
+	{
+		if ($i<size($attrTypes) && $attrTypes[$i]=="hairSys")
+		{
+			s100bkdyn_setAttr( $attrs[$i], $stat ) ;
+			setKeyframe -t 100 $attrs[$i];
+		}
+		else if ($stat==3 || $stat==1)
+		{
+			s100bkdyn_setAttr( $attrs[$i], 1 ) ;
+			setKeyframe -t 100 $attrs[$i];
+			maAnimManagerDynHairSetAttr($attrs[$i]);
+		}
+		else
+		{
+			s100bkdyn_setAttr( $attrs[$i], 0 ) ;
+			setKeyframe -t 100 $attrs[$i];
+		}
+	}
+	select -r $dynAttrs;
+}
+
+global proc string[] maDyn_returnSimMethodAttrsAndTypes(string $attrs[], string $searchedAttr,string $chars[])
+{
+	string $attrTypes[] = {};
+
+	string $dyn[]={};
+	for ($char in $chars)
+	{
+		string $buff[] = `ls -type hairSystem ($char+":*")`;
+		$dyn = stringArrayCatenate($dyn,$buff);
+	}
+	$dyn = stringArrayRemoveDuplicates($dyn);
+	for($tmp in $dyn)
+	{
+		$listConnections = `listConnections -d 0 -s 1  ($tmp + "."+$searchedAttr)`;
+		if(size($listConnections) == 0 )
+		{
+			$attrs[size($attrs)] = ($tmp+"."+$searchedAttr);
+			$attrTypes[size($attrTypes)] = "hairSys";
+        }
+		else if(`nodeType($listConnections[0]) ` == "animCurveUU")
+		{
+			$list2 = `listConnections -skipConversionNodes 1  -plugs 1  -d 0 -s 1  $listConnections[0]`;
+
+			$attrs[size($attrs)] = ($list2[0]);
+			$attrTypes[size($attrTypes)] = "dynAttr";
+        }
+    }
+
+	$attrs = stringArrayRemoveDuplicates($attrs);
+	return $attrTypes;
+}
+
+global proc maDMsetStartFrame()
+{
+	int $int = `intField -q -v maAnimManagerDynHairUI_sf`;
+	maSetDynValueStartFrame($int,0) ;
+}
+
+global proc maDMsetKeyFrameStartFrame()
+{
+	int $int = `intField -q -v maAnimManagerDynHairUI_sf`;
+	maSetDynValueStartFrame($int,1) ;
+}
+
+global proc maSetDynValueStartFrame(int $frame, int $setKeyFrame)
+{
+	string $chars[] = maAnimManagerDynHairSeleteType();
+	string $dyn[]={};
+	for ($char in $chars)
+	{
+		string $buff[] = `ls -type hairSystem ($char+":*")`;
+		$dyn = stringArrayCatenate($dyn,$buff);
+	}
+	$dyn = stringArrayRemoveDuplicates($dyn);
+
+	for($tmp in $dyn)
+	{
+		if (`getAttr -l ($tmp + ".startFrame")`==0)
+		{
+			$listConnections = `listConnections -d 0 -s 1  ($tmp + ".startFrame")`;
+
+			if(size($listConnections) == 0 )
+			{
+				s100bkdyn_setAttr( ($tmp + ".startFrame"), $frame ) ;
+				if($setKeyFrame == 1 )
+					setKeyframe ($tmp + ".startFrame");
+
+			}else if(`nodeType($listConnections[0]) ` == "animCurve")
+			{
+				s100bkdyn_setAttr( ($tmp + ".startFrame"), $frame ) ;
+				if($setKeyFrame == 1 )
+					setKeyframe ($tmp + ".startFrame");
+			}
+			else
+			{
+				$listConnectionsPlug = `listConnections -plugs 1  -d 0 -s 1  ($tmp + ".startFrame")`;
+				$list2 = `listConnections -d 0 -s 1  $listConnectionsPlug[0]`;
+				if(size($list2) == 0 )
+				{
+					s100bkdyn_setAttr( $listConnectionsPlug[0], $frame ) ;
+					if($setKeyFrame == 1 )
+						setKeyframe $listConnectionsPlug[0];
+				}
+				else
+				{
+					//setAttr  $listConnectionsPlug[0] $frame;
+					s100bkdyn_setAttr( $listConnectionsPlug[0], $frame ) ;
+					if($setKeyFrame == 1 )
+						setKeyframe $listConnectionsPlug[0];
+				}
+			}
+
+        }
+		else
+			print ("// \t '"+($tmp + ".startFrame")+"' is locked - skipped\n");
+    }
+
+	string $tmp1[] = `ls "*WilliMonster*:*" `;
+	if(size($tmp1) > 0)
+	{
+		string $buff[] = stringToStringArray($tmp1[0],":");
+		string $prename =  substring($tmp1[0],1,(size($tmp1[0])-size($buff[size($buff)-1])-1));
+		if (stringArrayCount($prename,$chars))
+		{
+			string $tmp2[] = `ls  "*WilliMonster*:*.start_frame"  "*WilliMonster*:*.Start_frame"`;
+			$list = `listConnections -d 0 -s 1  $tmp2 `;
+
+			if(size($list) > 0)
+				delete $list ;
+
+			for($tmp4 in $tmp2)
+			{
+				//setAttr $tmp4 $frame ;
+				s100bkdyn_setAttr( ($tmp4), $frame ) ;
+			}
+		}
+	}
+
+}
+
+global proc maAnimManagerDynHairSetAttr(string $cn)
+{
+	string $attrs[] ={"stifness","damping","attach","degree","sampleDensity","collide","widthScale","hairWidth","widthBase","widthEnd",
+				 "startFrame","iteration","gravity","collideNeighboors","drawCollideWidth","collideGround","groundHeight"};
+	int $int = `intField -q -v maAnimManagerDynHairUI_sf`;
+	//for ($cn in $controls)
+	{
+		string $buff[] = stringToStringArray($cn,".");
+		string $obj = substituteAllString($cn,$buff[size($buff)-1],"");
+
+		if (!`objExists ($obj+$attrs[0])` && `objExists ($obj+capitalizeString($attrs[0]))`)
+		{
+			for ($i=0;$i<=16;$i++)
+			{
+				$attrs[$i] = capitalizeString($attrs[$i]);
+			}
+		}
+		
+		if (`objExists ($obj+$attrs[0])`)
+		{
+			setAttr ($obj+$attrs[0]) 0.9;
+			setAttr ($obj+$attrs[1]) 0.2;
+			setAttr ($obj+$attrs[2]) 1;
+			setAttr ($obj+$attrs[3]) 1;
+			setAttr ($obj+$attrs[4]) 1;
+			setAttr ($obj+$attrs[5]) 0;
+			setAttr ($obj+$attrs[6]) 1;
+			setAttr ($obj+$attrs[7]) 1;
+			setAttr ($obj+$attrs[8]) 1;
+			setAttr ($obj+$attrs[9]) 0.1;
+			for ($i=0;$i<=9;$i++)
+			{
+				string $animCurves[] = `listConnections -type animCurve -s 1 -d 0 ($obj+$attrs[$i])`;
+				if (size($animCurves))
+				{
+					delete $animCurves;
+				}
+				setKeyframe -t 100 ($obj+$attrs[$i]);
+			}
+		}
+		if (`objExists ($obj+$attrs[10])`)
+		{
+			setAttr ($obj+$attrs[10]) $int;
+			setAttr ($obj+$attrs[11]) 10;
+			setAttr ($obj+$attrs[12]) 0;
+			setAttr ($obj+$attrs[13]) 0;
+			setAttr ($obj+$attrs[14]) 1;
+			setAttr ($obj+$attrs[15]) 0;
+			setAttr ($obj+$attrs[16]) 0;
+			for ($i=10;$i<=16;$i++)
+			{
+				string $animCurves[] = `listConnections -type animCurve -s 1 -d 0 ($obj+$attrs[$i])`;
+				if (size($animCurves))
+				{
+					delete $animCurves;
+				}
+				setKeyframe -t 100 ($obj+$attrs[$i]);
+			}
+		}
+	}
+}

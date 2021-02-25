@@ -1,0 +1,196 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/02/26
+///
+/// Description: ben&izzy项目渲染环节自动分层工具之子程序
+///		主要功能：针对场景（包含相关道具）的分层及renderGlobal的设置
+///
+
+global proc lt_createBGRL()
+{
+	string $BGRL[] = {"background"};
+
+	string $obj[] = `ls -sl`;
+	if (!`objExists $obj[0]`)
+		error "请选择需要创建渲染层的场景！";
+	for ($layer in $BGRL)
+	{
+		string $adj[] = `ls -type renderLayer $layer`;
+		if (!`objExists $adj[0]`)
+		{
+			createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+			ltMayaSoftwareRG();
+		}
+		layerEditorLayerButtonSelect 0 $layer;
+		updateHighlightSelectIcon;
+		editRenderLayerMembers $layer $obj;
+
+	}
+	select -cl;
+}
+
+global proc lt_createSkyRL()
+{
+	string $BGRL[] = {"sky"};
+
+	string $obj[] = `ls -sl`;
+	if (!`objExists $obj[0]`)
+		error "请选择需要创建渲染层的天空！";
+	for ($layer in $BGRL)
+	{
+		string $adj[] = `ls -type renderLayer $layer`;
+		if (!`objExists $adj[0]`)
+		{
+			createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+			ltMayaSoftwareRG();
+		}
+		layerEditorLayerButtonSelect 0 $layer;
+		updateHighlightSelectIcon;
+		editRenderLayerMembers $layer $obj;
+
+	}
+	select -cl;
+}
+
+global proc lt_createShadowRL(int $p)
+{
+	string $shadowRL = "shadow";
+	string $objs[] = `ls -sl`;
+
+	if ($p == 1 )
+	{
+		string $existsLayer[] = `ls -type renderLayer $shadowRL`;
+		if (!`objExists $existsLayer[0]`)
+		{
+			createRenderLayer -name $shadowRL -e -mc -number 1 -noRecurse;
+			ltMayaSoftwareRG;
+		}
+		layerEditorLayerButtonSelect 0 $shadowRL;
+		updateHighlightSelectIcon;
+
+		for ($obj in $objs)
+		{
+			select -hi $obj;
+			string $attr[] = `ls -sl -type mesh -type nurbsSurface -type subdiv`;
+			for ($temp in $attr )
+			{
+				editRenderLayerAdjustment ($temp+".primaryVisibility");
+				setAttr ($temp+".primaryVisibility") 0;
+				select -r $temp;
+				hyperShade -a lambert1;
+
+				editRenderLayerMembers  $shadowRL $temp;
+			}
+		}
+	}
+	if ($p == 2)
+	{
+		string $existsLayer[] = `ls -type renderLayer $shadowRL`;
+		if (!`objExists $existsLayer[0]`)
+		{
+			createRenderLayer -name $shadowRL -e -mc -number 1 -noRecurse;
+			ltMayaSoftwareRG;
+		}
+		layerEditorLayerButtonSelect 0 $shadowRL;
+		updateHighlightSelectIcon;
+		editRenderLayerMembers $shadowRL $objs;
+
+		for ($obj in $objs)
+		{
+			select -hi $obj;
+			string $attr[] = `ls -sl -type mesh -type nurbsSurface -type subdiv`;
+			for ($temp in $attr )
+			{
+				select -r $temp;
+				hyperShade -a ltShadow_useBackground;
+				setAttr ($temp + ".castsShadows") 0;
+
+			}
+		}
+
+	}	
+	select -cl;
+}
+
+global proc lt_createDepthRL()
+{
+	string $depthRL = "depth";
+	int $num=0;
+
+	string $obj[] = `ls -sl`;
+	
+	string $existsLayer[] = `ls -type renderLayer $depthRL`;
+	if (!`objExists $existsLayer[0]`)
+	{
+		createRenderLayer -name $depthRL -e -mc -number 1 -noRecurse;
+		ltMayaSoftwareRG;
+	}
+	layerEditorLayerButtonSelect 0 $depthRL;
+	updateHighlightSelectIcon;
+	editRenderLayerMembers $depthRL $obj;
+
+	for ($tem in $obj )
+	{
+		select -r $tem;
+		hyperShade -assign ltDepth_surfaceShader;
+		editRenderLayerAdjustment "ltDepth_surfaceShader.depth";
+		setAttr "ltDepth_surfaceShader.depth" 200;
+		editRenderLayerAdjustment "ltDepth_surfaceShader.near";
+	}
+
+	select -cl;
+
+}
+
+
+global proc lt_createDepthTemp()
+{
+
+	string $depthRL = "depth";
+	string $obj[] = `ls -sl`;
+
+	source "slLightDepth.mel";slDepthLight;slDepthMataril;
+
+	string $light[]= `ls -long  "zlighting"`;
+	
+	string $existsLayer[] = `ls -type renderLayer $depthRL`;
+	if (!`objExists $existsLayer[0]`)
+	{
+		createRenderLayer -name $depthRL -e -mc -number 1 -noRecurse;
+		ltMayaSoftwareRG;
+	}
+	layerEditorLayerButtonSelect 0 $depthRL;
+	updateHighlightSelectIcon;
+	editRenderLayerMembers $depthRL $obj $light[0];
+}
+
+global proc ltRenderLightcau()
+{
+
+	if (!`objExists ltlightcau_lambert`)
+		shadingNode -asShader lambert -name ltlightcau_lambert;
+	setAttr "ltlightcau_lambert.color" -type double3 1 1 1;
+	setAttr ltlightcau_lambert.diffuse 1;
+
+	file -import -type "mayaBinary" -rpr "lt_light" -options "v=0"  -pr "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\Import\\lt\\lt_light.mb";
+
+
+	string $obj[]= `ls -type nurbsSurface -type mesh`;
+	string $light[] = `ls "directionalLight_lightcau"`;
+
+	string $layer = "lightcau";
+	createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+	ltMayaSoftwareRG();
+	layerEditorLayerButtonSelect 0 $layer;
+	updateHighlightSelectIcon;
+
+	editRenderLayerMembers $layer $obj $light;
+
+	select -r $obj;
+	hyperShade -a ltlightcau_lambert;
+
+	setAttr "defaultRenderLayer.renderable" 0;
+	select -cl;
+}

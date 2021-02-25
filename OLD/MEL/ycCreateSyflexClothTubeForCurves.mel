@@ -1,0 +1,422 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 尹晟
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycCreateSyflexClothTubeForCurves()
+{
+	if(`window -exists ycCreateSyflexClothTubeForCurves`)
+	{
+		deleteUI -window ycCreateSyflexClothTubeForCurves;
+	}
+		source "ycPolyTransCurves.mel";
+		window -menuBar true -title "Create Syflex Cloth Tube" -width 445 -height 200 ycCreateSyflexClothTubeForCurves;
+			menu -label "Help";
+				menuItem -label "Help on Create Syflex Cloth Tube..." -command "zjHelpCallback ycCreateSyflexClothTubeForCurves";
+			formLayout formLayout1;
+				columnLayout columnLayout1;
+					floatSliderGrp -enable 1 -label "Tube Diameter" 
+							-field true 
+							-precision 4 
+							-minValue 0.0001 -maxValue 100.0 
+							-fieldMinValue 0.1 -fieldMaxValue 100000.000 
+							-value 0.200 
+							-changeCommand "CreateSyflexTessellateTest"
+							SyflexTubeDiameter;
+					intSliderGrp -enable 1 -label "Pin Count" 
+							-field true 
+							-minValue 1 -maxValue 100
+							-fieldMinValue 1 -fieldMaxValue 100 
+							-value 2 
+							SyflexPinCount;
+					checkBoxGrp	-numberOfCheckBoxes 1	-label "Combine Hair" -v1 1  CheckCombinePoly;
+				setParent ..;
+				string $button1 = `button -label "Create Syflex Cloth Tube" -command "CreateSyflexClothTubeForCurves;\ndeleteUI ycCreateSyflexClothTubeForCurves"`;
+				string $button2 = `button -label "Apply" -command "CreateSyflexClothTubeForCurves"`;
+				string $button3 = `button -label "Close" -command "deleteUI ycCreateSyflexClothTubeForCurves"`;
+
+			formLayout -edit
+				-attachForm	columnLayout1	"top"		5
+				-attachForm	columnLayout1	"left"		5
+
+				-attachForm	$button1	"left"		5
+				-attachForm	$button1	"bottom"	5
+				-attachPosition	$button1	"right"		5	33
+
+				-attachControl	$button2	"left"		5	$button1
+				-attachForm	$button2	"bottom"	5
+				-attachPosition	$button2	"right"		5	67
+
+				-attachControl	$button3	"left"		5	$button2
+				-attachForm	$button3	"bottom"	5
+				-attachForm	$button3	"right"		5
+			formLayout1;
+
+	showWindow;
+}
+
+//ycCreateSyflexClothTubeForCurves;
+
+global proc CreateSyflexTessellateTest()
+{
+	float $TubeDiameterSize=`floatSliderGrp -q -value SyflexTubeDiameter`;
+	float $zSize=$TubeDiameterSize*1.5;
+	curve -d 1 -per on -p 0 0 0 -p $TubeDiameterSize 0 $zSize -p (-$TubeDiameterSize) 0 $zSize -p 0 0 0 -k 0 -k 1 -k 2 -k 3;
+	if (`objExists "SyflexTubeShapeCurve"`)
+	{
+		delete "SyflexTubeShapeCurve";
+	}
+	rename "SyflexTubeShapeCurve";
+}
+
+global proc CreateSyflexClothTubeForCurves()
+{
+	float $dsize=`floatSliderGrp -q -value SyflexTubeDiameter`;
+
+	string $SelectObject[]=`ls -l -sl -fl`;
+	string $SelectShape[]=`listRelatives -f -type "nurbsCurve"`;
+	print $SelectShape;
+
+	if (size($SelectObject)!=size($SelectShape)+1||size($SelectObject)==0)
+	{
+		error "Please select Curve";
+		return;
+	}
+	int $cnt = `size $SelectObject`;
+	string $JugdeMeshShape[]=`listRelatives -c $SelectObject[$cnt-1]`;
+	if ( `nodeType $JugdeMeshShape[0]` != "mesh" )
+	{
+		print("No correct mesh node for cloth constraint!");
+		return;
+	}
+
+	float $zsize = $dsize * 1.5;
+	curve -d 1 -per on -p 0 0 0 -p $dsize 0 $zsize -p (-$dsize) 0 $zsize -p 0 0 0 -k 0 -k 1 -k 2 -k 3;
+	if (`objExists "SyflexTubeShapeCurve"`)
+	{
+		delete "SyflexTubeShapeCurve";
+	}
+	rename "SyflexTubeShapeCurve";
+
+	if (`checkBoxGrp -q -v1 CheckCombinePoly`)
+	{
+		string $AllTubeName[];
+		for ( $i = 0; $i < size($SelectShape); $i++ )
+		{
+			string $Tube[]=`extrude -ch true -rn false -po 1 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 "SyflexTubeShapeCurve" $SelectShape[$i]`;
+			$AllTubeName[$i]=$Tube[0];
+			string $NurvsTessellateTest[] = `listHistory -lf on -lv 1`;
+			setAttr ( $NurvsTessellateTest[1] + ".format" ) 3;
+		}
+
+		string $TubeString="polyUnite -n (\"YcPolyHair#\") -ch 1 ";
+		for ($i=0;$i<size($AllTubeName) ; $i++)
+		{
+			$TubeString=$TubeString+$AllTubeName[$i]+" ";
+		}
+		eval($TubeString);
+		DeleteHistory;
+		
+		syCreateCloth;
+		string $Extrude[]=`ls -sl`;
+		string $SyflexTrf[]=`listConnections -d 1 ($Extrude[0]+".outMesh")`;
+		select $SyflexTrf[0];
+		rename ("YcSyflexHair#");
+		string $HairName[]=`ls -sl`;
+
+		int $Segment=`getAttr ($SelectShape[0] + ".spans")`;
+		int $Degree=`getAttr ($SelectShape[0] + ".degree")`;
+
+		for ( $i = 0; $i < size($SelectShape); $i++ )
+		{
+			int $seg = `getAttr ( $SelectShape[$i] + ".spans" )`;
+			int $deg = `getAttr ( $SelectShape[$i] + ".degree" )`;
+			if ( `getAttr ( $SelectShape[$i] + ".form" )` == 2 )
+			{
+				error "There are close curves!";
+			}
+			if ($Segment!=$seg)
+			{
+				error "All line's spans no equal!";
+			}
+			if ($Degree!=$deg)
+			{
+				error "All line's spans no equal!";
+			}
+		}
+
+		select -r $SelectObject[$cnt-1];
+		int $pinCount=`	intSliderGrp -q	-value SyflexPinCount`;
+		for( $i = 0, $j = 0; $i < size($SelectShape)*3; $i++, $j += ($Degree+$Segment) )
+		{
+			if ($pinCount==1)
+			{
+				select -tgl ($HairName[0] + ".vtx[" + $j +  "]" );
+			}
+			else
+			{
+				select -tgl ($HairName[0] + ".vtx[" + $j + ":" + ( $j + $pinCount -1) + "]" );
+			}
+		}
+		createPin;
+		
+		loadPlugin "zjCrvOnPoly.mll";
+		int $EdgeCount=($Degree+$Segment)*3+($Degree+$Segment-1)*3;
+		string $GroupName=`group -em -name "YcSyflexGroup#"`;
+		for ( $i = 0; $i < size($SelectShape); $i++ )
+		{
+			select  ( $HairName[0] + ".e["+($EdgeCount*$i)+"]");
+			loopSelect;
+			zjCrvOnPolyPlugin;
+			string $SyflexCurveShpaeList[]=`ls -sl`;
+			string $SyflexCurveList[]=`listRelatives -p $SyflexCurveShpaeList[0]`;
+			string $NewName=`rename $SyflexCurveList[0] "YcSyflexCurve#"`;
+			parent $NewName $GroupName;
+		}
+		if (`objExists "SyflexTubeShapeCurve"`)
+		{
+			delete "SyflexTubeShapeCurve";
+		}
+	}
+	else
+	{
+		for ( $i = 0; $i < size($SelectShape); $i++ )
+			createSyflexHairCtrlCurveForCurves( $SelectObject[$i], "SyflexTubeShapeCurve", $SelectObject[$cnt-1] );
+	}
+}
+
+global proc createSyflexHairCtrlCurveForCurves( string $orgc, string $extc, string $consloc )
+{
+
+	string $JudgeCurveShape[] = `listRelatives -s -f $orgc`;
+	if ( `nodeType $JudgeCurveShape` != "nurbsCurve" )
+	{
+		print("No correct curve as original hair curve!");
+		return ;
+	}
+	// create tube
+	extrude -ch true -rn false -po 1 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 $extc $orgc;
+
+	string $NurvsTessellateTest[] = `listHistory -lf on -lv 1`;
+	if ( `nodeType $NurvsTessellateTest[1]` != "nurbsTessellate" )
+	{
+		print("Wrong extruding!");
+		delete;
+		$ret[0] = $ret[1] = "";
+		return ;
+	}
+	setAttr ( $NurvsTessellateTest[1] + ".format" ) 3;
+	syCreateCloth;
+	string $Extrude[]=`ls -sl`;
+	string $SyflexTrf[]=`listConnections -d 1 ($Extrude[0]+".outMesh")`;
+	select $SyflexTrf[0];
+	rename ($orgc+"_Cloth");
+	
+	//print $orgc;		//所选择的线的名称
+	int $seg = `getAttr ( $orgc + ".spans" )`;
+	if ( `getAttr ( $orgc + ".form" )` != 2 )
+		$seg += `getAttr ( $orgc + ".degree" )`;		// it isn't periodic curve 判断线是不是封闭的。
+
+	int $nseg = `getAttr ( $extc + ".spans" )`;
+	if ( `getAttr ( $extc + ".form" )` != 2 )
+		$nseg += `getAttr ( $extc + ".degree" )`;		// it isn't periodic curve 判断线是不是封闭的。
+
+	select -r $consloc;
+	// select vertexs for constraint
+	int $pinCount=`	intSliderGrp -q	-value SyflexPinCount`;
+	for( $i = 0, $j = 0; $i < $nseg; $i++, $j += $seg )
+	{
+		if ($pinCount==1)
+		{
+			select -tgl ( $orgc+"_Cloth" + ".vtx[" + $j +  "]" );
+		}
+		else
+		{
+			select -tgl ( $orgc+"_Cloth" + ".vtx[" + $j + ":" + ( $j + $pinCount -1) + "]" );
+		}
+	}
+	createPin;
+
+	select -r ( $orgc+"_Cloth" + ".e[0]");
+	loopSelect;
+	loadPlugin "zjCrvOnPoly.mll";
+	zjCrvOnPolyPlugin;
+
+	string $SelectedCuverShape[]=`ls -sl`;
+	string $SelectedCuver[]=`listRelatives -p $SelectedCuverShape[0]`;
+	rename $SelectedCuver[0] ($orgc+"_Cloth" + "_Curve");
+	select ($orgc+"_Cloth" + "_Curve");
+	RebuildJointCommandForCurves;
+}
+
+global proc RebuildJointCommandForCurves()
+{
+	string $SelectObj[]=`ls -sl`;
+	//print $SelectObj;
+	string $SelectShapeNurbs[]=`listRelatives -type "nurbsSurface" $SelectObj`;
+	string $SelectShapeMesh[]=`listRelatives -type "mesh" $SelectObj`;
+	if (size($SelectShapeNurbs)>0&&size($SelectShapeMesh)>0)
+	{
+		return;
+	}
+	if(size($SelectShapeNurbs)>0&&size($SelectShapeMesh)==0)
+	{
+		cthair("ycCreateCurves","ycCreateJoint");	
+	}
+	if(size($SelectShapeNurbs)==0&&size($SelectShapeMesh)>0)
+	{
+		UsePloyCreateCurve;
+	}
+	
+	string $SelectShape[]=`listRelatives  -type "nurbsCurve" $SelectObj`;
+	if ($SelectShape[0]=="")
+	{
+		print "not only one";
+		//return;
+	}
+	
+	select -cl;
+	if (`objExists yc_head_joint_demo`)
+	{
+		delete yc_head_joint_demo;
+	}
+	joint -p 0 0 0 -n yc_head_joint_demo;	//create joint
+
+	string $SelectLine[];
+	clear $SelectLine;
+	int $LineNumber=0;
+	for ($i=0;$i<size($SelectObj);$i++)
+	{
+		string $NurbsCurveShape[]=`listRelatives  -c $SelectObj[$i]`;
+		//print $NurbsCurveShape;
+		string $NurbsCurveNodeType=`nodeType $NurbsCurveShape[0]`;
+		//print $NurbsCurveNodeType;
+		//print "ttt\n";
+		if ($NurbsCurveNodeType=="nurbsCurve")
+		{
+			$SelectLine[$LineNumber]=$SelectObj[$i];
+			$LineNumber++;
+		}
+	}
+	int $SpansNumber=0;
+	int $curve_span=0;
+
+		for ($i=0;$i<size($SelectLine);$i++)
+		{
+			$curve_span=`getAttr ($SelectLine[$i]+".spans")`;
+			string $joint_number_name[];
+			for ($j=0;$j<=$curve_span;$j++)
+			{
+				$joint_number_name[$j]="joint_"+$j;
+			}
+			select -cl;
+			float $EditPointPosition[3];
+			for ($j=0;$j<=$curve_span;$j++)
+			{
+				$EditPointPosition = `pointOnCurve -parameter $j -position  $SelectLine[$i]`;
+				if (`objExists ($SelectLine[$i]+"_"+$joint_number_name[$j])`)
+				{
+					delete ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				}
+				joint  -p $EditPointPosition[0] $EditPointPosition[1] $EditPointPosition[2] -name ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				select -cl;
+			}
+			for ($j=$curve_span;$j>0;$j--)
+			{
+				parent ($SelectLine[$i]+"_"+$joint_number_name[$j]) ($SelectLine[$i]+"_"+$joint_number_name[$j-1]);
+			}
+				string $HeadJoint=($SelectLine[$i]+"_joint_0");
+				string $EndJointList[]=`listRelatives -allDescendents $HeadJoint`;
+				setJointIKSplineForCurves($HeadJoint,$EndJointList[0], $SelectLine[$i]);
+			select -cl;		
+		}
+	delete yc_head_joint_demo;	
+}
+
+global proc setJointIKSplineForCurves ( string $joint1st, string $jointend, string $ikcurve)
+{
+	select -r ( $joint1st + ".rotatePivot" );
+	select -add ( $jointend + ".rotatePivot" );
+	select -add $ikcurve;
+	ikHandle -sol ikSplineSolver -ccv false -pcv false -n ($ikcurve+"_ikHandle");
+}
+global proc loopSelect()
+{
+	string $E[] = `filterExpand -sm 32`;
+
+	for ( $Ed in $E )
+	{
+		$Edge = $Ed;
+
+		string $EdgeList[];
+		string $loopVertex;
+		string $loopEdge;
+		int $i = 0;
+		int $a = 0;
+
+		string $Verts[] = edge2Vertex($Edge);
+
+		$loopEdge           = $Edge;
+		$loopVertex         = $Verts[1];
+
+		$EdgeList[$i++] = $loopEdge;
+
+		int $stop = 0;
+		while ( $stop != 1 )
+		{
+			string $AllFaces[] = vertex2Face($loopVertex);   
+			if ( size($AllFaces) != 4 ) { $stop = 1; break;  }
+
+			$loopEdge   = getOppositeEdgeFromVertex( $loopEdge, $loopVertex );
+			$loopVertex = inverseVertexFromEdge( $loopVertex, $loopEdge );
+
+			if ($loopEdge == $Edge ) { $stop = 1; $a = 1; break; }
+
+			$EdgeList[$i++] = $loopEdge;
+		}
+		select -add $EdgeList;
+
+		string $EdgeList[] = inverseArray($EdgeList);
+		$loopEdge   = $Edge;
+		$loopVertex = $Verts[0];
+
+		$stop = 0;
+		while ( $stop != 1 )
+		{
+			if ( $a == 1 ) { $stop = 1; break; }
+
+			string $AllFaces[] = vertex2Face($loopVertex);   
+			if ( size($AllFaces) != 4 ) { $stop = 1; break; }
+
+			$loopEdge   = getOppositeEdgeFromVertex( $loopEdge, $loopVertex );
+			$loopVertex = inverseVertexFromEdge( $loopVertex, $loopEdge );
+
+			$EdgeList[$i++] = $loopEdge;
+		}
+		select -add $EdgeList;
+	}
+
+}
+
+global proc string[] edge2Vertex(string $theEdge)
+{
+	string $buffer[];
+	string $listVertexName[];
+	string $listVextex[] = `polyInfo -ev $theEdge`;
+	tokenize $theEdge "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbVertex = tokenize($listVextex[0] ,$buffer);
+	$nbVertex -= 2;
+	string $listVertexName[];
+	for ($i=2;$i<4;$i++)
+	{
+		$listVertexName[$i-2] = ($ObjectName + ".vtx["+$buffer[$i]+"]");
+	}
+	return $listVertexName;
+}
+//ycCreateSyflexClothTubeForCurves;

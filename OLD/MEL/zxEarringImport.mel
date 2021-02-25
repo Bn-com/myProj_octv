@@ -1,0 +1,316 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: hb
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc string mySubstitute(string $source, string $old, string $new)
+{
+	string $buf[];
+	
+	if (`tokenize $source "|" $buf`)
+		return ` substitute $old $buf[size($buf)-1]  ""`;
+	return "";
+}
+
+proc cleanNamespace (string $nsName)
+{
+	string $namesp[] = `ls ($nsName + "*:*")`;
+	for ($j=0;$j<size($namesp);$j++)
+	{
+		string $buff[];
+		tokenize $namesp[$j] "|" $buff;
+		string $obj = $buff[size($buff) - 1];
+
+		string $buf[];
+		tokenize $obj ":" $buf;
+		string $sp = $buf[0]+":";
+
+		string $new = mySubstitute($obj,$sp,"");
+		if (`objExists($namesp[$j])` && $new!=$namesp[$j] && size($new)>0)
+			rename $namesp[$j] $new;
+	}
+}
+
+
+
+
+
+
+
+proc importRing (string $chaName , string $prefix)
+{
+	string $ns_ring = $chaName + "_ring";
+
+	string $Path = `textField -q -tx zxIHtextField2`;
+
+	if(!size($Path))
+	{
+
+		confirmDialog -title "Warning"
+			      -message " 请 点 击 文 件 夹 图 标 ， 选 取 需 要 导 入 的 耳 环 文 件 ! "
+			      -button "OK";
+
+	}
+
+	file -import -namespace $ns_ring $Path;
+
+	string $checkNamespace[] = `ls "*:earRing_dyn"`;  
+	string $buff[];
+	tokenize $checkNamespace[0] ":" $buff;
+	$ns_ring = $buff[0];
+
+
+	string $ring = $ns_ring + ":ear";
+	string $ringGroup = $ns_ring + ":earRing_dyn";
+	string $jointList[] = `ls -l ("*:" + $chaName + "_head") ($chaName + "_head")`;
+	string $jointPath;
+	for ($jointPath in $jointList)
+	{
+		$matchName = `match $chaName $jointPath`;
+		if ($matchName == $chaName)
+		{
+			break;
+		}
+	}
+
+
+	if(`objExists ( $chaName + "_HAIRSYSTEM")`)
+	{
+	
+		parent $ringGroup ($chaName + "_HAIRSYSTEM");
+	
+	}
+	else parent $ringGroup ($chaName + "_GEO");
+
+	parentConstraint -mo -weight 1 $jointPath $ring;
+
+	cleanNamespace $ns_ring;
+	cleanNamespace $ns_ring;
+
+
+	if (!`namespace -exists $ns_ring`)
+	{
+		namespace -removeNamespace $ns_ring;
+
+		print "clear namespace $ns_ring\n";
+	}
+
+	rename ("earRing") ($chaName + "_earRing");
+
+}
+
+
+
+global proc zxEarringImport()                 
+{
+
+//	zjRemoveNamespace;
+//	zjRemoveNamespace;
+
+
+	string $Path = `textField -q -tx zxIHtextField2`;
+
+	if(!size($Path))
+	{
+
+		confirmDialog -title "Warning"
+			      -message " 请 点 击 文 件 夹 图 标 ， 选 取 需 要 导 入 的 耳 环 文 件 ! "
+			      -button "OK";
+		error " 请 点 击 文 件 夹 图 标 ， 选 取 需 要 导 入 的 耳 环 文 件 ! ";
+	}
+
+
+	string $selected[] = `ls -l -sl`;
+
+
+	if ( size($selected) == 1 )                       
+	{
+
+	string $selectedLN = $selected[0]; 
+	string $tem[];
+	tokenize $selected[0] "|" $tem;
+	tokenize $tem[size($tem)-1] ":" $tem;
+
+	string $prefix;
+	if(size($tem)==2)
+		$prefix = ($tem[0] + ":");
+
+	else if(size($tem)<2)
+		$prefix = "";
+	else 
+		error "MASTER 命 名 不 规 范 ";
+
+	$masterName = $tem[size($tem)-1];  
+
+	string $temp[];
+
+	string $chaName = `substitute "_MASTER" $masterName ""`;  
+	string $ns_hair = $chaName + "_hairNS";                   
+
+	string $chkChaName = substituteAllString($chaName, "_", ""); 
+
+
+
+									
+if(!objExists ($prefix + $chaName + "_set"))
+
+error ("没 有 发 现 " + ($prefix + $chaName + "_set") + " , 是 否 选 择 了 " + " MASTER !" );
+
+
+
+string $lockAttr[];
+
+string $transforms[] = {"tx","ty","tz","rx","ry","rz","sx","sy","sz"} ;
+
+
+for($tran in $transforms)
+{
+	$lock = `getAttr -l ($selectedLN + "." + $tran)`;
+
+	if($lock == 1)
+	{
+		$lockAttr[size($lockAttr)] = $tran;
+		setAttr -l 0 ($selectedLN + "." + $tran) ;
+	}
+}
+
+float $valAttr[];
+
+string $msParent[];
+
+string $wMs[];
+
+$msParent = `listRelatives -p -f $selectedLN`;
+
+string $buffer1[];
+
+$tokNum = `tokenize $selectedLN  "|" $buffer1`;
+
+// turn off autoKeyframe
+autoKeyframe -state false;
+
+if($tokNum > 2)
+{
+	parent -w $selectedLN;
+	$wMs = `ls -sl -l`;
+	$selectedLN = $wMs[0];
+}
+
+if ($tokNum == 2)
+{
+	string $buffer2[];
+
+	$tokNum = `tokenize $buffer1[size($buffer1)-1]  ":" $buffer2`;
+
+	if($buffer1[size($buffer1)-2] != ($buffer2[0] + "RNgroup"))
+	{
+		parent -w $selectedLN;
+		$wMs = `ls -sl -l`;
+		$selectedLN = $wMs[0];
+	}
+}
+
+
+
+float $rPivot[];
+
+float $time;
+
+$rPivot = `getAttr ($selectedLN + ".rp")`;
+
+if  ($rPivot[0] != 0 || $rPivot[1] != 0  || $rPivot[2] != 0 )   // && ($masterName != "dvdguskidnapperi017001_MASTER") )
+{
+
+	currentTime 43;
+	xform -rp 0 0 0 $selectedLN;
+	xform -sp 0 0 0 $selectedLN;
+}
+
+for($tran in $transforms)
+{
+	$valAttr[size($valAttr)] = `getAttr ($selectedLN + "." + $tran)`;
+}
+
+
+
+//select -ne ($prefix + $chaName + "_set");
+
+slResetPose;
+
+
+//import ring -----------------------------------------------
+
+			importRing ($chaName,$prefix);
+
+
+//恢复动画文件的初始状态----------------------------------------
+
+
+int $j;
+
+for($j = 0; $j<size($transforms) ;$j++)
+{
+
+setAttr ($selectedLN + "." + $transforms[$j]) $valAttr[$j];
+
+}
+
+
+if(`objExists $wMs[0]`)
+{
+parent $wMs[0] $msParent[0];
+
+$wMs = `ls -sl -l`;
+$selectedLN = $wMs[0];
+}
+
+
+if  ($rPivot[0] != 0 || $rPivot[1] != 0  || $rPivot[2] != 0 ) //&& ($masterName != "dvdguskidnapperi017001_MASTER") )
+{
+
+xform -rp $rPivot[0] $rPivot[1] $rPivot[2] $selectedLN;
+xform -sp $rPivot[0] $rPivot[1] $rPivot[2] $selectedLN;
+}
+
+for($lock in $lockAttr)
+{
+
+setAttr -l 1 ($selectedLN + "." +$lock);
+
+}
+
+
+//clean namespace----------------------------------------------------------
+
+							
+		cleanNamespace $ns_hair;
+		cleanNamespace $ns_hair;
+		if (!`namespace -exists $ns_hair`)
+		{
+			namespace -removeNamespace $ns_hair;
+		}
+
+		select -cl;
+
+
+
+		print ("Import hair and ring for " + $chaName); 
+
+
+
+
+	}
+
+
+
+
+	else error "invalid selection";
+
+	flushUndo;
+
+}

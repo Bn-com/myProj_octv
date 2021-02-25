@@ -1,0 +1,203 @@
+//////////////////////////////////////////////////////////////////////////////////////////
+//																						//
+//							Sets management functions library							//
+//										(s100Set_*)										//
+//																						//
+//	----------------------------------------------------------------------------------	//
+//																						//
+//	Main procs :			s100Set_retrieveSetMembers										//
+//							s100Set_retrieveAllSetMembers									//
+//							s100Set_retrieveSetsFromSet									//
+//							s100Set_inWhichSetsIs											//
+//							s100Set_moveToOtherSet											//
+//																						//
+//	+ add/remove	 :	s100Set_addToSet(string $transform[], string $set )
+//						s100Set_remFromSet(string $transform[], string $set)
+//						s100Set_remSelFromEverySet()
+//						s100Set_remFromEverySet
+//																						//
+//	+ Proxys (loRes) Sets :		s100Set_isValidProxySet									//
+//								s100Set_cleanObjFromProxySets								//
+//																						//
+//	+ to be tested :		s100Set_transferSelFromReferencedSetsToOther					//
+//																						//
+//																						//
+//////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+// Recursive Set members retrieving - apart from other subSets !
+global proc string [] s100Set_retrieveSetMembers(string $setName)
+{
+	string $setElements[] = `sets -q $setName`;
+	string $setsList[] = `ls -sets $setElements`;
+	$setElements = `stringArrayRemove $setsList $setElements`;
+
+	for($i=0; $i<size($setsList); $i++)
+		$setElements = `stringArrayCatenate $setElements (s100Set_retrieveSetMembers($setsList[$i]))`;
+
+	return stringArrayRemoveDuplicates($setElements);
+}
+
+// Recursive Set members retrieving - even other subSets !
+global proc string [] s100Set_retrieveAllSetMembers(string $setName)
+{
+	string $setElements[] = s100Set_retrieveSetMembers( $setName ) ;
+	string $setsList[] = s100Set_retrieveSetsFromSet( $setName );
+
+	$setElements = `stringArrayCatenate $setElements $setsList `;
+
+	return stringArrayRemoveDuplicates($setElements);
+}
+
+// Recursive Set members of type "objectSet" retrieving
+global proc string [] s100Set_retrieveSetsFromSet(string $setName)
+{
+	string $setElements[] = `sets -q $setName`;
+	string $setsList[] = `ls -sets $setElements`;
+	string $setsTmpList[] = $setsList ;
+
+	for($i=0; $i<size($setsList); $i++)
+		$setsTmpList = `stringArrayCatenate $setsTmpList (s100Set_retrieveSetsFromSet($setsList[$i]))`;
+
+	return stringArrayRemoveDuplicates($setsTmpList);
+}
+
+
+global proc string[] s100Set_inWhichSetsIs( string $obj ) // string $obj= "myRig_subSet"
+{
+	string $sets[] = {};
+	string $everySet[] = `ls -type "objectSet"`;
+	if (`objExists $obj`) {
+		for ($set in $everySet) { // string $set =  $everySet[0]
+			if (`sets -im $set $obj`) // is member of...
+				$sets[size($sets)] = $set;
+		}
+	}
+	return $sets;
+}
+
+// s100Set_moveToOtherSet("Eyes", "filteredObjSetsReminder", "_CTRL" , "" )
+
+global proc s100Set_moveToOtherSet(string $el, string $otherSet, string $searchInOldSet , string $replaceInNewSubset )
+{
+	string $itsSets[] = s100Set_inWhichSetsIs( $el ) ;
+	for ($set in $itsSets) {
+		if ($set == "CONTROLS" ) {
+			string $destSet = lRig_return_filteredObjSetsReminderSet();
+			lRig_addToSet( {$el} , $destSet ) ;
+		}
+		else if ($set=="filteredObjSetsReminder") {
+			string $destSet = lRig_return_CONTROLSSet();
+			lRig_addToSet( {$el} , $destSet ) ;
+		}
+		else {
+			string $newSubSet = `substitute $searchInOldSet $set $replaceInNewSubset`;
+			lRig_cleanUpObjectsInMainSet({$el}, $otherSet, $newSubSet) ;
+		}
+		// remove from orig set:
+		lRig_remFromSet( {$el} , $set ) ;
+		select -cl ;
+	}
+}
+
+
+// ajoute les elements  au dernier set selectionne
+
+global proc s100Set_addToSet(string $transform[], string $set )
+	{
+		int $s;
+		for($s = 0; $s<size($transform); $s++) {
+			if (`objExists $transform[$s]`)
+				sets -add $set $transform[$s];
+		}
+	}
+
+
+	global proc s100Set_remFromSet(string $transform[], string $set)
+	{
+		int $s;
+		for($s = 0; $s<size($transform); $s++)
+			sets -rm $set $transform[$s];
+	}
+
+
+
+global proc s100Set_remSelFromEverySet()
+{
+	string $sel[] = `ls -sl`;
+	s100Set_remFromEverySet( $sel );
+}
+
+
+global proc s100Set_remFromEverySet(string $objs[])
+{
+	for ($sl in $objs) { // string $sl = $sel[0]
+		string $sets[] = s100Set_inWhichSetsIs($sl);
+		if (size($sets)) {
+			for ($set in $sets)
+				lRig_remFromSet({$sl},$set) ;
+		}
+	}
+}
+
+
+
+//********************************************************;
+
+// to be tested !
+global proc s100Set_transferSelFromReferencedSetsToOther( string $nmspc)
+{
+	//string $nmspc = "C_brain_01:";
+	//string $srcSets[] = `ls -l -typ "objectSet"  ($nmspc+"*")`;
+	string $sel[] = `ls -sl`;
+	for ($sl in $sel) { // string $sl = $sel[0]
+		string $destObj=`substitute $nmspc $sl ""`;
+		string $srcSets[] = s100Set_inWhichSetsIs( $sl ) ;
+		if (size($srcSets)) {
+			for ($srcSet in $srcSets) { // string $srcSet = $srcSets[0]
+				string $destSet=`substitute $nmspc $srcSet ""`;
+				if (`objExists $destObj`) {
+					s100Set_addToSet({$destObj}, $destSet) ;
+				}
+			}
+		}
+	}
+}
+
+
+//=========================================================================
+//
+//	Smooth and Proxys Sets
+//
+//=========================================================================
+global proc int s100Set_isValidProxySet(string $set)
+{
+	if (!`objExists $set`)
+		return 0;
+	if (`objectType $set`=="objectSet" && `gmatch $set "prx_*"`
+		&& `attributeExists "mySourceMesh" $set`
+		&& `attributeExists "mySourceMeshName" $set`
+		&& `attributeExists "mySourceTransformName" $set` )
+		return 1;
+	else
+		return 0;
+}
+
+
+/*
+string $sel[] = `ls -sl`;
+string $obj = $sel[0];
+*/
+global proc s100Set_cleanObjFromProxySets( string $obj )
+{
+	string $sets[] = s100Set_inWhichSetsIs( $obj );
+	for ($set in $sets) {
+		if (s100Set_isValidProxySet($set)) {
+			print ("// Removing \""+$obj+"\" from Proxy set '"+$set+"'.\n");
+			sets -rm $set $obj ;
+		}
+	}
+}
+
+

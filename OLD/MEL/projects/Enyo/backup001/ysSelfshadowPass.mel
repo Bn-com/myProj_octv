@@ -1,0 +1,44 @@
+// Make a selfshadow pass
+global proc ysSelfshadowPass ()
+{
+	// Create shadow shader	
+	if(!(`objExists "sShadowShader"`))
+	{	
+		string $sdShadow = `shadingNode -asShader p_shadow -name "sShadowShader"`;
+		string $keyLights[] = `ls -lights "Key*"`;
+		string $keyLights[] = `listRelatives -parent $keyLights`;
+		int $i = 0;
+		int $count = size($keyLights);
+		for($i;$i<$count;$i++)
+		{
+			connectAttr -force ($keyLights[$i]+".message") ($sdShadow+".lights["+$i+"]");
+		}
+	}
+	// Create shadow channel
+	string $bufferList[] = `listConnections "miDefaultOptions.frameBufferList"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	int $number = size($bufferList);
+	for($item in $bufferList)
+	{
+		if(!(`gmatch $item "IDMT_FB_selfshadow*"`) && !(`gmatch $item "IDMT_FB_selfshadow*"`))
+		{
+			string $camera[] = `listConnections -shapes on "mentalrayOutputPass0.message"`;			
+			createNode mentalrayUserBuffer -name "IDMT_FB_selfshadow";
+			connectAttr -force "IDMT_FB_selfshadow.message" ("miDefaultOptions.frameBufferList["+$number+"]");
+			createNode mentalrayOutputPass -name "IDMT_FB_selfshadowPass";
+			connectAttr -force "IDMT_FB_selfshadowPass.message" ($camera[0] + ".miOutputShaderList["+$number+"]");
+			connectAttr -force "IDMT_FB_selfshadow.message" "IDMT_FB_selfshadowPass.dataType";
+			setAttr "IDMT_FB_selfshadowPass.fileMode" 1;
+			setAttr -type "string" IDMT_FB_selfshadowPass.fileName "selfshadow";
+			//setAttr IDMT_FB_selfshadow.dataType 1;
+			break;
+		}
+	}
+	string $bufferStore[] = `ls -type "buffer_store"`;
+	for($item in $bufferStore)
+	{
+		setAttr ($item + ".store_"+$number) 1;
+		connectAttr -force ("sShadowShader.outValue") ($item + ".inbuffer_"+$number);
+		connectAttr -force ("sShadowShader.outValueA") ($item + ".inbuffer_"+$number+"A");
+	}
+}

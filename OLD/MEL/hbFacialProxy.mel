@@ -1,0 +1,182 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: hb
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc unlockTransform (string $obj)
+{
+	string $attrs[];
+	$attrs[0] = "tx";
+	$attrs[1] = "ty";
+	$attrs[2] = "tz";
+	$attrs[3] = "rx";
+	$attrs[4] = "ry";
+	$attrs[5] = "rz";
+	$attrs[6] = "sx";
+	$attrs[7] = "sy";
+	$attrs[8] = "sz";
+	$attrs[9] = "visibility";
+	for ($attr in $attrs)
+		setAttr -keyable true -lock false ($obj + "." + $attr);
+}
+
+proc copySkinWeight (string $skin_sc, string $skin_dest)
+{
+	string $skins[2] = {$skin_sc, $skin_dest};
+	string $skinCluster[];
+	for ($i = 0; $i < 2 ; $i++ )
+	{
+		string $history[] = `listHistory $skins[$i]`;
+	        for ($item in $history)
+		{
+			if (`nodeType $item` == "skinCluster")
+			{
+				$skinCluster[$i] = $item; 
+				break;
+			}
+		}
+	}
+	copySkinWeights -ss $skinCluster[0] -ds $skinCluster[1] -noMirror -smooth;
+}
+
+proc ew_copySkinDestObject (string $selected_0, string $selected_1)  //created by Eddy, modified by zhenghaibin
+{
+	string $destSkinObj = "";
+	string $sourceSkinCluster = "";
+	string $destSkinCluster = ""; 
+	//string $selected[] = `ls -sl`; 	
+	//if (`size $selected` == 2) 	
+	//{ 		
+		// $selected_0 : destination 		
+		// $selected_1 : source 		
+		string $sourceSkinCluster; 		
+		string $destSkinObj = $selected_0; 		
+		string $history[] = `listHistory $selected_1`; 		
+		for ($item in $history) 			
+	if (`nodeType $item` == "skinCluster") 				
+		$sourceSkinCluster = $item; 	
+
+
+
+	string $jion[]=`skinCluster -q -inf $sourceSkinCluster`; 
+	string $item;
+        string $joint,$joints[];
+	int $k=0;
+        string $influnence,$inf[];
+	int $v=0;
+	for ($item in $jion)
+		{
+		if (`nodeType $item`=="joint")
+			{
+			$joints[$k]=$item;
+			$joint+=$joints[$k]+" ";
+			$k++;
+			}
+        	else
+			{
+			$inf[$v]=$item;
+			$influnence+=$inf[$v]+" ";
+			$v++;
+			}
+		}
+	
+	 string $cmd = ("skinCluster -ibp -tsb "+$joint + $destSkinObj + "\n");
+	print $cmd;
+	string $skin[] = `eval $cmd`;
+	string $destSkinCluster = $skin[0];
+	
+	if ($influnence!="")
+        	{
+		for ($v=0;$v<`size $inf`;$v++)
+			{
+			string $add=("skinCluster -e -ibp -ai "+$inf[$v]+" "+$destSkinCluster);
+			eval $add;
+			}
+		}
+	 //}
+	/*print "\n\n\n\n"; 
+        print ("Result is " + $destSkinCluster + " (Eddy)"+"\n"); 
+	print "\n";
+	 } 
+	else
+	error("Please select destination and source skin in that order.");
+	*/
+}
+
+global proc hbFacialProxy ()
+{
+	string $select[] = `ls -sl`;
+	if ((`size $select` == 0) ||(`nodeType $select[size($select)-1]` != "blendShape") )
+		error ("Please select the Removing Faces first, and a BlendShape Node last.");
+	select -d $select[size($select)-1];
+	string $slFaces[] = `filterExpand -sm 34 -ex 1`;
+	string $BSnode = $select[size($select)-1];
+	string $orgSkinShape[1] = `selectedNodes -dagObjects`;
+	string $orgSkin[1] = `listTransforms $orgSkinShape[0]`;
+	string $name = $orgSkin[0];
+	string $pxName = $name + "_PX";
+	string $temName_1 = $name + "_TEM_1";
+	string $temName_2 = $name + "_TEM_2";
+	string $pxBlendShape = $name + "_pxBlendShape";
+	string $RMfaces[];
+
+	int $BScount = `blendShape -q -weightCount $BSnode`;
+
+	duplicate -rr -ic -n $temName_1 $name;
+	duplicate -rr -n $temName_2 $name;
+
+	ew_copySkinDestObject $temName_2 $name;
+	copySkinWeight $name $temName_2;
+
+	select -cl;
+	for ($i = 0 ; $i < (size($slFaces)) ; $i++ )
+	{
+		$RMfaces[$i] = `substitute $orgSkin[0] $slFaces[$i] $temName_1`;
+		select -add $RMfaces[$i];
+	}
+
+	delete ;
+	unlockTransform $temName_1;
+
+	duplicate -rr -n $pxName $temName_1;
+
+	if (`objExists $pxBlendShape`)
+		delete $pxBlendShape;
+	blendShape -n $pxBlendShape $pxName;
+
+	for ($i = 0; $i < $BScount; $i++ )
+	{
+		string $bsAttr = ($BSnode + ".weight[" + $i + "]");
+		string $pxAttr = ($pxBlendShape + ".weight[" + $i + "]");
+		string $sAttr = `connectionInfo -sourceFromDestination $bsAttr`;
+		if ($sAttr != "")
+			disconnectAttr $sAttr $bsAttr;
+		setAttr $bsAttr 1;
+		duplicate -rr -n ($name + "_target" + $i) $temName_1;
+		setAttr $bsAttr 0;
+		if ($sAttr != "")
+			connectAttr $sAttr $bsAttr;
+
+		blendShape -e -t  $pxName $i ($name + "_target" + $i) 1 ($pxBlendShape);
+		connectAttr $bsAttr $pxAttr;
+		//setAttr $pxAttr 0;
+		string $tgName = `aliasAttr -q $bsAttr`;
+		if ($tgName != "")
+			aliasAttr $tgName $pxAttr;
+		delete ($name + "_target" + $i);
+	}
+
+	ew_copySkinDestObject $pxName $temName_2;
+	copySkinWeight $temName_2 $pxName;
+
+	delete $temName_1;
+	delete $temName_2;
+
+	select -cl;
+	print ($pxName + " is created");
+}

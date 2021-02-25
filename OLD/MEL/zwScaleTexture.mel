@@ -1,0 +1,355 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwScaleTextureCB()
+{
+	string $dest, $all[], $buf[], $buf2[], $buf3[];
+
+	int $zwScaleTextureApplyTo = `optionVar -query "zwScaleTextureApplyTo"`;
+	int $zwScaleTextureModifyPath = `optionVar -query "zwScaleTextureModifyPath"`;
+	zwScaleTextureChange "textFieldButtonGrpDest";
+	string $zwScaleTextureDestination = `optionVar -query "zwScaleTextureDestination"`;
+	$zwScaleTextureDestination = `substitute "/$" $zwScaleTextureDestination ""`;
+	if (($zwScaleTextureModifyPath == 1 || $zwScaleTextureModifyPath == 2 || $zwScaleTextureModifyPath == 5) && !`filetest -d $zwScaleTextureDestination`)
+		error "Destination folder not exists.";
+
+	string $file[] = {};
+
+	if ($zwScaleTextureApplyTo == 1)
+	{
+		$file = `ls -type file`;
+		string $temp[] = `ls -type aiImage`;
+		for($t=0;$t<size($temp);$t++)
+		{
+			$file[size($file)] = $temp[$t];
+		}
+	}
+	else if ($zwScaleTextureApplyTo == 2)
+	{
+		$file = `zwTextureNetwork`;
+	}
+	int $max = `size $file`;
+	if ($max == 0)
+		return;
+
+	int $imgSize = 0;
+
+	progressWindow -max $max -title "Scale Texture" -isInterruptable true;
+	for ($i=0; $i<size($file); $i++)
+	{
+		progressWindow -edit -progress ($i + 1) -status ($i + 1 + "/" + $max + "    " + $file[$i]);
+		string $nodeType = `nodeType $file[$i]`;
+		string $attrName = "";
+		if($nodeType == "file")
+		{
+			$attrName = ".fileTextureName";
+		}
+		if($nodeType == "aiImage")
+		{
+			$attrName = ".filename";
+		}
+		string $fileTextureName = `getAttr ($file[$i] + $attrName)`;
+		if ($fileTextureName == "")
+			continue;
+		$fileTextureName = `workspace -expandName $fileTextureName`;
+		if (!`filetest -f $fileTextureName`)
+		{
+			warning ("Texture File Missing: " + $file[$i] + " " + $fileTextureName);
+			continue;
+		}
+
+		tokenize $fileTextureName "/" $buf;
+		string $filename = $buf[size($buf) - 1];
+		string $folder = `substring $fileTextureName 1 (size($fileTextureName) - size($filename) - 1)`;
+
+		string $texture = "";
+		if ($zwScaleTextureModifyPath == 1)
+		{
+			$texture = $zwScaleTextureDestination + "/" + $filename;
+		}
+		else if ($zwScaleTextureModifyPath == 4)
+		{
+			if (`match "^low_" $filename` == "")
+			{
+				$texture = $folder + "/low_" + $filename;
+			}
+		}
+		else if ($zwScaleTextureModifyPath == 5)
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_backCmd;reload(sk_backCmd)");
+			$imgSize = python("sk_backCmd.sk_backCmd().checkTextureFileSize('" + $fileTextureName +"')");
+			//if (`match "_4[kK][.]" $filename` == "")
+			//print "\n-----------001\n";
+			//print $fileTextureName;
+			//print $imgSize;
+			if ($imgSize != 4096)
+			{
+				continue;
+			}
+			string $newFolder = $zwScaleTextureDestination;
+			if ($newFolder == "")
+			{
+				if (`match "/4[kK]" $folder` != "")
+				{
+					$newFolder = `substitute "/4[kK]$" $folder "/2k"`;
+				}
+				else
+				{
+					
+					$newFolder = $folder + "/2k";
+				}
+			}
+			if (!`filetest -d $newFolder`)
+			{
+				sysFile -md $newFolder;
+			}
+			if (`match "_4[kK][.]" $filename` != "")
+			{
+				$texture = $newFolder + "/" + `substitute "_4[kK][.]" $filename "_2k."`;
+			}
+			else
+			{
+				$texture = $newFolder + "/" + `substitute "[.]" $filename "_2k."`;
+			}
+		}
+		if ($texture == $fileTextureName)
+		{
+			$texture = "";
+		}
+	
+		clear $buf3;
+		$buf3[size($buf3)] = $fileTextureName;
+		if($nodeType == "file")
+		{
+			if (`getAttr ($file[$i] + ".useFrameExtension")`)
+			{
+				string $buf1[] = zwGetSequence($fileTextureName);
+				for ($seq in $buf1)
+				{
+					$buf3[size($buf3)] = $folder + "/" + $seq;
+				}
+			}
+		}
+
+		for ($source in $buf3)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				progressWindow -endProgress;
+				return;
+			}
+			if(`stringArrayCount $source $all`)
+				continue;
+			$all[size($all)] = $source;
+
+			tokenize $source "/" $buf;
+			$filename = $buf[size($buf) - 1];
+
+			if ($zwScaleTextureModifyPath == 3)
+			{
+				$dest = $source;
+				string $str = `substitute "[.]" $filename "_orig."`;
+				if ($str == $filename)
+					$str += "_orig";
+				$str = $folder + "/" + $str;
+				if (!`sysFile -rename $str $source`)
+					warning ("Fail in renaming: " + $filename + " -> " + $str);
+				$dest = $source;
+				$source = $str;
+			}
+			else if ($zwScaleTextureModifyPath == 4)
+			{
+				if (`match "^low_" $filename` != "")
+				{
+					continue;
+				}
+				$dest = $folder + "/low_" + $filename;
+			}
+			else if ($zwScaleTextureModifyPath == 5)
+			{
+				python("from idmt.maya.commonCore.core_mayaCommon import sk_backCmd;reload(sk_backCmd)");
+				//if (`match "_4[kK][.]" $filename` == "")
+				//print "\n-----------002\n";
+				//print $fileTextureName;
+				//print $imgSize;
+				if ($imgSize != 4096)
+				{
+					continue;
+				}
+				string $newFolder = $zwScaleTextureDestination;
+				if ($newFolder == "")
+				{
+					if (`match "/4[kK]" $folder` != "")
+					{
+						$newFolder = `substitute "/4[kK]$" $folder "/2k"`;
+					}
+					else
+					{
+
+						$newFolder = $folder + "/2k";
+					}
+				}
+				if (!`filetest -d $newFolder`)
+				{
+					sysFile -md $newFolder;
+				}
+				if (`match "_4[kK][.]" $filename` != "")
+				{
+					$dest = $newFolder + "/" + `substitute "_4[kK][.]" $filename "_2k."`;
+				}
+				else
+				{
+					$dest = $newFolder + "/" + `substitute "[.]" $filename "_2k."`;
+				}
+			}
+			else
+			{
+				$dest = $zwScaleTextureDestination + "/" + $filename;
+			}
+			if (!`filetest -f $source`)
+			{
+				progressWindow -endProgress;
+				error ("File not exists: " + $source);
+			}
+			if (`zwFullPath $source` == `zwFullPath $dest`)
+			{
+				string $temp = `internalVar -userTmpDir` + $filename;
+				sysFile -delete $temp;
+				if (catch(`idmtImage -scale 0.5 $source $temp`))
+				{
+					progressWindow -endProgress;
+				//	error ($rs + "\nSOURCE: " + $source + "\n" + "DEST: " + $temp);
+				}
+				sysFile -delete $dest;
+				if (`sysFile -move $dest $temp`)
+				{
+					print ($dest + "\n");
+				}
+				else
+				{
+					progressWindow -endProgress;
+					error ("Fail in moveing file.\nSOURCE: " + $temp + "\n" + "DEST: " + $dest);
+				}
+			}
+			else
+			{
+				if (catch(`idmtImage -scale 0.5 $source $dest`))
+				{
+					progressWindow -endProgress;
+				//	error ($rs + "\nSOURCE: " + $source + "\n" + "DEST: " + $dest);
+				}
+				else
+				{
+					print ($dest + "\n");
+				}
+			}
+		}
+
+		if ($texture != "")
+		{
+			setAttr ($file[$i] + $attrName) -type "string" $texture;
+		}
+	}
+	progressWindow -endProgress;
+}
+
+global proc zwScaleTextureBrowse(string $textFieldButtonGrp)
+{
+	string $zwScaleTextureDestination = `optionVar -query "zwScaleTextureDestination"`;
+	$zwScaleTextureDestination = `idmtFolderDialog -initialDir $zwScaleTextureDestination`;
+	$zwScaleTextureDestination = `substituteAllString $zwScaleTextureDestination "\\" "/"`;
+	if(`filetest -d $zwScaleTextureDestination`)
+	{
+		optionVar -stringValue "zwScaleTextureDestination" $zwScaleTextureDestination;
+		textFieldButtonGrp -edit -fileName $zwScaleTextureDestination $textFieldButtonGrp;
+	}
+}
+
+global proc zwScaleTextureChange(string $textFieldButtonGrp)
+{
+	string $zwScaleTextureDestination = `textFieldButtonGrp -query -fileName $textFieldButtonGrp`;
+	optionVar -stringValue "zwScaleTextureDestination" $zwScaleTextureDestination;
+}
+
+global proc zwScaleTextureReset()
+{
+	optionVar -intValue "zwScaleTextureApplyTo" 1;
+	optionVar -intValue "zwScaleTextureModifyPath" 1;
+	optionVar -stringValue "zwScaleTextureDestination" "";
+
+	zwScaleTexture;
+}
+
+global proc zwScaleTexture()
+{
+	if (!`optionVar -exists "zwScaleTextureApplyTo"`)
+		optionVar -intValue "zwScaleTextureApplyTo" 1;
+	if (!`optionVar -exists "zwScaleTextureModifyPath"`)
+		optionVar -intValue "zwScaleTextureModifyPath" 1;
+	if (!`optionVar -exists "zwScaleTextureDestination"`)
+		optionVar -stringValue "zwScaleTextureDestination" "";
+
+	int $zwScaleTextureApplyTo = `optionVar -query "zwScaleTextureApplyTo"`;
+	int $zwScaleTextureModifyPath = `optionVar -query "zwScaleTextureModifyPath"`;
+	string $zwScaleTextureDestination = `optionVar -query "zwScaleTextureDestination"`;
+
+	if (`window -exists zwScaleTexture`)
+		deleteUI zwScaleTexture;
+
+	window -menuBar true -title "Scale Texture" -width 500 -height 200 zwScaleTexture;
+		menu -label "Edit";
+			menuItem -label "Reset Setings" -command "zwScaleTextureReset";
+		string $formLayout = `formLayout`;
+			string $tabLayout = `tabLayout -tabsVisible false -scrollable true -childResizable true`;
+				columnLayout -adjustableColumn true -rowSpacing 5;
+					string $radioButtonGrp = `radioButtonGrp -label "Apply to" -label1 "All Textures" -onCommand "optionVar -intValue \"zwScaleTextureApplyTo\" 1" -select ($zwScaleTextureApplyTo == 1)`;
+					radioButtonGrp -adjustableColumn 2 -shareCollection $radioButtonGrp -label "" -label1 "Selected Objects Only" -onCommand "optionVar -intValue \"zwScaleTextureApplyTo\" 2" -select ($zwScaleTextureApplyTo == 2);
+					string $radioButtonGrp1 = `radioButtonGrp -adjustableColumn 2 -label "Modify Path" -label1 "Modify" radioButtonGrpType1`;
+					string $radioButtonGrp2 = `radioButtonGrp -adjustableColumn 2 -shareCollection $radioButtonGrp1 -label "" -label1 "Not Modify" radioButtonGrpType2`;
+					string $radioButtonGrp3 = `radioButtonGrp -adjustableColumn 2 -shareCollection $radioButtonGrp1 -label "" -label1 "Add '_orig' as postfix to the old filename" radioButtonGrpType3`;
+					string $radioButtonGrp4 = `radioButtonGrp -adjustableColumn 2 -shareCollection $radioButtonGrp1 -label "" -label1 "Add 'low_' as prefix to the new filename" radioButtonGrpType4`;
+					string $radioButtonGrp5 = `radioButtonGrp -adjustableColumn 2 -shareCollection $radioButtonGrp1 -label "" -label1 "4k->2k，缩小、改名、改路径" radioButtonGrpType5`;
+					string $textFieldButtonGrp = `textFieldButtonGrp -enable ($zwScaleTextureModifyPath != 3 && $zwScaleTextureModifyPath != 4) -label "Save New Files in:" -fileName $zwScaleTextureDestination -buttonLabel "Browse" -adjustableColumn 2 textFieldButtonGrpDest`;
+					setParent..;
+				setParent..;
+			string $button1 = `button -label "Scale" -command "zwScaleTextureCB;\ndeleteUI zwScaleTexture;"`;
+			string $button2 = `button -label "Apply" -command "zwScaleTextureCB"`;
+			string $button3 = `button -label "Close" -command "deleteUI zwScaleTexture"`;
+
+	formLayout -edit
+		-attachForm	$tabLayout	"top"		0
+		-attachForm	$tabLayout	"left"		0
+		-attachForm	$tabLayout	"right"		0
+		-attachControl	$tabLayout	"bottom"	5	$button1
+
+		-attachForm	$button1	"left"		5
+		-attachForm	$button1	"bottom"	5
+		-attachPosition	$button1	"right"		5	33
+
+		-attachControl	$button2	"left"		5	$button1
+		-attachForm	$button2	"bottom"	5
+		-attachPosition	$button2	"right"		5	66
+
+		-attachControl	$button3	"left"		5	$button2
+		-attachForm	$button3	"bottom"	5
+		-attachForm	$button3	"right"		5
+	$formLayout;
+
+	eval ("radioButtonGrp -edit -select 1 \"radioButtonGrpType" + $zwScaleTextureModifyPath + "\"");
+
+	radioButtonGrp -edit -onCommand ("optionVar -intValue \"zwScaleTextureModifyPath\" 1; textFieldButtonGrp -edit -enable true " + $textFieldButtonGrp) $radioButtonGrp1;
+	radioButtonGrp -edit -onCommand ("optionVar -intValue \"zwScaleTextureModifyPath\" 2; textFieldButtonGrp -edit -enable true " + $textFieldButtonGrp) $radioButtonGrp2;
+	radioButtonGrp -edit -onCommand ("optionVar -intValue \"zwScaleTextureModifyPath\" 3; textFieldButtonGrp -edit -enable false " + $textFieldButtonGrp) $radioButtonGrp3;
+	radioButtonGrp -edit -onCommand ("optionVar -intValue \"zwScaleTextureModifyPath\" 4; textFieldButtonGrp -edit -enable false " + $textFieldButtonGrp) $radioButtonGrp4;
+	radioButtonGrp -edit -onCommand ("optionVar -intValue \"zwScaleTextureModifyPath\" 5; textFieldButtonGrp -edit -enable true " + $textFieldButtonGrp) $radioButtonGrp5;
+	textFieldButtonGrp -edit -changeCommand ("zwScaleTextureChange " + $textFieldButtonGrp) -buttonCommand ("zwScaleTextureBrowse " + $textFieldButtonGrp) $textFieldButtonGrp;
+
+	showWindow zwScaleTexture;
+}

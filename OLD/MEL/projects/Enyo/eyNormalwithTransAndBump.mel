@@ -1,0 +1,86 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2009-6-2
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc eyNormalwithTransAndBump()
+{
+
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -geometry`;
+	createRenderLayer -name "transNormal" -makeCurrent -noRecurse $objShape;
+	
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	
+	/*editRenderLayerAdjustment "defaultResolution.width";
+	setAttr "defaultResolution.width" 960;
+	editRenderLayerAdjustment "defaultResolution.height";
+	setAttr "defaultResolution.height" 540;*/
+	
+	// AO shader
+	string $norTex = `shadingNode -asTexture mib_amb_occlusion -name "norTexture"`;
+	//setAttr ($norTex + ".samples" ) 128;
+	//setAttr ($norTex + ".max_distance" ) 10;
+	setAttr ($norTex + ".output_mode" ) 2;
+	string $norShader = `shadingNode -asShader surfaceShader -name "norShader"`;
+	string $norShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($norShader+"SG")`;
+	connectAttr -force ($norTex + ".outValue") ($norShader + ".outColor");
+	connectAttr -force ($norShader + ".outColor") ($norShaderSG + ".surfaceShader");
+	
+	// Filtering material 
+	string $allSG[] = `ls -type shadingEngine`;
+	string $eliminate [] = {"lambert1", "particleCloud1", "shaderGlow1"};
+	//string $matArray[] = stringArrayRemove ($eliminate, $mats);
+	for($item in $allSG)
+	{	
+		string $sgObjs[] = `sets -q $item`;
+		if (size($sgObjs))
+		{
+			string $shader[] = `listConnections -s 1 -d 0 ($item+".surfaceShader")`;
+			if (size($shader) && stringArrayCount($shader[0],$eliminate)==0)
+			{
+				if((`objExists ($shader[0]+".normalCamera")`)||(`objExists ($shader[0]+".transparency")`))
+				{
+					print ($item+"\n");
+					
+					string $norBumpTransShaderSG[] = `duplicate -un $item`;
+					string $norBumpTransShader[] = `listConnections -s 1 -d 0 ($norBumpTransShaderSG[0]+".surfaceShader")`;
+					
+					string $colorCNS[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($norBumpTransShader[0]+".color")`;
+					for ($i=0;$i<size($colorCNS);$i=$i+2)
+					{
+						disconnectAttr $colorCNS[$i+1] $colorCNS[$i];
+					}
+					connectAttr -f ($norTex+".outValue") ($norBumpTransShader[0]+".color");
+					
+					catch(`sets -e -forceElement  $norBumpTransShaderSG[0] $sgObjs`);
+					select -cl;					 
+				}
+				else 
+				{
+					sets -e -forceElement  $norShaderSG $sgObjs;
+					select -cl;					 
+				}
+			}
+		}
+	}
+	//ÑÛÇòµ¥¶À´¦Àí
+	//string $allEyes[] = `ls -geometry "*eye*" "*:*_eye*"`;
+	//sets -e -forceElement  $norShaderSG $allEyes;
+
+}
+

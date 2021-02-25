@@ -1,0 +1,169 @@
+global proc ezEffectParticle()
+{
+	string $joints[];
+	string  $objs[] = `ls -l -type joint `;
+	for ($obj in $objs)
+	{
+		string $parent[] = `listRelatives -p $obj`;
+		if ($parent[0] == "fx_magicstar")
+			$joints[size($joints)] = $obj;
+	}
+	
+	string $emitterCloud[],$emitterStar[];
+	string  $objs[] = `ls -l -type pointEmitter`;
+	for ($obj in $objs)
+	{
+		string $parent[] = `listRelatives -p $obj`;
+		if ($parent[0] == "fx_magicstar")
+			$emitterStar[size($emitterStar)] = $obj;
+		if ($parent[0] == "fx_magiccloud")
+			$emitterCloud[size($emitterCloud)] = $obj;
+	}
+
+	string $partCloud[],$partStar[];
+	string  $objs[] = `ls -l -type particle`;
+	for ($obj in $objs)
+	{
+		string $trans[] = `listRelatives -f -p $obj`;
+		string $parent[] = `listRelatives - p $trans[0]`;
+		if ($parent[0] == "fx_magiccloud")
+			$partCloud[size($partCloud)] = $trans[0];
+		if ($parent[0] == "fx_magicstar")
+			$partStar[size($partStar)] = $trans[0];
+	}
+
+	string $phere[];
+	string  $objs[] = `ls -l -type mesh`;
+	for ($obj in $objs)
+	{
+		string $trans[] = `listRelatives -f -p $obj`;
+		string $parent[] = `listRelatives - p $trans[0]`;
+		if ($parent[0] == "fx_magiccloud")
+			$phere[size($phere)] = $trans[0];
+	}
+
+	string $mps[] = `ls -type motionPath "*motionPath_star*"`;
+	
+	//get time
+	float $keys[] =`keyframe -q -tc ($emitterCloud[0]+".rate")`;
+	float $current = $keys[size($keys)-1] + 2 ;
+
+	int $disa = `intField -q -v disFrame`;
+	float $tc = $disa - $current ;
+
+	//magiccloud emitter rate 
+	keyframe -e -iub true -r -o over -tc $tc  ($emitterCloud[0]+".rate");
+
+	// particle startframe
+	setAttr ($partCloud[0]+".startFrame") (`getAttr ($partCloud[0]+".startFrame")` + $tc);
+	setAttr ($partStar[0]+".startFrame") (`getAttr ($partStar[0]+".startFrame")` + $tc);
+
+	//magiccloud pherer
+	string $attrs[] = {"rotateY","scaleX","scaleY","scaleZ","visibility"};
+	for ($attr in $attrs)
+	{
+		keyframe -e -iub true -r -o over -tc $tc ($phere[0] + "." + $attr);
+	}
+	
+	//magicstar joint
+	string $attrs[] = {"translateX","translateY","translateZ","scaleX","scaleY","scaleZ"};
+	for ($attr in $attrs)
+	{
+		keyframe -e -iub true -r -o over -tc $tc ($joints[0] + "." + $attr);
+	}
+
+	//magicstar emitter rate
+	for ($emitter in $emitterStar)
+	{
+		keyframe -e -iub true -r -o over -tc $tc ($emitter + ".rate");
+	}
+
+	//motionPath
+	for ($mp in $mps )
+	{
+		keyframe -e -iub true -r -o over -tc $tc ($mp+".uValue");
+	}
+
+	print "TimeChange Done£¡";
+
+}
+
+global proc ezEffectParticleTools()
+{
+	string $file = `getenv "DEV_PATH"` + "/Maya/Import/BenAndIzzy/magic_001.mb";
+	
+	if(`window -ex ezEffectParticleTools`) 
+		deleteUI ezEffectParticleTools;
+
+	 window -title "Bubble time" ezEffectParticleTools;
+		 menuBarLayout;
+			menu -label "Help" ;
+			menuItem -label "Help by " -command ""; 
+
+			columnLayout -adjustableColumn true -columnWidth 10;
+			button -label "import file "  -h 30 -align "center" -c ("file -import -type \"mayaBinary\" -rpr \"\" -options \"v=0\"  -pr \""+$file+"\"");
+			text -label "Disappear Frame";
+			intField -minValue 0 -maxValue 1000000 -value 43 disFrame;
+			button -label "time"  -h 30 -align "center" -c "ezEffectParticle" ;
+			button -label "layer" -h 30 -align "center" -c "ezEffectParticleLayer" ;
+	showWindow ezEffectParticleTools;
+}
+
+
+global proc ezEffectParticleLayer()
+{
+	string $layers[] = {"cloudshadows_all","magiccloud_all","magiclight_all","magicstar_all"};
+
+	if (!`objExists ezmatte_lambert`)
+		shadingNode -asShader lambert -name ezmatte_lambert;
+	setAttr "ezmatte_lambert.color" -type double3 0 0 0 ;
+	setAttr ezmatte_lambert.matteOpacityMode 0;
+
+	string $sels[] = `ls -sl`;
+	for ($layer in $layers)
+	{
+		layerEditorLayerButtonSelect 0 $layer;
+		updateHighlightSelectIcon;
+		editRenderLayerMembers $layer $sels;
+
+		hyperShade -assign ezmatte_lambert;
+	}
+	
+	/*
+	for ($layer in $layers )
+	{
+		string $adj[] = `ls -type renderLayer $layer`;
+		if (!`objExists $adj[0]`)
+			createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+	}
+	setAttr "defaultRenderLayer.renderable" 0;
+
+	string $partCloud[],$partStar[];
+	string  $objs[] = `ls -l -type particle`;
+	for ($obj in $objs)
+	{
+		string $trans[] = `listRelatives -p $obj`;
+		string $parent[] = `listRelatives - p $trans[0]`;
+		if ($parent[0] == "fx_magiccloud")
+			$partCloud[size($partCloud)] = $trans[0];
+		if ($parent[0] == "fx_magicstar")
+			$partStar[size($partStar)] = $trans[0];
+	}
+
+	string $phere[];
+	string  $objs[] = `ls -l -type mesh`;
+	for ($obj in $objs)
+	{
+		string $trans[] = `listRelatives -p $obj`;
+		string $parent[] = `listRelatives - p $trans[0]`;
+		if ($parent[0] == "fx_magiccloud")
+			$phere[size($phere)] = $trans[0];
+	}
+
+
+	editRenderLayerMembers  cloudshadows_all $partCloud;
+	editRenderLayerMembers  magiccloud_all $partCloud;
+	editRenderLayerMembers  magiclight_all $phere;
+	editRenderLayerMembers  magicstar_all $partStar;
+	*/
+}

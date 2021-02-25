@@ -1,0 +1,129 @@
+global proc int zwXcopyEx(string $source, string $dest, int $force, int $useProxy)
+{
+	int $rs = true;
+
+	string $buf[] = `getFileList -filespec ($source + "/*.*")`;
+
+	// progressWindow
+	int $progress;
+	int $max;
+	int $batchMode = `about -batch`;
+	if (!$batchMode)
+	{
+		$max = `progressWindow -query -max`;
+		$progress = `progressWindow -query -progress`;
+		if ($progress <= 0)
+		{
+			$max = size($buf);
+			$progress = 0;
+			progressWindow -progress $progress -max $max -title "Copy File" -status ($progress + "/" + $max) -isInterruptable true;
+		}
+		else
+		{
+			$max += size($buf);
+			progressWindow -edit -max $max;
+		}
+	}
+
+	for ($file in $buf)
+	{
+		// progressWindow
+		if (!$batchMode)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				progressWindow -endProgress;
+				return false;
+			}
+			$progress = `progressWindow -query -progress`;
+			$progress ++;
+			$max = `progressWindow -query -max`;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $file);
+		}
+
+		string $sourceFile = $source + "/" + $file;
+		string $destFile = $dest + "/" + $file;
+		if (`filetest -f $sourceFile`)
+		{
+			if ($force || !`filetest -f $destFile`)
+			{
+				if ($useProxy)
+				{
+					string $error = `zwSysFile "copy" $sourceFile $destFile $useProxy`;
+					if ($error != "")
+					{
+						// progressWindow
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+
+						string $error = $rs + "\ncopy \"" + `substituteAllString $sourceFile "/" "\\"` + "\" \"" + `substituteAllString $destFile "/" "\\"` + "\"";
+						error $error;
+					}
+				}
+				else
+				{
+					if (!`sysFile -copy $destFile $sourceFile`)
+					{
+						// progressWindow
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+
+						string $error = "copy \"" + `substituteAllString $sourceFile "/" "\\"` + "\" \"" + `substituteAllString $destFile "/" "\\"` + "\"";
+						error $error;
+					}
+				}
+			}
+		}
+		else if (`filetest -d $sourceFile`)
+		{
+			if (!`filetest -d $destFile`)
+			{
+				if ($useProxy)
+				{
+					string $error = `zwSysFile "md" $destFile "" $useProxy`;
+					if ($error != "")
+					{
+						// progressWindow
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+
+						$error = $error + "\nmd \"" + `substituteAllString $destFile "/" "\\"` + "\"";
+						error $error;
+					}
+				}
+				else
+				{
+					if (!`sysFile -makeDir $destFile`)
+					{
+						// progressWindow
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+
+						$error = "md \"" + `substituteAllString $destFile "/" "\\"` + "\"";
+						error $error;
+					}
+				}
+			}
+			$rs = $rs && `zwXcopyEx $sourceFile $destFile $force $useProxy`;
+		}
+	}
+
+	// progressWindow
+	if (!$batchMode)
+	{
+		if ($progress == $max)
+		{
+			progressWindow -endProgress;
+		}
+	}
+
+	return $rs;
+}

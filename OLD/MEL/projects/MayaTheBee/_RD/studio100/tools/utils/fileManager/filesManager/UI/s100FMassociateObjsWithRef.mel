@@ -1,0 +1,858 @@
+// GLOBAL VARS :
+// (also used in s100FMIAUI.mel)
+//
+// global var telling the name of attribute to add to object (possibly Instance) to "associate" them with ref :
+global string $gS100_associatedRefFileTag = "s100_associatedRefFile";
+// and the one that's connected to that ref AFTER it's imported (and before Instance is deleted):
+global string $gS100_associatedRefImported = "s100_importedAsset";
+// name of group to which instances are possibly parented when replacement with associated ref file didn't go well:
+global string $gS100_associatedRefSafeGroup = "unreplaceableINSTANCEs_grp";
+
+
+global proc s100FMassociateObjsWithRefFromUI()
+{
+	string $tab = `tabLayout -q -selectTab s100FileManagerUITLMain` ;
+	if ($tab!="s100FMIAFL")
+		warning "Current tab is NOT 's100FMIAFL' (the \"Import Asset\" one). Stopped.";
+	else
+	{
+		string $ref = s100FMgetRefFromFMAIUI();
+		string $objects[] = `ls -sl -tr`;
+		s100FMassociateObjsWithRef($objects,$ref);
+    }
+}
+
+global proc string s100FMgetRefFromFMAIUI()
+{
+	string $fromUI[] = s100FMIAImportAndReferenceGetPathAndSuffixesFromUI();
+	string $path = $fromUI[0];
+	string $suf = $fromUI[1];
+	string $name = $fromUI[2];
+
+	return $path;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//	Associated ref : INSTANCE...
+//
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+global proc s100FMassociateObjsWithRef(string $objs[], string $ref)
+{
+	global string $gS100_associatedRefFileTag ;
+
+	// checking if $reference exists :
+	if(!`filetest -e $ref` || size($ref)==0 )
+		error ("Supposed file to Reference '"+$ref+"' does NOT exist ! Stopped.");
+
+	// checking if objects were passed :
+	string $nonRefd[] = s100_keepingObjsIfReferencedOrNot($objs, 0);
+	if (size($nonRefd)==0)
+		error ("No NON-referenced Transform selected ! Please select non-referenced transform(s) and pick an Asset in FileManager's \"Import Asset\" tab!");
+
+	if (size($objs)!=size($nonRefd))
+		warning ("Caution : some selected transform were REFERENCED... They were skipped here.");
+
+	// if that's good :
+	for ($obj in $nonRefd)
+	{
+		int $okLocal = false;
+		if (!`attributeExists $gS100_associatedRefFileTag $obj`)
+		{
+			$okLocal = !catch(`addAttr -dt "string" -ln $gS100_associatedRefFileTag $obj`);
+			print ("// s100FMassociateObjsWithRef >> Creating attribute '"+$gS100_associatedRefFileTag+"' on '"+shortNameOf($obj)+"' \r\n");
+        }
+		else
+		{
+			$okLocal = true;
+			print ("// s100FMassociateObjsWithRef >> Attribute '"+$gS100_associatedRefFileTag+"' already exists on '"+shortNameOf($obj)+"' \r\n");
+        }
+
+		if ($okLocal)
+		{
+			$okLocal = !catch(`setAttr -type "string" ($obj+"."+$gS100_associatedRefFileTag) $ref`);
+			if ($okLocal)
+				print ("// .. setting it to \""+$ref+"\" \r\n");
+			else
+				print ("// .. could NOT set it to \""+$ref+"\" ! \r\n");
+        }
+		else
+			print ("// .. could NOT create it ! \r\n");
+    }
+}
+
+// string $objs[]=`ls -sl`;
+//
+global proc int s100FMreplaceObjsWithAssociatedRef(string $objs[])
+{
+	int $oks = 0;
+	string $nonDelObjs[]={};
+
+	global string $gS100_associatedRefFileTag ;
+
+	// checking if objects were passed :
+	string $nonRefd[] = s100_keepingObjsIfReferencedOrNot($objs, 0);
+	if (size($nonRefd)==0)
+		error ("No NON-referenced Transform selected ! Please select non-referenced transform(s) to replace with their associated reference (if any)");
+
+	if (size($objs)!=size($nonRefd))
+		warning ("Caution : some selected transform were REFERENCED... They were skipped here.");
+
+	// if that's good :
+	for ($obj in $nonRefd) // string $obj = $objs[0]
+	{
+		string $connectedRef = s100FMfindAssociatedImportedRef ($obj);
+		if (size($connectedRef))
+		{
+			warning  ("s100FMreplaceObjsWithAssociatedRef >> object '"+$connectedRef+"' is already connected to it! Skipped but keeped.");
+			$nonDelObjs[size($nonDelObjs)] = $obj;
+			continue;
+		}
+
+		print ("// s100FMreplaceObjsWithAssociatedRef >> Attribute '"+$gS100_associatedRefFileTag+"' exists on '"+shortNameOf($obj)+"' \r\n");
+		string $ref = `getAttr ($obj+"."+$gS100_associatedRefFileTag) `;
+		print ("// s100FMreplaceObjsWithAssociatedRef >> value \""+$ref+"\" \r\n");
+
+		if(!`filetest -e $ref` || size($ref)==0 )
+			error ("Supposed file to Reference '"+$ref+"' does NOT exist ! Stopped.");
+
+		int $okLocal = s100FMAssoReplaceObjWithFile($obj, $ref);
+		if ($okLocal==false)
+			$nonDelObjs[size($nonDelObjs)] = $obj;
+		$oks+=$okLocal;
+
+    }
+	if (size($nonDelObjs))
+	{
+		warning (size($nonDelObjs)+" selected associated-objects were NOT deleted! => Selected.");
+		select -r $nonDelObjs;
+    }
+	else
+	{
+		print ("// "+$oks+" ref-associated-objects successfully replaced by their references.\r\n");
+		select -r;
+    }
+	return $oks;
+}
+
+
+// find object connected to $gS100_associatedRefImported attribute of passed obj if any:
+//
+global proc string s100FMfindAssociatedImportedRef (string $obj)
+{
+	global string $gS100_associatedRefImported;
+	string $ref = "";
+
+	if (!`attributeExists $gS100_associatedRefImported $obj`)
+		print ("\r\n// s100FMfindAssociatedImportedRef >> No attribute '"+$gS100_associatedRefImported+"' on '"+shortNameOf($obj)+"' - skipped\r\n");
+	else
+	{
+		if (`attributeExists $gS100_associatedRefImported $obj`)
+		{
+			print ("// s100FMfindAssociatedImportedRef >> attribute '"+$gS100_associatedRefImported+"' exists on '"+shortNameOf($obj)+"'\r\n");
+			string $connectedRef[] = `listConnections -s 1 -d 0 ($obj+"."+$gS100_associatedRefImported)`;
+			if (size($connectedRef))
+			{
+				warning  ("s100FMfindAssociatedImportedRef >> object '"+$connectedRef[0]+"' is already connected to it! Skipped but keeped.");
+				$ref = $connectedRef[0];
+			}
+		}
+	}
+	return $ref;
+}
+
+global proc s100FMselectAssociatedImportedRefFromSel ()
+{
+	string $sel[] = `ls -sl -tr`;
+	select -cl;
+	for ($obj in $sel)
+	{
+		string $connectedRef = s100FMfindAssociatedImportedRef ($obj);
+		if (size($connectedRef))
+			select -add $connectedRef;
+	}
+	if (size(`ls -sl`)==0)
+	{
+		print "// Nothing found.\r\n";
+		select -r $sel;
+	}
+}
+
+
+
+
+global proc int s100FMAssoReplaceObjWithFile(string $obj, string $file) // $file = $ref
+{
+	int $ok = false;
+	// storing values and connections of $obj :
+	string $inCons[] = `listConnections -p 1 -c 1 -d 0 -s 1 $obj`;
+	string $outCons[] = `listConnections -p 1 -c 1 -d 1 -s 0 $obj`;
+
+	float $trs[] = `getAttr ($obj+".t")`;
+	float $rts[] = `getAttr ($obj+".r")`;
+	float $scs[] = `getAttr ($obj+".s")`;
+
+	string $filepart = `match "[^/\\]*$" $file`;
+	string $name = `match "^[^\.]*" $filepart`;
+
+	print ("// Trying to replace \""+$obj+"\" by reference from : \"" + $file+"\"\r\n" ) ;
+	print ("// ( Namespace : \"" + $name +"\" )\r\n" ) ;
+
+	string $namespace = s100FMIACreateRefImport($file, $name)	;
+	int $okdel = false;
+	if (size($namespace))
+	{
+		print ("\r\n// Reference \""+$namespace+":...\" seems to be well imported. \r\n");
+		print   ("// Trying to set it up like object \""+$obj+"\" now...\r\n");
+
+		// reconnect connections of associated to imported ref :
+		int $okCon = s100FMAssoReconnectRefFromObjValues( $obj, $namespace, $inCons, $outCons, $trs, $rts, $scs);
+
+		// connect message attr of both associated and imported ref : (before maybe delete the last one)
+		s100FMconnectAssociatedWithRef( $obj, $namespace, (1-$okCon) );
+
+		// if importation and reconnection went fine, no need to keep associated object : let's delete it:
+		if ($okCon)
+		{
+			print ("// Seems OK. Trying to delete \""+$obj+"\" now...");
+			$okdel = !catch(`delete $obj`);
+			if ($okdel)
+				print " Done. \r\n";
+			else
+				print (" Error. See ScriptEditor for details.\r\n");
+        }
+		else
+		{
+			warning ("Could NOT reset/reconnect reference \""+$namespace+":...\" like associated object \""+shortNameOf($obj)+"\" : see ScriptEditor for details.");
+        }
+    }
+	else
+		warning ("Could NOT import reference \""+$name+"\" from said file. Won't delete object \""+$obj+"\".");
+
+	return $okdel;
+}
+
+// connect message attr of both associated and imported ref : (before maybe delete the last one)
+//
+global proc int s100FMconnectAssociatedWithRef( string $obj, string $namespace, int $toHide )
+{
+	global string $gS100_associatedRefImported;
+	global string $gS100_associatedRefSafeGroup ;
+
+
+	int $ok = 1;
+	string $refobj = s100FMAssoReturnRefObjFromNamespace( $namespace );
+	if (size($refobj)==0)
+		return 0;
+
+	if (!`attributeExists $gS100_associatedRefImported $obj`)
+	{
+		catch(`addAttr -at "message" -ln $gS100_associatedRefImported $obj`);
+		print ("// s100FMconnectAssociatedWithRef >> Creating attribute '"+$gS100_associatedRefImported+"' on '"+shortNameOf($obj)+"' \r\n");
+    }
+
+	if (`attributeExists $gS100_associatedRefImported $obj`)
+	{
+		$ok = !catch(`connectAttr -f ($refobj+".message") ($obj+"."+$gS100_associatedRefImported)`);
+		print ("// s100FMconnectAssociatedWithRef >> connecting '"+shortNameOf($refobj)+".message' into it. \r\n");
+	}
+	else
+	{
+		$ok = 0;
+		warning ("s100FMassociateObjsWithRef >> Attribute '"+$gS100_associatedRefImported+"' could NOT be created on '"+shortNameOf($obj)+"' !");
+	}
+
+	// hiding object (associated) if asked (usually if its values/connections couldn't be transmitted to associated ref):
+	if ($toHide)
+	{
+		string $grp = $gS100_associatedRefSafeGroup ;
+		if (!`objExists $grp`)
+			$grp = `createNode transform -p |full_grp -n $grp`;
+		catch(` setAttr -l true ($grp+".t")  `);
+		catch(` setAttr -l true ($grp+".r")  `);
+		catch(` setAttr -l true ($grp+".s")  `);
+		catch(` setAttr -l 0 -k 1 ($grp+".v") 0 `);
+		if (firstParentOf($obj)!=$grp)
+		{
+			$okLocal = !catch(`parent $obj $grp`);
+			if ($okLocal)
+				print ("// s100FMconnectAssociatedWithRef >> parenting \""+$obj+"\" to hidden \""+$grp+"\".\r\n");
+			else
+				print ("// s100FMconnectAssociatedWithRef >> Could NOT parent \""+$obj+"\" to hidden \""+$grp+"\"!\r\n");
+			$ok *= $okLocal;
+        }
+
+	}
+	return $ok;
+}
+
+// Repluging inCons (in-connections) and outCons (out-connections) found on $obj into/from $refObj, skipping .visibility
+// also tries to re-set values found in $trs, $rts and scs into translates, rotates and scales
+// (knowing that if there are constraints or animation curves plugged in them it will ovverride this anyway)
+// Also reparenting actual constraints nodes to obj if any.
+//
+global proc int s100FMAssoReconnectRefFromObjValues( 	string $obj, string $namespace, string $inCons[], string $outCons[],
+														float $trs[], float $rts[], float $scs[])
+{
+	int $ok = 1;
+	string $refobj = s100FMAssoReturnRefObjFromNamespace( $namespace );
+	if (size($refobj)==0)
+		return 0;
+
+	// connections :
+	for ($c=0; $c<size($inCons)-1;$c+=2)
+	{
+		string $newInAttr = substitute($obj,$inCons[$c],$refobj);
+		if (size(`match ".visibility" $inCons[$c]`))
+			print ("// s100FMAssoReconnectRefFromObjValues >> has to replug something into \""+$newInAttr+"\", a 'visibility' attr : skipped.\r\n");
+		else
+			$ok *= !catch(`connectAttr -f $inCons[$c+1] $newInAttr `);
+    }
+	for ($c=0; $c<size($outCons)-1;$c+=2)
+		$ok *= !catch(`connectAttr -f (substitute($obj,$outCons[$c],$refobj)) $outCons[$c+1] `);
+
+	// translate :
+		$ok *= !catch(`setAttr ($refobj+".tx") $trs[0]`);
+		$ok *= !catch(`setAttr ($refobj+".ty") $trs[1]`);
+		$ok *= !catch(`setAttr ($refobj+".tz") $trs[2]`);
+	// rotate :
+		$ok *= !catch(`setAttr ($refobj+".rx") $rts[0]`);
+		$ok *= !catch(`setAttr ($refobj+".ry") $rts[1]`);
+		$ok *= !catch(`setAttr ($refobj+".rz") $rts[2]`);
+	// scale :
+		$ok *= !catch(`setAttr ($refobj+".sx") $scs[0]`);
+		$ok *= !catch(`setAttr ($refobj+".sy") $scs[1]`);
+		$ok *= !catch(`setAttr ($refobj+".sz") $scs[2]`);
+
+	// trying to reparent constraints from one to the other :
+	string $cons[4];
+	$cons[0] = `pointConstraint -q $refobj`;
+	$cons[1] = `orientConstraint -q $refobj`;
+	$cons[2] = `parentConstraint -q $refobj`;
+	$cons[3] = `scaleConstraint -q $refobj`;
+	for ($con in $cons)
+		if (size($con))
+			$ok *= !catch(`parent $con $refobj`);
+
+	return $ok;
+}
+
+
+global proc string[] s100FMlistAllRefAssociatedObjsInScene()
+{
+	global string $gS100_associatedRefFileTag;
+	string $objs[] = s100FMlistAllRefAssociatedObjsInSceneByTag( $gS100_associatedRefFileTag);
+	return $objs;
+}
+
+// string $assoTag = $gS100_associatedRefFileTag
+//
+global proc string[] s100FMlistAllRefAssociatedObjsInSceneByTag(string $assoTag)
+{
+	string $objs[] = `ls -o ("*."+$assoTag)`;
+	$objs = stringArrayCatenate($objs,`ls -o ("*:*."+$assoTag)`);
+	$objs = stringArrayCatenate($objs,`ls -o ("*:*:*."+$assoTag)`);
+	return $objs;
+}
+
+// s100FMselectRefAssociatedObjsInScene($assoTag)
+//
+global proc string[] s100FMselectRefAssociatedObjsInScene(string $assoTag)
+{
+	string $objs[] = s100FMlistAllRefAssociatedObjsInSceneByTag( $assoTag);
+
+	$objs = s100_keepingObjsIfReferencedOrNot($objs, 0);
+	if (size($objs))
+	{
+		print ("//" +size($objs)+" ref-associated-objects (not referenced) found in scene => Selected.");
+		select -r $objs;
+    }
+	else
+	{
+		print ("// No ref-associated-objects found in the scene...\r\n");
+		select -cl;
+    }
+	return $objs;
+}
+
+global proc string s100FMAssoReturnRefObjFromNamespace( string $namespace )
+{
+	string $basenames[] = {"root_ctrl","Main","traj","place_ctrl"};
+	for ($base in $basenames) //
+	{
+		string $search = ($namespace+":"+$base);
+		if (size(`ls $search` )==1 )
+			return $search;
+    }
+	return "";
+}
+
+// returns list of passed nodes, filtering out the ones that are linked to existing files if $returnExisting==true, or vice-versa:
+//
+global proc string[] s100_keepingObjsIfAssociatedFileExists(string $objs[], int $returnExisting, string $assoFiles[] )
+{
+	global string $gS100_associatedRefFileTag;
+
+	string $ret[]={};
+	for ($obj in $objs)
+	{
+		int $exists = true;
+		string $ref = `getAttr ($obj+"."+$gS100_associatedRefFileTag) `;
+		if(!`filetest -e $ref` || size($ref)==0 )
+		{
+			$exists = false;
+			print ("Supposed file associated to '"+shortNameOf($obj)+"' is \""+$ref+"\" that does NOT exist !\r\n");
+        }
+
+		if ( $exists && $returnExisting )
+		{
+			$ret[size($ret)] = $obj;
+			$assoFiles[size($assoFiles)] = $ref;
+		}
+		else if ( $exists==0 && $returnExisting==0 )
+		{
+			$ret[size($ret)] = $obj;
+			$assoFiles[size($assoFiles)] = $ref;
+		}
+    }
+
+	return $ret;
+}
+
+
+
+// returns list of passed nodes, filtering out the ones that are not referenced if $returnRefd==false, and vice-versa:
+//
+global proc string[] s100_keepingObjsIfReferencedOrNot(string $objs[], int $returnRefd)
+{
+	string $ret[]={};
+	for ($obj in $objs)
+	{
+		if ($returnRefd)
+		{
+			if (`referenceQuery -inr $obj`)
+				$ret[size($ret)] = $obj;
+        }
+		else
+		{
+			if (!`referenceQuery -inr $obj`)
+				$ret[size($ret)] = $obj;
+        }
+    }
+	return $ret;
+}
+
+global proc s100FMdeleteRefAssociationOnSel(string $objs[])
+{
+	global string $gS100_associatedRefFileTag ;
+	int $oks=0;
+
+	// checking if objects were passed :
+	string $nonRefd[] = s100_keepingObjsIfReferencedOrNot($objs, 0);
+	if (size($nonRefd)==0)
+		error ("No NON-referenced Transform selected ! Please select non-referenced transform(s) to replace with their associated reference (if any)");
+
+	if (size($objs)!=size($nonRefd))
+		warning ("Caution : some selected transform were REFERENCED... They were skipped here.");
+
+	// if that's good :
+	for ($obj in $nonRefd) // string $obj = $objs[0]
+	{
+		if (!`attributeExists $gS100_associatedRefFileTag $obj`)
+		{
+			print ("// s100FMdeleteRefAssociationOnSel >> No attribute '"+$gS100_associatedRefFileTag+"' on '"+shortNameOf($obj)+"' - skipped\r\n");
+			continue;
+        }
+		else
+		{
+			$oks += !catch(`deleteAttr -at $gS100_associatedRefFileTag $obj`);
+        }
+    }
+	print ("// Could deleted attribute \""+$gS100_associatedRefFileTag+"\" on "+$oks+"/"+size($objs)+" of selected objects.\r\n");
+}
+
+global proc s100FMprintRefAssociationOnSel(string $objs[])
+{
+	global string $gS100_associatedRefFileTag ;
+	int $oks=0;
+
+	print ("\r\n// s100FMprintRefAssociationOnSel : \r\n//\r\n");
+
+	// checking if objects were passed :
+	string $nonRefd[] = s100_keepingObjsIfReferencedOrNot($objs, 0);
+	if (size($nonRefd)==0)
+		error ("No NON-referenced Transform selected ! Please select non-referenced transform(s) to replace with their associated reference (if any)");
+
+	if (size($objs)!=size($nonRefd))
+		warning ("Caution : some selected transform(s) were REFERENCED... They were skipped here.");
+
+	// if that's good :
+	for ($i=0; $i<size($nonRefd);$i++)
+	{
+		if (!`attributeExists $gS100_associatedRefFileTag $nonRefd[$i]`)
+		{
+			print ("// "+($i+1)+"/"+(size($nonRefd))+" - Object \""+($nonRefd[$i])+"\" : no attribute '"+$gS100_associatedRefFileTag+"' - skipped\r\n");
+			continue;
+        }
+		else
+		{
+			string $ref = `getAttr ($nonRefd[$i]+"."+$gS100_associatedRefFileTag) `;
+			print ("// "+($i+1)+"/"+(size($nonRefd))+" - Object \""+$nonRefd[$i]+"\" is associated with Asset \""+$ref+"\"\r\n");
+        }
+    }
+}
+
+
+
+// Lists all asset-associated xforms and replace them (w/t asking user)
+// returns action  : -1 : canceled, 0 : no change (default), 1 : replace Associated Xforms
+//
+// 	s100FMforceReplaceAllLinkedAssociatedRefs(1, "Save")
+	// -> askUser=1 so if some instances are found user will be prompted if he wants to 'Save' with or without replacement
+	// (proc only replace or not and returns -1/0/1 anyway)
+//
+// 	s100FMforceReplaceAllLinkedAssociatedRefs(1, "Keep")
+	// -> askUser=1 so if some instances are found user will be prompted if he wants to 'Save' with or without replacement
+	// (proc only replace or not and returns -1/0/1 anyway)
+//
+// 	s100FMforceReplaceAllLinkedAssociatedRefs(0, "")
+	// -> askUser=0 so if some instances are found user will NOT be prompted anyway
+	// proc only replace (or not) and returns 1/0 anyway
+//
+global proc int s100FMforceReplaceAllLinkedAssociatedRefs(int $askUser, string $actionNameOnScene)
+{
+	int $action = 0; // -1 : canceled, 0 : no change, 1 : replace Associated Xforms
+	string $filesToRef[] = {};
+	string $instances[] = s100FMlistAllRefAssociatedObjsInScene();
+	$instances = s100_keepingObjsIfReferencedOrNot($instances, 0);
+	$instances = s100_keepingObjsIfAssociatedFileExists($instances, 1, $filesToRef);
+
+	int $replace = true;
+	int $num = 0;
+	if (size($instances))
+	{
+		if ($askUser)
+		{
+			print ("// \r\n// List of Transforms that are associated to external assets :\r\n//\r\n");
+			for ($i=0; $i<size($instances); $i++)
+			{
+				print ("// \""+shortNameOf($instances[$i])+"\" : associated to \""+$filesToRef[$i]+"\"\r\n");
+            }
+			print ("//\r\n");
+
+			string $rec = `confirmDialog -title "Asset-Association in Scene !"
+				-message ("The current scene contains "+size($instances)+" Transform(s) 'associated' to External Assets for further reference!\r\n"
+						+ "('INSTANCEs' or others : see ScriptEditor for a complete list) \r\n\r\n"
+						+ "Do you want to "+$actionNameOnScene+" the scene like this anyway ?" )
+				-button "Yes" -button "Cancel" -button "Replace them by Referenced files first! (takes seconds or minutes)"
+				-defaultButton "Cancel"
+				-cancelButton "No" -dismissString "Cancel"`;
+
+			if($rec=="Yes" || $rec=="Cancel")
+			{
+				$replace = 0 ;
+				if($rec=="Cancel")
+				{
+					print "// Action Canceled by user.\r\n";
+					$action = -1;
+                }
+				else
+					print ("// "+$actionNameOnScene+" the scene anyway.\r\n");
+            }
+        }
+		if ($replace && size($instances) )
+		{
+			$num = s100FMreplaceObjsWithAssociatedRef($instances);
+			$action = 1;
+        }
+    }
+	print ("//\r\n// "+$num+"/"+size($instances)+" Transforms successfully replaced by their related external associated file\r\n");
+
+	return $action ;
+}
+
+// To treat sets of files :
+/*
+	 string $files[] = {
+			//"C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/scenes/SETS/loc.ma",
+			//"C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/scenes/SETS/loc1.mb",
+			"Y:/005_EPISODES/Ep054_MayaCommanderInChief/Sq004A/_PREVIZ/MA_Ep054_Sq004A_PREVIZ_Tk02.ma"
+		     };
+	s100forceReplaceAllLinkedAssociatedRefsInListOfFile($files, 1);
+*/
+//
+global proc s100forceReplaceAllLinkedAssociatedRefsInListOfFile(string $files[], int $hideViewport)
+{
+	int $i=1;
+	int $noOK = 0;
+	int $num = size($files);
+
+	string $log = "\r\n// s100forceReplaceAllLinkedAssociatedRefsInListOfFile() : \r\n//\r\n";
+
+	for ($file in $files) // $file = $files[0]
+	{
+		$log = $log + s100FMprintAndReturn("\r\n// ===================================================================\r\n");
+		$log = $log + s100FMprintAndReturn("\r\n// TREATING ("+$i+"/"+$num+") FILE(S) \""+$file+"\" :\r\n");
+
+		string $ext = `match "[^\.]*$" $file`;
+		string $type="mayaAscii";
+		if ($ext=="mb")
+			$type = "mayaBinary";
+
+		if (`filetest -e $file`)
+		{
+			int $ok = !catch(`file -f -options "v=0" -ignoreVersion  -typ $type -o $file `);
+			if ($hideViewport)
+				s100FMforceViewportToScriptEditor();
+			if ($ok)
+			{
+				string $res[] = s100FMforceReplaceAllLinkedAssociatedRefsResave();
+				$log = $log + $res[0];
+				$noOK += (1 - int($res[1]));
+            }
+			else
+			{
+				$log = $log + s100FMprintAndReturn(" ! Warning : File \""+$file+"\" exists but could NOT be opened ! Skipped...\r\n");
+				$noOK +=1;
+            }
+        }
+		else
+		{
+			$log = $log + s100FMprintAndReturn(" ! Warning : File \""+$file+"\" does NOT exist ! Skipped...");
+			$noOK +=1;
+        }
+		$i+=1;
+    }
+	$log = $log + s100FMprintAndReturn("\r\n// ===================================================================\r\n");
+	$log = $log + s100FMprintAndReturn(  "// "+($i-1-$noOK)+"/"+$num+" FILES successfully treated. \r\n");
+	$log = $log + s100FMprintAndReturn(  "// ===================================================================\r\n");
+
+	print ("\r\n.. resume : \r\n");
+	print $log;
+	print "\r\n...\r\n";
+
+	if ($hideViewport)
+		s100FMforceViewportBack();
+}
+
+
+
+global proc string s100FMprintAndReturn(string $str)
+{
+	print $str;
+	return $str;
+}
+
+
+global proc string[] s100FMforceReplaceAllLinkedAssociatedRefsResave()
+{
+	string $log = "";
+	int $ok1 = $ok2 = $stopped = false;
+	string $stopStr = "Successfully DONE";
+
+	// resaving as is :
+	string $name = `file -q -sn`; // string $name = $file;
+	string $ext = `match "[^\.]*$" $name`;
+	string $type="mayaAscii";
+	if ($ext=="mb")
+		$type = "mayaBinary";
+
+	string $baseName = `substitute ("\."+$ext+"$") $name "" `;
+
+	// first saving old versions "withInstances" if they already exit :
+	string $newName = $baseName+"_withInstances."+$ext;
+	$newName = `file -rename $newName `;
+	string $dir = `match "^.*/" $newName`;
+
+	$log = $log + s100FMprintAndReturn("\r\n\t1/4. RESAVING AS IS UNDER NAME '"+$newName +"'... \r\n");
+		// first saving backup of it if file with same newName already exists :
+		s100AMSsaveBckUpScn($dir, `match "[^/\\]*$" $newName`);
+
+		$ok1 = !catch(`file -prompt 0 -f -save -options "v=0" -type $type `);
+		if ($ok1)
+			$log = $log + s100FMprintAndReturn("\t\t// File \""+$newName+"\" saved successfully.\r\n");
+		else
+		{
+			string $err = (" ! Could NOT save \""+$newName+"\" to keep a safe version of original file ! Stopped !") ;
+			$log = $log + s100FMprintAndReturn($err+"\r\n");
+			$stopped = true;
+			$stopStr = "STOPPED at re-Saving Original file";
+        }
+
+	if ($stopped==false)
+	{
+		// Switching every Instances subRefs :
+		$log = $log + s100FMprintAndReturn("\r\n\t2/4. AUTO SWITCH INSTANCES... \r\n");
+		s100FMforceReplaceAllLinkedAssociatedRefs(0, "");
+
+
+		// resaving without instances :
+		string $newName2 = `file -rename $name `;
+
+		$log = $log + s100FMprintAndReturn("\r\n\t3/4. RESAVING FILE UNDER ORIGINAL NAME '"+$newName2 +"'... \r\n");
+			// first saving backup of it if file with same newName already exists :
+			s100AMSsaveBckUpScn($dir, `match "[^/\\]*$" $newName2`);
+			$ok2 = !catch(`file -prompt 0 -f -save -options "v=0" -type $type  `);
+			if ($ok2)
+				$log = $log + s100FMprintAndReturn("\t\t// File \""+$newName2+"\" saved successfully.\r\n\r\n");
+			else
+			{
+				string $err = (" ! Could NOT save \""+$newName2+"\"! Stopped !") ;
+				$log = $log + s100FMprintAndReturn($err+"\r\n");
+				$stopped = true;
+				$stopStr = "STOPPED at re-Saving Final switched file";
+			}
+    }
+
+	// Creates/updates "analyse" file describing asset content of published scene :
+		int $showWindow = false;
+		string $analyseFile = "";
+		int $okAnls = !catch($analyseFile = s100FMsceneAnalyser($showWindow));
+		if ($okAnls)
+			$log = $log + s100FMprintAndReturn("\t4/4. Wrote new analyse of scene in \"" + $analyseFile +"\" \r\n\r\n") ;
+		else
+			$log = $log + s100FMprintAndReturn("\t4/4. !! Could NOT write new analyse of scene in \"" + $analyseFile +"\" !\r\n\r\n") ;
+
+	$log = $log + s100FMprintAndReturn("\r\n// AUTO SWITCH INSTANCES of \""+$name+"\" "+$stopStr+". \r\n\r\n");
+
+	// saving log file :
+		string $logFile = $baseName+"_instanceSwitchLog.txt";
+		//s100AMSsaveBckUpScn($dir, `match "[^/\\]*$" $logFile`);
+		s100FMsceneAnalyser_saveFile( $log,  $logFile);
+
+
+	return { $log, ($ok1*$ok2) } ;
+}
+
+
+// Scripts by Jean-Paul Tetu to Help replacing actual References by "INSTANCES" pointing to them
+// (to create "Layout"-ready location assets for ex.)
+//
+// int $vege=0; $props=1; int $selectedOnly = 1;
+//	 s100FMassoSwitchToInstance( $vege, $props, $selectedOnly )
+//
+global proc s100FMassoSwitchToInstance( int $vege, int $props, int $selectedOnly )
+{
+	global string $gS100_associatedRefFileTag ;
+
+	string $sels[]={};
+	string $asset={};
+	string $instFile="";
+	string $buggySwitchedRef[]={};
+	string $patterns[] = {};
+	string $instance = "";
+	int $okChange = 0;
+
+	//string $pattern = "*:root_ctrl";
+	if ($vege)
+		$patterns = stringArrayCatenate($patterns,{"V_*:root_ctrl", "*:V_*:root_ctrl"});
+	if ($props)
+		$patterns = stringArrayCatenate($patterns,{"P_*:root_ctrl", "*:P_*:root_ctrl"});
+
+	for ($pattern in $patterns)
+	{
+		if ($selectedOnly)
+			$sels = stringArrayCatenate($sels,`ls -sl $pattern`);
+		else
+			$sels = stringArrayCatenate($sels,`ls $pattern`);
+    }
+
+
+	for($sel in $sels) // $i=0; string $sel=$sels[$i]; $i++
+	{
+		// safety, in cas current object was removed with other previous references...
+		if (!`objExists $sel`)
+		{
+			print ("// Object \""+$sel+"\" does NOT exist anymore in the scene. Skipped\r\n");
+			continue;
+        }
+
+		// trying to guess name of INSTANCE file of selected ref :
+		$refFile = `referenceQuery -filename  -wcn $sel`;
+		$refFile = substituteAllString($refFile, "/02_Ref","");
+		$refFile = substituteAllString($refFile, "_Lo2","");
+		$refFile = substituteAllString($refFile, "_Lo","");
+		$refFile = substituteAllString($refFile, "_Hi","");
+		$asset = `basenameEx($refFile)`;
+		$instFile = (dirname($refFile)+"/00_subRefs/"+$asset+"_INSTANCE.ma");
+
+		if (`file -q -ex $instFile`)
+		{
+			print ("// Asset \""+$asset+"\" has an INSTANCE file : \r\n//\t '"+$instFile+"'\r\n");
+
+			// current file of Referenced object (to be removed afterwards):
+			$refFileToRemove = `referenceQuery -filename $sel`;
+
+			// Trying to find if an existing instance pointing to this file exists here :
+			$representant = substituteAllString($asset, "MA_", "");
+			$representant = ($representant+"_INSTANCE_0??");
+			string $rep[] = `ls -tr $representant`;
+
+			if( size($rep) )
+			{
+				print ("// Found object(s) already named \""+$representant+"\" in the scene. Checking it/them...\r\n");
+
+				for ($rp in $rep) // $rp = $rep[0]
+				{
+					if (`attributeExists $gS100_associatedRefFileTag $rp`)
+					{
+						// if file this instance is pointing toward is the same than the referenced one, we found an instance to use !
+						string $ref = `getAttr ($rp+"."+$gS100_associatedRefFileTag) `;
+						if ( gmatch( $refFileToRemove,($ref+"*")) )
+						{
+							print("// - '"+$rp+"' actually pointing to file \r\n//\t'"+$instFile+"',\r\n// just duplicating it (as instance) then...\r\n");
+							string $tmps[] = `duplicate -instanceLeaf $rp`;
+							$instance = $tmps[0];
+						}
+					}
+                }
+				if (size($instance)==0)
+				{
+					print ("// No \""+$representant+"\" is actually NOT pointing to file \r\n//\t '"+$instFile+"'. Skipped \r\n");
+				}
+        	}
+
+			$ok = true;
+			if ($instance=="")
+			{
+				print ("// No object already named \""+$representant+"\" found in the scene => importing INSTANCE");
+				$ok = !catch(`file -i $instFile`);
+        	}
+			else
+			{
+				// TO DO :
+				// transfers values/connections of ref'd ctrl to instance...
+
+				// ....
+            }
+
+			if ($ok)
+			{
+				file -removeReference $refFileToRemove;
+            }
+			else
+			{
+				print ("// Problem encountered to import file '"+$instFile+"'.. Referenced asset won't be removed..\r\n");
+				$buggySwitchedRef[size($buggySwitchedRef)] = $sel;
+            }
+
+			$okChange += $ok;
+        }
+		else
+		{
+			print ("// Asset \""+$asset+"\" does NOT have an INSTANCE version! Kept in Reference..\r\n");
+        }
+    }
+	print ("// "+$okChange+"/"+size($sels)+" successfully switched Referenced Asset (into their INSTANCES) in the scene. See Script Editor for more details...\r\n");
+
+	if (size($buggySwitchedRef))
+	{
+		print ("// "+size($buggySwitchedRef)+" unsuccessfully imported INSTANCE for selected referenced assets\r\n");
+		select -r $buggySwitchedRef;
+    }
+}
+

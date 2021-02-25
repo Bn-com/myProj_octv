@@ -1,0 +1,102 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// COPYRIGHT (c) 2004 IDMT CHINA
+// 
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// 
+// Date: 2004.02.03
+// Last modified: 2004.02.04
+//
+// Description:
+//		+ Create an image plane for the input file and return the name of the resultant image.
+//			SG: FileTextureNode ------------>SurfaceShader		
+//
+global proc string tnpImagePlane(string $file, // absolute filename: e:/<folder1>/<subfolder1>/....
+									int $startCycle,
+									int $endCycle,
+									int $startFrame){
+
+	if(!(`filetest -f $file`)) error($file + " doesn't exist OR there's \"\\\" in the filename!\n To resolve, change \"\\\" in the filename to \"/\"");
+
+	string $newline = "\n";
+	//$file = toNativePath($file);
+	string $dirname = dirname($file) + "/";
+	string $filename = substitute($dirname, $file, "");  // the name may contain (<name>.<frameNo>.<extension>)
+	string $temp[]; tokenize($filename, ".", $temp); 
+	$filename = $temp[0];
+
+	string $imgname = "img_" + $filename;
+	
+	// Create a nurbsPlane (10x10)
+	string $result[] = `nurbsPlane -p 0 0 0 -ax 0 1 0 -w 10 -lr 1 -d 3 -u 1 -v 1 -ch 1 -name $imgname`;
+	$imgname = $result[0];
+
+	setAttr ($imgname+ ".rotateX") 90;
+	setAttr ($imgname+ ".translateY") 5;
+	performFreezeTransformations(0);
+
+	// CREATE SHADING GROUP
+
+	// Create a file texture node
+	string $fileNode = `shadingNode -asTexture file -name ("file_"+$filename)`;
+	setAttr -type "string" ($fileNode+".fileTextureName") $file;
+	setAttr ($fileNode+".alphaGain") -1;
+	setAttr ($fileNode+".alphaOffset") 1;
+
+	string $place2dNode = `shadingNode -asUtility place2dTexture -name ("p2d_"+$filename)`;
+	connectAttr -f ($place2dNode+".coverage") ($fileNode+".coverage");
+	connectAttr -f ($place2dNode+".translateFrame") ($fileNode+".translateFrame");
+	connectAttr -f ($place2dNode+".rotateFrame") ($fileNode+".rotateFrame");
+	connectAttr -f ($place2dNode+".mirror") ($fileNode+".mirror");
+	connectAttr -f ($place2dNode+".stagger") ($fileNode+".stagger");
+	connectAttr -f ($place2dNode+".wrapU") ($fileNode+".wrapU");
+	connectAttr -f ($place2dNode+".wrapV") ($fileNode+".wrapV");
+	connectAttr -f ($place2dNode+".repeatUV") ($fileNode+".repeatUV");
+	connectAttr -f ($place2dNode+".offset") ($fileNode+".offset");
+	connectAttr -f ($place2dNode+".rotateUV") ($fileNode+".rotateUV");
+	connectAttr -f ($place2dNode+".noiseUV") ($fileNode+".noiseUV");
+	connectAttr -f ($place2dNode+".outUV") ($fileNode+".uv");
+	connectAttr -f ($place2dNode+".outUvFilterSize") ($fileNode+".uvFilterSize");
+
+	// Create a surface shader
+	string $surfaceShader = `shadingNode -asShader surfaceShader - name ("shader_"+$filename)`;
+	// connect attributes
+	connectAttr -f ($fileNode+".outColor") ($surfaceShader+".outColor");
+	connectAttr -f ($fileNode+".outAlpha") ($surfaceShader+".outTransparencyR");
+	connectAttr -f ($fileNode+".outAlpha") ($surfaceShader+".outTransparencyG");
+	connectAttr -f ($fileNode+".outAlpha") ($surfaceShader+".outTransparencyB");
+	connectAttr -f ($fileNode+".outTransparency") ($surfaceShader+".outMatteOpacity");	 
+	
+	// Create a shader group
+	string $SGName = `sets -renderable true -noSurfaceShader false -empty -name ($surfaceShader+"SG")`;
+	connectAttr -f ($surfaceShader+".outColor") ($SGName+".surfaceShader");
+
+	// ASSIGN SG TO THE IMAGE PLANE
+	select $imgname;
+	sets -e -forceElement $SGName;
+	
+	//
+	setAttr ($fileNode+".useHardwareTextureCycling") 1;
+	setAttr ($fileNode+".startCycleExtension") $startCycle;
+	setAttr ($fileNode+".endCycleExtension") $endCycle;
+	setAttr ($fileNode+".useFrameExtension") 1;
+
+	// set keyframe
+	currentTime -e $startFrame;
+	setAttr ($fileNode+".frameExtension") $startCycle;
+	setKeyframe ($fileNode+".frameExtension");
+	
+	currentTime -e ($startFrame + ($endCycle - $startCycle + 1));
+	setAttr ($fileNode+".frameExtension") $endCycle;
+	setKeyframe ($fileNode+".frameExtension");
+
+	return $imgname;	
+}

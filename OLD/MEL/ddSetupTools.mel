@@ -1,0 +1,1211 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddEZSetupTools
+//	Verision: 0.12 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: February 27 2007
+//	Changed Projcet Date:
+//	Last Updated: March 9 2007
+//	Update/Change this file at: Julii FreeMAN
+//	Note:EZ Setup Tools Pack 由Bratz的设置工具上改动
+//		导入基本joint 工具
+//		统一轴向工具
+//		导入控制器工具
+//		手臂与腿部的工具
+//		set创建工具
+//		bindPose数据备份工具及-31,0帧keyframe工具
+//		处理proxy hair
+//		添加smooth Node工具
+//
+//
+//	modify record:
+//		3/1/2007 修改smooth控制联接的方式，改成需要选择smooth的物体
+//
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZBaseJoint
+// 
+// 导入基本骨骼
+// Arguments :
+//  $charName 角色名
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddEZBaseJoint(string $charName)
+{
+ if(`objExists ($charName + "_lobackA")`)
+ {
+  error "骨骼已经存在!" ;
+ }
+ //导入EZ的基本骨架
+ //file -import "Z://Resource//Groups//Production//setup//EZ//file//ez_base_joint.ma" ;
+ file -import "Z://Resource//Support//Maya//Import//Lionelville//ez_base_joint.ma" ;
+ source ddBatchRename ;
+ ddBatchRename "baseJoint_MASTER" "" "" "baseJoint" $charName ;
+
+ ddEZLayer $charName ;
+
+ parent -w ($charName+"_lobackA") ;
+
+ editDisplayLayerMembers ($charName+"_layer") ($charName+"_MASTER") ;
+
+ parent ($charName+"_lobackA") ($charName+"_MASTER") ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZLayer
+// 
+// 创建角色层
+//
+// Arguments:
+//  $charName 角色名 
+//////////////////////////////////////////////////////////
+global proc ddEZLayer(string $charName)
+{
+ if(!`objExists ($charName + "_layer")`)
+ {
+  createDisplayLayer -name ($charName + "_layer") -number 1 -empty ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddOrientEZJoint
+// 
+// 整理
+//
+// Arguments:
+//  $charName 角色名 
+//////////////////////////////////////////////////////////
+global proc ddOrientEZJoint(string $charName)
+{
+ string $selected[] ;
+ source ddOrientJointTools ;
+ 
+ select -r ($charName + "_eyeJoint") ;
+ parent -relative -world ;
+
+ select -r ($charName + "_MASTER") ;
+
+ makeIdentity -apply true
+		-t 1
+		-r 1
+		 -s 1
+		-n 0
+		-jointOrient ;
+ 
+ parent -relative ($charName + "_eyeJoint") ($charName + "_head") ;
+
+ select -r ($charName + "_arm_left") ;
+
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "yup" ;
+ 
+ joint -edit -orientJoint xyz -secondaryAxisOrient "zup" ($charName + "_elbow_left") ;
+
+ select -clear ;
+ for($i=1;$i<8;$i++)
+ {
+  if(objExists ($charName + "_arm" + $i + "_left"))
+  {
+   select -tgl ($charName + "_arm" + $i + "_left") ;
+  }
+
+  if(objExists ($charName + "_forearm" + $i + "_left"))
+  {
+   select -tgl ($charName + "_forearm" + $i + "_left") ;
+  }
+  
+ }
+
+ $selected = `ls -sl` ;
+ if(size($selected))
+ {
+  joint -edit -orientJoint none ;
+ }
+
+ //thumb 处理拇指
+ float $dot1[3],$dot2[3] ;
+ string $locatorName[1] ;
+ $locatorName = `spaceLocator -p 0 0 0` ;
+ $dot1 = `joint -q -p ($charName + "_thumbA_left")` ;
+ $dot2 = `joint -q -p ($charName + "_thumbD_left")` ;
+ select -r $locatorName[0] ;
+ move -ws -absolute ($dot1[0] + ($dot2[0] - $dot1[0])/2)
+	($dot1[1] + ($dot2[1] - $dot1[1])/2)
+	($dot1[2] + ($dot2[2] - $dot1[2])/2) ;
+ select -r ($charName + "_thumbA_left") ;
+ ddOrientJoint("ddOJT_xyz",8,$locatorName[0],1,1,0,1) ;
+ delete $locatorName[0] ;
+ select -r   ($charName + "_thumbA_left.rotateAxis") ;
+ select -tgl ($charName + "_thumbB_left.rotateAxis") ;
+ select -tgl ($charName + "_thumbC_left.rotateAxis") ;
+ rotate -r -os -180 0 0 ;
+
+ delete ($charName + "_shoulder_right") ;
+
+ select -r ($charName + "_shoulder_left") ;
+ mirrorJoint -mirrorYZ
+	     -mirrorBehavior
+	     -searchReplace "_left" "_right" ;
+
+
+ //处理leg
+ select -r ($charName + "_leg_left") ;
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "zdown" ;
+
+ select -r ($charName + "_toe_left") ;
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "yup" ;
+
+
+ joint -edit -orientJoint none ($charName + "_ankle_left") ;
+
+ delete ($charName + "_leg_right") ;
+ 
+ select -r ($charName + "_leg_left") ;
+ mirrorJoint -mirrorYZ
+		-mirrorBehavior
+		-searchReplace "_left" "_right" ;
+// select -r ($charName + "_lobackA") ; ;
+ select -clear ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZControlObject
+// 
+// 导入控制器
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddEZControlObject(string $charName)
+{
+ float $tempArray[] ;
+ if(!`objExists ($charName + "_lobackA")`)
+ {
+  error "基本骨骼不存在!" ;
+ }
+ if(`objExists ($charName + "_Upper_Body")`)
+ {
+  error "控制器已经存在!" ;
+ }
+ //导入EZ基本控制器
+ file -import "Z://Resource//Support//Maya//Import//Lionelville//ezControlCurve.mb" ;
+ source ddBatchRename ;
+
+ ddBatchRename "base_eyeCTRL" "" "" "base" $charName ;
+ ddBatchRename "base_Upper_Body" "" "" "base" $charName ;
+
+ //$tempArray = `xform -query -absolute ($charName + "_lobackA")` ;
+ //move
+ 
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZRenameFinger
+// 
+// 控制及骨骼改名
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+proc ddEZRenameFinger(string $charName,string $side)
+{
+	rename ($charName+"_thumbA_"+$side) ($charName+"_thumb1_"+$side) ;
+	rename ($charName+"_thumbB_"+$side) ($charName+"_thumb2_"+$side) ;
+	rename ($charName+"_thumbC_"+$side) ($charName+"_thumb3_"+$side) ;
+	rename ($charName+"_thumbD_"+$side) ($charName+"_thumb4_"+$side) ;
+
+	rename ($charName+"_finger1A_"+$side) ($charName+"_index1_"+$side) ;
+	rename ($charName+"_finger1B_"+$side) ($charName+"_index2_"+$side) ;
+	rename ($charName+"_finger1C_"+$side) ($charName+"_index3_"+$side) ;
+	rename ($charName+"_finger1D_"+$side) ($charName+"_index4_"+$side) ;
+	
+	rename ($charName+"_finger2A_"+$side) ($charName+"_middle1_"+$side) ;
+	rename ($charName+"_finger2B_"+$side) ($charName+"_middle2_"+$side) ;
+	rename ($charName+"_finger2C_"+$side) ($charName+"_middle3_"+$side) ;
+	rename ($charName+"_finger2D_"+$side) ($charName+"_middle4_"+$side) ;
+
+	rename ($charName+"_finger3A_"+$side)  ($charName+"_ring1_"+$side) ;
+	rename ($charName+"_finger3B_"+$side)  ($charName+"_ring2_"+$side) ;
+	rename ($charName+"_finger3C_"+$side)  ($charName+"_ring3_"+$side) ;
+	rename ($charName+"_finger3D_"+$side)  ($charName+"_ring4_"+$side) ;
+
+	rename ($charName+"_finger4A_"+$side)  ($charName+"_little1_"+$side) ;
+	rename ($charName+"_finger4B_"+$side)  ($charName+"_little2_"+$side) ;
+	rename ($charName+"_finger4C_"+$side)  ($charName+"_little3_"+$side) ;
+	rename ($charName+"_finger4D_"+$side)  ($charName+"_little4_"+$side) ;
+
+
+	rename ($charName+"_thumbAConAll_"+$side) ($charName+"_thumb1AllCon_"+$side) ;
+	rename ($charName+"_thumbBConAll_"+$side) ($charName+"_thumb2AllCon_"+$side) ;
+	rename ($charName+"_thumbCConAll_"+$side) ($charName+"_thumb3AllCon_"+$side) ;
+
+	rename ($charName+"_finger1AConAll_"+$side) ($charName+"_index1AllCon_"+$side) ;
+	rename ($charName+"_finger1BConAll_"+$side) ($charName+"_index2AllCon_"+$side) ;
+	rename ($charName+"_finger1CConAll_"+$side) ($charName+"_index3AllCon_"+$side) ;
+
+	rename ($charName+"_finger2AConAll_"+$side) ($charName+"_middle1AllCon_"+$side) ;
+	rename ($charName+"_finger2BConAll_"+$side) ($charName+"_middle2AllCon_"+$side) ;
+	rename ($charName+"_finger2CConAll_"+$side) ($charName+"_middle3AllCon_"+$side) ;
+
+	rename ($charName+"_finger3AConAll_"+$side) ($charName+"_ring1AllCon_"+$side) ;
+	rename ($charName+"_finger3BConAll_"+$side) ($charName+"_ring2AllCon_"+$side) ;
+	rename ($charName+"_finger3CConAll_"+$side) ($charName+"_ring3AllCon_"+$side) ;
+
+	rename ($charName+"_finger4AConAll_"+$side) ($charName+"_little1AllCon_"+$side) ;
+	rename ($charName+"_finger4BConAll_"+$side) ($charName+"_little2AllCon_"+$side) ;
+	rename ($charName+"_finger4CConAll_"+$side) ($charName+"_little3AllCon_"+$side) ;
+
+	rename ($charName+"_thumbAConMid_"+$side) ($charName+"_thumb1MidCon_"+$side) ;
+	rename ($charName+"_thumbBConMid_"+$side) ($charName+"_thumb2MidCon_"+$side) ;
+	rename ($charName+"_thumbCConMid_"+$side) ($charName+"_thumb3MidCon_"+$side) ;
+
+	rename ($charName+"_finger1AConMid_"+$side) ($charName+"_index1MidCon_"+$side) ;
+	rename ($charName+"_finger1BConMid_"+$side) ($charName+"_index2MidCon_"+$side) ;
+	rename ($charName+"_finger1CConMid_"+$side) ($charName+"_index3MidCon_"+$side) ;
+
+	rename ($charName+"_finger2AConMid_"+$side) ($charName+"_middle1MidCon_"+$side) ;
+	rename ($charName+"_finger2BConMid_"+$side) ($charName+"_middle2MidCon_"+$side) ;
+	rename ($charName+"_finger2CConMid_"+$side) ($charName+"_middle3MidCon_"+$side) ;
+
+	rename ($charName+"_finger3AConMid_"+$side) ($charName+"_ring1MidCon_"+$side) ;
+	rename ($charName+"_finger3BConMid_"+$side) ($charName+"_ring2MidCon_"+$side) ;
+	rename ($charName+"_finger3CConMid_"+$side) ($charName+"_ring3MidCon_"+$side) ;
+
+	rename ($charName+"_finger4AConMid_"+$side) ($charName+"_little1MidCon_"+$side) ;
+	rename ($charName+"_finger4BConMid_"+$side) ($charName+"_little2MidCon_"+$side) ;
+	rename ($charName+"_finger4CConMid_"+$side) ($charName+"_little3MidCon_"+$side) ;
+
+	rename ($charName+"_thumbACon_"+$side) ($charName+"_thumb1Con_"+$side) ;
+	rename ($charName+"_thumbBCon_"+$side) ($charName+"_thumb2Con_"+$side) ;
+	rename ($charName+"_thumbCCon_"+$side) ($charName+"_thumb3Con_"+$side) ;
+
+	rename ($charName+"_finger1ACon_"+$side) ($charName+"_index1Con_"+$side) ;
+	rename ($charName+"_finger1BCon_"+$side) ($charName+"_index2Con_"+$side) ;
+	rename ($charName+"_finger1CCon_"+$side) ($charName+"_index3Con_"+$side) ;
+
+	rename ($charName+"_finger2ACon_"+$side) ($charName+"_middle1Con_"+$side) ;
+	rename ($charName+"_finger2BCon_"+$side) ($charName+"_middle2Con_"+$side) ;
+	rename ($charName+"_finger2CCon_"+$side) ($charName+"_middle3Con_"+$side) ;
+
+	rename ($charName+"_finger3ACon_"+$side) ($charName+"_ring1Con_"+$side) ;
+	rename ($charName+"_finger3BCon_"+$side) ($charName+"_ring2Con_"+$side) ;
+	rename ($charName+"_finger3CCon_"+$side) ($charName+"_ring3Con_"+$side) ;
+
+	rename ($charName+"_finger4ACon_"+$side) ($charName+"_little1Con_"+$side) ;
+	rename ($charName+"_finger4BCon_"+$side) ($charName+"_little2Con_"+$side) ;
+	rename ($charName+"_finger4CCon_"+$side) ($charName+"_little3Con_"+$side) ;
+
+	rename ($charName+"_world_wristCon_"+$side) ($charName+"_IKWristCon_"+$side) ;
+	rename ($charName+"_wristCon_"+$side) ($charName+"_FKWristCon_"+$side) ;
+
+	rename ($charName+"_"+$side+"_eye") ($charName+"_eyeAim_"+$side) ;
+
+}
+
+proc ddBR2EZRename(string $charName)
+{
+
+	rename ($charName+"_eyeCTRL") ($charName+"_eyeAim") ;
+
+
+	rename ($charName+"_Chest") ($charName+"_chestCon") ;
+
+	rename ($charName+"_Pelvis") ($charName+"_pelvisCon") ;
+	rename ($charName+"_Upper_Body") ($charName+"_upperBodyCon") ;
+//	rename ($charName+"_lobackB_conGrp") ($charName+"_waistConGrp") ;
+	if (`objExists ($charName+"_lobackB_con")`)
+	{
+		rename ($charName+"_lobackB_con") ($charName+"_waistCon") ;
+	}
+	rename ($charName+"_lobackB") ($charName+"_waist") ;
+	rename ($charName+"_lobackA") ($charName+"_pelvis") ;
+
+	ddEZRenameFinger $charName "left" ;
+	ddEZRenameFinger $charName "right" ;
+	
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZWaistSetup
+// 
+// 腰部的设置
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddEZWaistSetup(string $charName)
+{
+	float $boundMin[3],$boundMax[3],$waistLength ;
+	string $tempStr ;
+	//导入waist
+	file -import "Z://Resource//Support//Maya//Import//Lionelville//ez_waist_setup.mb" ;
+	source ddBatchRename ;
+	ddBatchRename "waistAssistantnConGrp" ($charName+"_") "" "" "" ;
+
+	parent ($charName+"_waistTopCon") ($charName+"_chestA") ;
+	setAttr ($charName+"_waistTopCon.tx") 0 ;
+	setAttr ($charName+"_waistTopCon.ty") 0 ;
+	setAttr ($charName+"_waistTopCon.tz") 0 ;
+
+	parent ($charName+"_waistBottomCon") ($charName+"_lobackA") ;
+	setAttr ($charName+"_waistBottomCon.tx") 0 ;
+	setAttr ($charName+"_waistBottomCon.ty") 0 ;
+	setAttr ($charName+"_waistBottomCon.tz") 0 ;
+
+	parent ($charName+"_chestA") ($charName+"_lobackA") ;
+
+	circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 8 -ch 1 -name ($charName+"_waistCon") ;
+	$boundMin = getAttr ($charName+"_Chest.boundingBoxMin") ;
+	$boundMax = getAttr ($charName+"_Chest.boundingBoxMax") ;
+	setAttr ($charName+"_waistCon.sx") (abs($boundMin[0]-$boundMax[0])*0.4) ;
+	setAttr ($charName+"_waistCon.sz") (abs($boundMin[2]-$boundMax[2])*0.4) ;
+	makeIdentity -apply true -scale true ($charName+"_waistCon") ;
+	DeleteHistory ($charName+"_waistCon.sx") ;
+	group -name ($charName+"_waistConGrp") ($charName+"_waistCon") ;
+
+	$boundMin = `xform -query -ws -t ($charName+"_lobackB")` ;
+	setAttr ($charName+"_waistConGrp.tx") $boundMin[0] ;
+	setAttr ($charName+"_waistConGrp.ty") $boundMin[1] ;
+	setAttr ($charName+"_waistConGrp.tz") $boundMin[2] ;
+	parent ($charName+"_waistConGrp") ($charName+"_lobackA") ;
+	parent ($charName+"_lobackB") ($charName+"_waistCon") ;
+	parentConstraint -weight 1 -maintainOffset ($charName+"_waistAssistantnFollicle2") ($charName+"_waistConGrp") ;
+	$waistLength = `getAttr($charName+"_waistAssistantnCurve.length_value") ` ;
+	expression -string
+	("{\nfloat $startLength = "+$waistLength+" * "+$charName+"_MASTER.scaleX ;\nfloat $zoomSp = "+$charName+"_waistAssistantnConGrp.zoomSpeed;\nfloat $midOdds ="+$charName+"_waistAssistantnConGrp.midOdds;\n"
+	+$charName+"_waistAssistantnFollicle1.scaleY = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp);\n"
+	+$charName+"_waistAssistantnFollicle1.scaleZ = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp);\n"
+	+$charName+"_waistAssistantnFollicle2.scaleY = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp*$midOdds);\n"
+	+$charName+"_waistAssistantnFollicle2.scaleZ = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp*$midOdds);\n"
+	+$charName+"_waistAssistantnFollicle3.scaleY = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp);\n"
+	+$charName+"_waistAssistantnFollicle3.scaleZ = pow($startLength,$zoomSp)/pow(waistAssistantnArcLengthDimensionShape.arcLength,$zoomSp);\n}")
+	-name ($charName+"_waistAssistantnExpression") ;
+
+	parentConstraint -weight 1 -maintainOffset ($charName+"_Chest") ($charName+"_chestA") ;
+	parentConstraint -weight 1 -maintainOffset ($charName+"_Pelvis") ($charName+"_lobackA") ;
+
+	connectAttr -force ($charName+"_waistAssistantnFollicle2.scaleZ") ($charName+"_lobackB.scaleX") ;
+	connectAttr -force ($charName+"_waistAssistantnFollicle2.scaleY") ($charName+"_lobackB.scaleZ") ;
+}
+
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZAddStrchy
+// 
+// 创建手臂与脚部伸缩的设置
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddEZAddStrchy(string $charName)
+{
+	source ddStretchyIK ;
+	ddStretchyIK ($charName+"_armHandle_left")	"ddSIK_x" ;
+	ddStretchyIK ($charName+"_armHandle_right")	"ddSIK_x" ;
+
+	ddStretchyIK ($charName+"_leg_ikHandle_left")	"ddSIK_x" ;
+	ddStretchyIK ($charName+"_leg_ikHandle_right")	"ddSIK_x" ;
+
+	connectAttr -force ($charName+"_MASTER.s") ($charName+"_armHandle_left_curve.s") ;
+	connectAttr -force ($charName+"_MASTER.s") ($charName+"_armHandle_right_curve.s") ;
+	connectAttr -force ($charName+"_MASTER.s") ($charName+"_leg_ikHandle_left_curve.s") ;
+	connectAttr -force ($charName+"_MASTER.s") ($charName+"_leg_ikHandle_right_curve.s") ;
+
+	addAttr -ln stretchyEnable -at double  -min 0 -max 1 ($charName+"_IKWristCon_left") ;
+	setAttr -e -keyable true ($charName+"_IKWristCon_left.stretchyEnable") ;
+	addAttr -ln stretchyEnable -at double  -min 0 -max 1 ($charName+"_IKWristCon_right") ;
+	setAttr -e -keyable true ($charName+"_IKWristCon_right.stretchyEnable") ;
+
+	addAttr -ln stretchyEnable -at double  -min 0 -max 1 ($charName+"_footCon_left") ;
+	setAttr -e -keyable true ($charName+"_footCon_left.stretchyEnable") ;
+	addAttr -ln stretchyEnable -at double  -min 0 -max 1 ($charName+"_footCon_right") ;
+	setAttr -e -keyable true ($charName+"_footCon_right.stretchyEnable") ;
+
+	connectAttr -force ($charName+"_IKWristCon_left.stretchyEnable")	($charName+"_armHandle_left.stretchyEnable") ;
+	connectAttr -force ($charName+"_IKWristCon_right.stretchyEnable")	($charName+"_armHandle_right.stretchyEnable") ;
+
+	connectAttr -force ($charName+"_footCon_left.stretchyEnable")	($charName+"_leg_ikHandle_left.stretchyEnable") ;
+	connectAttr -force ($charName+"_footCon_right.stretchyEnable")	($charName+"_leg_ikHandle_right.stretchyEnable") ;
+
+	select -clear ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZEyeSetupCore
+// 
+// 添加设置
+// Arguments:
+//	$charName 角色名
+//	$side 方位
+//////////////////////////////////////////////////////////
+proc ddEZEyeSetupCore(string $eyeName,string $aimName)
+{
+	float $eyePosition[3] ;
+	spaceLocator -p 0 0 0 -name ($eyeName+"_UpLoc") ;
+	$eyePosition =`xform -query -worldSpace -translation $eyeName` ;
+	move -w $eyePosition[0] ($eyePosition[1]+1) $eyePosition[2] ($eyeName+"_UpLoc") ;
+	
+	aimConstraint -mo -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject ($eyeName+"_UpLoc") $aimName $eyeName ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZAddRiggingSetup
+// 
+// 添加设置
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddEZArmLegSetup(string $charName)
+{
+	source ddEZArmSetup ;
+	source ddLegSetup ;
+
+	//统一骨骼轴向
+//	ddOrientEZJoint $charName ;
+	
+	//手臂设置
+	ddEZArmSetup $charName "left" ;
+	ddEZArmSetup $charName "right" ;
+
+	//脚部设置
+	ddLegSetup $charName "left" ;
+	ddLegSetup $charName "right" ;
+	parent ($charName+"_footCon_left") ($charName+"_MASTER") ;
+	parent ($charName+"_footCon_right") ($charName+"_MASTER") ;
+	parent ($charName+"_armHandle_left") ($charName+"_MASTER") ;
+	parent ($charName+"_armHandle_right") ($charName+"_MASTER") ;
+
+	//谢桂良的附加设置
+	source add_setup ;
+	add_setup $charName ;
+
+	//腰部的设置 waistRigging
+	ddEZWaistSetup $charName ;
+
+	//应用新的命名
+	ddBR2EZRename $charName ;
+
+	//增加伸长设置
+	ddEZAddStrchy $charName ;
+
+	//谢桂良的添加控制器部分
+	file -import "Z://Resource//Support//Maya//Import//Lionelville//tempFile_icon.mb" ;
+	source addIcon_test ;
+	addIcon $charName ;
+	source insulateJoint ;
+	insulateJoint $charName ;
+//	ddEZEyeSetup $charName "left" ;
+	//修正脖子反转的问题
+	source modify_korrect ;
+	modify_korrect $charName ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZSet
+// 
+// 创建角色set
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddEZSet(string $charName)
+{
+	if(`objExists ($charName + "_MASTER")`)
+	{
+		if(`objExists ($charName + "_set")`)
+		{
+			delete ($charName + "_set") ;
+		}
+
+		select -r ($charName + "_MASTER") ;
+		select -tgl ($charName + "_upperBodyCon") ;
+		select -tgl ($charName + "_chestCon") ;
+		select -tgl ($charName + "_waistCon") ;
+		select -tgl ($charName + "_pelvisCon") ;
+
+		select -tgl ($charName + "_footCon_left") ;
+		select -tgl ($charName + "_footCon_right") ;
+		select -tgl ($charName + "_legPoleVecterCon_left") ;
+		select -tgl ($charName + "_legPoleVecterCon_right") ;
+
+		select -tgl ($charName + "_headWholdCon") ;
+		select -tgl ($charName + "_neckACon") ;
+		select -tgl ($charName + "_neckBCon") ;
+		select -tgl ($charName + "_headCon") ;
+
+		select -tgl ($charName + "_eyeAim") ;
+		select -tgl ($charName + "_eyeAim_left") ;
+		select -tgl ($charName + "_eyeAim_right") ;
+
+		select -tgl ($charName + "_shoulderIkCon_left") ;
+		select -tgl ($charName + "_arm_left") ;
+		select -tgl ($charName + "_elbow_left") ;
+		select -tgl ($charName + "_shoulderIkCon_right") ;
+		select -tgl ($charName + "_arm_right") ;
+		select -tgl ($charName + "_elbow_right") ;
+
+		select -tgl ($charName + "_handCon_left") ;
+		select -tgl ($charName + "_handCon_right") ;
+
+		select -tgl ($charName + "_FKWristCon_left") ;
+		select -tgl ($charName + "_FKWristCon_right") ;
+
+		select -tgl ($charName + "_IKWristCon_left") ;
+		select -tgl ($charName + "_IKWristCon_right") ;
+		select -tgl ($charName + "_armPoleVecterCon_left") ;
+		select -tgl ($charName + "_armPoleVecterCon_right") ;
+
+		select -tgl ($charName + "_thumb1Con_left") ;
+		select -tgl ($charName + "_thumb2Con_left") ;
+		select -tgl ($charName + "_thumb3Con_left") ;
+		select -tgl ($charName + "_index1Con_left") ;
+		select -tgl ($charName + "_index2Con_left") ;
+		select -tgl ($charName + "_index3Con_left") ;
+		select -tgl ($charName + "_middle1Con_left") ;
+		select -tgl ($charName + "_middle2Con_left") ;
+		select -tgl ($charName + "_middle3Con_left") ;
+		select -tgl ($charName + "_ring1Con_left") ;
+		select -tgl ($charName + "_ring2Con_left") ;
+		select -tgl ($charName + "_ring3Con_left") ;
+		select -tgl ($charName + "_little1Con_left") ;
+		select -tgl ($charName + "_little2Con_left") ;
+		select -tgl ($charName + "_little3Con_left") ;
+
+		select -tgl ($charName + "_thumb1Con_right") ;
+		select -tgl ($charName + "_thumb2Con_right") ;
+		select -tgl ($charName + "_thumb3Con_right") ;
+		select -tgl ($charName + "_index1Con_right") ;
+		select -tgl ($charName + "_index2Con_right") ;
+		select -tgl ($charName + "_index3Con_right") ;
+		select -tgl ($charName + "_middle1Con_right") ;
+		select -tgl ($charName + "_middle2Con_right") ;
+		select -tgl ($charName + "_middle3Con_right") ;
+		select -tgl ($charName + "_ring1Con_right") ;
+		select -tgl ($charName + "_ring2Con_right") ;
+		select -tgl ($charName + "_ring3Con_right") ;
+		select -tgl ($charName + "_little1Con_right") ;
+		select -tgl ($charName + "_little2Con_right") ;
+		select -tgl ($charName + "_little3Con_right") ;
+
+		sets -name ($charName + "_set") ;
+		select -cl ;
+	}
+	else
+	{
+		error "角色名可能选择错误在或者不存在！" ;
+	}
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZBindPose
+// 
+// 备份 bindPose 数据及 -31,0 帧 keyframe
+//
+// Arguments:
+//	$charName 角色名
+// Return :
+//	null
+//////////////////////////////////////////////////////////
+global proc ddEZBindPose(string $charName)
+{
+  if(`objExists ($charName + "_set")`)
+  {
+   select -r -noExpand ($charName + "_set") ;
+   slSavePose ;
+//   slKeyInitial ;
+  }
+  else
+  {
+   error ($charName + "_set 并未建立！") ;
+  }
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZAddSmooth
+// 
+// 为polygon物体添加smooth node
+//
+// Arguments:
+//	$charName 角色名
+// Return :
+//	null
+//////////////////////////////////////////////////////////
+global proc ddEZAddSmooth(string $charName)
+{
+	int $sign = 0;
+	string $selected[],$temp1,$temp2,$tempSmooth[],$tempArray[],$historyTemp[] ;
+
+	select -hi ;
+	$selected = `ls -sl` ;
+
+	for($temp1 in $selected)
+	{
+		if(`nodeType $temp1` == "mesh")
+		{
+			$tempArray = `listHistory $temp1` ;
+
+			for($temp2 in $tempArray)
+			{
+				if(`nodeType $temp2` == "polySmoothFace")
+				{
+					$sign = 1 ;
+					if(`isConnected ($charName + "_MASTER.smooth") ($temp2 + ".divisions")`)
+					{
+						break ;
+					}
+					else
+					{
+						connectAttr ($charName + "_MASTER.smooth") ($temp2 + ".divisions") ;
+						break ;
+					}
+				}
+			}
+			if($sign != 1)
+			{
+				$tempSmooth = `polySmooth -mth 0
+					-dv 1
+					-c 1
+					-kb 0
+					-ksb 1
+					-khe 0
+					-kt 1
+					-kmb 1
+					-suv 1
+					-sl 1
+					-dpe 1
+					-ps 0.1
+					-ro 1
+					-ch 1
+					$temp1 ` ;
+				connectAttr ($charName + "_MASTER.smooth") ($tempSmooth[0] + ".divisions") ;
+				$sign = 0 ;
+			}
+		}
+	}
+
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZLockHide
+// 
+// 无用属性处理
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddEZLockHide(string $charName)
+{
+	source ddEZSetCharAttrib ;
+
+	ddEZSetSideAttrib $charName "left" ;
+	ddEZSetSideAttrib $charName "right" ;
+
+	//ddSetEZHBAttrib $charName ;
+
+	select -r ($charName + "_MASTER") ;
+	ddLockJointAttrCMD ;
+
+	//
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZProxyNoRender
+// 
+// 关掉a模型的渲染
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddEZProxyNoRender(string $charName)
+{
+	string $proxyList[],$currentObject ;
+	$proxyList = `ls "*_an_*"` ;
+
+	for ($currentObject in $proxyList)
+	{
+		if (`attributeExists "castsShadows" $currentObject`)
+		{
+			setAttr ($currentObject + ".castsShadows") 0 ;
+			setAttr ($currentObject + ".receiveShadows") 0 ;
+			setAttr ($currentObject + ".motionBlur") 0 ;
+			setAttr ($currentObject + ".primaryVisibility") 0 ;
+			setAttr ($currentObject + ".smoothShading") 0 ;
+			setAttr ($currentObject + ".visibleInReflections") 0 ;
+			setAttr ($currentObject + ".visibleInRefractions") 0 ;
+		}
+	}
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZCurrentCharacter
+// 
+// 返回当前选择的角色名
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc string ddEZCurrentCharacter()
+{
+	string $SelectedChar ;
+
+	$SelectedChar = `optionMenuGrp -query -value ddEZNameListField` ;
+
+	if($SelectedChar != "Other...")
+	{
+		return $SelectedChar ;
+	}
+	else
+	{
+		$SelectedChar = `textField -query -text ddEZNameListTextField` ;
+		if(size($SelectedChar))
+		{
+			return $SelectedChar ;
+		}
+		else
+		{
+			error "角色名不能为空！" ;
+		}
+
+	}
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZCharOptionMenuChangeCommand
+// 
+// 改变角色选单时执行的命令
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddEZCharOptionMenuChangeCommand()
+{
+	string $SelectedChar ;
+
+	$SelectedChar = `optionMenuGrp -query -value ddEZNameListField` ;
+
+	if($SelectedChar != "Other...")
+	{
+		textField -edit -editable false ddEZNameListTextField ;
+	}
+	else
+	{
+		textField -edit -editable true ddEZNameListTextField ;
+	}
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddSTConnectLowV
+// 
+// 联接低模
+//
+// Arguments: 
+//	$charName 角色名
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddSTConnectLowV(string $charName)
+{
+	string $lowPoly[],$tmp ;
+	$lowPoly = `ls -type "transform" "*_an_*" ` ;
+	for ($tmp in $lowPoly)
+	{
+		if(!`isConnected ($charName+"_MASTER.skinProxy_vis") ($tmp+".visibility")`)
+		{
+			connectAttr -force ($charName+"_MASTER.skinProxy_vis") ($tmp+".visibility") ;
+		}
+	}
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddEZSetupToolsUI
+// 
+// 用户界面
+// 
+//////////////////////////////////////////////////////////
+global proc ddSetupToolsUI(string $project)
+{
+
+	global string $ddImagePath ;
+
+	string $windowTitle,
+		$projectImagePath ;
+
+	switch ($project)
+	{
+		case "bratz":
+			$windowTitle = "durdur's Bratz Tools 0.52 beta" ;
+			$projectImagePath = ($ddImagePath+"bratzLogo.jpg") ;
+			break ;
+
+		case "ez":
+			$windowTitle = "durdur's Ben Izzy Tools 0.52 beta" ;
+			$projectImagePath = ($ddImagePath+"ezLogo.bmp") ;
+			break ;
+
+		case "littleTikes":
+			$windowTitle = "durdur's Little Tikes Tools 0.52 beta" ;
+			$projectImagePath = ($ddImagePath+"LittleTikesLogo.bmp") ;
+			break ;
+	}
+
+	if ((`window -ex ddSetupToolsWin`) == true)
+	{
+		deleteUI ddSetupToolsWin ;
+		if(`windowPref -exists ddSetupToolsWin`)
+		{
+			windowPref -remove ddSetupToolsWin ;
+		}
+	}
+
+	window -widthHeight 245 640
+	-title $windowTitle
+	ddSetupToolsWin ;
+
+	columnLayout -adjustableColumn true
+			-columnAttach both 1 ;
+
+	frameLayout -labelVisible false
+				-borderStyle "in" ;
+		columnLayout -adjustableColumn true ;
+			image 	-height 103 -image $projectImagePath ;
+		setParent .. ;
+	setParent .. ;
+
+	separator -width 260 ;
+
+	optionMenuGrp -label "Character Name:"
+		-columnWidth 1 100
+		-columnWidth 2 140
+		-changeCommand "ddEZCharOptionMenuChangeCommand"
+		ddEZNameListField ;
+		//character List Menu 角色名选单
+		switch ($project)
+		{
+			case "bratz":
+				menuItem -label "Other..." ;
+				menuItem -label "m001062cloekid" ;
+				menuItem -label "m001067cloe" ;
+				menuItem -label "m001070cloe" ;
+				menuItem -label "m001071cloe" ;
+				menuItem -label "m001072cloe" ;
+				menuItem -label "dvdaloncei018001" ;
+				menuItem -label "m002066sasha" ;
+				menuItem -label "m002069sasha" ;
+				menuItem -label "m002070sasha" ;
+				menuItem -label "m003062yasmin" ;
+				menuItem -label "m004060jade" ;
+				menuItem -label "m004064jade" ;
+				menuItem -label "dvdsasham002030" ;
+				menuItem -label "m002062sasha" ;
+				menuItem -label "m002068sasha" ;
+				menuItem -label "m003014yasmin" ;
+				menuItem -label "m003055yasmin" ;
+				menuItem -label "m003057yasminkid" ;
+				menuItem -label "m003063yasmin" ;
+				menuItem -label "m003064yasmin" ;
+				menuItem -label "dvdbackupdanceri038001" ;
+				menuItem -label "m004056jadekid" ;
+				menuItem -label "m004062jade" ;
+				menuItem -label "m001065cloebaby" ;
+				menuItem -label "i009007officerblythe" ;
+				menuItem -label "i020003santaclaus" ;
+				menuItem -label "i027003officersterns" ;
+				menuItem -label "i046009williamsdad" ;
+				menuItem -label "i048002sebastianlodgeuniform" ;
+				menuItem -label "i048003sebastian" ;
+				menuItem -label "dvdzelli050001" ;
+				menuItem -label "i053008katia" ;
+				menuItem -label "i053007katia" ;
+				menuItem -label "i053009katiayellowpartydress" ;
+				menuItem -label "dvdalfiei065001" ;
+				menuItem -label "dvdalfiei065005" ;
+				menuItem -label "dvdalfiei065006" ;
+				menuItem -label "dvdalfiei065007" ;
+				menuItem -label "dvdalfiei065008" ;
+				menuItem -label "i065009justindwarf" ;
+				menuItem -label "i065010nickdwarf" ;
+				menuItem -label "i074003spaattendant" ;
+				menuItem -label "i093007joelackey" ;
+				menuItem -label "i098008olddesertwoman" ;
+				menuItem -label "i129001chadwick" ;
+				menuItem -label "i132001mirrorguy" ;
+				menuItem -label "i133001wickedqueen" ;
+				menuItem -label "i135001uglystepsister" ;
+				menuItem -label "i136001uglystepsister" ;
+				menuItem -label "i137001fairygodmother" ;
+				menuItem -label "i138001princecharming" ;
+				menuItem -label "i139001reggie" ;
+				menuItem -label "i143001charlot" ;
+				menuItem -label "i143002charlot" ;
+				menuItem -label "i145002aliamoroccanoutfit" ;
+				menuItem -label "i145005aliaredpartydress" ;
+
+				menuItem -label "i146001moroccanvillageroldwoman1" ;
+				menuItem -label "i147001moroccanvillageryoungman1" ;
+				menuItem -label "i148001moroccanlimodriver" ;
+				menuItem -label "i149001aliasmother" ;
+				menuItem -label "i150001aliasfather" ;
+				menuItem -label "i152001mslola" ;
+				menuItem -label "i153002museumguard" ;
+				menuItem -label "i155001jinxymonkey" ;
+
+
+				break ;
+
+			case "ez":
+				menuItem -label "Other..." ;
+				menuItem -label "cc0044magiciana" ;
+				menuItem -label "cc0045magicianb" ;
+				menuItem -label "cc0046travelera" ;
+				menuItem -label "cc0047firnasa" ;
+				menuItem -label "cc0048firnasb" ;
+				menuItem -label "cc0049firnasc" ;
+				menuItem -label "cc0053monkey" ;
+				menuItem -label "cc0055shepard" ;
+				menuItem -label "cc0061sindbad" ;
+				menuItem -label "cc0062clutchforda" ;
+				menuItem -label "cc0063roxannec" ;
+				menuItem -label "cc0064africana" ;
+				menuItem -label "cc0065africanb" ;
+				menuItem -label "cc0066africanc" ;
+				menuItem -label "cc0067africand" ;
+				menuItem -label "cc0068africane" ;
+				menuItem -label "cc0069ibnmajida" ;
+				menuItem -label "cc0070dockworkera" ;
+				menuItem -label "cc0071dockworkerb" ;
+				menuItem -label "cc0072dockworkerc" ;
+				menuItem -label "cc0073dockworkerd" ;
+				menuItem -label "cc0074dockworkere" ;
+				menuItem -label "cc0075dockworkerf" ;
+				menuItem -label "cc0076dockworkerg" ;
+				menuItem -label "cc0079vascodagama" ; 
+				menuItem -label "cc0080sailora" ;
+				menuItem -label "cc0081sailorb" ;
+				menuItem -label "cc0082sailorc" ;
+				menuItem -label "cc0083sailord" ;
+				menuItem -label "cc0084sailore" ;
+				menuItem -label "cc0085roxanned" ;
+				menuItem -label "cc0091tussi" ;
+				menuItem -label "cc0092copernicus" ;
+				menuItem -label "cc0093euroinca" ;
+				menuItem -label "cc0094euroincb" ;
+				menuItem -label "cc0095euroincc" ;
+				menuItem -label "cc0096euroincd" ;
+				menuItem -label "cc0097euroince" ;
+				menuItem -label "cc0098kharainca" ;
+				menuItem -label "cc0099kharaincb" ;
+				menuItem -label "cc0100kharaincc" ;
+				menuItem -label "cc0101kharaincd" ;
+				menuItem -label "cc0102kharaince" ;
+				menuItem -label "cc0103donkeyb" ;
+				menuItem -label "cc0112ghost" ;
+				menuItem -label "cc0113marktwain" ;
+				menuItem -label "cc0114rashid" ;
+				menuItem -label "cc0120jazari" ;
+				menuItem -label "cc0131dido" ;
+				menuItem -label "cc0132pygmalion" ;
+				menuItem -label "cc0133dyera" ;
+				menuItem -label "cc0135dyerc" ;
+				menuItem -label "cc0134dyerb" ;
+				menuItem -label "cc0136followera" ;
+				menuItem -label "cc0137followerb" ;
+				menuItem -label "cc0138followerc" ;
+				menuItem -label "cc0139followerd" ;
+				menuItem -label "cc0140followere" ;
+				menuItem -label "cc0141followerf" ;
+				menuItem -label "cc0142followerg" ;
+				menuItem -label "cc0143followerh" ;
+				menuItem -label "cc0144gaurdc" ;
+				menuItem -label "cc0145guardd" ;
+				menuItem -label "cc0146guarde" ;
+				menuItem -label "cc0147guardf" ;
+				menuItem -label "cc0148guardg" ;
+				menuItem -label "cc0151ibnsina" ;
+				menuItem -label "cc0152chamberlain" ;
+				menuItem -label "cc0161pearldiver" ;
+				menuItem -label "cc0164gilgamesh" ;
+				menuItem -label "cc0166cluthfordd" ;
+				menuItem -label "cc0171biruni" ;
+				menuItem -label "cc0172officer" ;
+				menuItem -label "cc0173dockworkerh" ;
+				menuItem -label "cc0174dockworkeri" ;
+				menuItem -label "cc0175dockworkerj" ;
+				menuItem -label "cc0176modernworkera" ;
+				menuItem -label "cc0177modernworkerb" ;
+				menuItem -label "cc0178modernworkerc" ;
+				menuItem -label "cc0179ancientworkera" ;
+				menuItem -label "cc0180ancientworkerb" ;
+				menuItem -label "cc0181ancientworkerc" ;
+				menuItem -label "cc0182ancientworkerd" ;
+				menuItem -label "cc0183ancientworkere" ;
+				menuItem -label "cc0184clutchfordd" ;
+				menuItem -label "cc0185roxannee" ;
+				menuItem -label "cc0186scorpion" ;
+				menuItem -label "cc0191equestrianadmin" ;
+				menuItem -label "cc0192securityguard" ;
+				menuItem -label "cc0193lysippos" ;
+				menuItem -label "cc0194horsehandler" ;
+				menuItem -label "cc0195izzyd" ;
+				menuItem -label "cc0201ibnbatouta" ;
+				menuItem -label "cc0202indianguya" ;
+				menuItem -label "cc0203arabwitnessa" ;
+				menuItem -label "cc0204arabwitnessb" ;
+				menuItem -label "cc0205arabwitnessc" ;
+				menuItem -label "cc0206jeddahcitizena" ;
+				menuItem -label "cc0207jeddahcitizenb" ;
+				menuItem -label "cc0208jeddahcitizenc" ;
+				menuItem -label "cc0209jeddahcitizend" ;
+				menuItem -label "cc0211kuwaiticitizena" ;
+				menuItem -label "cc0212kuwaiticitizenb" ;
+				menuItem -label "cc0213kuwaiticitizenc" ;
+				menuItem -label "cc0214kuwaiticitizend" ;
+				menuItem -label "cc0215kuwaiticitizene" ;
+				menuItem -label "cc0216kuwaiticitizenf" ;
+				menuItem -label "cc0217kuwaiticitizeng" ;
+
+				menuItem -label "ben" ;
+				menuItem -label "clutchford" ;
+				menuItem -label "izzy" ;
+				menuItem -label "gaurda" ;
+				menuItem -label "gaurdb" ;
+				menuItem -label "haitham" ;
+				menuItem -label "headgaurd" ;
+				menuItem -label "incidentala" ;
+				menuItem -label "incidentalb" ;
+				menuItem -label "incidentalc" ;
+				menuItem -label "incidentald" ;
+				menuItem -label "incidentale" ;
+				menuItem -label "incidentalf" ;
+				menuItem -label "incidentalg" ;
+				menuItem -label "incidentalh" ;
+				menuItem -label "incidentali" ;
+				menuItem -label "incidentalj" ;
+				menuItem -label "jake" ;
+				menuItem -label "khalif" ;
+				menuItem -label "kindi" ;
+				menuItem -label "omar" ;
+				menuItem -label "qifti" ;
+				menuItem -label "roxanne" ;
+				menuItem -label "yasmine" ;
+
+				break ;
+
+			case "littleTikes":
+				menuItem -label "c00101lt" ;
+				menuItem -label "c00107lt" ;
+				menuItem -label "c00201lilly" ;
+				menuItem -label "c01101barnabe" ;
+				menuItem -label "c02601incidentalboy" ;
+				menuItem -label "c02801ltsmom" ;				
+
+				break ;
+		
+		}
+
+	textField -editable true ddEZNameListTextField ;
+
+	separator -width 260 ;
+
+	frameLayout -label "设置" -labelAlign "top"
+				-borderStyle "in";
+		columnLayout -adjustableColumn true ;
+
+			button -label "导入基本骨骼" //import base joint"
+				-height 28
+				-width 120
+				-command "ddEZBaseJoint `ddEZCurrentCharacter`" ;
+
+			button -label "导入控制器"
+				-height 28
+				-width 80
+				-command "ddEZControlObject `ddEZCurrentCharacter`" ;
+
+			text "按照模型来定位骨骼及控制器" ;
+
+			button -label "统一轴向及对称骨骼 (从左到右)"//"orient joint"
+				-height 28
+				-width 80
+				-command "ddOrientEZJoint `ddEZCurrentCharacter`" ;
+
+			text "绑定角色" ;
+
+			button -label "完成Rigging"
+				-height 28
+				-width 80
+				-command "ddEZArmLegSetup `ddEZCurrentCharacter`" ;
+/*
+			button -label "眼睛的设置 (未完成)"
+				-height 28
+				-width 80
+				-command "ddEZEyeSetup `ddEZCurrentCharacter`" ;
+*/
+			button -label "隐藏锁定无关属性"
+				-height 28
+				-width 80
+				-command "ddEZLockHide `ddEZCurrentCharacter`" ;
+
+			button -label "创建身体Set"
+				-height 28
+				-width 80
+				-command "ddEZSet `ddEZCurrentCharacter`" ;
+
+			button -label "备份 bindPose 数据"
+				-height 28
+				-width 80
+				-command "ddEZBindPose `ddEZCurrentCharacter`" ;
+
+			button -label "为 polygon 对象添加 smooth 节点"
+				-height 28
+				-width 80 
+				-annotation "选择需要添加的polygon物体"
+				-command "ddEZAddSmooth `ddEZCurrentCharacter`" ;
+
+			button -label "联接低模显示"
+				-height 28
+				-width 80
+				-command "ddSTConnectLowV `ddEZCurrentCharacter` ;ddEZProxyNoRender `ddEZCurrentCharacter`;" ;
+
+
+		setParent ..;
+	setParent ..;
+
+	frameLayout -label "测试" -labelAlign "top"
+				-borderStyle "in";
+		columnLayout -adjustableColumn true ;
+			button -label "导入测试用动画(未完成)"
+				-height 28
+				-width 80
+				-command "ddEZ" ;
+
+
+			button -label "文件检查"
+				-height 28
+				-width 80
+				-command "checkScene 2 2" ;
+
+
+		setParent ..;
+	setParent ..;
+
+	frameLayout -label "修正部分" -labelAlign "top"
+				-borderStyle "in";
+		columnLayout -adjustableColumn true ;
+			/*button -label "修正脖子反转的错误"
+				-height 28
+				-width 80
+				-command "source modify_korrect ;modify_korrect `ddEZCurrentCharacter` ;" ;*/
+
+			button -label "增加舌头缩放控制"
+				-height 28
+				-width 80
+				-command "source tongueModifyTool ;tongueModifyTool_auto() ;" ;
+
+			button -label "增加视线跟随控制"
+				-height 28
+				-width 80
+				-command "source auto_add_eyesAim_followCon ;auto_add_eyesAim_followCon ;" ;
+
+		setParent ..;
+	setParent ..;
+
+ setParent.. ;
+
+ showWindow ddSetupToolsWin ;
+}
+
+//End of file.

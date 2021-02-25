@@ -1,0 +1,357 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc gtRenderLayerColor()
+{
+		string $GetObjectName[]=`ls -sl`;
+		string $ColorLayer = `createRenderLayer -name "Color" -number 1 -noRecurse $GetObjectName`;
+		setAttr defaultRenderLayer.renderable 0;
+		refreshAE;
+}
+
+global proc gtRenderLayerOcc()
+{
+		string $GetObjectName[]=`ls -sl`;
+		string $OCCLayer = `createRenderLayer -name "OCC" -number 1 -noRecurse $GetObjectName`;
+		setAttr defaultRenderLayer.renderable 0;
+		renderLayerBuiltinPreset occlusion $OCCLayer;
+		refreshAE;
+
+		string $occlusion1[] = `ls -type mib_amb_occlusion`;
+		for ($aa in $occlusion1)
+		{
+			float $aaOutput_mode = `getAttr ($aa+".output_mode")`;
+			if ($aaOutput_mode==0)
+			{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0.25 0.25 0.25 ;
+				setAttr ($aa+".max_distance") 10;
+			}
+			else if ($aaOutput_mode==3)
+			{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0 0 0 ;
+				setAttr ($aa+".max_distance") 0;			
+			}
+		}
+}
+
+global proc gtRenderLayerNormal()
+{
+		string $GetObjectName[]=`ls -sl`;
+		string $NormalLayer = `createRenderLayer -name "Normal" -number 1 -noRecurse $GetObjectName`;
+		setAttr defaultRenderLayer.renderable 0;
+		renderLayerBuiltinPreset normal $NormalLayer;
+		refreshAE;
+
+		string $occlusion1[] = `ls -type mib_amb_occlusion`;
+		for ($aa in $occlusion1)
+		{
+			float $aaOutput_mode = `getAttr ($aa+".output_mode")`;
+			if ($aaOutput_mode==0)
+			{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0.25 0.25 0.25 ;
+				setAttr ($aa+".max_distance") 10;
+			}
+			else if ($aaOutput_mode==3)
+			{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0 0 0 ;
+				setAttr ($aa+".max_distance") 0;			
+			}
+		}
+}
+
+global proc gtRenderLayerShadow()
+{
+	string $GetObjectName[]=`ls -sl`;
+	for ($aa in $GetObjectName)
+	{
+		if (!`objExists ($aa+".miLabel")`)
+		{
+			addAttr -ln "miLabel" -k on  -at "enum" -en "场景:角色:" $aa;
+		}
+	}
+	string $ShadowLayer = `createRenderLayer -name "Shadow" -number 1 -noRecurse $GetObjectName`;
+	source ezRenderMainLayoutMaterial.mel;ezRenderMainLayoutMaterial_Assign("shadow");
+}
+
+global proc gtRenderLayerOccShadow()
+{
+	string $GetObjectName[]=`ls -sl`;
+	for ($aa in $GetObjectName)
+	{
+		if (!`objExists ($aa+".miLabel")`)
+		{
+			addAttr -ln "miLabel" -k on  -at "enum" -en "场景:角色:" $aa;
+		}
+	}
+	
+	string $OCCShadowLayer = `createRenderLayer -name ("OCCShadow") -number 1 -noRecurse $GetObjectName`;
+	layerEditorRenderLayerChange;
+	layerEditorLayerButtonSelect 0 $OCCShadowLayer;
+	if (!`objExists "OCC_Shadow_surfaceShader"`)
+	{
+		shadingNode -asShader surfaceShader -n "OCC_Shadow_surfaceShader";
+		sets -renderable true -noSurfaceShader true -empty -name OCC_Shadow_surfaceShaderSG;
+		connectAttr -f ("OCC_Shadow_surfaceShader"+".outColor") OCC_Shadow_surfaceShaderSG.surfaceShader;
+		setAttr ("OCC_Shadow_surfaceShader"+".outColor") -type double3 0 0 0 ;
+		setAttr ("OCC_Shadow_surfaceShader"+".outMatteOpacity") -type double3 0 0 0 ;
+
+		if (!`objExists "OCC_Shadow_mib_amb_occlusion"`)
+		{
+			shadingNode -asShader mib_amb_occlusion -n "OCC_Shadow_mib_amb_occlusion";
+		}
+		connectAttr -f ("OCC_Shadow_mib_amb_occlusion"+".outValue") ("OCC_Shadow_surfaceShader"+".outColor");
+		setAttr ("OCC_Shadow_mib_amb_occlusion"+".samples") 100;
+		setAttr ("OCC_Shadow_mib_amb_occlusion"+".dark") -type double3 0.25 0.25 0.25 ;
+		setAttr ("OCC_Shadow_mib_amb_occlusion"+".max_distance") 10;
+		setAttr ("OCC_Shadow_mib_amb_occlusion"+".id_inclexcl") 1;
+	}
+	sets -e -forceElement OCC_Shadow_surfaceShaderSG $GetObjectName;
+	string $camera[] = `ls -type camera `;
+	for ($aa in $camera)
+	{
+		editRenderLayerAdjustment ($aa+".backgroundColor");
+		setAttr ($aa + ".backgroundColor") -type double3 1 1 1 ;	
+	}
+	editRenderLayerAdjustment "defaultRenderGlobals.enableDefaultLight";
+	setAttr "defaultRenderGlobals.enableDefaultLight" 0;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+	editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+	setAttr "miDefaultOptions.rayTracing" 1;
+	editRenderLayerAdjustment "miDefaultOptions.maxSamples";
+	setAttr "miDefaultOptions.maxSamples" 2;
+	setAttr "miDefaultOptions.contrastR" 0.02;
+	setAttr "miDefaultOptions.contrastG" 0.02;
+	setAttr "miDefaultOptions.contrastB" 0.02;
+	editRenderLayerAdjustment "miDefaultOptions.contrastA";
+	setAttr "miDefaultOptions.contrastA" 0.02;
+	editRenderLayerAdjustment "miDefaultOptions.filter";
+	setAttr miDefaultOptions.filter 1;
+	editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+	setAttr "miDefaultOptions.rayTracing" 1;
+	editRenderLayerAdjustment "miDefaultOptions.maxReflectionRays";
+	setAttr "miDefaultOptions.maxReflectionRays" 1;
+	editRenderLayerAdjustment "miDefaultOptions.maxRefractionRays";
+	setAttr "miDefaultOptions.maxRefractionRays" 1;
+	editRenderLayerAdjustment "miDefaultOptions.maxRayDepth";
+	setAttr "miDefaultOptions.maxRayDepth" 1;
+	editRenderLayerAdjustment "miDefaultOptions.maxShadowRayDepth";
+	setAttr "miDefaultOptions.maxShadowRayDepth" 2;
+
+	setAttr defaultRenderLayer.renderable 0;
+}
+
+global proc gtRenderLayerCharacter()
+{
+	string $getr = `radioCollection -q -sl gtRenderToolsLayoutUI_sel`;
+	string $CC = `checkBox -q -v gtRenderToolsLayoutUI_CharColor`;
+	string $CO = `checkBox -q -v gtRenderToolsLayoutUI_CharOcc`;
+	string $CN = `checkBox -q -v gtRenderToolsLayoutUI_CharNormal`;
+	if ($getr == "gtRenderToolsLayoutUI_selected")
+	{
+		string $allChr[]=`ls -sl`;
+		if ($CC ==1)
+		{	
+			string $getLight[]=`ls "charlight"`;
+			if (size($getLight)==0)
+			file -import -type "mayaBinary" -rpr "char_light" -options "v=0;p=17" "//file-cluster/GDC/Resource/Support/Maya/projects/JT/chrlight/char_light.mb";
+			select $allChr;
+			HbCreateChrLayer("ChrColor","CHR");
+		}
+		if ($CN ==1)
+		{
+			select $allChr;
+			HbCreateChrLayer("ChrNormal","CHR");
+		}
+		if ($CO ==1)
+		{
+			select $allChr;
+			HbCreateChrLayer("ChrOcc","CHR");
+		}
+		print "创建完成";
+	}
+	else 
+	{
+		if ($getr=="gtRenderToolsLayoutUI_all")
+		{
+			if ($CC ==1)
+			{	
+				string $getLight[]=`ls "charlight"`;
+				if (size($getLight)==0)
+				file -import -type "mayaBinary" -rpr "char_light" -options "v=0;p=17" "//file-cluster/GDC/Resource/Support/Maya/projects/JT/chrlight/char_light.mb";
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				select $allChr;
+				HbCreateChrLayer("ChrColor","CHR");
+			}
+			if ($CN ==1)
+			{
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				select $allChr;
+				HbCreateChrLayer("ChrNormal","CHR");
+			}
+			if ($CO ==1)
+			{
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				select $allChr;
+				HbCreateChrLayer("ChrOcc","CHR");
+			}
+			print "创建完成";
+		}
+		else if ($getr=="gtRenderToolsLayoutUI_single")
+		{
+			if ($CC ==1)
+			{	
+				string $getLight[]=`ls "charlight"`;
+				if (size($getLight)==0)
+				file -import -type "mayaBinary" -rpr "char_light" -options "v=0;p=17" "//file-cluster/GDC/Resource/Support/Maya/projects/JT/chrlight/char_light.mb";
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				for($Chr in $allChr)
+				{
+					select $Chr;
+					string $selectname=woRenderGetCharPre();
+					string $buff[];
+					int $num = `tokenize $selectname "_" $buff`;
+
+					string $layerName = `substring $buff[1] 8 (size($buff[1]))`;
+					HbCreateChrLayer("ChrColor",$layerName);
+				}
+			}
+			if ($CN ==1)
+			{
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				for($Chr in $allChr)
+				{
+					select $Chr;
+					string $selectname=woRenderGetCharPre();
+					string $buff[];
+					int $num = `tokenize $selectname "_" $buff`;
+
+					string $layerName = `substring $buff[1] 8 (size($buff[1]))`;
+					HbCreateChrLayer("ChrNormal",$layerName);
+				}
+			}
+			if ($CO ==1)
+			{
+				string $allChr[]=`ls "gt_c*RNgroup*" "*:gt_c*RNgroup*"`;
+				for($Chr in $allChr)
+				{
+					select $Chr;
+					string $selectname=woRenderGetCharPre();
+					string $buff[];
+					int $num = `tokenize $selectname "_" $buff`;
+
+					string $layerName = `substring $buff[1] 8 (size($buff[1]))`;
+					HbCreateChrLayer("ChrOcc",$layerName);
+				}
+
+			}
+			print "创建完成";
+		}
+	}
+
+}
+
+global proc gtRenderLayerCharacterSel(string $type)
+{
+	string $allChr[]=`ls -sl`;
+	if ($type =="color")
+	{	
+		string $getLight[]=`ls "charlight"`;
+		if (size($getLight)==0)
+		file -import -type "mayaBinary" -rpr "char_light" -options "v=0;p=17" "//file-cluster/GDC/Resource/Support/Maya/projects/JT/chrlight/char_light.mb";
+		select $allChr;
+		HbCreateChrLayer("ChrColor","CHR");
+	}
+	else if ($type =="normal")
+	{
+		select $allChr;
+		HbCreateChrLayer("ChrNormal","CHR");
+	}
+	else if ($type =="occ")
+	{
+		select $allChr;
+		HbCreateChrLayer("ChrOcc","CHR");
+	}
+	print "创建完成";
+}
+
+global proc gtRenderLayerBackground()
+{
+	string $sel = `ls -sl`;
+	{
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGTree`) HbCreatTreeLayer;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGKey`) HbCreatKeyLightLayer;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGEnv`) HbCreatEnvLightLayer;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGZ`) CreatDepthLayerSel;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGOcc`) HbCreatBgOcc;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGNormal`) HbCreatBgNormal;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGShadow`) gtRenderLayerShadow;
+		if (`checkBox -q -v gtRenderToolsLayoutUI_BGOShadow`) gtRenderLayerOccShadow;
+	}
+}
+
+global proc gtRenderLayerRenderCam()
+{
+	string $renderCam[] = `ls -type stereoRigCamera "RenderCAM_*"`;
+	if (size($renderCam))
+	{
+		string $renderableCam[] = `listRelatives -p $renderCam[0]`;
+
+		global string $gRenderableCameraListMenu;
+
+		string $oldOM = $gRenderableCameraListMenu;
+		optionMenuGrp -e -v  ($renderableCam[0]+" (Stereo Pair)") $gRenderableCameraListMenu;
+		MayaSoftwareChangedCamera($renderableCam[0],1,$gRenderableCameraListMenu);
+		updateMayaSoftwareCameraControl;
+
+		global string $gRenderableCameraListMenu;
+		if ($gRenderableCameraListMenu != $oldOM)
+		{
+			string $oldValue =  `optionMenuGrp -q -v $oldOM`;
+			if (gmatch($oldValue,"*(Stereo Pair)*"))
+			{
+				$oldValue = substituteAllString($oldValue,"(Stereo Pair)","");
+				MayaSoftwareChangedCamera($oldValue,2,"");
+				updateMayaSoftwareCameraControl;
+			}
+			else
+			{
+				MayaSoftwareChangedCamera($oldValue,1,"");
+				updateMayaSoftwareCameraControl;
+			}
+		}	
+	}
+}
+
+global proc gtRenderLayerCloseHairsystem()
+{
+	string $hairsystems[] = `ls -type hairSystem`;
+	for ($hs in $hairsystems)
+	{
+		string $connections[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($hs+".simulationMethod")`;
+		if (size($connections) == 2)
+		{
+			disconnectAttr $connections[1] $connections[0];
+			setAttr ($hs+".simulationMethod") 1;
+		}
+		else
+			setAttr ($hs+".simulationMethod") 1;
+	}
+
+	/*string $diskCache[] = `ls -type diskCache`;
+	if (size($diskCache))
+		delete $diskCache;*/
+}

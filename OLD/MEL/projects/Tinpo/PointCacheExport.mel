@@ -1,0 +1,1084 @@
+// PointCacheExport.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Executes point caching process
+Use:
+	PointCacheExport argList
+Options:
+	type (string)	- What type of scene - ani, lay, or lit
+	
+Dependancies:
+
+	parseXML
+	fileIO
+	php
+	isStaticChannel
+	findAssetsByType
+	parsePlaylist
+	getPointCacheGeometry
+	getInsightShotGroupLength
+	selectiveFileLoad
+	loadDependentReferences
+	generatePointCacheTempLocation
+	getPath
+	lookupPointCacheExportNames
+	insightGetShotSubmissionData
+	getFileMTime
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	09/09/05
+Revisions:	09/15/05	Rev 1.0
+		- Making sure visibility is turned on.
+		
+		09/18/05	Rev 1.1
+		- Only turning on visibility if it isn't keyed with a non-static channel
+		
+		09/23/05	Rev 1.2
+		- Updated to deal with cases where extra assets must be loaded (but not exported) because the assets we have loaded
+		are constrained to them
+		
+		12/30/05	Rev 1.3
+		- Adding handling for cases where deformers have been added in scene, and this has resulted in a duplicate of the
+		shape being made. Calling exportPointCache with name re-mapping info.
+		
+		01/06/06	Rev 1.4
+		- Modify smooth setting to handle CGMPolyToCCNode
+
+		08/22/06	Rev 1.5
+		- Pulling frame rate from project globals to feed to exportPointCache
+		- Switched path generation to getPath
+		- Switched arg parsing to argList
+
+		08/30/06	Rev 1.6
+		- Replaced internal proc buildNameMappingList with a call to lookupPointCacheExportNames. This handles cases where Maya has dynamically renamed the shape nodes,
+		and also cases where the asset has been referenced with -rpr instead of -ns, in addition to the previous functionality.
+	
+		09/03/06	Rev 1.7
+		- Added a checking loop when transferring point caches from temp directory to final directory
+		- Added an option to export to local drive (home directory) then move
+
+		03/05/07	Rev 1.8
+		- Introduced versioning support. Introduced pointCacheExport.xml file to store versioning data
+
+		03/16/07	Rev 1.9
+		- Updated handling of pointCacheExport.xml to preserve data written by cloth
+		- Fixed problem with visibility cache names that had been introduced in Rev 1.8
+
+		04/26/07	Rev 2.0
+		- Making frame rate senstive to seq/shot globals if present
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+
+// ---------------------------------------------------------------------------------------------------
+// latest dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/PointCacheExport.2.0.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "exportPointCache"`)
+	{
+		loadPlugin "exportPointCache";	
+	}
+	if (!`pluginInfo -q -l "compileAnimCache"`)
+	{
+		loadPlugin "compileAnimCache";	
+	}
+	if (!`pluginInfo -q -l "fileQuery"`)
+	{
+		loadPlugin "fileQuery";	
+	}
+
+
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getFrameRate ()
+{
+	global string $PCE_sequence;	// The sequence
+	global string $PCE_shotGroup;	// The shot
+
+
+	string $projGlobals = getPath ("ShotBase",{$PCE_sequence,$PCE_shotGroup})+"/projectGlobals/project.xml";
+	if (!`filetest -f $projGlobals`)
+	{
+		$projGlobals = getPath ("SeqBase",{$PCE_sequence})+"/projectGlobals/project.xml";
+	}
+	if (!`filetest -f $projGlobals`)
+	{
+		$projGlobals = getPath ("ProjectGlobals",{})+"/project.xml";
+	} 
+		
+	if (!`filetest -f $projGlobals`)
+	{
+		return "film";
+	}
+	string $xml = readXML ($projGlobals,0);
+	string $node[] = xml_getTag ($xml,"frameRate");
+	if (!size($node))
+		return "film";
+	
+	string $name = xml_getVar ($node[0],"name");
+	if ($name == "")
+		return "film";
+
+	return (tolower($name));
+}
+// -----------------------------------------------------------------------------------------------
+// find all smooth nodes, and set divisions to zero.
+// -----------------------------------------------------------------------------------------------
+proc setSmoothingOld()
+{
+	string $nodes[] = `ls -type polySmoothFace`;
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		//if (`reference -q -inr $nodes[$i]`)
+		//	continue;
+		
+		//int $isLocked[] = `lockNode -q $nodes[$i]`;
+		//if ($isLocked[0])
+		//	lockNode -l 0 $nodes[$i];
+		//if (`getAttr -l ($nodes[$i]+".divisions")`)
+		//	setAttr -l 0 ($nodes[$i]+".divisions");
+		string $in[] = `listConnections -s 1 -d 0 -p 1 ($nodes[$i]+".divisions")`;
+		if (size($in))
+			disconnectAttr $in[0] ($nodes[$i]+".divisions");
+			
+		setAttr ($nodes[$i]+".divisions") 0;
+		
+	}
+	
+}
+// -----------------------------------------------------------------------------------------------
+// 12/10/05 find all smooth nodes, and set divisions to zero.
+// #Mod - More subtle version of setSmoothing...if the mesh drives something, it's smoothing may need to be left alone.
+// Create a proxy exporter.
+// -----------------------------------------------------------------------------------------------
+proc string findDownstreamMesh (string $smoothNode)
+{
+	string $mesh[] = `listHistory -f 1 $smoothNode`;
+	$mesh = `ls -type mesh -ni $mesh`;	
+	
+	if (size($mesh)>1)
+	{
+		// find the intermediate object of the mesh, and make sure the smooth node is in the future of it.
+		// otherwise it is possible to find meshes that the smooth doesn't belong to. E.g. somebody has wrapped something
+		// to the smoothed geometry - the wrapped geo may be returned, depending on the order of the meshes returned
+		// by the listHistory command
+		
+		for ($i=0;$i<size($mesh);$i++)
+		{
+			string $trans[] = `listRelatives -p -pa $mesh[$i]`;
+			if (!size($trans))
+				continue;	// something wierd
+			string $inter[] = `listRelatives -s -pa $trans[0]`;
+			$inter = `ls -io $inter`;
+			if (!size($inter))
+				continue;
+			// there might also be multiple intermediate objects
+			for ($j=0;$j<size($inter);$j++)
+			{
+				string $future[] = `listHistory -f 1 $inter[$j]`;
+				if (stringArrayFindIndex ($smoothNode,$future)!=-1)
+					return $mesh[$i];	
+			
+			}
+		}	
+		
+	}
+
+	return $mesh[0];
+}
+// -----------------------------------------------------------------------------------------------
+proc int hasDependancies (string $mesh)
+{
+	string $out1[] = `listConnections -s 0 -d 1 ($mesh+".worldMesh")`;
+	string $out2[] = `listConnections -s 0 -d 1 ($mesh+".outMesh")`;
+	
+	return (size($out1) || size($out2));	
+}
+// -----------------------------------------------------------------------------------------------
+proc breakSmoothNormal (string $smoothNode)
+{
+	int $isLocked[] = `lockNode -q $smoothNode`;
+	if ($isLocked[0])
+		lockNode -l 0 $smoothNode;
+	if (`getAttr -l ($smoothNode+".divisions")`)
+		setAttr -l 0 ($smoothNode+".divisions");
+	string $in[] = `listConnections -s 1 -d 0 -p 1 ($smoothNode+".divisions")`;
+	if (size($in))
+		disconnectAttr $in[0] ($smoothNode+".divisions");
+			
+	setAttr ($smoothNode+".divisions") 0;	
+}
+// -----------------------------------------------------------------------------------------------
+proc breakSmoothNormal_CGMPolyToCCNode (string $node)
+{
+	int $isLocked[] = `lockNode -q $node`;
+	if ($isLocked[0])
+		lockNode -l 0 $node;	
+		
+	if (`getAttr -l ($node+".level")`)
+		setAttr -l 0 ($node+".level");
+		
+	string $in[] = `listConnections -s 1 -d 0 -p 1 ($node+".level")`;
+	if (size($in))
+		disconnectAttr $in[0] ($node+".level");
+		
+	setAttr ($node+".level") 0;	
+	
+}
+// -----------------------------------------------------------------------------------------------
+proc  breakSmoothDep_CGMPolyToCCNode (string $node, string $mesh)
+{
+	string $transform[] = `listRelatives -p -pa $mesh`;
+	
+	string $meshRen = `rename $mesh ($mesh+"_renamed")`;
+	print ("rename "+$mesh+" "+$meshRen+";\n");
+	string $proxyExporter = `createNode -p $transform[0] -n $mesh "mesh"`;
+	print ("Created proxyExporter for "+$mesh+"\n");
+	
+	string $CGMPolyToCCNodeIn[] = `listConnections -s 1 -d 0 -p 1 ($node+".inMesh")`;
+	connectAttr $CGMPolyToCCNodeIn[0] ($proxyExporter+".inMesh");
+	
+	setAttr ($meshRen+".io") 1;	
+}
+// -----------------------------------------------------------------------------------------------
+proc  breakSmoothDep (string $smoothNode, string $mesh)
+{
+	string $transform[] = `listRelatives -p -pa $mesh`;
+	
+	string $meshRen = `rename $mesh ($mesh+"_renamed")`;
+	print ("rename "+$mesh+" "+$meshRen+";\n");
+	string $proxyExporter = `createNode -p $transform[0] -n $mesh "mesh"`;
+	print ("Created proxyExporter for "+$mesh+"\n");
+	
+	string $smoothIn[] = `listConnections -s 1 -d 0 -p 1 ($smoothNode+".inputPolymesh")`;
+	connectAttr $smoothIn[0] ($proxyExporter+".inMesh");
+	
+	setAttr ($meshRen+".io") 1;	
+}
+// -----------------------------------------------------------------------------------------------
+global proc setCGMPolyToCCNodeSmoothing()
+{
+	if (!`pluginInfo -q -l "CGMSubd"`)
+		return;
+		
+	string $nodes[] = `ls -type CGMPolyToCCNode`;	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		if (`reference -q -inr $nodes[$i]`)
+			continue;
+		// does this CGMPolyToCCNode drive a mesh which drives other stuff?	findDownstreamMesh will work for 
+		// CGMPolyToCCNode
+		string $mesh = findDownstreamMesh ($nodes[$i]);
+		if (!size($mesh))
+			continue;
+		// does it have dependancies that need it to be smoothed?
+		int $hasDep = hasDependancies($mesh);
+		if (!$hasDep)
+			breakSmoothNormal_CGMPolyToCCNode ($nodes[$i]);
+		else
+			breakSmoothDep_CGMPolyToCCNode ($nodes[$i],$mesh);
+	}
+}		
+// -----------------------------------------------------------------------------------------------
+global proc setSmoothing()
+{
+	string $nodes[] = `ls -type polySmoothFace`;	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		if (`reference -q -inr $nodes[$i]`)
+			continue;
+		// does this polySmoothFace drive a mesh which drives other stuff?	
+		string $mesh = findDownstreamMesh ($nodes[$i]);
+		if (!size($mesh))
+			continue;
+		// does it have dependancies that need it to be smoothed?
+		int $hasDep = hasDependancies($mesh);
+		if (!$hasDep)
+			breakSmoothNormal ($nodes[$i]);
+		else
+			breakSmoothDep ($nodes[$i],$mesh);
+	}
+}
+// -----------------------------------------------------------------------------------------------
+// Set all assets res setting to render
+// -----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------------------------
+proc setRenderRes()
+{
+	string $charGrps[] = findAssetsByType ("cpsv",0);
+	for ($i=0;$i<size($charGrps);$i++)
+	{
+		if (!`objExists ($charGrps[$i]+".res")`)
+			continue;
+		
+		//if (`reference -q -inr $charGrps[$i]`)
+		//	continue;
+		
+		//if (`getAttr -l ($charGrps[$i]+".res")`)
+		//	setAttr -l 0 ($charGrps[$i]+".res");
+		
+		string $in[] = `listConnections -s 1 -d 0 -p 1 ($charGrps[$i]+".res")`;
+		if (size($in))
+		{
+			disconnectAttr $in[0] ($charGrps[$i]+".res");
+		}	
+		
+		string $enumNames = `addAttr -q -en ($charGrps[$i]+".res")`;	
+		string $enums[];
+		tokenize ($enumNames,":",$enums);
+		// first try to set to "Render"
+		int $renderVal = -1;
+		int $highVal = -1;
+		for ($j = 0; $j < size($enums);$j++)
+		{
+			if ($enums[$j] == "Render")
+			{
+				$renderVal = $j;
+				break;	
+			}
+			if ($enums[$j] == "High")
+			{
+				$highVal = $j;	
+			}
+		}
+		if ($renderVal != -1)
+		{
+			setAttr ($charGrps[$i]+".res") $renderVal;
+			continue;
+		}
+		if ($highVal != -1)
+		{
+			setAttr ($charGrps[$i]+".res") $highVal;
+			continue;
+		}
+		
+	}
+	
+}
+// -----------------------------------------------------------------------------------------------
+// Temp hard-coded hack...for testing only
+// -----------------------------------------------------------------------------------------------
+proc setVisControl()
+{
+	string $visControls[] = `ls "sid*:visALL"`;
+	for ($control in $visControls)
+	{
+		if (`reference -q -inr $control`)
+			continue;
+		if (!`objExists ($control+".hair")`)
+			continue;
+		
+		if (`getAttr -l ($control+".hair")`)
+			setAttr -l 0 ($control+".hair");
+		
+		string $in[] = `listConnections -s 1 -d 0 -p 1 ($control+".hair")`;
+		if (size($in))
+		{
+			disconnectAttr $in[0] ($control+".hair");
+		}	
+		print ("setAttr "+$control+".hair 1;\n");
+		setAttr ($control+".hair") 1;	
+	}
+}
+// -----------------------------------------------------------------------------------------------
+proc breakAndSet(string $plug, string $val)
+{
+	if (!`objExists $plug`)
+		return;
+	string $inputs[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+	if (size($inputs))
+	{
+		catch (`disconnectAttr $inputs[0] $plug`);
+	}
+	string $cmd = "setAttr \""+$plug+"\" "+$val;
+	catch (`eval $cmd`);
+}
+// -----------------------------------------------------------------------------------------------
+// Project specific stuff
+// -----------------------------------------------------------------------------------------------
+proc setShapeVisibility (string $exportList[])
+{
+	for ($obj in $exportList)
+	{
+		string $shape[] = `listRelatives -s -ni -pa $obj`;
+		if (!size($shape))
+			continue;
+		
+		string $inPlug[] = `listConnections -s 1 -d 0 ($shape[0]+".v")`;
+		if (size($inPlug))
+			continue;
+		
+		catch (`setAttr ($shape[0]+".v") 1`);	
+	}	
+}
+
+// -----------------------------------------------------------------------------------------------
+proc setVisibilityCustom()
+{
+	global string $PCE_sequence;
+	// project specific viz setting here.
+	string $charGrps[] = findAssetsByType("c",0);
+	for ($i=0;$i<size($charGrps);$i++)
+	{
+		string $name = `getAttr ($charGrps[$i]+".name")`;
+		if ($name == "chr_nc01_napoleon")
+		{
+			breakAndSet (($charGrps[$i]+".hairCurveViz"),"1");
+		}
+		if ($name == "chr_lm3a_lefty_messy_3a_bad_day")
+		{
+			breakAndSet (($charGrps[$i]+".hatVis"),"0");
+		}
+		if ($name == "chr_si02_stanley_jan" && gmatch ($PCE_sequence,"090_*"))
+		{
+			breakAndSet (($charGrps[$i]+".clothes"),"2");
+		}
+
+	}
+
+}
+// -----------------------------------------------------------------------------------------------
+proc setVisibility()
+{
+	string $charGrps[] = findAssetsByType ("cpsv",0);
+	string $groups[] = 
+	{
+		"CHARACTERS",
+		"PROPS",
+		"VEHICLES"	
+	};
+	$charGrps = stringArrayCatenate ($charGrps,$groups);
+	for ($i=0;$i<size($charGrps);$i++)
+	{
+		if (!`objExists ($charGrps[$i])`)
+			continue;
+			
+		if (`reference -q -inr $charGrps[$i]`)
+			continue;
+			
+		if (!`objExists ($charGrps[$i])`)
+			continue;
+		lockNode -l 0 $charGrps[$i];
+		setAttr -l 0 ($charGrps[$i]+".v");
+		string $in[] = `listConnections -s 1 -d 0 -p 1 ($charGrps[$i]+".v")`;
+		
+		// preserve non-static visibility
+		if (!isStaticChannel ($charGrps[$i]+".v"))
+			continue;
+		if (size($in))
+		{
+			disconnectAttr $in[0] ($charGrps[$i]+".v");		
+		}
+		
+		if (!`getAttr ($charGrps[$i]+".v")`)
+		{
+			print ($charGrps[$i]+".v was turned off. Turning it on for point cache export.\n");	
+		}
+		print ("setAttr "+$charGrps[$i]+".v 1\n");
+		setAttr ($charGrps[$i]+".v") 1;
+		
+	}
+	
+	// turn on display layers
+	string $layers[] = `ls -type displayLayer`;
+	
+	for ($layer in $layers)
+	{
+		if (gmatch ($layer,"*defaultLayer"))
+			continue;
+			
+		if (!`getAttr ($layer+".v")`)
+		{
+			print ($layer+".v was turned off. Turning it on for point cache export.\n");		
+		}
+	
+		setAttr ($layer+".v") 1;	
+	}
+	
+	setVisibilityCustom();
+}
+// -----------------------------------------------------------------------------------------------
+proc int needsUpdate (string $liveFile, string $archiveFile)
+{
+	loadPlugins;
+	// First does the archive file exist?
+	if (!`filetest -f $archiveFile`)
+		return true;
+		
+	// Check both timestamp and file size
+	string $cmd = "fileQuery -lm -sz \""+$liveFile+"\"";
+	int $liveData[] = eval ($cmd);
+	
+	$cmd = 	"fileQuery -lm -sz \""+$archiveFile+"\"";
+	int $archiveData[] = eval ($cmd);
+	
+	int $liveStamp = $liveData[1];
+	int $liveSize = $liveData[0];
+	int $archiveStamp = $archiveData[1];
+	int $archiveSize = $archiveData[0];
+	
+	// is the live file newer than the archived file?
+	if ($liveStamp > $archiveStamp)
+		return true;
+		
+	// is the live file a different size than the archived file
+	if ($liveSize != $archiveSize)
+		return true;
+		
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc movePointCacheFiles(string $sourceDir, string $targetDir)
+{
+	string $files[] = `getFileList -fld ($sourceDir+"/")`;
+	int $copy_max_tries = 5;
+	
+	for ($file in $files)
+	{
+		string $sourcePath = $sourceDir+"/"+$file;
+		string $targetPath = $targetDir+"/"+$file;
+		if (`filetest -d $sourcePath`)
+		{
+			if (!`filetest -d $targetPath`)
+				sysFile -md $targetPath;
+			
+			movePointCacheFiles ($sourcePath,$targetPath);	
+			
+		}	
+		
+		// if it is a file...
+		if (`filetest -f $sourcePath`)
+		{
+			print ("Moving "+$sourcePath+" -> "+$targetPath+"\n");
+			int $success = false;
+			for ($i=0;$i<$copy_max_tries;$i++)
+			{
+				if ($i)
+					print ("Retrying...\n");
+				
+				print ("cp "+$sourcePath+" "+$targetPath+"\n");
+				sysFile -cp $targetPath $sourcePath;
+				if (!needsUpdate($sourcePath,$targetPath))
+				{
+					break;
+					$success = true;
+				}
+			}
+			if ($success)
+			{
+				sysFile -del $sourcePath;
+			}
+		}
+	}
+
+	
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc prepareToMovePointCache (string $sourceDir, string $targetDir, string $namespaces[], string $exportVersions[])
+{
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		string $srcPath = $sourceDir+"/"+$namespaces[$i];
+		string $tgtPath = $targetDir+"/"+$namespaces[$i]+"/versions/"+$exportVersions[$i];
+
+		if (!`filetest -d $tgtPath`)
+			sysFile -md $tgtPath;
+
+		movePointCacheFiles ($srcPath, $tgtPath);
+	}
+}
+// -----------------------------------------------------------------------------------------------
+global proc createPointCacheExportData(
+	string $namespaces[],
+	string $filenames[],
+	string $exportVersions[]
+)
+{
+	global string $PCE_sequence;
+	global string $PCE_shotGroup;
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+
+
+	string $file = getPath ("ShotInfoDir",{$PCE_sequence,$PCE_shotGroup})+"/"+$PCE_sequence+"_"+$PCE_shotGroup+"_pointCacheExport.xml";
+
+	string $allNamespaces[],$allFilenames[], $allExportVersions[], $allAniVersions[], $allAniTimestamps[], $allAssetVersions[], $allAssetTimestamps[];
+	string $clothNamespaces[], $clothNames[], $clothVersions[];
+
+	if (`filetest -f $file`)
+	{
+		string $xml = readXML ($file,0);
+		string $nodes[] = xml_getTag ($xml,"Asset");
+		for ($i=0;$i<size($nodes);$i++)
+		{
+			$allNamespaces[$i] = xml_getVar ($nodes[$i],"namespace");
+			$allExportVersions[$i] = xml_getVar ($nodes[$i],"pointCacheVersion");
+			$allFilenames[$i] = xml_getVar ($nodes[$i],"filename");
+			$allAniVersions[$i] = xml_getVar ($nodes[$i],"shotVersion");
+			$allAniTimestamps[$i] = xml_getVar ($nodes[$i],"shotStamp");
+			$allAssetVersions[$i] = xml_getVar ($nodes[$i],"assetVersion");
+			$allAssetTimestamps[$i] = xml_getVar ($nodes[$i],"assetStamp");
+		}
+
+		$nodes = xml_getTag ($xml,"Cloth");
+		if (size($nodes))
+		{
+			$nodes = xml_getTag ($nodes[0],"Object");
+			for ($i=0;$i<size($nodes);$i++)
+			{
+				$clothNamespaces[$i] = xml_getVar ($nodes[$i],"namespace");
+				$clothNames[$i] = xml_getVar ($nodes[$i],"name");
+				$clothVersions[$i] = xml_getVar ($nodes[$i],"version");
+			}
+		}
+	}
+
+	// get Insight version and timestamp of ani/lay
+	string $insightPhase = ($gParentTaskType == "AnimationSubmission")?"Animation":"Layout";
+	string $insightVer[];
+	insightGetShotSubmissionData ($PCE_sequence,$PCE_shotGroup,$insightPhase,$insightVer,{},{});
+
+	string $suffix = ($gParentTaskType == "AnimationSubmission")?"ani":"lay";
+	string $aniFile = getPath ("ShotBase",{$PCE_sequence,$PCE_shotGroup})+"/"+$PCE_sequence+"_"+$PCE_shotGroup+"_"+$suffix+".ma";
+	int $aniStamp = getFileMTime ($aniFile);
+	
+
+	// add/edit the "all" arrays with the data passed to this proc
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		int $idx = stringArrayFindIndex ($namespaces[$i],$allNamespaces);
+		if ($idx == -1)
+			$idx = size ($allNamespaces);
+
+		// insert the rest of the data
+		$allAniVersions[$idx] = $insightVer[0];
+		$allAniTimestamps[$idx] = $aniStamp;
+		// get the version (if avail) and timestamp of the asset used for the point cache export
+		$allAssetVersions[$idx] = getVersion ("FromFilenameGeneric",{$filenames[$i]});
+		$allAssetTimestamps[$idx] = getFileMTime ($filenames[$i]);
+		
+		// add stuff we already know
+		$allNamespaces[$idx] = $namespaces[$i];
+		$allFilenames[$idx] = $filenames[$i];
+		$allExportVersions[$idx] = $exportVersions[$i];
+
+	}
+
+	// build the xml
+	string $xml = "<PointCacheExport>\n";
+
+	for ($i=0;$i<size($allNamespaces);$i++)
+	{
+		$xml += "\t<Asset ";
+		$xml += "namespace=\""+$allNamespaces[$i]+"\" ";
+		$xml += "pointCacheVersion=\""+$allExportVersions[$i]+"\" ";
+		$xml += "filename=\""+$allFilenames[$i]+"\" ";
+		$xml += "assetVersion=\""+$allAssetVersions[$i]+"\" ";
+		$xml += "assetStamp=\""+$allAssetTimestamps[$i]+"\" ";
+		$xml += "shotVersion=\""+$allAniVersions[$i]+"\" ";
+		$xml += "shotStamp=\""+$allAniTimestamps[$i]+"\" ";
+		$xml += "/>\n";
+	}
+	if (size($clothNamespaces))
+	{
+		$xml += "\t<Cloth>\n";
+		for ($i=0;$i<size($clothNamespaces);$i++)
+		{
+			$xml += "\t\t<Object namespace=\""+$clothNamespaces[$i]+"\" name=\""+$clothNames[$i]+"\" version=\""+$clothVersions[$i]+"\" />\n";
+		}
+		$xml += "\t</Cloth>\n";
+	}
+	$xml += "</PointCacheExport>\n";
+
+	writeFile ($file,$xml);
+
+}
+// -----------------------------------------------------------------------------------------------
+proc int do_PointCacheExport()
+{
+	global string $PCE_sequence;
+	global string $PCE_shotGroup;
+	global string $PCE_host;
+	global string $PCE_playlist;
+	global int $PCE_playlistItem;
+	global int $PCE_usePlaylist;
+	global string $PCE_tempFile;
+	global int $PCE_localExport;
+	
+	
+	
+	// 09/23/05
+	string $depRefsLoadedNs[];
+	
+	string $basePath = getPath ("ShotBase",{$PCE_sequence,$PCE_shotGroup});
+	
+	string $p_namespaces[];
+	string $p_refNodes[];
+	int $p_deferred[];
+	string $p_filenames[];
+	string $p_exportVersions[];
+	string $p_xml_output[];
+	string $p_cache_output[];
+	int $p_cache_exportCameras[];
+	
+	int $frameStart, $frameEnd;
+	
+	// -------------------------------------------------
+	/*
+		Read the playlist
+	*/
+	// -------------------------------------------------
+	print ("PointCacheExport: Reading playlist "+$PCE_playlist+"...\n\n");
+	
+	if (!`filetest -f $PCE_playlist`)
+	{
+		print ("PointCacheExport: Couldn't find playlist. Can't continue. \n");	
+		return false;
+	}
+	// parse the playlist	
+	int $success = parsePlaylist(
+		$p_namespaces,
+		$p_refNodes,
+		$p_deferred,
+		$p_filenames,
+		$p_exportVersions,
+		$p_xml_output,
+		$p_cache_output,
+		$p_cache_exportCameras,
+		$PCE_playlist,
+		$PCE_playlistItem
+	);
+	if (!$success)
+	{
+		print ("PointCacheExport: Couldn't parse the playlist. Can't continue. \n");	
+		return false;	
+	}
+	// -------------------------------------------------
+	/*
+		Load the scene
+	*/
+	// -------------------------------------------------
+	
+	// load the scene, with only the assets specified in the playlist
+	print ("PointCacheExport: Opening "+$PCE_tempFile+"...\n\n");
+	// 12/30/05 - do not import references right away
+	// int $import = true;
+	int $import = false;
+	int $testing = false;
+	if ($testing)
+	{
+		file -f -o $PCE_tempFile;
+	}
+	else
+	{
+		int $loaded = selectiveFileLoad(
+			$PCE_tempFile,
+			$p_namespaces,
+			$p_refNodes,
+			$p_filenames,
+			$import
+		);
+		//if ($PCE_sequence == "070_0017")
+		//	return false;
+				
+		if (!$loaded)
+		{
+			print ("PointCacheExport: Failure loading "+$PCE_tempFile+". Can't continue.\n");
+			return false;	
+		}
+		print ("PointCacheExport: Checking for dependancies to unloaded references....\n");
+		string $refsToLoad[] = detectDependancies ($p_namespaces);
+		//$depRefsLoadedNs = detectDependancies ($p_namespaces);
+		for ($i=0;$i<size($refsToLoad);$i++)
+		{
+			print ("Loading dependant reference "+$refsToLoad[$i]+"...\n");
+			file -lr $refsToLoad[$i];	
+			string $fileLoaded = `reference -rfn $refsToLoad[$i] -q -filename`;
+			string $nsLoaded = `file -q -ns $fileLoaded`;
+			$depRefsLoadedNs[size($depRefsLoadedNs)] = $nsLoaded;
+		}
+		//$depRefsLoadedNs = loadDependentReferences();
+		
+	}
+	// -------------------------------------------------
+	/*
+		Get frame range from Insight
+	*/
+	// -------------------------------------------------
+	print ("PointCacheExport: Retrieving frame range info from Insight. \n");	
+	
+	int $data[];
+	print ("getInsightShotGroupLength args: "+$PCE_sequence+" "+$PCE_shotGroup+"\n");
+	int $success = getInsightShotGroupLength ($PCE_sequence,$PCE_shotGroup,$data);
+	if (!$success)
+	{
+		print ("PointCacheExport: Couldn't connect to Insight for frame range info. Can't continue... \n");
+		return false;		
+	}
+	$frameStart = $data[0];
+	$frameEnd = $data[1];
+	
+	// -------------------------------------------------
+	/*
+		Get geometry to export
+	*/
+	// -------------------------------------------------
+	print ("PointCacheExport: Building export geometry list... \n");
+	string $pointCacheGeo[] = getPointCacheGeometry ($p_namespaces);
+	
+	if (!size($pointCacheGeo))
+	{
+		print ("PointCacheExport: Found no geometry in the scene to export. Exiting. \n");
+		return true;	
+	}
+	// 09/23/05 - remove geometry of asset loaded because the export asset(s) is constrained to it.
+	print ("PointCacheExport: Removing guest geometry from export list... \n");
+	
+	if (size($depRefsLoadedNs))
+	{
+		string $tempGeo[];
+		for ($i=0;$i<size($pointCacheGeo);$i++)
+		{
+			int $cull_geo = false;
+			for ($j=0;$j<size($depRefsLoadedNs);$j++)	
+			{
+				if (gmatch ($pointCacheGeo[$i],($depRefsLoadedNs[$j]+":*")))
+				{
+					$cull_geo = true;
+					break;
+				}
+			}
+			if (!$cull_geo)
+				$tempGeo[size($tempGeo)] = $pointCacheGeo[$i];
+			else
+				print ("PointCacheExport: Removing "+$pointCacheGeo[$i]+" from export list...\n");
+		}	
+		$pointCacheGeo = $tempGeo;
+	}
+	
+	print ("PointCacheExport: Re-mapping names... \n");
+	// 12/30/05 - build name re-targeting list
+	// 08/30/06 - buildNameMappingList replaced with a call to lookupPointCacheExportNames
+	string $mappingList = lookupPointCacheExportNames($pointCacheGeo);
+	
+	// 12/30/05 - Now we can import our references
+	print ("PointCacheExport: Skipping reference import...\n");
+	/*
+	print ("PointCacheExport: Importing references...\n");
+	string $refFiles[] = `file -q -r`;
+	for ($file in $refFiles)
+	{
+		if (`file -q -dr $file`)
+			continue;
+		file -ir $file;	
+	}
+	*/
+	
+	// find all the polysmooths in the scene, and zero them
+	//setSmoothing();
+	setSmoothingOld();	
+
+	// #01/04/06 - yankee specific - find all CGMPolyToCCNodes and zero them
+	//setCGMPolyToCCNodeSmoothing();
+	
+	
+	// find character groups. Set the resolution to render or high to make sure that the high res geo is visible
+	setRenderRes();
+	
+	// now we need to make sure that everything is visible.
+	// turn on visibility on character group, CHARACTERS group, turn on any display layers
+	setVisibility();
+	
+	// call character specific scripts for turning on visibilities, etc...e.g. back hair on wildebeest
+	setVisControl();
+
+	// turn on non-driven shape visibility
+	setShapeVisibility ($pointCacheGeo);
+	
+	// -------------------------------------------------
+	/*
+		Do the export
+	*/
+	// -------------------------------------------------
+	print ("PointCacheExport: Starting export ("+(size($pointCacheGeo))+" objects)...\n");
+	
+	// build the point cache output directory.
+	if (!`filetest -d $p_cache_output[0]`)
+		sysFile -makeDir $p_cache_output[0];
+	
+	// Testing - skipping the pre-roll - maya seems to be crashing at this point at times.	
+	// 01/11/06 - do a little pre-roll to help wake up sleepy nodes
+
+	print ("Pre-rolling.\n");
+	print ("currentTime "+($frameStart-1)+"\n");
+	currentTime ($frameStart-1);
+	
+	
+	// 11/19/05
+	// generate a temp location for point cache export
+	// 09/03/06
+	// temp output locally, if $PCE_localExport is set to 1
+	print ("PointCacheExport: Creating temp directory for point cache export...\n");
+	string $temp_cache_output;
+	if ($PCE_localExport)
+		$temp_cache_output = generatePointCacheTempLocation (`getenv "HOME"`);
+	else
+		$temp_cache_output = generatePointCacheTempLocation (dirname ($p_cache_output[0]));
+
+	print ("PointCacheExport: Created "+$temp_cache_output+"\n");
+	
+	// build the command
+	// #08/22/06 - set the frame rate for export
+	string $frameRate = getFrameRate();
+	string $exportCmd = "exportPointCache -s "+$frameStart+" -e "+$frameEnd+" -b 1 -m 3 ";
+	if ($frameRate != "film")
+		$exportCmd += "-fr \""+$frameRate+"\" ";
+
+	$exportCmd += "-o \""+$temp_cache_output+"\"";
+	
+	// 12/30/05 - remapping of names if necessary
+	if (size($mappingList))
+		$exportCmd += " -r \""+$mappingList+"\"";
+	
+	print ($exportCmd+" ...\n");
+	
+	for ($i=0;$i<size($pointCacheGeo);$i++)
+	{
+		$exportCmd += " "+$pointCacheGeo[$i];
+	}
+	
+	float $st = `timerX`;
+	eval ($exportCmd);
+	print ("PointCacheExport: Export complete. Elapsed time "+(`timerX -st $st`)+" seconds.\n");
+
+	// 09/19/05 - compile the point cache visibility
+	float $totalCompileStartTime = `timerX`;
+	for ($i=0;$i<size($p_namespaces);$i++)
+	{
+		print ("PointCacheExport: Compiling the point cache visibility for objects in namespace: "+$p_namespaces[$i]+"...\n");
+		string $compile_list[];clear $compile_list;
+		for ($j=0;$j<size($pointCacheGeo);$j++)
+		{
+			string $shape[] = `listRelatives -s -ni -pa $pointCacheGeo[$j]`;
+			if (gmatch ($shape[0],($p_namespaces[$i]+":*")))
+			{
+				int $c = size($compile_list);
+				string $buf[];
+				tokenize ($shape[0],":",$buf);
+				string $basename = $buf[size($buf)-1];
+				//string $compileListName = $p_cache_output[0]+"/"+$p_namespaces[$i]+"/"+$basename+".pc";
+				string $compileListName = $temp_cache_output+"/"+$p_namespaces[$i]+"/"+$basename+".pc";
+				//string $compileListName = $p_cache_output[0]+"/"+$p_namespaces[$i]+"/versions/"+$p_exportVersions[$i]+"/"+$basename+".pc";
+				if (!`filetest -f $compileListName `)
+				{
+					print ("PointCacheExport: "+$compileListName+" doesn't exist. Skipping visibility compile.\n");
+					continue;
+				}	
+				$compile_list[$c] = $compileListName ;
+			}	
+		}
+		// build the command
+		if (size($compile_list))
+		{
+			//string $outputFile = $p_cache_output[0]+"/"+$p_namespaces[$i]+"/versions/"+$p_exportVersions[$i]+"/visibility.bcf";
+			string $outputFile = $temp_cache_output+"/"+$p_namespaces[$i]+"/visibility.bcf";
+			string $cmd = "compileAnimCache -o \""+$outputFile+"\" -pcv ";
+			for ($j=0;$j<size($compile_list);$j++)
+			{
+				$cmd += "\""+$compile_list[$j]+"\" ";	
+			}
+			float $st = `timerX`;
+			eval ($cmd);
+			print ("PointCacheExport: Visibility compile complete for "+$p_namespaces[$i]+". Elapsed time "+(`timerX -st $st`)+" seconds.\n");
+		}
+	}
+	print ("PointCacheExport: Visibility compile complete. Total time for all point caches: "+(`timerX -st $totalCompileStartTime`)+" seconds.\n");
+
+	
+	print ("PointCacheExport: Moving point cache files.\n");
+	//movePointCacheFiles ($temp_cache_output,$p_cache_output[0]);
+	prepareToMovePointCache ($temp_cache_output,$p_cache_output[0],$p_namespaces,$p_exportVersions);
+	/*
+	prepareToMovePointCache (string $sourceDir, string $targetDir, string $namespaces[], string $exportVersions[])
+	*/
+	system ("rm -r "+$temp_cache_output);
+	
+	
+	
+
+	// ----------------------------
+	// Write pointCacheExport xml data
+	// ----------------------------
+	print ("PointCacheExport: Creating/updating export data...\n");
+	createPointCacheExportData ($p_namespaces,$p_filenames,$p_exportVersions);
+
+	// -------------------------------------------------
+	/*
+		Done
+	*/
+	// -------------------------------------------------
+	print ("\nPointCacheExport: DONE.\n\n");
+	
+	
+	return true;
+} 
+// ---------------------------------------------------------------------------------------------------
+global proc PointCacheExport( string $args) 
+{
+	// turn off undo queue
+	undoInfo -state off;
+	
+	// load plug-ins, source scripts
+	loadPlugins();
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+	eval ("source \"argList.mel\"");
+	
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $PCE_sequence;	// The sequence
+	global string $PCE_shotGroup;	// The shot
+	global string $PCE_host;	// Who is calling this process? "insight" or "maya"
+	global int $PCE_usePlaylist;	// Should we use a playlist to selective export assets, or do the whole scene?
+	global string $PCE_playlist;	// Playlist filename to use
+	global int $PCE_playlistItem;	// Item in the playlist to export
+	global string $PCE_tempFile;	// File to open
+	global int $PCE_localExport;	// Export point cache to local directory, then move
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$PCE_sequence = getArgValue ($args,"sequence");
+	$PCE_shotGroup = getArgValue ($args,"shotgroup");
+	$PCE_host = getArgValueDefault ($args,"host","maya"); $PL_host = tolower ($PCE_host);
+	$PCE_usePlaylist = (int)getArgValueDefault ($args,"usePlaylist","0");
+	$PCE_playlist = getArgValue ($args,"playlist");
+	$PCE_playlistItem = getArgValue ($args,"playlistItem");
+	$PCE_tempFile = getArgValue ($args,"pointCacheTempFile");
+	$PCE_localExport = (int)getArgValueDefault ($args,"localExport","1");
+	$gParentTaskType = getArgValue ($args,"parentTaskType");
+	
+	do_PointCacheExport();
+		
+}

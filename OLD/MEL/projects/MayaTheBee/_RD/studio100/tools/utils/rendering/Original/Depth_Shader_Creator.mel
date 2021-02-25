@@ -1,0 +1,385 @@
+// Depth_Shader_Creator.mel
+// Date: 2010/04/25
+// Author: Dai Sato   dstruevision@dstruevision.com    http://www.dstruevision.com
+// Procedure Name: Depth_Shader_Creator
+// Description: This scripts enable you to to create depth pass, like the one which maya 2008 creates.
+// It also detects trasnparent shader, and keep that's transparency.
+// Usage: After pressing "Assign Depth Shader!!" button, plz select a sampler info, which is connected to all shader's network.
+// That has two attributes, "Camera near clipping plane", and "Camera far clipping plane". By changeing these numbers, you can adjust
+// depth shading range.
+
+
+{
+
+global string $my_surface_shader = "";
+global string $my_sampler_info = "";
+
+proc my_create_trans_nodeConnection(string $temp_checkTrans[], string $temp_Shader, string $temp_nodeType) {
+
+global string $my_sampler_info;
+
+print "****************************";
+print ("global string $my_sampler_info!" +$my_sampler_info);
+print "****************************";
+
+string $token[];
+int $numTokens = `tokenize $temp_checkTrans[0] "." $token`;
+
+
+$mr_shader_check = $token[1];
+
+                if($temp_nodeType =="reverse") {
+                    
+                        print ($temp_checkTrans[0] + "-------Reverse" + "\n");
+                       
+                        connectAttr  -f ($temp_checkTrans[1] + ".output") ($temp_Shader + ".outTransparency");
+                        $temp_Connection = `listConnections -d off -s 1 ($temp_checkTrans[1] + ".input") `;
+                        connectAttr  -f ($temp_Connection[0] + ".outColor") ($temp_Shader + ".outMatteOpacity");
+
+                        $temp_multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+                        $temp_setRange = `shadingNode -asUtility setRange`;
+
+                      if($my_sampler_info =="") {
+                        $my_sampler_info = `shadingNode -asUtility samplerInfo`;
+                                                 }
+
+                        setAttr ($temp_multiplyDivide +".input2X") -1;
+                        setAttr ($temp_setRange +".minX") 1;
+                        
+                        $check_attr1 = `attributeQuery -node $my_sampler_info -exists "camera_near_clipping_plane"`;
+                        $check_attr2 = `attributeQuery -node $my_sampler_info -exists "camera_far_clipping_plane"`;
+            
+                      if($check_attr1 == 0 || $check_attr2 == 0) {
+                        addAttr -ln "camera_near_clipping_plane" -nn "Camera near clipping plane" -at double  -min -1000000 -max 1000000 -dv 0.0 $my_sampler_info;
+                        addAttr -ln "camera_far_clipping_plane" -nn "Camera far clipping plane" -at double   -min -1000000 -max 1000000 -dv 1000.0 $my_sampler_info;
+                                                        }
+
+                        connectAttr -f ($my_sampler_info +".camera_near_clipping_plane") ($temp_setRange + ".oldMinX");
+                        connectAttr -f ($my_sampler_info +".camera_far_clipping_plane") ($temp_setRange + ".oldMaxX");
+                        connectAttr -f ($my_sampler_info +".pointCameraZ") ($temp_multiplyDivide + ".input1X");
+                        connectAttr -f ($temp_multiplyDivide + ".outputX") ($temp_setRange + ".valueX");
+
+                        $temp_reverse = `createNode reverse`;
+                        $temp_stencil = `createNode stencil`;
+                        connectAttr  -f ($temp_Connection[0] + ".outAlpha") ($temp_reverse + ".inputX");
+                        connectAttr  -f ($temp_reverse + ".outputX") ($temp_stencil + ".mask");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil +".imageR");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil +".imageG");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil +".imageB");
+                        setAttr ($temp_stencil + ".defaultColor")  0.0  0.0  0.0;
+                        connectAttr  -f ($temp_stencil + ".outColor") ($temp_Shader + ".outColor");
+ 
+                        setAttr ($temp_Connection[0] +".alphaIsLuminance") 1; 
+                                       
+                       
+                                               }
+
+                 if($temp_nodeType =="file" && $temp_checkTrans[2] != "mia_material") {
+
+                        print ($temp_checkTrans[0] + "-------File" +  "\n");
+
+                        setAttr ($temp_checkTrans[1] +".alphaIsLuminance") 0; 
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_Shader + ".outTransparency");
+                        $temp_reverse_1 = `createNode reverse`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_reverse_1 + ".input");
+                        connectAttr -f  ($temp_reverse_1 + ".output") ($temp_Shader + ".outMatteOpacity");
+
+                        $temp_multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+                        $temp_setRange = `shadingNode -asUtility setRange`;
+
+                      if($my_sampler_info =="") {
+                        $my_sampler_info = `shadingNode -asUtility samplerInfo`;
+                                                } 
+
+                        setAttr ($temp_multiplyDivide +".input2X") -1;
+                        setAttr ($temp_setRange +".minX") 1;
+
+                        $check_attr1 = `attributeQuery -node $my_sampler_info -exists "camera_near_clipping_plane"`;
+                        $check_attr2 = `attributeQuery -node $my_sampler_info -exists "camera_far_clipping_plane"`;
+            
+                      if($check_attr1 == 0 || $check_attr2 == 0) {
+                          addAttr -ln "camera_near_clipping_plane" -nn "Camera near clipping plane" -at double  -min -1000000 -max 1000000 -dv 0.0 $my_sampler_info;
+                          addAttr -ln "camera_far_clipping_plane" -nn "Camera far clipping plane" -at double   -min -1000000 -max 1000000 -dv 1000.0 $my_sampler_info;
+                                                                 }
+
+                        connectAttr -f ($my_sampler_info +".camera_near_clipping_plane") ($temp_setRange + ".oldMinX");
+                        connectAttr -f ($my_sampler_info +".camera_far_clipping_plane") ($temp_setRange + ".oldMaxX");
+                        connectAttr -f ($my_sampler_info +".pointCameraZ") ($temp_multiplyDivide + ".input1X");
+                        connectAttr -f ($temp_multiplyDivide + ".outputX") ($temp_setRange + ".valueX");
+                   
+                      
+                        $temp_reverse_2 = `createNode reverse`;
+                        $temp_stencil_1 = `createNode stencil`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outAlpha") ($temp_reverse_2 + ".inputX");
+                        connectAttr -f  ($temp_reverse_2 + ".outputX") ($temp_stencil_1 + ".mask");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageR");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageG");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageB");
+                        setAttr ($temp_stencil_1 + ".defaultColor") 0.0  0.0  0.0;
+                        connectAttr -f  ($temp_stencil_1 + ".outColor") ($temp_Shader + ".outColor");    
+
+                                             }
+
+                 if ($temp_nodeType =="file" && $temp_checkTrans[2] == "mia_material") {
+
+                        print ($temp_checkTrans[0] + "-------File" +  "\n");
+
+                        setAttr ($temp_checkTrans[1] +".alphaIsLuminance") 0; 
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_Shader + ".outTransparency");
+                        $temp_reverse_1 = `createNode reverse`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_reverse_1 + ".input");
+                        connectAttr -f  ($temp_reverse_1 + ".output") ($temp_Shader + ".outMatteOpacity");
+
+                        $temp_multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+                        $temp_setRange = `shadingNode -asUtility setRange`;
+      
+                      if($my_sampler_info =="") {
+                        $my_sampler_info = `shadingNode -asUtility samplerInfo`;
+                                                 }
+
+                        setAttr ($temp_multiplyDivide +".input2X") -1;
+                        setAttr ($temp_setRange +".minX") 1;
+
+                        $check_attr1 = `attributeQuery -node $my_sampler_info -exists "camera_near_clipping_plane"`;
+                        $check_attr2 = `attributeQuery -node $my_sampler_info -exists "camera_far_clipping_plane"`;
+            
+                     if($check_attr1 == 0 || $check_attr2 == 0) {
+                        addAttr -ln "camera_near_clipping_plane" -nn "Camera near clipping plane" -at double  -min -1000000 -max 1000000 -dv 0.0 $my_sampler_info;
+                        addAttr -ln "camera_far_clipping_plane" -nn "Camera far clipping plane" -at double   -min -1000000 -max 1000000 -dv 1000.0 $my_sampler_info;
+                                                               }
+ 
+                        connectAttr -f ($my_sampler_info +".camera_near_clipping_plane") ($temp_setRange + ".oldMinX");
+                        connectAttr -f ($my_sampler_info +".camera_far_clipping_plane") ($temp_setRange + ".oldMaxX");
+                        connectAttr -f ($my_sampler_info +".pointCameraZ") ($temp_multiplyDivide + ".input1X");
+                        connectAttr -f ($temp_multiplyDivide + ".outputX") ($temp_setRange + ".valueX");
+
+                      
+                        $temp_reverse_2 = `createNode reverse`;
+                        $temp_stencil_1 = `createNode stencil`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outAlpha") ($temp_reverse_2 + ".inputX");
+                        connectAttr -f  ($temp_reverse_2 + ".outputX") ($temp_stencil_1 + ".mask");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageR");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageG");
+                        connectAttr -f ($temp_setRange +".outValueX") ($temp_stencil_1 +".imageB");
+                        setAttr ($temp_stencil_1 + ".defaultColor") 0.0  0.0  0.0;
+                        connectAttr -f  ($temp_stencil_1 + ".outColor") ($temp_Shader + ".outColor");  
+                       
+                       
+                                             }
+
+
+}
+
+proc string my_create_shader(string $temp_checkTrans[]) {
+
+global string $my_surface_shader;
+global string $my_sampler_info;
+$temp_Shader = "";
+
+     
+       if($temp_checkTrans[0] != "") {
+            
+            $temp_Shader = `shadingNode  -asShader surfaceShader`;      
+            $temp_nodeType = `nodeType $temp_checkTrans[1]`;
+
+          if($my_sampler_info =="") {
+            $my_sampler_info = `shadingNode -asUtility samplerInfo`;
+                                     }
+            
+            my_create_trans_nodeConnection($temp_checkTrans, $temp_Shader, $temp_nodeType);
+ 
+                                                                     
+                                     }
+       else {
+           
+         if($my_surface_shader == "") {
+            $temp_Shader = `shadingNode  -asShader surfaceShader`;
+            $temp_multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+            $temp_setRange = `shadingNode -asUtility setRange`;
+
+           if($my_sampler_info =="") {
+            $my_sampler_info = `shadingNode -asUtility samplerInfo`;
+                                     }
+ 
+            setAttr ($temp_multiplyDivide +".input2X") -1;
+            setAttr ($temp_setRange +".minX") 1;
+
+            $check_attr1 = `attributeQuery -node $my_sampler_info -exists "camera_near_clipping_plane"`;
+            $check_attr2 = `attributeQuery -node $my_sampler_info -exists "camera_far_clipping_plane"`;
+            
+          if($check_attr1 == 0 || $check_attr2 == 0) {
+            addAttr -ln "camera_near_clipping_plane" -nn "Camera near clipping plane" -at double  -min -1000000 -max 1000000 -dv 0.0 $my_sampler_info;
+            addAttr -ln "camera_far_clipping_plane" -nn "Camera far clipping plane" -at double   -min -1000000 -max 1000000 -dv 1000.0 $my_sampler_info;
+                                                        }
+
+            connectAttr -f ($my_sampler_info +".camera_near_clipping_plane") ($temp_setRange + ".oldMinX");
+            connectAttr -f ($my_sampler_info +".camera_far_clipping_plane") ($temp_setRange + ".oldMaxX");
+            connectAttr -f ($my_sampler_info +".pointCameraZ") ($temp_multiplyDivide + ".input1X");
+            connectAttr -f ($temp_multiplyDivide + ".outputX") ($temp_setRange + ".valueX");
+            connectAttr -f ($temp_setRange +".outValueX") ($temp_Shader +".outColorR");
+            connectAttr -f ($temp_setRange +".outValueX") ($temp_Shader +".outColorG");
+            connectAttr -f ($temp_setRange +".outValueX") ($temp_Shader +".outColorB");
+            $my_surface_shader = $temp_Shader;
+                                       }
+           else
+                                       {
+
+            $temp_Shader = $my_surface_shader;
+
+                                        }
+             }  
+        
+
+  return $temp_Shader;
+
+}
+
+
+
+proc string[] check_Trans(string $current_selection) {
+
+string $return_String[];
+
+select $current_selection;
+
+string $temp_Node[];
+hyperShade -smn;
+$temp_Node = `ls -sl`;
+
+string $temp_nodeType;
+$temp_nodeType = `nodeType $temp_Node[0]`;
+
+
+if($temp_nodeType != "") {
+  
+   $temp_connectionToTrans = "";
+                        
+
+  if($temp_nodeType =="surfaceShader") {
+  
+      $temp_connectionToTrans = ".outTransparency";
+ 
+                                       }
+  else {
+
+      $temp_connectionToTrans = ".transparency";
+
+       }
+
+
+string $temp_getClassification[];
+$temp_getClassification = `getClassification $temp_nodeType`;
+string $temp_Connection[];
+
+
+ if($temp_getClassification[0] == "shader/surface" || $temp_getClassification[0] == "shader/surface/utility") {
+
+     $temp_Connection = `listConnections -d off -s 1 ( $temp_Node[0] + $temp_connectionToTrans) `;
+     
+
+      if($temp_Connection[0] != "") {
+
+                           $return_String[0] = $temp_Node[0] + $temp_connectionToTrans;
+                           $return_String[1] = $temp_Connection[0];
+                           return $return_String; 
+                                    }
+                                                                                                             }
+ else {
+             
+           if($temp_nodeType == "mia_material" || $temp_nodeType == "mia_material_x" || $temp_nodeType == "mia_material_x_passes" ) {
+                             
+                             $temp_Connection = `listConnections -d off -s 1 ( $temp_Node[0] + ".cutout_opacity")`;
+                            
+      
+                                 if($temp_Connection[0] != "") {
+
+                                        $return_String[0] = $temp_Node[0] + ".cutout_opacity";
+                                        $return_String[1] = $temp_Connection[0];
+                                        $return_String[2] = "mia_material";
+                                        return $return_String;  
+
+                                                               }                                                                     }
+
+       }
+
+
+  }  
+
+
+
+
+}
+
+
+
+
+global proc my_assign_Depth_Shader() {
+
+ $current_selection = `ls -sl`;
+ $progressMax = size($current_selection);
+
+ $temp_flieNode = `ls -type file`;
+ 
+ for($i=0; $i<size($temp_flieNode); $i++ ) {
+
+      setAttr ($temp_flieNode[$i] +".alphaIsLuminance") 1;         
+
+                                           }
+
+
+
+ if($progressMax) {
+
+       progressBar -edit -beginProgress -isInterruptable true -status "Calculation ..." -maxValue $progressMax mainProgressBar;
+
+  for($i=0;$i <size($current_selection);$i++) {
+ 
+  
+    string $temp_checkTrans[];
+     $temp_checkTrans = check_Trans($current_selection[$i]);
+ 
+     string $temp_Shader = "";
+  
+     $temp_Shader = my_create_shader($temp_checkTrans);
+
+     select $current_selection[$i];
+     hyperShade -assign $temp_Shader;
+
+                        
+     progressBar -edit -step 1 mainProgressBar;
+
+                                                } 
+                                            //For Loop End
+   
+   progressBar -edit -endProgress mainProgressBar;
+                 }
+              //if($progressMax) End
+
+}
+
+
+global proc Depth_Shader_Creator() {
+
+if ((`window -ex my_Depth_Shader_Window`) == true) deleteUI my_Depth_Shader_Window;
+window -t "Depth_Shader_Creator" -s true -mnb true -mxb true -mb true -w 100 -h 200 my_Depth_Shader_Window;
+
+columnLayout mainLayout;
+
+columnLayout -rs 1;
+rowColumnLayout -numberOfRows 1;
+button -l "Assign Depth Shader!!" -w 200 -h 30 -c "my_assign_Depth_Shader()";
+setParent mainLayout;
+
+columnLayout -rs 10;
+progressBar -width 200 -height 10 mainProgressBar;
+setParent mainLayout;
+
+window -e -width 300 -height 100  my_Depth_Shader_Window;
+showWindow;
+
+}
+
+Depth_Shader_Creator();
+
+}
+//Sampler Info‚Ì‹¤’Ê‰»

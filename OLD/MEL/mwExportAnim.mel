@@ -1,0 +1,117 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//THIS PROCEDURE WILL WRITE OUT A "CONNECTIONS" FILE AND AN "ANIM" FILE INTO THE DATA FOLDER.
+//THESE FILES ARE FOR SETTING NON-KEYED VALUES AND FOR CONNECTING ANIM CURVE NODES.
+//AN "ANIM" FILE CONTAINING ALL THE ANIM CURVES WILL BE SAVED INTO THE SCENE FOLDER AS WELL.
+//THIS FILE WILL BE IMPORTED INTO A NEW SCENE AND THE OTHER 2 TEXT FILES WILL BE SOURCED TO 
+//SET VALUES AND MAKE CONNECTIONS.
+
+global proc mwExportAnim()
+{
+	//GET CURRENT FILE NAME
+	//string $file = `file -q -sn`;
+	//int $size = `size $file`;
+	//$file = `substring $file 1 ($size-3)`;
+
+	//GET ALL KEYABLE NODES IN MASTER HIERARCHY
+	$tmp = `ls -sl`;
+	string $node;
+	string $keyNodes[];
+	string $valueFile;
+	for($node in $tmp)
+	{
+		select -hi $tmp;
+		string $list[] = `ls -l -sl`;
+		int $i = 1;
+		for($node1 in $list)
+		{
+			string $type[] = `ls -st $node1`;
+			if(`strcmp "transform" $type[1]`==0||`strcmp "joint" $type[1]`==0&&`strcmp $node ("|"+$tmp[0])`!=0)
+			{
+				string $attr[] = `listAttr -k $node1`;
+				if(`size $attr`>0&&`strcmp ("|"+$node) $node1`!=0)
+				{
+					$keyNodes[$i] = $node1;
+					$i++;
+				}
+			}
+		}
+		$keyNodes[0] = $node;
+		//$file = ($file+"_"+$tmp[0]+"_ANIM.mb");
+		//string $name_parts[];
+		//int $tok = tokenize($file, "/", $name_parts);
+		//$valueFile = $name_parts[0];
+		//for($i=1;$i<$tok-2;$i++)
+		//{
+		//	$valueFile = ($valueFile+"/"+$name_parts[$i]);
+		//}
+		//string $conFile = ($valueFile+"/data/"+$tmp[0]+"_CONNECTIONS.txt");
+		string $file = `fileDialog`;
+		string $conFile = `substitute ".mb" $file "_CONNECTIONS.txt"`;
+		int $fileId = `fopen $conFile "w"`;
+		$valueFile = `substitute "CONNECTIONS" $conFile "VALUE"`;
+		int $fileId1 = `fopen $valueFile "w"`;
+
+		//GET VALUES OR ANIM CURVES
+		string $animCurves[], $destAttrs[];
+		int $ac = 0;
+		for ($node in $keyNodes)
+		{
+			//CHECK FOR CONNECTIONS
+			string $attrs[] = `listAttr -k $node`;
+			string $attr = $attrs[0];
+			for($attr in $attrs)
+			{
+				string $cons[] = `listConnections -s 1 -d 0 -scn on -p 1 ($node+"."+$attr)`;
+				if(`size $cons`>0)
+				{
+					//GET ANIM CURVE
+					string $name_parts[];
+					int $tok = tokenize($cons[0], ".", $name_parts);
+					string $type[] = `ls -st $name_parts[0]`;
+					if(`gmatch $type[1] "*animCurve*"`)
+					{
+						$animCurves[$ac] = $name_parts[0];
+						$destAttrs[$ac] = ($node+"."+$attr);
+						$ac++;
+
+						//WRITE CONNECTIONS TO FILE
+						string $line = ("connectAttr -f "+$cons[0]+" "+$node+"."+$attr+";\n");
+						fwrite $fileId $line;
+
+						//DISCONNECT ANIM CURVES
+						disconnectAttr $cons[0] ($node+"."+$attr);
+					}
+				}
+				else
+				{
+					//WRITE VALUE FILE
+					float $val = `getAttr ($node+"."+$attr)`;
+					string $line = ("setAttr "+$node+"."+$attr+" "+$val+";\n");
+					fwrite $fileId1 $line;
+				}
+			}
+		}
+		fclose $fileId;
+		fclose $fileId1;
+
+		//EXPORT ANIM CURVES
+		select -r $animCurves;
+		file -es -type "mayaBinary" $file;
+
+		//RECONNECT ANIM CURVES
+		for($i=0;$i<$ac;$i++)
+		{
+			connectAttr -f ($animCurves[$i]+".output") $destAttrs[$i];
+		}
+	}
+	print "ALL DONE\n";
+}

@@ -1,0 +1,69 @@
+// Make a AO pass
+global proc ysAddAOPass ()
+{
+	//Creat common AO shader
+	if(!(`objExists "AOtex"`))
+	{
+		string $texAO = `shadingNode -asTexture mib_amb_occlusion -name "AOtex"`;
+		string $sdAO = `shadingNode -asShader surfaceShader -name "AOShader"`;
+		setAttr ($texAO+".samples") 128;
+		setAttr ($texAO+".spread") 1;
+		connectAttr -f ($texAO+".outValue") ($sdAO+".outColor");
+	}
+
+	// Create AO channel 
+	string $bufferList[] = `listConnections "miDefaultOptions.frameBufferList"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	int $number = size($bufferList);
+	for($item in $bufferList)
+	{
+		if(!(`gmatch $item "IDMT_FB_depth*"`) && !(`gmatch $item "IDMT_FB_depthPass*"`))
+		{
+		string $camera[] = `listConnections -shapes on "mentalrayOutputPass0.message"`;	
+		createNode mentalrayUserBuffer -name "IDMT_FB_AO";
+		connectAttr -force "IDMT_FB_AO.message" ("miDefaultOptions.frameBufferList["+$number+"]");
+		createNode mentalrayOutputPass -name "IDMT_FB_AOPass";
+		connectAttr -force "IDMT_FB_AOPass.message" ($camera[0] + ".miOutputShaderList["+$number+"]");
+		connectAttr -force "IDMT_FB_AO.message" "IDMT_FB_AOPass.dataType";
+		setAttr "IDMT_FB_AOPass.fileMode" 1;
+		setAttr -type "string" IDMT_FB_AOPass.fileName "AO";
+		break;
+		}
+	}
+	
+	string $bufferNodes[] = `ls -type "buffer_store"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	global string $bufferNode;
+	int $number = size($outputList)-1;
+
+	// Check out material which is connected by bump map		
+	for ($item in $bufferNodes)
+	{	
+		setAttr ($item + ".store_"+$number) 1;
+		$bufferNode = $item;
+		string $Array[] = `listConnections -s on ($bufferNode+".primarybuffer")`;
+		string $surShaders[] = `ls -type "surfaceShader"`;
+		string $Arrary[] = stringArrayRemove($surShaders, $Array);
+		for($mat in $Array)
+		{
+			if(`connectionInfo -isDestination ($mat+".normalCamera")`)
+			{					
+				//Creat special AO shader that has bump 
+				string $aoTexX = `shadingNode -asTexture mib_amb_occlusion -name "aoTex"`;
+				setAttr ($aoTexX+".samples") 128;
+				setAttr ($aoTexX+".spread") 1;
+				string $aoLambert = `shadingNode -asShader lambert -name "aoLambert"`;
+				setAttr ($aoLambert+".color") -type double3 0 0 0;
+				setAttr ($aoLambert+".diffuse") 0;
+				connectAttr -force ($aoTexX+".outValue") ($aoLambert+".incandescence");
+				string $bump = `connectionInfo -sourceFromDestination ($mat+".normalCamera")`;
+				connectAttr -force $bump ($aoLambert+".normalCamera");
+				connectAttr ($aoLambert+".outColor") ($bufferNode+".inbuffer_"+$number); 
+			}
+			if((`connectionInfo -isDestination ($mat+".normalCamera")`)==0)
+			{
+				connectAttr -force ("AOShader.outColor") ($bufferNode+".inbuffer_"+$number); 
+			}
+		}
+	}		
+}

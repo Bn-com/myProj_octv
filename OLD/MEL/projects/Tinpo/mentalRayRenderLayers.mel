@@ -1,0 +1,2369 @@
+// mentalRayRenderLayers.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Creates a three point camera, and constrains to cameraMain to avoid the constraint flipping problem
+Use:
+	bakeConstraintsForCache string $cam
+Options:
+	cam (string)	- The camera to constrain to
+	
+Dependancies:
+
+	parseXML
+
+Documentation:
+
+Examples:
+
+Notes:
+	renderType -
+	possibilities - "normal" - no boxes checked, "envColor", "envShadow","occlusion"
+	
+	actions:
+	normal - do nothing
+	envColor - turn off shadow receiving for everything that is visible on the layer
+	envShadow - put a use background shader on everything that is visible in the layer
+	
+	occlusion - override every asset which is not set to visible, and assign a blackhole shader 
+	
+	assets:
+	renderState attribute
+	visible - do nothing
+	omit - delete the asset
+	occludes - assign a black hole shader to the asset
+	shadowCasting - turn the primary visibility off for the asset
+	ambientOcclusion - assign an ambient occlusion shader to everything which is visible. Turns on ray tracing, sets related globals.
+	
+	passes:
+	beauty - do nothing
+	color,shadow,diffuse,specular - not implemented. Ask Chris about passes in MR
+	motionVector - assign a gray shader to everything in the scene. Override the SR_renderer global variable of shot render, to render through maya. Set motion blur on in the maya render globals. Set keep motionVectors on in the maya render globals.
+
+	
+Bugs:
+
+Original:	06/02/05
+Revisions:	09/21/05	Rev 1.0
+		- Implementing ambientOcclusion renderType
+	
+		01/21/06	Rev 1.1
+		- Yankee specific. Making occlusion (black hole shader) work with DKPHairSurface. 
+		
+		01/30/06	Rev 1.2
+		- Implemented envShadow2
+		- Implemented spread in ambOcc
+		
+		01/31/06	Rev 1.3
+		- Implemented render stat overrides	
+		
+		02/09/06	Rev 1.4
+		- Implemented max displace for mental ray motion vector shaders from rlc
+		- If an object which needs to be hidden has vis locked, set render stats to off instead.
+		
+		02/09/06	Rev 1.5
+		- Implemented depth pass.
+		
+		02/21/06	Rev 1.6
+		- Fixed problems with occlusion mode and DKPHairSurfaces and custom objects - where one DKPHairSurface shader 
+		is shared by several objects some occluding and some not.
+		
+		02/27/06	Rev 1.7
+		- Implementing ambocc bump		
+		
+		02/28/06 v 1.9 -JM
+		- added new properties per layer
+		- added amboccBumpMult
+		
+		03/03/06 v 2.0 -JM
+		- added ColorSeparation
+		03/03/06 v 2.1
+		- modified colors
+		
+		03/06/06	Rev 2.2
+		- Modified how amboccBump works so it can handle multiple shader assignments (source bumps to borrow) per object
+		
+		03/06/06	Rev 2.3
+		- Implementing mi caches.
+		
+		03/27/06	Rev 2.4
+		- Added support for particle instancers.
+
+		03/28/06 	Rev 2.5
+		- added VisibilitySamples & ShadingQuality
+
+		03/28/06 v 2.6
+		- added MinSamples & MaxSamples
+
+		04/04/06 v 2.7
+		- modified the colorSeparation to grab colorSepIcon instead of icon_color
+		
+		04/12/06	Rev 2.8
+		- For black hole and colorSep shader creation replaced lambert with a surface shader (less expensive)
+		
+		05/01/06	Rev 2.9
+		- Fixed setting of motion blur
+		- Improved how ambOcc bump is applied (hijack existing shading engine, rather than create new one)
+		
+		05/03/06	Rev 3.0
+		- For yankee only, use the idt motion vector shader when doing motion vector passes.
+		
+		05/05/06	Rev 3.1
+		- When using motion blur and mental ray, do a post pass on all hidden lights to make sure they are hidden at
+		the transform level. 
+
+		05/10/06	Rev 3.2
+		- Put a provision in expandToLeaves to stop us from erroring out when we encounter non-unique names.
+		
+		05/30/06	Rev 3.3
+		- More advanced handling of miCache locators (for Yankee seq 120)
+
+		08/25/06	Rev 3.4-3.5
+		- Added support for shaders with displacement
+
+		08/28/06	Rev 3.6
+		- Fixed typo in black hole shader creation proc
+
+		12/15/06	Rev 3.7
+		- Switched shader assignment technique to direct connections
+
+		01/19/07	Rev 3.8
+		- Added handling of shaveHair nodes (must be hidden by turning off active attribute)
+
+		02/23/07	Rev 3.9
+		- Added handling for useMotionVectors attribute on rfx_fur nodes.
+
+
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source loadAllPlugins.mel;
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global int $TMP_a = 1;
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() {
+	string $requiredPlugins[] = 
+	{
+	"objExport",
+	"studioImport"	
+	};
+	loadAllPlugins ($requiredPlugins);
+}
+// -------------------------------------------------------------------
+global proc setAndKeyAttr (string $objAndAttr,float $val)
+{
+	string $inplug[] = `listConnections -s 1 -d  0 -p 1 ($objAndAttr)`;
+	if (`getAttr -l $objAndAttr`)
+	{
+		
+		catch (`setAttr -l 0 $objAndAttr`);
+		
+	}
+	if (size($inplug))
+		disconnectAttr $inplug 	$objAndAttr;
+		
+	setKeyframe -v $val $objAndAttr;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc mentalRayMVGlobals()
+{
+	print ("Setting Mental Ray motion vector globals.\n");
+	setAndKeyAttr ( "miDefaultOptions.minSamples", 0);
+	setAndKeyAttr ( "miDefaultOptions.maxSamples", 2);
+	
+	setAndKeyAttr ( "miDefaultOptions.filter", 3); // Gaussian
+	setAndKeyAttr ( "miDefaultOptions.filterWidth", 1);
+	setAndKeyAttr ( "miDefaultOptions.filterHeight", 1);
+	
+	setAndKeyAttr ("miDefaultOptions.rayTracing", 0);
+	setAndKeyAttr ( "miDefaultOptions.shadowMethod", 0);
+
+	setAndKeyAttr ( "miDefaultOptions.motionBlur", 2);
+	//setAndKeyAttr ("miDefaultOptions.motionBlurBy", 1);
+	setAndKeyAttr ("miDefaultOptions.motionBlurBy", 1.25);
+	
+	setAndKeyAttr ( "mentalrayGlobals.exportCustomMotion", 1);
+	
+	setAndKeyAttr (  "mentalrayGlobals.exportMotionOffset", 0);
+	setAndKeyAttr (  "mentalrayGlobals.exportMotionOutput", 0);
+	setAndKeyAttr (  "miDefaultOptions.shutter", 0.00001);
+	setAndKeyAttr (  "miDefaultOptions.shutterDelay", 0.00001);
+	
+	setAndKeyAttr (  "miDefaultOptions.finalGather", 0);
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc mentalRayMBGlobals()
+{
+	setAndKeyAttr ( "miDefaultOptions.motionBlur", 2);	// Exact
+	setAndKeyAttr ( "miDefaultOptions.shutter", 1);
+	setAndKeyAttr ( "miDefaultOptions.shutterDelay", 0);
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc mentalRayAmbientOcclusionGlobals()
+{
+	setAndKeyAttr ("miDefaultOptions.rayTracing", 1);
+	setAndKeyAttr ("miDefaultOptions.maxReflectionRays", 0);
+	setAndKeyAttr ("miDefaultOptions.maxRefractionRays", 0);
+	setAndKeyAttr ("miDefaultOptions.maxRayDepth", 1);
+	setAndKeyAttr ("miDefaultOptions.maxShadowRayDepth", 1);
+}
+// ---------------------------------------------------------------------------------------------------
+proc breakAndSet(string $plug, string $val)
+{
+	if (!`objExists $plug`)
+		return;
+	string $inputs[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+	if (size($inputs))
+	{
+		catch (`disconnectAttr $inputs[0] $plug`);
+	}
+	string $cmd = "setAttr \""+$plug+"\" "+$val;
+	catch (`evalEcho $cmd`);
+}
+// ---------------------------------------------------------------------------------------------------
+/*
+	- To be called after all other visibilities have been set. Makes sure that every light which is hidden, is hidden at
+	the transform level immediately above the shape
+*/
+global proc hideLightsForMotionBlur()
+{
+	string $lights[] = `ls -type light`;
+	for ($light in $lights)
+	{
+		if (isVisible ($light))
+			continue;
+		string $p[] = `listRelatives -p -pa $light`;
+		breakAndSet (($p[0]+".v"),"0");
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc createMentalRayText (string $renderType)
+{
+	string $includeText = "";
+	string $renderText = "";
+	string $includeTextArray[];
+	string $renderTextArray[];
+	string $amboccMatArray[];
+	global int $gGot_v2_cache_loc; // if true, miCacheLocator exists and it is version 2 - call proc for different handling
+	
+	if ($gGot_v2_cache_loc)
+	{
+		yankeeCrowdLocatorToText ($renderType);
+		return;	
+	}
+	
+	int $isAmboccPass = ($renderType == "ambientOcclusion" || $renderType == "ambientOcclusionLg");
+	
+	string $miCacheLocators[] = findAssetsByType ("x",0);
+	
+	for ($i=0;$i<size($miCacheLocators);$i++)
+	{
+		// if the object or it's shape is invisible, skip
+		if (!`getAttr ($miCacheLocators[$i]+".v")`)
+			continue;
+		string $shape[] = `listRelatives -s -ni -pa $miCacheLocators[$i]`;
+		if (size($shape))
+		{
+			if (!`getAttr ($shape[0]+".v")`)
+				continue;	
+		}
+		
+		// make sure attributes exists
+		if (!`objExists ($miCacheLocators[$i]+".rlc_miIncludeText")`)
+		{
+			print ($miCacheLocators[$i]+" has no rlc_miIncludeText attribute. Skipping...\n");
+			continue;
+		}
+		if (!`objExists ($miCacheLocators[$i]+".rlc_miRenderText")`)
+		{
+			print ($miCacheLocators[$i]+" has no rlc_miRenderText attribute. Skipping...\n");
+			continue;
+		}
+		if ($isAmboccPass && !`objExists ($miCacheLocators[$i]+".rlc_miOcclusionMat")`)
+		{
+			print ($miCacheLocators[$i]+" has no rlc_miOcclusionMat attribute. Skipping...\n");	
+		}
+		string $curIncludeText = `getAttr ($miCacheLocators[$i]+".rlc_miIncludeText")`;
+		string $curRenderText = `getAttr ($miCacheLocators[$i]+".rlc_miRenderText")`;
+		string $curAmboccMat = "";
+		if ($isAmboccPass)
+		{
+			$curAmboccMat = `getAttr ($miCacheLocators[$i]+".rlc_miOcclusionMat")`;
+			$curAmboccMat = `strip $curAmboccMat`;
+			if (`about -nt`)
+				$curAmboccMat = subAll ("/diskx",$curAmboccMat,"X:");
+			else
+				$curAmboccMat = subAll ("X:",$curAmboccMat,"/diskx");
+				
+			$amboccMatArray[size($amboccMatArray)] = $curAmboccMat;
+		}
+		
+		// remove leading and trailing newlines, etc.
+		$curIncludeText = `strip $curIncludeText`;
+		$curRenderText = `strip $curRenderText`;	
+		
+		if (`about -nt`)
+			$curIncludeText = subAll ("/diskx",$curIncludeText,"X:");	
+		else
+			$curIncludeText = subAll ("X:",$curIncludeText,"/diskx");
+			
+		$includeTextArray[size($includeTextArray)] = $curIncludeText;
+		$renderTextArray[size($renderTextArray)] = $curRenderText;
+	}
+	
+	// build text
+	$includeTextArray = stringArrayRemoveDuplicates ($includeTextArray);
+	$renderTextArray = stringArrayRemoveDuplicates ($renderTextArray);
+	if ($isAmboccPass)
+		$amboccMatArray = stringArrayRemoveDuplicates ($amboccMatArray);
+		
+	// include
+	for ($i=0;$i<size($includeTextArray);$i++)
+	{
+		$includeText += $includeTextArray[$i]+"\n";	
+	}
+	if ($isAmboccPass)
+	{
+		$includeText += "$include \"base.mi\"\n";	// needed in case there are no other ambocc shaders in the scene
+								// in this case base.mi does not get included, and the amb occ doesn't render
+		for ($i=0;$i<size($amboccMatArray);$i++)
+			$includeText += $amboccMatArray[$i]+"\n";	
+	}
+	// render text
+	for ($i=0;$i<size($renderTextArray);$i++)
+	{
+		$renderText += $renderTextArray[$i]+"\n";	
+	}
+	
+	print ("include text:\n");
+	print ($includeText);
+	print ("\nrender text:\n");
+	print ($renderText);
+	
+	
+	// create the actual mentalrayText nodes and attach
+	string $rlcIncludeText = `createNode mentalrayText -n "rlc_renderInclude_TEXT"`;
+	setAttr -type "string" ($rlcIncludeText+".txt") $includeText;
+	setAttr ($rlcIncludeText+".mo") 2;
+	setAttr ($rlcIncludeText+".t") 8;
+	
+	string $rlcRenderText = `createNode mentalrayText -n "rlc_render_TEXT"`;
+	setAttr -type "string" ($rlcRenderText+".txt") $renderText;
+	setAttr ($rlcRenderText+".mo") 2;
+	setAttr ($rlcRenderText+".t") 7;
+	
+	// hook up to render globals, etc
+	string $out[] = `listConnections -s 0 -d 1 -type "mentalrayItemsList" ($rlcIncludeText+".msg")`;
+	if (!size($out))
+		connectAttr ($rlcIncludeText+".msg") ":mentalrayItemsList.tr" -na;
+	
+	$out = `listConnections -s 0 -d 1 -type "mentalrayItemsList" ($rlcRenderText+".msg")`;
+	if (!size($out))
+		connectAttr ($rlcRenderText+".msg") ":mentalrayItemsList.tt" -na;
+	
+	catch (`connectAttr -f ($rlcIncludeText+".msg") ":mentalrayGlobals.mitr"`);
+	catch (`connectAttr -f ($rlcRenderText+".msg") ":mentalrayGlobals.mitt"`);
+	
+	// make sure export custom text is turned on.
+	setAttr "mentalrayGlobals.exportCustom" 1;
+
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createUseBackgroundShaderNew (int $reflect)
+{
+	string $shader;
+	
+	if ($reflect)
+		$shader = "RenderLayers_useBackgroundRefl";
+	else
+		$shader = "RenderLayers_useBackground";
+
+	if (`objExists $shader`)
+		return $shader;
+	
+	$shader = `createNode useBackground -n "RenderLayers_useBackground"`;
+	setAttr ($shader+".fll") 0;
+	setAttr ($shader+".sc") -type "float3" 0 0 0 ;
+	if ($reflect)
+	{
+		setAttr ($shader+".rfl") 1;
+		setAttr ($shader+".sm") 0;
+	}
+	else
+	{
+		setAttr ($shader+".rfl") 0;
+	}
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -na;
+	
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createDepthShaderNew (float $minDist, float $maxDist)
+{
+	string $shader = "RenderLayers_depth";
+	
+	if (`objExists $shader`)
+		return $shader;
+		
+	string $shader = `createNode lambert -name $shader`;
+	setAttr ($shader+".color") -type "float3" 0 0 0 ;
+
+	string $setRange = `createNode setRange`;
+	setAttr ($setRange+".min") -type "float3" 0 0 1 ;
+	setAttr ($setRange+".max") -type "float3" 0 0 0 ;
+	setAttr ($setRange+".oldMin") -type "float3" 0 0 ($maxDist * -1.0) ;
+	setAttr ($setRange+".oldMax") -type "float3" 0 0 ($minDist * -1.0) ;
+
+	string $samplerInfo = `createNode samplerInfo`;
+
+	connectAttr ($setRange+".outValueZ") ($shader+".incandescenceR");
+	connectAttr ($setRange+".outValueZ") ($shader+".incandescenceG");
+	connectAttr ($setRange+".outValueZ") ($shader+".incandescenceB");
+
+	connectAttr ($samplerInfo+".pointCameraZ") ($setRange+".valueZ");
+
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+	connectAttr ($samplerInfo+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable;
+	connectAttr ($setRange+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createAmbOccShaderNew (float $maxDist, float $spread)
+{
+	string $shader = "RenderLayers_ambOcc";
+	
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode -n $shader surfaceShader`;
+	string $ambOcc = `createNode mib_amb_occlusion`;
+
+	// ambOcc settings
+	setAttr ($ambOcc+".samples") 128;
+	setAttr ($ambOcc+".spread") $spread;
+	setAttr ($ambOcc+".max_distance") $maxDist;
+
+	connectAttr ($ambOcc+".outValue") ($shader+".outColor");
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+	connectAttr ($ambOcc+".message") ":defaultTextureList1.tx" -na;
+	
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createBlackHoleShaderNew ()
+{
+	string $shader = "RenderLayers_blackhole";
+	
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode surfaceShader -n $shader`;
+	setAttr ($shader+".outMatteOpacity") -type "float3" 0 0 0;
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createColorSepShaderNew (float $rgb[])
+{
+	string $shader = `createNode surfaceShader`;
+	setAttr ($shader+".outColor") -type "float3" $rgb[0] $rgb[1] $rgb[2] ;
+
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createLambertShaderNew (string $name, float $rgb[])
+{
+	string $shader = "RenderLayers_lambert_"+$name;
+
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode lambert -n $shader`;
+	setAttr ($shader+".color") -type "float3" $rgb[0] $rgb[1] $rgb[2] ;
+
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createNormalShaderNew ()
+{
+	string $shader = "RenderLayers_normalShader";
+
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode surfaceShader -n $shader`;
+
+	
+
+	string $range = `createNode setRange`;
+	setAttr ($range+".maxX") 1;
+	setAttr ($range+".maxY") 1;
+	setAttr ($range+".maxZ") 1;
+	setAttr ($range+".oldMinX") -1;
+	setAttr ($range+".oldMinY") -1;
+	setAttr ($range+".oldMinZ") -1;
+	setAttr ($range+".oldMaxX") 1;
+	setAttr ($range+".oldMaxY") 1;
+	setAttr ($range+".oldMaxZ") 1;
+	connectAttr ($range+".outValue") ($shader+".outColor");
+
+	string $sample = `createNode samplerInfo`;
+	connectAttr ($sample+".normalCamera") ($range+".value");
+
+
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;	
+	connectAttr ($sample+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable;
+	connectAttr ($range+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createBroadRampShaderNew ()
+{
+	string $shader = "RenderLayers_broadRamp";
+
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode lambert -n $shader`;
+	setAttr ($shader+".tcf") 0;
+	setAttr ($shader+".trsd") 0;
+
+	string $ramp = `createNode ramp`;
+	setAttr ($ramp+".cel[0].ep") 0;
+	setAttr ($ramp+".cel[1].ep") 0.885;
+	setAttr ($ramp+".cel[0].ec") -type "float3"  0.725 0.725 0.725;
+	setAttr ($ramp+".cel[1].ec") -type "float3"  0 0 0;
+
+	string $samplerInfo = `createNode samplerInfo`;
+
+	connectAttr ($ramp+".outColor") ($shader+".color");
+	connectAttr ($samplerInfo+".facingRatio") ($ramp+".u");
+	connectAttr ($samplerInfo+".facingRatio") ($ramp+".v");
+	
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+	connectAttr ($samplerInfo+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable; 
+	connectAttr ($ramp+".message") ":defaultTextureList1.tx" -na;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createTightRampShaderNew ()
+{
+	string $shader = "RenderLayers_tightRamp";
+
+	if (`objExists $shader`)
+		return $shader;
+
+	string $shader = `createNode lambert -n $shader`;
+
+	string $ramp = `createNode ramp`;
+	setAttr ($ramp+".cel[0].ep") 0.265;
+	setAttr ($ramp+".cel[1].ep") 0.48;
+	setAttr ($ramp+".cel[0].ec") -type "float3"  1 1 1;
+	setAttr ($ramp+".cel[1].ec") -type "float3"  0 0 0;
+	setAttr ($ramp+".in") 4;
+
+	string $samplerInfo = `createNode samplerInfo`;
+
+	connectAttr ($ramp+".outColor") ($shader+".color");
+	connectAttr ($samplerInfo+".facingRatio") ($ramp+".u");
+	connectAttr ($samplerInfo+".facingRatio") ($ramp+".v");
+	
+	
+	connectAttr ($shader+".message") ":defaultShaderList1.shaders" -nextAvailable;
+	connectAttr ($samplerInfo+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable; 
+	connectAttr ($ramp+".message") ":defaultTextureList1.tx" -na;
+
+	return $shader;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string create_idte_mv_shader ()
+{
+	if (`objExists "RenderLayers_idte_mat_motion2d_SG"`)
+		return "RenderLayers_idte_mat_motion2d_SG";
+		
+	string $materialInfo = `createNode materialInfo`;
+	string $shadingEngine = `createNode shadingEngine -n "RenderLayers_idte_mat_motion2d_SG"`;
+	setAttr ($shadingEngine+".ihi") 0;
+	setAttr ($shadingEngine+".ro") yes;
+	
+	string $shader = `createNode idte_mat_motion2d`;
+	
+	connectAttr ($shader+".msg") ($shadingEngine+".mims");
+	connectAttr ($shadingEngine+".msg") ($materialInfo+".sg");
+	connectAttr ($shadingEngine+".pa") ":renderPartition.st" -na;
+	connectAttr ($shader+".msg") ":defaultShaderList1.s" -na;
+	
+	return $shadingEngine;
+		
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string createMentalRayMVShader (float $mvMaxDisplace)
+{
+	/*
+		05/02/06 - Using idte motion vector shader for Yankss
+	*/
+	string $proj = `workspace -q -act`;
+	if (gmatch ($proj,"*14755_yankee_irving*"))
+		return create_idte_mv_shader();
+		
+	//
+	global int $SR_mr_mvMaxDisplace;
+	if (`objExists "RenderLayers_lm2DMV_SG"`)
+	{
+		string $shader[] = `listConnections -s 1 -d 0 ("RenderLayers_lm2DMV_SG.mims")`;
+		setAttr ($shader[0]+".S01") $mvMaxDisplace;
+		return "RenderLayers_lm2DMV_SG";
+	}
+	
+	string $materialInfo = `createNode materialInfo -n "RenderLayers_lm2DMV_materialInfo"`;
+	string $shadingEngine = `createNode shadingEngine -n "RenderLayers_lm2DMV_SG"`;
+	setAttr ($shadingEngine+".ihi") 0;
+	setAttr ($shadingEngine+".ro") yes;
+	
+	string $shader = `createNode -n "RenderLayers_lm2DMV_shader" lm2DMV_v2`;
+	setAttr ($shader+".S01")  $SR_mr_mvMaxDisplace;
+	
+	
+	
+	connectAttr ($shadingEngine+".msg") ($materialInfo+".sg");
+	connectAttr ($shader+".msg") ($shadingEngine+".mims");
+	connectAttr ($shadingEngine+".pa") ":renderPartition.st" -na;
+	
+	connectAttr ($shader+".msg") ":defaultShaderList1.s" -na;
+		
+	return $shadingEngine;		
+}
+// ---------------------------------------------------------------------------------------------------
+global proc assignShader(string $shape, string $shadingGroup)
+{
+	// disconnect the shape from whatever shading engine it is a member of
+	string $outplugs[] = `listConnections -d 1 -s 0 -c 1 -p 1 -type "shadingEngine" $shape`;
+	int $useSetsCmd = 0;
+
+	for ($i=0;$i<size($outplugs);$i+=2)
+	{
+		// make sure the connection is not to the shading group we want to assign. This happens with instances, when we get to the second
+		// instance of the object, we don't want to break the connections we made when we were dealing with the first instance
+		string $tokens[];
+		tokenize ($outplugs[$i+1],".",$tokens);
+		if ($tokens[0] != $shadingGroup)
+		{
+			if (catch(`disconnectAttr $outplugs[$i] $outplugs[$i+1]`))
+				$useSetsCmd = 1;
+		}
+	}
+		
+	string $inplugs[] = `listConnections -d 0 -s 1 -c 1 -p 1 -type "shadingEngine" $shape`;
+	for ($i=0;$i<size($inplugs);$i+=2)
+	{
+		if (catch(`disconnectAttr $inplugs[$i+1] $inplugs[$i]`))
+			$useSetsCmd = 1;
+	}
+		
+	if (catch(`connectAttr -na ($shape+".instObjGroups") ($shadingGroup+".dsm")`) || $useSetsCmd)
+		sets -e -forceElement $shadingGroup $shape;
+
+// Result: pCubeShape5.instObjGroups lambert2SG.dagSetMembers[3] //
+	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string [] getShadingEngineAssignments (string $object, string $shadingEngine)
+{
+	// get short dag path of object
+	string $tmp[] = `ls $object`;
+	string $object = $tmp[0];
+
+	// get parent
+	string $parent[] = `listRelatives -p -pa $object`;
+	
+	// get what is assigned to the shading engine that is part of this object - either faces or the shape node
+	string $assigned[] = `sets -q $shadingEngine`;
+	string $assignmentToThisObj[];
+
+	for ($i=0;$i<size($assigned);$i++)
+	{
+		// the shape node
+		if ($assigned[$i] == $object)
+			$assignmentToThisObj[size($assignmentToThisObj)] = $assigned[$i];
+
+		// faces
+		string $matchStr = $parent[0]+".f";
+		if (match (("^"+$matchStr),$assigned[$i]) == $matchStr)
+		{
+			$assignmentToThisObj[size($assignmentToThisObj)] = $assigned[$i];
+		}
+	}
+
+	return $assignmentToThisObj;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string[] getShadingEngineConnections (string $shadingEngine)
+{
+	// returns pairs of source plug (obj.attr), and destination attr (attr) in that order
+	
+	// attributes on the shading engine to check
+	string $attrs[] =
+	{
+		"displacementShader",
+		"miDisplacementShader"
+	};
+
+	string $connectionInfo[];
+
+	for ($i=0;$i<size($attrs);$i++)
+	{
+		string $plug = $shadingEngine+"."+$attrs[$i];
+		// check that plug exists - it might be a dynamic attribute that only exists after Mayatomr has added it. Note, we don't need to worry about this
+		// when we re-create the connection to a new shading engine. If Mayatomr is loaded, all new shadingEngines will have the attributes
+		if (`objExists ($plug)`)
+		{
+			string $inputPlug[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+			if (size($inputPlug))
+			{
+				$connectionInfo[size($connectionInfo)] = $inputPlug[0];
+				$connectionInfo[size($connectionInfo)] = $attrs[$i];
+			}
+		}
+	}
+	return $connectionInfo;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string createNewShadingEngine (string $shader)
+{
+	string $shadingEngine = $shader+"SG";
+
+	// create the shading engine
+	$shadingEngine = `createNode shadingEngine -n $shadingEngine`;
+	setAttr ($shadingEngine+".isHistoricallyInteresting") 0;
+	setAttr ($shadingEngine+".renderableOnlySet") yes;
+
+	// create the materialInfo node - this is so that the shadingEngine will shade in the view port
+	string $materialInfo = `createNode materialInfo`;
+
+	// connect shader to new shading engine
+	connectAttr ($shader+".outColor") ($shadingEngine+".surfaceShader");
+
+	// connections for hardware shading
+	connectAttr ($shader+".message") ($materialInfo+".material");
+	connectAttr ($shadingEngine+".message") ($materialInfo+".shadingGroup");
+	
+
+	// this tells Maya that the shader engine is renderable
+	connectAttr ($shadingEngine+".partition") ":renderPartition.sets" -na;
+
+	
+	return $shadingEngine;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc transferMaterialAssignments(string $shape,string $oldShadingEngine, string $newShadingEngine)
+{
+	string $plugs[] = `listConnections -s 0 -d 1 -c 1 -p 1 -type shadingEngine $shape`;
+
+	for ($i=0;$i<size($plugs);$i+=2)
+	{
+		string $srcPlug = $plugs[$i];
+		string $dstPlug = $plugs[$i+1];
+
+		string $dstObj[] = `ls -o $dstPlug`;
+		if ($dstObj[0] != $oldShadingEngine)
+			continue;
+
+		// make sure the connection is to dagSetMembers
+		string $buf[];
+		tokenize ($dstPlug,".[]",$buf);
+		string $dstAttr = $buf[1];
+
+		if ($dstAttr != "dagSetMembers")
+			continue;
+
+		// connect to newShadingEngine, and break connection to oldShadingEngine
+		evalEcho ("disconnectAttr "+$srcPlug+" "+$dstPlug);
+		//disconnectAttr $srcPlug $dstPlug;
+		evalEcho ("connectAttr -na "+$srcPlug+" "+$newShadingEngine+".dagSetMembers");
+		//connectAttr -na $srcPlug ($newShadingEngine+".dagSetMembers");
+
+		// Connect groupId nodes to the shading engine
+		/*
+			If this step is not performed, the shader assignment will work, but it will not be possible to subsequently assign
+			a new material to the whole object, only to the components
+		*/
+
+		if (`objExists ($srcPlug+".objectGroupId")`)
+		{
+			string $groupId[] = `listConnections -s 1 -d 0 -type groupId ($srcPlug+".objectGroupId")`;
+			if (size($groupId))
+			{
+				// if there is a connection from the groupId node to the old shading engine, break it
+				string $groupIdDstPlug[] = `listConnections -s 0 -d 1 -p 1 -type shadingEngine ($groupId[0]+".message")`;
+				for ($j=0;$j<size($groupIdDstPlug);$j++)
+				{
+					string $buf[];
+					tokenize ($groupIdDstPlug[$j],".[]",$buf);
+					if ($buf[0] == $oldShadingEngine && $buf[1] == "groupNodes")
+					{
+						evalEcho ("disconnectAttr "+$groupId[0]+".message "+$groupIdDstPlug[$j]);
+					}
+				}
+				// connect the groupId node to the new shading engine
+				evalEcho ("connectAttr -na "+$groupId[0]+".message "+$newShadingEngine+".groupNodes");
+				
+			}
+		}
+		
+		
+	}
+	// update the connection from memberWireframeColor, so that the shape is completely disconnected from the oldShadingEngine
+	$plugs = `listConnections -s 0 -d 1 -p 1 -type shape ($oldShadingEngine+".memberWireframeColor")`;
+	
+	for ($i=0;$i<size($plugs);$i++)
+	{
+		string $dstObj[] = `ls -l -o $plugs[$i]`;
+		if ($dstObj[0] != $shape)
+			continue;
+
+		evalEcho ("connectAttr -f "+$newShadingEngine+".memberWireframeColor "+$plugs[$i]);
+		//connectAttr -f ($newShadingEngine+".memberWireframeColor") $plugs[$i];
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc assignShaderUnique (string $list[], string $shader)
+{
+	// $list contains shapes, not transforms. It contains the full dag path
+
+	string $defaultShadingEngine = "";	// As soon as a shading engine is created that can be shared by other objects in the list, set this, so it can be re-used.
+
+	for ($i=0;$i<size($list);$i++)
+	{
+		print ("$list["+$i+"] = "+$list[$i]+"\n");
+		// don't put shaders on renderCones!
+		if (`nodeType $list[$i]` == "renderCone")
+			continue;
+		// get shading engines that this geometry is connected to
+		string $shadingEngines[] = `listConnections -s 0 -d 1 -type "shadingEngine" $list[$i]`;
+		$shadingEngines = stringArrayRemoveDuplicates ($shadingEngines);
+
+		for ($j = 0; $j < size($shadingEngines); $j ++)
+		{
+			print ("\t$shadingEngines["+$j+"] = "+$shadingEngines[$j]+"\n");
+			// get what faces (or the whole object) that this shading engine is assigned to
+			string $assigned[] = getShadingEngineAssignments ($list[$i],$shadingEngines[$j]);
+
+			// is a unique new shading engine required - i.e. does the existing one have input connections from a displacement
+			string $connectionInfo[] = getShadingEngineConnections($shadingEngines[$j]);
+			
+			int $needsNewShadingEngine = ((size($connectionInfo)>0) || (!`objExists $defaultShadingEngine`));
+
+			// testing
+			//$needsNewShadingEngine = 1;	// testing - make a new shading engine for each component group
+
+			string $newShadingEngine = "";
+			// make a new shading engine (if required) and hook it up to the shader
+			if ($needsNewShadingEngine)
+			{
+				$newShadingEngine = createNewShadingEngine ($shader);
+				
+				if (!size($connectionInfo))
+					$defaultShadingEngine = $newShadingEngine;	// Make this the default shading engine that can be shared by anything that doesn't need a separate one	
+			}
+			else
+			{
+				$newShadingEngine = $defaultShadingEngine;
+			}
+
+			// hook up connections, if there are any
+			for ($k = 0; $k < size($connectionInfo); $k+=2)
+			{
+				connectAttr ($connectionInfo[$k]) ($newShadingEngine+"."+$connectionInfo[$k+1]);
+			}
+
+			// assign the new shading engine
+			print ("Assigning "+$newShadingEngine+"\n");
+			// sets -e -rm $shadingEngines[$j] $assigned;
+			evalEcho ("transferMaterialAssignments \""+$list[$i]+"\" \""+$shadingEngines[$j]+"\" \""+$newShadingEngine+"\"");
+		
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc assignShaderToAllInList (string $list[], string $shader)
+{
+	for ($obj in $list)
+	{
+		//print ("Assigning "+$shader+" to "+$obj+"\n");
+		if (size(`ls -type instancer $obj`))
+			continue;
+		
+		assignShader ($obj, $shader);	
+		//sets -e -forceElement $shader $obj;
+	
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc createPerObjectAmboccBumpshader (string $oldShadingEngine, float $maxDist, float $spread, float $bumpMult)
+{
+	if (`objExists ($oldShadingEngine+".renderLayersAmboccBump")`)
+	{
+		print ($oldShadingEngine+" is already an ambOcc shader, skipping...\n");
+		return;
+	}
+		
+	if (!size($oldShadingEngine))
+		return;	
+	
+	if (!size(`sets -q $oldShadingEngine`))
+		return;
+	
+	// Create shading engine
+	//string $shadingEngine = `createNode shadingEngine`;
+	//addAttr -ln "renderLayersAmboccBump" -at "message" $shadingEngine;
+	
+	string $materialInfo = `createNode materialInfo`;
+	
+	//setAttr ($shadingEngine+".ihi") 0;
+	//setAttr ($shadingEngine+".ro") yes;
+	
+	string $shader = `createNode lambert`;
+	setAttr ($shader+".c") -type "float3" 0 0 0;
+	
+	//connectAttr ($shadingEngine+".msg") ($materialInfo+".sg");
+	//connectAttr ($shader+".oc") ($shadingEngine+".ss");
+	//connectAttr ($shader+".msg") ($shadingEngine+".miMaterialShader");
+	
+	//connectAttr ($shadingEngine+".pa") ":renderPartition.st" -na;
+	connectAttr ($shader+".msg") ":defaultShaderList1.s" -na;
+	
+	// plug ambocc shader into incandescence.
+	string $ambientOccl = `createNode mib_amb_occlusion`;
+	setAttr ($ambientOccl+".S00") 128;
+	setAttr ($ambientOccl+".S04") $maxDist;
+	setAttr ($ambientOccl+".spread") $spread;
+	
+	connectAttr ($ambientOccl+".msg") ":defaultTextureList1.tx" -na;
+	
+	connectAttr ($ambientOccl+".outValue") ($shader+".incandescence");
+	
+	
+	
+	// plug bump of old shader into bump of lambert.
+	// find old shader from old shading group.
+	string $oldShader[] = `listConnections -s 1 -d 0 ($oldShadingEngine+".ss")`;
+	if (!size($oldShader))
+	{
+		$oldShader = `listConnections -s 1 -d 0 ($oldShadingEngine+".miMaterialShader")`;
+	}
+	
+	if (!size($oldShader))
+	{
+		warning ("No shader found connected to "+$oldShadingEngine+". Skipping...");
+		return;	
+	}
+
+	// find the bump, if any
+	if (!`objExists ($oldShader[0]+".normalCamera")`)
+	{
+		//string $assigned[] = `sets -q $oldShadingEngine`;
+		//catch (`sets -e -forceElement $shadingEngine $assigned`);
+		// hijack the shading engine with our ambient occlusion shader.
+		connectAttr -f 	($shader+".outColor") ($oldShadingEngine+".ss");
+		connectAttr -f 	($shader+".msg") ($oldShadingEngine+".miMaterialShader");
+		addAttr -ln "renderLayersAmboccBump" -at "message" $oldShadingEngine;
+		
+		return;
+	}
+	string $bumpInput[] = `listConnections -s 1 -d 0 -p 1 ($oldShader[0]+".normalCamera")`;
+	string $bumpNode[] =  `listConnections -s 1 -d 0 ($oldShader[0]+".normalCamera")`;
+	
+	if (size($bumpInput))
+	{
+		connectAttr $bumpInput[0] ($shader+".normalCamera");
+		if (`objExists ($bumpNode[0]+".bumpDepth")`)
+		{
+			if (`getAttr -se  ($bumpNode[0]+".bumpDepth")`)
+			{
+				float $curBump = `getAttr ($bumpNode[0]+".bumpDepth")`;
+				setAttr ($bumpNode[0]+".bumpDepth") ($curBump * $bumpMult);
+			}
+		}
+	}
+	
+	// finally assign it.
+	
+	//string $assigned[] = `sets -q $oldShadingEngine`;
+	//catch (`sets -e -forceElement $shadingEngine $assigned`);
+	connectAttr -f 	($shader+".outColor") ($oldShadingEngine+".ss");
+	connectAttr -f 	($shader+".msg") ($oldShadingEngine+".miMaterialShader");
+	addAttr -ln "renderLayersAmboccBump" -at "message" $oldShadingEngine;	
+	
+	//done
+}
+// ---------------------------------------------------------------------------------------------------
+global proc createAmboccBump (float $maxDist, float $spread, float $bumpMult)
+{
+	string $allShadingEngines[] = `ls -type shadingEngine`;
+	
+	for ($i=0;$i<size($allShadingEngines);$i++)
+	{
+		createPerObjectAmboccBumpshader ($allShadingEngines[$i], $maxDist, $spread, $bumpMult);	
+	}	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc setAttrList (string $list[],string $attr, float $val)
+{
+	for ($obj in $list)
+	{
+		if (`objExists ($obj+"."+$attr)`)
+		{
+			if (`getAttr -l ($obj+"."+$attr)`)
+			{
+				if (!`reference -q -inr $obj`)
+					setAttr -l 0 ($obj+"."+$attr);
+				else
+				{
+					warning ("Can't unlock "+$obj+"."+$attr+". Node is referenced. Skipping..");
+					continue;	
+				}
+			}
+			setAttr ($obj+"."+$attr) $val;
+		}
+	}
+		
+}
+// ---------------------------------------------------------------------------------------------------
+proc turnOffLights (string $list[])
+{
+	for ($obj in $list)
+	{
+		if (!size (`ls -type light $obj`))
+			continue;
+		if (`getAttr -l ($obj+".v")`)
+		{
+			if (!`reference -q -inr $obj`)
+				setAttr -l 0 ($obj+".v");
+			else
+			{
+				warning ("Can't unlock "+$obj+".v Node is referenced... Skipping...");
+				continue;	
+			}
+				
+		}
+		setAttr ($obj+".v") 0;	
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc deleteObjectsInList (string $list[])
+{
+	string $hideAttrs[] = {
+		"castsShadows",
+		"receiveShadows",
+		"motionBlur",
+		"primaryVisibility",
+		"visibleInReflections",
+		"visibleInRefractions"
+	};
+	
+	for ($obj in $list)
+	{
+		if (`objExists $obj`)
+		{
+			if (`getAttr -l ($obj+".v")`)
+			{
+				if (!`reference -q -inr $obj`)
+					setAttr -l 0 ($obj+".v");
+				else
+				{
+					warning ("Couldn't unlock "+$obj+".v Node is locked...");
+					continue;
+					
+					// Try to hide it by other means
+					for ($i=0;$i<size($hideAttrs);$i++)
+					{
+						if (!`objExists ($obj+"."+$hideAttrs[$i])`)
+							continue;
+						if (`getAttr -l ($obj+"."+$hideAttrs[$i])`)
+						{
+							warning ("Couldn't setAttr "+($obj+"."+$hideAttrs[$i])+" 0. Plug is locked.");
+							continue;	
+						}
+						if (size(`listConnections -s 1 -d 0 ($obj+"."+$hideAttrs[$i])`))
+						{
+							string $inPlug[] = `listConnections -s 1 -d 0 -p 1 ($obj+"."+$hideAttrs[$i])`;
+							catch (`disconnectAttr $inPlug[0] ($obj+"."+$hideAttrs[$i])`);	
+						}
+						catch (`setAttr ($obj+"."+$hideAttrs[$i]) 0`);
+					}	
+				}
+			
+			}
+			string $inplugs[] = `listConnections -s 1 -d 0 -p 1 ($obj+".v")`;
+			if (size($inplugs))
+				disconnectAttr ($inplugs[0]) ($obj+".v");
+				
+			setAttr ($obj+".v") 0;
+			//catch (`delete $obj`);
+			//if (!size(`ls -ro $obj`))	
+			//	delete $obj;
+			
+			// if this is a shaveHair node, hide by turning off active attribute
+			if (`nodeType $obj` == "shaveHair")
+				setAttr ($obj+".active") 0;
+
+			// Now attempt to hide the transform as well
+			// make sure we don't already have the transform
+			
+			if (size(`ls -type shape $obj`))
+			{
+				string $transform[] = `listRelatives -p -f $obj`;
+				//print ("obj = "+$obj+"\n");
+				//print ("transform = "+$transform[0]+"\n");
+				if (size($transform))
+				{
+					// are there child transforms? If so, we can't turn off the visibility of this transform
+					string $childTransforms[] = `listRelatives -c -f -type transform $transform[0]`;
+					if (!size($childTransforms))
+					{
+						// are there incoming connections on the visibility?
+						string $incoming[] = `listConnections -s 1 -d 0 -p 1 ($transform[0]+".v")`;
+						if (size($incoming))
+						{
+							catch (`disconnectAttr 	$incoming[0] ($transform[0]+".v")`);
+						}	
+						if (`getAttr -se ($transform[0]+".v")`)
+						{
+							catch (`setAttr ($transform[0]+".v") 0`);
+						}
+						else
+						{
+							warning ("Couldn't set "+$transform[0]+".v");	
+						}
+					}
+				}	
+			}
+			
+		}
+		
+	}	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc setMayaMotionVectorRenderGlobals ()
+{
+	string $file = `workspace -q -act`+"/mel/renderGlobals/MotionVectorRenderGlobals.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderGlobals;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/MotionVectorRenderQuality.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderQuality;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/MotionVectorRenderResolution.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultResolution;
+	eval $cmd;
+	
+	// set maya's render globals for rendering a motion vector pass
+	setAttr -l 0 defaultRenderGlobals.mb;
+	setAttr defaultRenderGlobals.mb 1;
+	setAttr defaultRenderGlobals.motionBlurType 0;
+	setAttr "defaultRenderGlobals.keepMotionVector" 1;
+	setAttr "defaultRenderQuality.shadingSamples" 3;
+	setAttr "defaultRenderQuality.maxShadingSamples" 8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 1;
+	setAttr "defaultRenderQuality.enableRaytracing" 0;
+
+	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc setMayaShadowPassRenderGlobals ()
+{
+	string $file = `workspace -q -act`+"/mel/renderGlobals/ShadowPassRenderGlobals.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderGlobals;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/ShadowPassRenderQuality.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderQuality;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/ShadowPassRenderResolution.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultResolution;
+	eval $cmd;
+		
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc setMayaGeneralRenderGlobals ()
+{
+	string $file = `workspace -q -act`+"/mel/renderGlobals/DefaultFinalRenderGlobals.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderGlobals;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/DefaultFinalRenderQuality.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultRenderQuality;
+	eval $cmd;
+	
+	string $file = `workspace -q -act`+"/mel/renderGlobals/DefaultFinalRenderResolution.mel";
+	string $cmd = "source \""+$file+"\"";
+	
+	select -r defaultResolution;
+	eval $cmd;
+		
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc string [] resolveNonUniqueNames (string $list[])
+{
+	string $resList[];
+	print ("mentalRayRenderLayers: DEBUG: resolveNonUniqueNames: Working on "+size($list)+" items.\n");
+	float $startTime = `timerX`;
+	for ($i=0;$i<size($list);$i++)
+	{
+		if ($i % 500 == 0)
+		{
+			float $elapsedSoFar = `timerX -st $startTime`;
+			print ("Working on item "+$i+". "+$elapsedSoFar+" seconds elapsed so far.\n");	
+		}
+		string $search = $list[$i] + "*";
+		string $allMatching[] = `ls $search`;
+		if (!size($allMatching))
+			continue;
+		if (size($allMatching)==1)
+		{
+			$resList[size($resList)] = $allMatching[0];
+			continue;		
+		}
+		string $matches[];
+		for ($j=0;$j<size($allMatching);$j++)
+		{
+			if (endsWith ($allMatching[$j],$list[$i]))
+				$matches[size($matches)] = $allMatching[$j];
+		}
+		$resList = stringArrayCatenate ($resList,$matches);
+	}
+	return $resList;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string[] expandToLeaves(string $list[])
+{
+	print ("version 3.2\n");
+	print ("1...\n");
+	$list = resolveNonUniqueNames ($list);
+	print ("1.1...\n");
+	string $allChildren[] = `listRelatives -ad -pa $list`;
+	$allChildren = stringArrayRemoveDuplicates ($allChildren);
+	$allChildren = `ls -l $allChildren`;
+	
+	$allChildren = stringArrayCatenate ($allChildren,$list);
+	
+	print ("2...\n");
+	
+	// only non-intermediate shape nodes allowed
+	
+	string $outList[] = `ls -l -ap -ni -dag -type shape $allChildren`;
+	
+	print ("3...\n");
+	// 06/15/05 - include imagePlanes
+	string $imagePlanes[] = `ls -type imagePlane $list`;
+	for ($i=0;$i<size($imagePlanes);$i++)
+	{
+		$outList[size($outList)] = $imagePlanes[$i];
+		// add an attribute to protect the image plane from deletion
+		if (!`objExists ($imagePlanes[$i]+".protected")`)
+			addAttr -ln "protected" -at "message" $imagePlanes[$i];	
+	}
+	
+	// 03/27/06 - instancers
+	string $instancers[] = `ls -type instancer $list`;
+	string $instancerGeom[];
+	for ($i=0;$i<size($instancers);$i++)
+	{
+		string $inputHier[] = `listConnections -s 1 -d 0 ($instancers[$i]+".inputHierarchy")`;
+		if (size($inputHier))
+		{
+			string $geom[] = `ls -l -ap -ni -dag -type shape $inputHier`;
+			if (size($geom))	
+				$instancerGeom = stringArrayCatenate ($instancerGeom,$geom);
+		}	
+	}
+	if (size($instancerGeom))
+	{
+		$instancerGeom = stringArrayRemoveDuplicates ($instancerGeom);
+		$outList = stringArrayCatenate ($outList,$instancerGeom);
+		$outList = stringArrayCatenate ($outList,$instancers);
+	}
+	
+	return $outList;	
+}
+// ---------------------------------------------------------------------------------------------------
+proc string[] getCustomObjectMembers (string $xml)
+{
+	string $members[];
+	
+	string $membersXML[] = xml_getTag ($xml,"member");
+	for ($j = 0;$j<size($membersXML);$j++)
+	{
+		string $memberName = xml_getVar ($membersXML[$j],"name");
+		if (`objExists $memberName`)
+			$members[size($members)] = $memberName;	
+	}
+	return $members;
+		
+}
+// ---------------------------------------------------------------------------------------------------
+proc setOverrideSmooth(string $objectList[], int $level)
+{
+	for ($i=0;$i<size($objectList);$i++)
+	{
+		// probably a shape, check that it isn't a transform
+		string $trans = $objectList[$i];
+		if (!size(`ls -tr $trans`))
+		{
+			string $tmp[] = `listRelatives -p -pa $trans`;
+			$trans = $tmp[0];	
+		}	
+		if (!`objExists ($trans+".useOverride")`)
+			continue;
+		if (!`objExists ($trans+".overrideSmooth")`)
+			continue;
+			
+		setAndKeyAttr (($trans+".useOverride"),1);
+		setAndKeyAttr (($trans+".overrideSmooth"),$level);
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string [] getObjectList (string $namespace)
+{
+	string $objectList[] = `ls -l -ap -type shape ($namespace+":*")`;
+	$objectList = `listRelatives -p -f $objectList`;
+	$objectList = `listRelatives -s -ni -f $objectList`;
+	$objectList = stringArrayRemoveDuplicates ($objectList);
+	
+	// instancers
+	string $instancers[] = `ls -type instancer ($namespace+":*")`;
+	string $instancerGeom[];
+	for ($i=0;$i<size($instancers);$i++)
+	{
+		string $inputHier[] = `listConnections -s 1 -d 0 ($instancers[$i]+".inputHierarchy")`;
+		if (size($inputHier))
+		{
+			string $geom[] = `ls -l -ap -ni -dag -type shape $inputHier`;
+			if (size($geom))	
+				$instancerGeom = stringArrayCatenate ($instancerGeom,$geom);
+		}	
+	}
+	if (size($instancerGeom))
+	{
+		$instancerGeom = stringArrayRemoveDuplicates ($instancerGeom);
+		$objectList = stringArrayCatenate ($objectList,$instancerGeom);
+		$objectList = stringArrayCatenate ($objectList,$instancers);
+	}
+	
+
+	//if ($namespace == "set_apt1")
+	//	print $objectList;
+
+	return $objectList; 
+}
+// ---------------------------------------------------------------------------------------------------
+proc set_fur_motionBlur (string $objectList[], int $state)
+{
+	// loop through object list
+	for ($node in $objectList)
+	{
+		// if it's a shape, get the transform
+		string $xform;
+		if (size(`ls -type shape $node`))
+		{
+			string $parent[] = `listRelatives -p -pa $node`;
+			$xform = $parent[0];
+		}
+		else
+		{
+			$xform = $node;
+		}
+		// does it have a miGeoShader attribute? Not a given, we may not be rendering with mental ray
+		if (`objExists ($xform+".miGeoShader")`)
+		{
+			string $input[] = `listConnections -s 1 -d 0 ($xform+".miGeoShader")`;
+			if (size($input))
+			{
+				if (`nodeType $input[0]` == "rfx_fur")
+				{
+					setAttr ($input[0]+".useMotionVectors") $state;
+				}
+			}
+		}
+	}
+
+}
+
+// ========================================================================
+// return rgb color of rlc icon
+// ========================================================================
+global proc float[] get_rlc_color(string $icon)
+{
+	string $rlcIcons[35] = {"rlc_icon_blue",
+									"rlc_icon_navy",
+									"rlc_icon_midblue",
+									"rlc_icon_realblue",
+									"rlc_icon_bluepurple",
+									
+									"rlc_icon_brown",
+									"rlc_icon_tan",
+							 		"rlc_icon_newgray",
+									"rlc_icon_darkgray",
+							 		"rlc_icon_gray",
+										
+									"rlc_icon_armygreen",
+									"rlc_icon_darkgreen",
+									"rlc_icon_forest",
+							 		"rlc_icon_green",
+									"rlc_icon_greenTint",
+									
+									"rlc_icon_orangered",
+									"rlc_icon_darkorange",
+							 		"rlc_icon_orange",
+									"rlc_icon_darkyellow",
+									"rlc_icon_darkorangered",
+									
+									"rlc_icon_darkred",
+									"rlc_icon_redpurple",
+							 		"rlc_icon_redred",
+									"rlc_icon_purple",
+									"rlc_icon_maroon",
+									
+									"rlc_icon_lightpurple",
+									"rlc_icon_realpurple",
+									"rlc_icon_white",
+									"rlc_icon_yellow",
+									"rlc_icon_sky",	
+									
+									"rlc_icon_pureRed",
+									"rlc_icon_pureGreen",
+									"rlc_icon_pureBlue",
+									"rlc_icon_aqua",
+									"rlc_icon_pureyellow" };
+									
+	float $colors[] = { 0.686, 0.761, 0.816,
+							  0.282, 0.388, 0.549,
+							  0.247, 0.475, 0.733,
+							  0.039, 0.490, 0.957,
+							  0.427, 0.455, 0.663,
+
+							  0.722, 0.627, 0.494,
+							  0.843, 0.678, 0.624,
+							  0.753, 0.741, 0.706,
+							  0.565, 0.561, 0.635,
+							  0.647, 0.647, 0.647,
+
+							  0.439, 0.529, 0.380,
+							  0.114, 0.576, 0.533,
+							  0.486, 0.576, 0.573,
+							  0.482, 0.816, 0.694,
+							  0.639, 0.788, 0.639,
+
+							  0.996, 0.482, 0.329,
+							  1.000, 0.651, 0.361,
+							  1.000, 0.784, 0.420,
+							  0.965, 0.851, 0.008,
+							  0.780, 0.349, 0.216,
+
+							  0.761, 0.000, 0.259,
+							  0.616, 0.153, 0.306,
+							  0.914, 0.459, 0.522,
+							  0.714, 0.600, 0.718,
+							  0.600, 0.333, 0.498,
+
+							  0.890, 0.851, 0.918,
+							  0.796, 0.494, 0.765,
+							  1.000, 1.000, 1.000,
+							  0.957, 0.953, 0.608,
+							  0.820, 0.933, 0.992,
+							  
+							  1.000, 0.000, 0.000,
+							  0.000, 1.000, 0.000,
+							  0.000, 0.000, 1.000,
+							  0.000, 1.000, 1.000,
+							  1.000, 1.000, 1.000 };	
+	
+	int $index = stringArrayFindIndex($icon, $rlcIcons);
+
+	if ($index == -1)
+	{
+		return({0.0, 0.0, 0.0});
+	}
+
+	float $res[]; clear($res);
+
+	$res[0] = $colors[($index*3)];
+	$res[1] = $colors[(($index*3)+1)];
+	$res[2] = $colors[(($index*3)+2)];
+
+	return($res);	
+
+}
+
+// ========================================================================
+// main proc
+// ========================================================================
+global proc string mentalRayRenderLayers( string $xmlFile) 
+{
+	global string $SR_renderer;
+	
+	
+	// globals that can be retrieved by calling process
+	global string $gLayerName;
+	global int $gMotionVector;
+	global int $gColor;
+	global int $gBroadLight;
+	global int $gTightLight;
+	global int $gWhiteLambert;
+	global int $gNormalsPass;
+	global int $gFinalGather;
+	global int $gMotionBlur;
+	global int $gMayaRender;
+	global string $gRenderType;
+	global int $gRapidScanLine;
+	global float $gRapidVisibilitySamples;
+	global float $gRapidShadingQuality;
+	global float $gMinSamples;
+	global float $gMaxSamples;
+	
+	// do we need custom handling for version 2 mi cache locators
+	string $miCacheLocators[] = findAssetsByType ("x",0);
+	global int $gGot_v2_cache_loc = false;
+	if (size($miCacheLocators))
+	{
+		if (`objExists ($miCacheLocators[0]+".version")`)
+		{
+			string $ver = `getAttr 	($miCacheLocators[0]+".version")`;
+			if ($ver == "2.0")
+			{
+				$gGot_v2_cache_loc = true;
+				print ("mentalRayRenderLayers: Found a version 2 miCacheLocator.\n");
+			}
+		}
+	}
+	// --------------------
+	
+	
+	// check for the xml file
+	if (!`filetest -f $xmlFile`)
+	{
+		error ("mentalRayRenderLayers: Error: Couldn't find xml file "+$xmlFile);	
+		return "";
+	}
+	// read the xml
+	string $xml = readXML ($xmlFile,0);
+	
+	// get layer name
+	string $layerName = xml_getVar ($xml,"name");
+	
+	// get passes
+	string $passesXML[] = xml_getTag ($xml,"passes");
+	int $motionVector = (int)xml_getVar ($passesXML[0],"motionVector");
+	float $mvMaxDisplace = 64.0;
+	if ($motionVector)
+	{
+		string $val = xml_getVar ($passesXML[0],"MVmaxDisplace");
+		if ($val != "")
+			$mvMaxDisplace = (float)$val;	
+	}
+	int $color = (int)xml_getVar ($passesXML[0],"color");
+	int $broadLight = (int)xml_getVar ($passesXML[0],"broadLight");
+	int $tightLight = (int)xml_getVar ($passesXML[0],"tightLight");
+	int $whiteLambert = (int)xml_getVar ($passesXML[0],"whiteLambert");
+	int $normalPass  = (int)xml_getVar ($passesXML[0],"normals");
+	
+	// get settings
+	string $finalGather = xml_getVar ($xml,"finalGather");
+	string $motionBlur = xml_getVar ($xml,"motionBlur");
+	string $mayaRender = xml_getVar ($xml,"mayaRender");
+	string $noRayTrace = xml_getVar ($xml,"noRayTrace");
+
+	print ("mentalRayRenderLayers (DEBUG): mayaRender = "+$mayaRender+"\n");
+	print ("mentalRayRenderLayers (DEBUG): motionBlur = "+$motionBlur+"\n");
+
+	int $rapidScanLine = 0;
+	
+	string $rapidStr = xml_getVar($xml, "rapidScanline");
+	float $rapidVisibilitySamples, $rapidShadingQuality;
+	if ($rapidStr != "")
+	{
+		$rapidScanLine = (int)$rapidStr;
+		if ($rapidScanLine)
+		{
+			string $visSamplesStr = xml_getVar ($xml,"visibilitySamples");
+			if ($visSamplesStr != "")
+			{
+				$rapidVisibilitySamples = (float)$visSamplesStr;
+			}
+			else
+			{
+				$rapidVisibilitySamples	= 4.0;
+			}
+				
+			string $shadingQualityStr = xml_getVar ($xml,"shadingQuality");
+			if ($shadingQualityStr != "")
+			{
+				$rapidShadingQuality = (float)$shadingQualityStr;
+			}
+			else
+			{
+				$rapidShadingQuality	= 1.0;
+			}
+		}
+	}
+		
+	int $tmpMayaRender = (int)$mayaRender;
+
+	float $minSamples;
+	float $maxSamples;
+	
+	if ( ($tmpMayaRender == 0) && ($rapidScanLine == 0) )
+	{
+		string $minSamplesString = xml_getVar($xml, "minSamples");
+		string $maxSamplesString = xml_getVar($xml, "maxSamples");
+
+		if ($minSamplesString == "")
+		{
+			$minSamples = 1.0;
+		}
+		else
+		{
+			$minSamples = (float)$minSamplesString;
+		}
+
+		if ($maxSamplesString == "")
+		{
+			$maxSamples = 3.0;
+		}
+		else
+		{
+			$maxSamples = (float)$maxSamplesString;
+		}
+	}
+
+
+	int $mayaRenderOldBehavior = 0;
+	if ($mayaRender == "")
+	{
+		$mayaRenderOldBehavior = 1;	// backward compatibility for old rlc's	
+	}
+	
+	// get renderType
+	string $renderType = xml_getVar ($xml,"renderType");
+	
+	// ambocc max dist
+	float $ambOccMaxDist = 5.0;
+	float $ambOccSpread  = 1.0;
+	int   $ambOccBump    = false;
+	float $bumpMult      = 1.0;
+	
+	if ($renderType == "ambientOcclusion")
+	{
+		string $maxDist = xml_getVar ($xml,"amboccMaxDist");
+		if ($maxDist != "")
+			$ambOccMaxDist = (float)$maxDist;
+		
+		string $spread = xml_getVar ($xml,"amboccSpread");
+		if ($spread != "")
+			$ambOccSpread = (float)$spread;
+		
+		string $bump = xml_getVar ($xml,"amboccBump");
+		if ($bump != "")
+			$ambOccBump = (int)$bump;
+	
+		string $mult = xml_getVar($xml, "amboccBumpMult");
+		if ($mult != "")
+			$bumpMult = (float)$mult;			
+	}
+	
+	// depth pass parameters
+	float $depthMinDist = 10.0;
+	float $depthMaxDist = 100.0;
+	
+	if ($renderType == "depth")
+	{
+		string $depthMin = xml_getVar ($xml,"depthMin");
+		if ($depthMin != "")
+			$depthMinDist = (float)$depthMin;
+		
+		string $depthMax = xml_getVar ($xml,"depthMax");
+		if ($depthMax != "")
+			$depthMaxDist = (float)$depthMax;
+	}
+	
+	// get assets
+	string $assetsXML[] = xml_getTag ($xml,"asset");
+	
+	// build a list of all the custom objects
+	// as we go through each layer remove these objects, so that custom objects can be used to take items out of an asset (e.g. a door from a set)
+	print ("mentalRayRenderLayers: Getting custom objects...\n");
+	string $allCustomObjects[];
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		string $assetType = xml_getVar ($assetsXML[$i],"assetType");
+		if ($assetType == "misc")
+		{
+			string $customMembers[] = getCustomObjectMembers ($assetsXML[$i]);
+			if (size($customMembers))
+				$allCustomObjects = stringArrayCatenate ($allCustomObjects,$customMembers);
+		}	
+	}
+	print ("mentalRayRenderLayers (DEBUG): About to call expandToLeaves.\n");
+	// expand the custom object list to leaf level
+	$allCustomObjects = expandToLeaves ($allCustomObjects);
+
+	print ("mentalRayRenderLayers (DEBUG): Done getting custom objects.\n");
+	
+	// do shader based passes first. e.g. color, which involves switching all shaders irrespective of what they are assigned to.
+	// doing it first, allows it to be overwritten later, e.g. if some objects have occlusion turned on.
+	if ($color)
+	{
+		rlcColorPass();	// located in main scripts directory
+	}
+	
+	
+	// end shader based passes
+	
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		string $subAssetsXML[] = xml_getTag ($assetsXML[$i],"subPart");
+		string $curAssetsXML[]; clear $curAssetsXML;
+		$curAssetsXML[0] = $assetsXML[$i];
+		if (size($subAssetsXML))
+			$curAssetsXML = stringArrayCatenate ($curAssetsXML,$subAssetsXML);
+			
+		for ($j=0;$j<size($curAssetsXML);$j++)
+		{
+			string $namespace = xml_getVar ($curAssetsXML[$j],"name");
+			string $renderState = xml_getVar ($curAssetsXML[$j],"renderState");
+			
+			print ("mentalRayRenderLayers: working on "+$namespace+"...\n");
+			
+			string $objectList[];
+			string $v2_miCacheLoc_in_objectList = "";
+			// if the asset type is not misc (custom obj), get all objects in the namespace, then subtract all custom objects (all the custom assets)
+			string $assetType = xml_getVar ($curAssetsXML[$j],"assetType");
+
+			if ($assetType != "misc")
+			{
+				//$objectList = `ls -l -ap -ni -dag -type shape ($namespace+":*")`;
+				// removed -dag flag - this caused members of child namespaces to be listed.
+				//$objectList = `ls -l -ap -ni -type shape ($namespace+":*")`;
+				
+				$objectList = getObjectList ($namespace);
+				if (size($allCustomObjects))
+				{
+					int $sizeBefore = size($objectList);
+					string $listBefore[] = $objectList;
+					$objectList = stringArrayRemove ($allCustomObjects,$objectList);
+					//print ("Removing custom objects from "+$namespace+"\n");
+					
+					int $sizeAfter = size($objectList);
+					//print ("Size before = "+$sizeBefore+", size after "+$sizeAfter+"\n");
+					string $removed[] = stringArrayRemove ($objectList,$listBefore);
+					//print ("Objects removed from "+$namespace+":\n");
+					//print $removed;
+				}
+			}
+			else
+			{
+				// for custom objects, get members and expand
+				$objectList = getCustomObjectMembers ($curAssetsXML[$j]);
+				$objectList = expandToLeaves ($objectList);
+			}
+			
+			// --------------------
+			/*
+				If we have a v2 mi cache locator
+			*/
+			// --------------------
+			if ($gGot_v2_cache_loc )
+			{
+				// is the v2 mi cache locator contained in the current object list?
+				string $v2_cacheLoc_shape[] = `listRelatives -s -ni -f  $miCacheLocators[0]`;
+				if (!size($v2_cacheLoc_shape))
+				{
+					warning ("mentalRayRenderLayers: Problems encountered with miCacheLocator - shape node missing.");	
+				}
+				else
+				{
+					int $v2_cacheLoc_index = stringArrayFindIndex ($v2_cacheLoc_shape[0],$objectList)	;
+					if ($v2_cacheLoc_index != -1)
+					{
+						$v2_miCacheLoc_in_objectList = $miCacheLocators[0];
+					}
+				}
+			}
+			// set custom smoothing
+			// do we override the smoothing?
+			string $overrideStr = xml_getVar ($curAssetsXML[$j],"overrideSmooth");
+			int $doOverride = 0;
+			if ($overrideStr != "")
+				$doOverride = (int)$overrideStr;
+				
+			// 
+			if ($doOverride)
+			{
+				// make sure we get the smoothing lever
+				string $smoothLevelStr = xml_getVar ($curAssetsXML[$j],"smoothing");
+				if ($smoothLevelStr != "")
+				{
+					int $smoothingLevel = (int)$smoothLevelStr;
+					print ("mentalRayRenderLayers: Setting override smooth to "+$smoothingLevel+" on "+$namespace+"\n");
+					
+					setOverrideSmooth ($objectList,$smoothingLevel);	
+				}	
+			}
+			
+			// =================================
+			// 02/28/06 - properties per layer
+			// =================================
+			// remove "layer" from "layer1", etc
+			int $layerNum = substring($layerName, 6, size($layerName));
+			
+			int $overrideCastShadows    = 0;
+			int $overrideRecieveShadows = 0;
+			int $overrideMotionBlur     = 0;
+			int $overrideReflectionVis  = 0;				
+			
+			// casts shadows
+			$overrideStr = xml_getVar ($curAssetsXML[$j], "castShadows");
+			if ( ($overrideStr != "") && (size($overrideStr) >= $layerNum) )
+			{
+				$overrideCastShadows = substring($overrideStr, $layerNum, $layerNum);
+			}
+			
+			// recieveShadows
+			$overrideStr = xml_getVar ($curAssetsXML[$j], "receiveShadows");
+			if ( ($overrideStr != "") && (size($overrideStr) >= $layerNum) )
+			{
+				$overrideRecieveShadows = substring($overrideStr, $layerNum, $layerNum);
+			}
+			
+			// motion blur
+			$overrideStr = xml_getVar ($curAssetsXML[$j], "motionBlur");
+			if ( ($overrideStr != "") && (size($overrideStr) >= $layerNum) )
+			{
+				$overrideMotionBlur = substring($overrideStr, $layerNum, $layerNum);
+			}
+			
+			// visible in reflections
+			$overrideStr = xml_getVar ($curAssetsXML[$j], "reflectionVis");
+			if ( ($overrideStr != "") && (size($overrideStr) >= $layerNum) )
+			{
+				$overrideReflectionVis = substring($overrideStr, $layerNum, $layerNum);
+			}
+			
+			// end render stat overrides			
+			
+			if ($renderType == "occlusion")
+			{
+				if ($renderState == "shadowCasting")
+					$renderState = "occludes";	
+			}
+			
+			// handle motion blur on rfx_fur
+			int $mb_state = (int)$motionBlur;
+			if ($overrideMotionBlur != 0)
+			{
+				if ($overrideMotionBlur == 1)
+					$mb_state = 1;
+				else
+					$mb_state = 2;
+			}
+			set_fur_motionBlur ($objectList,$mb_state);
+			
+			// switch based on renderState
+			switch ($renderState)
+			{
+				case "visible":
+					// apply gray shader if motionVector is turned on
+					if ($motionVector)
+					{
+						if ($mayaRender != "1")
+						{
+							string $shader = createMentalRayMVShader($mvMaxDisplace);
+							assignShaderToAllInList ($objectList,$shader);
+						}
+						else
+						{	
+							string $grayShader = createLambertShaderNew ("gray", {0.5,0.5,0.5});
+							assignShaderUnique($objectList,$grayShader);							
+							setAttrList ($objectList,"castsShadows",0);
+							setAttrList ($objectList,"receiveShadows",0);
+						}
+					}
+					else if ($color)
+					{
+						// per asset color settings
+						setAttrList ($objectList,"castsShadows",0);
+						setAttrList ($objectList,"receiveShadows",0);
+						turnOffLights ($objectList);
+							
+					}
+					else if ($renderType == "envColor")
+					{
+						setAttrList ($objectList,"receiveShadows",0);	
+					}
+					else if ($renderType == "envShadow" || $renderType == "contactShadow")
+					{
+						string $useBgShader = createUseBackgroundShaderNew (0);	// 0 means no reflections
+						assignShaderUnique($objectList,$useBgShader);
+						
+					}
+					else if ($renderType == "envShadow2")
+					{	
+						string $useBgShader = createUseBackgroundShaderNew (0);	// 0 means no reflections
+						assignShaderUnique($objectList,$useBgShader);
+						setAttrList ($objectList,"castsShadows",0);
+							
+					}
+					else if ($renderType == "reflection" || $renderType == "reflectionAlpha")
+					{
+						string $useBgReflShader = createUseBackgroundShaderNew (1);	// 1 means yes to reflections
+						assignShaderUnique($objectList,$useBgReflShader);
+						setAttrList ($objectList,"receiveShadows",0);
+					}
+					else if ($renderType == "ambientOcclusion")
+					{
+						if (!$ambOccBump)
+						{
+							string $ambientOcclusionShader = createAmbOccShaderNew ($ambOccMaxDist,$ambOccSpread);
+							assignShaderUnique($objectList,$ambientOcclusionShader);
+						}
+						else
+						{
+							//#2/27	
+							//createAmboccBump ($objectList, $ambOccMaxDist, $ambOccSpread, $bumpMult);
+							createAmboccBump ($ambOccMaxDist, $ambOccSpread, $bumpMult);
+						}
+						turnOffLights ($objectList);	
+						if ($v2_miCacheLoc_in_objectList != "")
+						{
+							catch (`setAttr ($v2_miCacheLoc_in_objectList+".rlc_useShader") 1`);
+							// tell it to use ambOcc shader
+						}
+					}
+					else if ($renderType == "colorSeparation")
+					{
+						string $assetColorStr = xml_getVar($curAssetsXML[$j], "colorSepIcon");
+
+						// make sure it exists
+						if ($assetColorStr == "")
+						{
+							$assetColorStr = xml_getVar ($curAssetsXML[$j],"iconColor");
+						}				
+						
+						// look up rgb value
+						float $assetColor[] = get_rlc_color ($assetColorStr);
+						// #3/03
+						// Create a shader
+						string $colorSepShader = createColorSepShaderNew ($assetColor);
+						assignShaderUnique($objectList,$colorSepShader);
+
+						setAttrList ($objectList,"castsShadows",0);
+						setAttrList ($objectList,"receiveShadows",0);
+						setAttrList ($objectList, "visibleInReflections", 0);
+
+						turnOffLights ($objectList);	
+					}
+					else if ($renderType == "depth")
+					{
+						string $depthShader = createDepthShaderNew ($depthMinDist,$depthMaxDist);
+						assignShaderUnique($objectList,$depthShader);
+						turnOffLights ($objectList);	
+						setAttrList ($objectList,"castsShadows",0);
+						setAttrList ($objectList,"receiveShadows",0);
+					}
+					else if ($broadLight)
+					{	
+						string $broadLightShader = createBroadRampShaderNew ();
+						assignShaderUnique($objectList,$broadLightShader);	
+					}
+					else if ($tightLight)
+					{
+						string $tightLightShader = createTightRampShaderNew ();
+						assignShaderUnique($objectList,$tightLightShader);			
+					}
+					else if ($whiteLambert)
+					{
+						string $whiteLambert = createLambertShaderNew ("white", {1.0,1.0,1.0});
+						assignShaderUnique($objectList,$whiteLambert);		
+					}
+					else if ($normalPass)
+					{
+						string $normalShader = createNormalShaderNew();
+						assignShaderUnique($objectList,$normalShader);		
+					} 
+					else
+					{
+						// normal beauty pass
+						// render stat overrides?
+						// 0 == No Override
+						// 1 == Override ON
+						// 2 == Override OFF
+						
+						if ($overrideCastShadows != 0)
+						{
+							if ($overrideCastShadows == 1)
+							{
+								setAttrList ($objectList, "castsShadows", 1); // set castsShadows override on
+								if ($v2_miCacheLoc_in_objectList != "")
+								{
+									catch (`setAttr ($v2_miCacheLoc_in_objectList+".castsShadows") 1`);
+								}	
+							}
+							else
+							{
+								setAttrList ($objectList, "castsShadows", 0); // set castShadows override off
+								if ($v2_miCacheLoc_in_objectList != "")
+								{
+									catch (`setAttr ($v2_miCacheLoc_in_objectList+".castsShadows") 0`);
+								}
+							}
+						}
+						
+						if ($overrideRecieveShadows != 0)
+						{
+							if ($overrideRecieveShadows == 1)
+							{
+								setAttrList ($objectList, "receiveShadows", 1);	// set receiveShadows override on
+								if ($v2_miCacheLoc_in_objectList != "")
+								{
+									catch (`setAttr ($v2_miCacheLoc_in_objectList+".receiveShadows") 1`);
+								}	
+							}
+							else
+							{
+								setAttrList ($objectList, "receiveShadows", 0); // set receiveShadows override off
+								if ($v2_miCacheLoc_in_objectList != "")
+								{
+									catch (`setAttr ($v2_miCacheLoc_in_objectList+".receiveShadows") 0`);
+								}
+							}							
+						}
+						
+						if ($overrideMotionBlur != 0)
+						{
+							if ($overrideMotionBlur == 1)
+								setAttrList ($objectList, "motionBlur", 1); // set motionBlur override on
+							else 
+								setAttrList ($objectList, "motionBlur", 0); // set motionBlur override off
+						}	
+						
+						if ($overrideReflectionVis != 0)
+						{
+							if ($overrideReflectionVis == 1)
+								setAttrList ($objectList, "visibleInReflections", 1);	// set reflectionVis override on
+							else
+								setAttrList ($objectList, "visibleInReflections", 0); // set reflectionVis override off
+						}
+					}
+					break;
+				case "omit":
+					// delete objects
+					deleteObjectsInList ($objectList);
+					break;
+				case "shadowCasting":
+					// turn off primary visibility
+					if ($motionVector)
+					{
+						deleteObjectsInList ($objectList);	
+					}
+					else if ($color)
+					{
+						deleteObjectsInList ($objectList);		
+					}
+					else
+					{
+						turnOffLights ($objectList);
+						setAttrList ($objectList,"receiveShadows",0);
+						setAttrList ($objectList,"primaryVisibility",0);	
+						if ($renderType == "envColor")
+							setAttrList ($objectList,"castsShadows",0);
+						if ($renderType == "reflectionAlpha")
+						{	
+							string $whiteLambert = createLambertShaderNew ("white", {1.0,1.0,1.0});
+							assignShaderUnique($objectList,$whiteLambert);	
+						}
+						
+						if ($v2_miCacheLoc_in_objectList != "")
+						{
+							catch (`setAttr ($v2_miCacheLoc_in_objectList+".receiveShadows") 0`);
+							catch (`setAttr ($v2_miCacheLoc_in_objectList+".primaryVisibility") 0`);
+						}
+					}
+					break;
+				case "occludes":
+					// assign black hole shader
+					string $blackholeShader = createBlackHoleShaderNew();
+					assignShaderUnique($objectList,$blackholeShader);
+					setAttrList ($objectList,"receiveShadows",0);	
+					
+					if ($v2_miCacheLoc_in_objectList != "")
+					{
+						catch (`setAttr ($v2_miCacheLoc_in_objectList+".receiveShadows") 0`);
+						catch (`setAttr ($v2_miCacheLoc_in_objectList+".rlc_useShader") 2`); // use black hole shader
+					}
+					
+					if ($overrideCastShadows != 0)
+					{
+						if ($overrideCastShadows == 1)
+						{
+							setAttrList ($objectList, "castsShadows", 1); // set castsShadows override on
+							if ($v2_miCacheLoc_in_objectList != "")
+							{
+								catch (`setAttr ($v2_miCacheLoc_in_objectList+".castsShadows") 1`);
+							}	
+						}
+						else
+						{
+							setAttrList ($objectList, "castsShadows", 0); // set castShadows override off
+							if ($v2_miCacheLoc_in_objectList != "")
+							{
+								catch (`setAttr ($v2_miCacheLoc_in_objectList+".castsShadows") 0`);
+							}
+						}
+					}
+										
+					if ($overrideMotionBlur != 0)
+					{
+						if ($overrideMotionBlur == 1)
+							setAttrList ($objectList, "motionBlur", 1); // set motionBlur override on
+						else 
+							setAttrList ($objectList, "motionBlur", 0); // set motionBlur override off
+					}	
+						
+					if ($overrideReflectionVis != 0)
+					{
+						if ($overrideReflectionVis == 1)
+							setAttrList ($objectList, "visibleInReflections", 1);	// set reflectionVis override on
+						else
+							setAttrList ($objectList, "visibleInReflections", 0); // set reflectionVis override off
+					}					
+					
+					break;
+				default:
+					break;		
+		
+			}
+		}
+		// end loop j
+	}
+	// end main asset loop (i)
+	
+	// set the renderer to maya if specified 
+	if ($mayaRender)
+	{
+		if ($renderType != "envShadow" && !$motionVector)
+		{
+			setMayaGeneralRenderGlobals ();
+			// these have special maya render globals	
+		}	
+		$SR_renderer = "maya";
+	}
+	
+	// modify render globals, etc...
+	if ($motionVector)
+	{
+		if ($mayaRender == "1")
+		{
+			// switch the renderer to maya
+			$SR_renderer = "maya";
+			// set render globals for rendering motion vector pass in maya.
+			setMayaMotionVectorRenderGlobals ();	
+		}
+		else
+		{
+			mentalRayMVGlobals;
+		}
+		
+		
+	}
+	else if ($renderType == "envShadow")
+	{
+		if ($mayaRender == "1" || $mayaRenderOldBehavior)
+		{
+			// switch the renderer to maya
+			$SR_renderer = "maya";
+			print ("mentalRayRenderLayers: Switching renderer to maya for env shadow pass...\n");
+			// set render globals for rendering shadow passes in maya.
+			setMayaShadowPassRenderGlobals ();	
+		}	
+	}
+	else if ($renderType == "ambientOcclusion" || $renderType == "ambientOcclusionLg")
+	{
+		mentalRayAmbientOcclusionGlobals();	
+	}
+	else if ($renderType == "contactShadow")
+	{
+		// force renderer to mental ray
+		$SR_renderer = "mentalRay";
+		// turn on final gathering and set rays
+		setAndKeyAttr ("miDefaultOptions.finalGather", 1);
+		setAndKeyAttr ("miDefaultOptions.finalGatherRays", 1500);
+		setAndKeyAttr ("miDefaultOptions.finalGatherMinRadius", 0);
+		setAndKeyAttr ("miDefaultOptions.finalGatherMaxRadius", 4);
+		setAndKeyAttr ("miDefaultOptions.rayTracing", 1);
+		setAndKeyAttr ("miDefaultOptions.maxReflectionRays", 1);
+		setAndKeyAttr ("miDefaultOptions.maxRefractionRays", 0);
+		
+		// hide all the lights in the scene
+		string $lights[] = `ls -type light`;
+		turnOffLights ($lights);
+		
+		// enable default light
+		setAndKeyAttr ("defaultRenderGlobals.enableDefaultLight", 1);
+		
+		// set bg color of cameraMain to 100% white
+		setAndKeyAttr ("cameraMainShape.backgroundColorR", 1);
+		setAndKeyAttr ("cameraMainShape.backgroundColorG", 1);
+		setAndKeyAttr ("cameraMainShape.backgroundColorB", 1);
+		
+		// done
+	
+	}
+	else if ($finalGather)
+	{
+		if ($mayaRender != "1")
+			setAndKeyAttr ("miDefaultOptions.finalGather", 1);
+	}
+	else
+	{
+		if ($mayaRender != "1")
+			setAndKeyAttr ("miDefaultOptions.finalGather", 0);
+
+		// insert no raytrace stuff
+		if ($noRayTrace == "1")
+			setAndKeyAttr ("miDefaultOptions.rayTracing", 0);
+	}
+	
+	// MotionBlur --------------------------------------
+	// --------------------------------------
+	if ($motionBlur == "1")
+	{
+		if ($mayaRender != "1")
+		{
+			//setAndKeyAttr ("miDefaultOptions.motionBlur", 1);
+			print ("mentalRayRenderLayers: Turning motion blur ON for Mental Ray Render.\n");
+			mentalRayMBGlobals();
+			
+			// 05/05/06 - make sure that all hidden lights are hidden at the transform level.
+			hideLightsForMotionBlur();
+		}
+		else
+		{
+			setAttr -l 0 "defaultRenderGlobals.motionBlur";
+			//setAndKeyAttr ("defaultRenderGlobals.motionBlur",1);
+			setAttr "defaultRenderGlobals.motionBlur" yes;
+			print ("mentalRayRenderLayers: Turning motion blur ON for Maya Render.\n");
+			//
+			int $newVal = `getAttr "defaultRenderGlobals.motionBlur"`;
+			print ("mentalRayRenderLayers (DEBUG): After turning on motion blur, value is "+$newVal+"\n");
+			
+			//
+			
+		}
+
+	}
+	else
+	{
+		if (!$motionVector && $motionBlur!="1")
+		{
+			if ($mayaRender != "1")
+			{
+				//setAndKeyAttr ("miDefaultOptions.motionBlur", 0);
+				setAttr "miDefaultOptions.motionBlur" 0;
+				print ("mentalRayRenderLayers: Turning motion blur OFF for Mental Ray Render.\n");
+			}
+			else
+			{
+				setAttr -l 0 "defaultRenderGlobals.motionBlur";
+				//setAndKeyAttr ("defaultRenderGlobals.motionBlur",0);
+				setAttr "defaultRenderGlobals.motionBlur" no;
+				print ("mentalRayRenderLayers: Turning motion blur OFF for Maya Render.\n");
+			}
+		}
+	}
+	// ------------------------------------------------------
+	// mental ray caches.
+	if ($mayaRender != "1")
+	{
+		string $miCacheLocs[] = findAssetsByType ("x",0);
+		if (size($miCacheLocs))
+		{
+			createMentalRayText ($renderType);	
+		}	
+	}
+	
+	$gLayerName = $layerName;
+	$gMotionVector = $motionVector;
+	$gColor = $color;
+	$gBroadLight = $broadLight;
+	$gTightLight = $tightLight;
+	$gWhiteLambert = $whiteLambert;
+	$gNormalsPass = $normalPass;
+	$gFinalGather = $finalGather;
+	$gMotionBlur = $motionBlur;
+	$gMayaRender = $mayaRender;
+	$gRenderType = $renderType;
+	$gRapidScanLine = $rapidScanLine;
+	$gRapidVisibilitySamples = $rapidVisibilitySamples;
+	$gRapidShadingQuality = $rapidShadingQuality;
+	$gMinSamples = $minSamples;
+	$gMaxSamples = $maxSamples;	
+	
+	return $layerName;
+}

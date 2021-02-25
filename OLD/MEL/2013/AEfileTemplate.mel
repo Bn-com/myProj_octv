@@ -1,0 +1,525 @@
+// Copyright (C) 1997-2011 Autodesk, Inc., and/or its licensors.
+// All rights reserved.
+//
+// The coded instructions, statements, computer programs, and/or related
+// material (collectively the "Data") in these files contain unpublished
+// information proprietary to Autodesk, Inc. ("Autodesk") and/or its licensors,
+// which is protected by U.S. and Canadian federal copyright law and by
+// international treaties.
+//
+// The Data is provided for use exclusively by You. You have the right to use,
+// modify, and incorporate this Data into other products for purposes authorized 
+// by the Autodesk software license agreement, without fee.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AUTODESK
+// DOES NOT MAKE AND HEREBY DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTIES
+// INCLUDING, BUT NOT LIMITED TO, THE WARRANTIES OF NON-INFRINGEMENT,
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, OR ARISING FROM A COURSE 
+// OF DEALING, USAGE, OR TRADE PRACTICE. IN NO EVENT WILL AUTODESK AND/OR ITS
+// LICENSORS BE LIABLE FOR ANY LOST REVENUES, DATA, OR PROFITS, OR SPECIAL,
+// DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES, EVEN IF AUTODESK AND/OR ITS
+// LICENSORS HAS BEEN ADVISED OF THE POSSIBILITY OR PROBABILITY OF SUCH DAMAGES.
+
+//
+//  Procedure Name:
+//	AEfileTemplate
+//
+//  Description Name;
+//	Creates the attribute editor controls for the file Node
+//
+//  Input Value:
+//	nodeName 
+//
+//  Output Value:
+//	None
+// 
+
+// bring in the necessary procedures for the color profile controls
+source "colorProfileProcedures";
+
+global proc AEfileTextureNameChanged(
+	string $fileNode)
+{
+	//
+	// Description:
+	//	This procedure is called from AEassignTextureCB.
+	//	If the newly chosen file has an alpha channel, this procedure hooks up
+	//	the outTransparency attribute of the file node to the transparency
+	//	attribute of materials which are using this file for color, where
+	//	appropriate.
+	//
+
+	if (`getAttr ($fileNode + ".fileHasAlpha")` == 1)
+	{
+		//
+		// The newly chosen file has an alpha channel.
+		//
+
+		string $dstNodeArray[];
+		
+		$dstNodeArray = 
+			`listConnections 
+				-source false 
+				-destination true 
+				($fileNode + ".outColor")`;
+		
+		string $dstNode;
+		
+		for ($dstNode in $dstNodeArray)
+		{
+			if (	(isClassified($dstNode, "shader"))
+				&&	(size(`ls ($dstNode + ".transparency")`) != 0)
+				&&	(size(`ls ($dstNode + ".color")`) != 0)
+				&&	(`isConnected ($fileNode+".outColor") ($dstNode+".color")`)
+				&&	(size(`listConnections
+						-source true
+						-destination false
+						($dstNode + ".transparency")`) == 0))
+			{
+				// The dstNode is a material,
+				// and it has a transparency attribute,
+				// and it has a color attribute,
+				// and the file node outColor is connected to the material 
+				// color,
+				// and that transparency attribute is not currently the
+				// destination of any connection.
+				// We want to connect this file node's outTransparency to
+				// the dstNode's transparency.
+				//
+				connectAttr 
+					($fileNode + ".outTransparency") 
+					($dstNode + ".transparency");
+			}
+		}
+	}
+}
+
+//
+//  Procedure Name:
+//	AEassignTextureCB
+//
+
+global proc int AEassignTextureCB( string $fileAttribute,
+                                 string $filename,
+                                 string $fileType )
+{
+	//
+	// Description:
+	//	This procedure is called when the user changes the file texture name in
+	//	the edit box in the file texture attribute editor (whether by manually
+	//	typing it in, or by using the file browser to choose a new file).
+	//
+	//	This procedure updates the file texture node file name attribute and
+	//	calls AEfileTextureNameChanged to do some special case handling for 
+	//	files with alpha channels. 
+	//
+
+	python "try:\n\treload(idmt.maya.path)\nexcept:\n\timport idmt.maya.path";	// added by huangzhongwei@idmt.org.cn, 20081024, because of ${MC_winxII}
+	$filename = `python ("idmt.maya.path.GetDollarPath('" + $filename + "')")`;
+	setAttr $fileAttribute -type "string" $filename;
+
+	string $currentDir = `workspace -q -dir`;
+    retainWorkingDirectory ($currentDir);
+
+	// Extract the name of the node from the node.attribute name
+	//
+	string $tokenArray[];
+	tokenize($fileAttribute, ".", $tokenArray);
+
+	string $fileNode = $tokenArray[0];
+
+	AEfileTextureNameChanged($fileNode);
+
+	return true;
+}
+
+//
+//  Procedure Name:
+//	AEfileTextureBrowser
+//
+
+global proc AEfileTextureBrowser( string $cmd, string $fileType )
+{
+    //get the directory where texure is put
+    string $path = fromNativePath(`textField -q -text textureNameField`);
+        
+    //if file exist, then use it as start directory of file browser
+    if(`filetest -f $path`) 
+    {
+        $path = dirname( $path );
+                   
+        workspace -dir $path;
+    }
+    else
+    {
+        string $workspace = `workspace -q -fn`;
+        
+        setWorkingDirectory $workspace $fileType "sourceImages";
+    }
+    
+    fileBrowser ($cmd, "Open", $fileType, 0);
+}
+
+//
+//  Procedure Name:
+//	AEfileTextureNameNew 
+//
+
+global proc AEfileTextureNameNew (string $fileAttribute)
+{
+	setUITemplate -pst attributeEditorTemplate;
+	rowLayout -nc 3 textureNameLayout;
+		text -label (uiRes("m_AEfileTemplate.kImageName"));
+		textField textureNameField;
+			symbolButton -image "navButtonBrowse.png" browser;
+	setParent ..;
+	setUITemplate -ppt;
+	
+    AEfileTextureNameReplace $fileAttribute;
+}
+
+//
+//  Procedure Name:
+//	AEfileTextureNameReplace
+//
+
+global proc AEfileTextureNameReplace (string $fileAttribute)
+{
+	string $tokens[];
+	tokenize $fileAttribute $tokens;
+	
+	connectControl -fileName textureNameField $tokens[0];
+
+    string $command = "AEassignTextureCB "+" "+$tokens[0];
+
+    button -e -c
+		( "AEfileTextureBrowser \"" + $command + "\" " + $tokens[1] ) browser;
+}
+
+global proc checkUseHardwareTextureCycling ( string $nodeName ) 
+{
+	string $nodeAttr = $nodeName + ".useHardwareTextureCycling";
+	int $value = `getAttr $nodeAttr`;
+	
+	if ( $value == 1 ) {
+		editorTemplate -dimControl $nodeName "startCycleExtension" false;
+		editorTemplate -dimControl $nodeName "endCycleExtension" false;
+		editorTemplate -dimControl $nodeName "byCycleIncrement" false;
+	} else {
+		editorTemplate -dimControl $nodeName "startCycleExtension" true;
+		editorTemplate -dimControl $nodeName "endCycleExtension" true;
+		editorTemplate -dimControl $nodeName "byCycleIncrement" true;
+	}
+}
+
+//
+//  Procedure Name:
+//  checkFilterType
+//
+
+global proc checkFilterType ( string $nodeName )
+{
+	string $nodeAttr = $nodeName + ".filterType";
+	int $filter = `getAttr $nodeAttr`;
+	if ($filter == 0) {
+		editorTemplate -dimControl $nodeName "filter" true;
+		editorTemplate -dimControl $nodeName "filterOffset" true;
+
+		editorTemplate -dimControl $nodeName "miUseEllipticalFilter" true;
+
+	} else {
+		editorTemplate -dimControl $nodeName "filter" false;
+		editorTemplate -dimControl $nodeName "filterOffset" false;
+	}
+
+	// if ($filter == 1)
+	//	editorTemplate -dimControl $nodeName "useMaximumRes" false;
+	// else
+	//	editorTemplate -dimControl $nodeName "useMaximumRes" true;
+
+
+	if ($filter == 1) {
+		editorTemplate -dimControl $nodeName "miUseEllipticalFilter" false;
+	} else {
+		editorTemplate -dimControl $nodeName "miUseEllipticalFilter" true;
+	}
+
+	checkEllipticalFilter($nodeName);
+
+}
+
+global proc checkEllipticalFilter ( string $nodeName )
+{
+	if (`attrFieldSliderGrp -exists fileTextureEllipticalLevelGrp`) {
+		int $filterType = `getAttr ($nodeName + ".filterType")`;
+		int $useElliptical = `getAttr ($nodeName + ".miUseEllipticalFilter")`;
+		int $value = (($filterType == 1) && ($useElliptical));
+
+		attrFieldSliderGrp -edit -enable $value
+			fileTextureEllipticalLevelGrp;
+	}
+}
+
+global proc enableAutoConvertForElliptical ( string $nodeName )
+{
+	int $filterType = `getAttr ($nodeName + ".filterType")`;
+	int $useElliptical = `getAttr ($nodeName + ".miUseEllipticalFilter")`;
+	int $dim = (($filterType != 1) || (!$useElliptical));
+	
+	// activate auto-convert to gain benefits in filtering
+	if (!$dim) {
+		setAttr ($nodeName + ".miOverrideConvertToOptim") 1;
+		setAttr ($nodeName + ".miConvertToOptim") 1;
+	}
+
+	// call UI enable function in case user set this attribute
+	// manually
+	checkEllipticalFilter $nodeName;
+}
+
+// Elliptical filter controls
+global proc AEfileTextureEllipticalFilterNew ( string $useFilter,
+												string $level )
+{
+	checkBoxGrp -label1 (uiRes("m_AEfileTemplate.kUseElliptical"))
+		-annotation (uiRes("m_AEfileTemplate.kUseEllipticalAnn"))
+		fileTextureEllipticalFilterCB;
+	attrFieldSliderGrp -label (uiRes("m_AEfileTemplate.kEllQuality"))
+		-annotation (uiRes("m_AEfileTemplate.kEllQualityAnn"))
+		fileTextureEllipticalLevelGrp;
+
+	AEfileTextureEllipticalFilterReplace $useFilter $level;
+}
+
+global proc AEfileTextureEllipticalFilterReplace ( string $useFilter,
+													string $level )
+{
+	string $tokenArray[];
+	tokenize($useFilter, ".", $tokenArray);
+	string $node = $tokenArray[0];
+
+	// change command to enable/disable level UI
+	checkBoxGrp -edit
+		-changeCommand ("checkEllipticalFilter " + $node)
+		fileTextureEllipticalFilterCB;
+	// connect attr to checkbox
+	connectControl -index 2
+		fileTextureEllipticalFilterCB
+		$useFilter;
+	// hook up script job to automatically enable the auto convert
+	// when turning on elliptical filtering. By hooking this
+	// to the attribute and not the UI, it will only be done when
+	// the user sets the attr and not also when the UI is loaded
+	scriptJob -replacePrevious
+		-parent fileTextureEllipticalFilterCB
+		-attributeChange $useFilter
+				("enableAutoConvertForElliptical " + $node);
+	
+	attrFieldSliderGrp -edit
+		-attribute $level
+		fileTextureEllipticalLevelGrp;
+}
+
+//
+// File Texture Reload functions
+//
+
+global proc AEfileTextureReload (string $ftn)
+{
+    {
+		setUITemplate -pst attributeEditorTemplate;
+		rowLayout -nc 5  -cl5  "center" "center" "center" "center" "center";
+			text -label "";
+			button -label (uiRes("m_AEfileTemplate.kReload")) fileReloadBtn;
+			button -label (uiRes("m_AEfileTemplate.kEdit"))  fileEditBtn;
+			button -label (uiRes("m_AEfileTemplate.kView"))  fileViewBtn;
+	//	text -label "";
+	// added by huangzhongwei@idmt.org.cn, 20081024, because of ${MC_winxII}
+		button -label "Explore" -command ("AEfileTextureExploreCmd " + $ftn) fileExploreBtn;
+
+		setParent ..;
+		setUITemplate -ppt;
+	}
+	AEfileTextureReloadReplace($ftn);
+}
+
+global proc AEfileTextureReloadReplace (string $ftn)
+{
+    {
+		button -e -c ("AEfileTextureReloadCmd " + $ftn) fileReloadBtn;
+		button -e -c ("AEfileTextureEditCmd " + $ftn) fileEditBtn;
+		button -e -c ("AEfileTextureViewCmd " + $ftn) fileViewBtn;
+	}
+	button -e -c ("AEfileTextureExploreCmd " + $ftn) fileExploreBtn;	// added by huangzhongwei@idmt.org.cn, 20081024, because of ${MC_winxII}
+}
+
+global proc AEfileTextureReloadCmd (string $ftn)
+{
+    string $currFile = `getAttr $ftn`;
+	if ($currFile != "") {
+		int $i;
+		string $allTextures[] = `ls -typ file -type mentalrayTexture`;
+
+		// this loop is needed to guarantee all texture nodes who
+		// reference this file gets updated.
+		for ($i = 0; $i < size($allTextures); $i++) {
+			string $ithFile = `getAttr ($allTextures[$i] + ".ftn")`;
+			if ($ithFile == $currFile)
+				setAttr ($allTextures[$i] + ".ftn") -type "string" $currFile;
+		}
+	}
+}
+
+global proc AEfileTextureEditCmd (string $ftn)
+{
+    string $currFile = `getAttr $ftn`;
+	if ($currFile != "") {
+
+	$currFile = `workspace -expandName $currFile`;	// added by huangzhongwei@idmt.org.cn, 20081024, because of ${MC_winxII}
+
+		if (`about -linux`) {
+			int $sequence  = 0;	// 0 -> single image
+			int $editImage = 1;
+			launchImageApp($currFile, $sequence, $editImage);
+		}
+		else {
+			launchImageEditor -eif $currFile;
+		}
+	}
+}
+
+global proc AEfileTextureViewCmd (string $ftn)
+{
+    string $currFile = `getAttr $ftn`;
+	if ($currFile != "") {
+
+	$currFile = `workspace -expandName $currFile`;	// added by huangzhongwei@idmt.org.cn, 20081024, because of ${MC_winxII}
+
+		if (`about -linux`) {
+			int $sequence  = 0;	// 0 -> single image
+			int $editImage = 0;	// 0 -> view image
+			launchImageApp($currFile, $sequence, $editImage);
+		}
+		else {
+			launchImageEditor -vif $currFile;
+		}
+	}
+}
+
+
+//
+//	Prefilter settings
+//
+global proc checkPreFilter ( string $nodeName )
+{
+    string $nodeAttr = $nodeName + ".preFilter";
+    int $value = `getAttr $nodeAttr`;
+
+    if ( $value == 1 ) {
+        editorTemplate -dimControl $nodeName "preFilterRadius" false;
+    } else {
+        editorTemplate -dimControl $nodeName "preFilterRadius" true;
+    }
+}
+
+global proc checkHDRMapping( string $nodeName )
+{
+    string $nodeAttr = $nodeName + ".hdrMapping";
+    int $value = `getAttr $nodeAttr`;
+    
+    // 2 == exponential, so enable exponential exposure parameter
+    if ( $value == 2 )
+    {
+        editorTemplate -dimControl $nodeName "hdrExposure" false;
+    }
+    else
+    {
+        editorTemplate -dimControl $nodeName "hdrExposure" true;
+    }  
+}
+
+global proc checkAutoConvert( string $nodeName )
+{
+	string $nodeAttr = $nodeName + ".miOverrideConvertToOptim";
+	int $value = `getAttr $nodeAttr`;
+	int $dim = !$value;
+	editorTemplate -dimControl $nodeName "miConvertToOptim" $dim;
+}
+
+//
+//  Procedure Name:
+//	AEfileTemplate
+//
+
+global proc AEfileTemplate ( string $nodeName )
+{
+	fileOrMovieTemplate( $nodeName, "image" );
+}
+
+global proc fileOrMovieTemplate ( string $nodeName, string $fileType )
+{
+	AEswatchDisplay $nodeName;
+	editorTemplate -beginScrollLayout;
+		editorTemplate -beginLayout (uiRes("m_AEfileTemplate.kFileAttributes")) -collapse 0;
+			editorTemplate -addControl "filterType" "checkFilterType";
+			editorTemplate -addControl "preFilter" "checkPreFilter";
+			editorTemplate -addControl "preFilterRadius";
+			editorTemplate -addSeparator;
+
+			editorTemplate -callCustom "AEfileTextureNameNew" 
+						"AEfileTextureNameReplace" 
+						( "fileTextureName " + $fileType );
+			editorTemplate -callCustom "AEfileTextureReload"
+						"AEfileTextureReloadReplace"
+						"fileTextureName";
+            editorTemplate -ccu "AEcolorProfileNew" "AEcolorProfileReplace" "colorProfile";
+			editorTemplate -addSeparator;
+			
+			editorTemplate -suppress "filterWidth";
+			editorTemplate -beginNoOptimize;
+			editorTemplate -suppress "useMaximumRes";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kUseBOT")) -addControl "useCache";
+			editorTemplate -addControl "disableFileLoad";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kUseImageSequence")) -addControl "useFrameExtension" "checkUseFrameExtension";
+			editorTemplate -endNoOptimize;
+			editorTemplate -label (uiRes("m_AEfileTemplate.kImageNumber")) -addControl "frameExtension";
+			editorTemplate -addControl "frameOffset";
+//			editorTemplate -label "Missing frames" -addControl "framesMissing";
+		editorTemplate -endLayout;
+
+		editorTemplate -beginLayout (uiRes("m_AEfileTemplate.kInteractiveSequenceCachingOptions"));
+			editorTemplate -label (uiRes("m_AEfileTemplate.kUseInteractiveSequenceCaching")) -addControl "useHardwareTextureCycling"
+						"checkUseHardwareTextureCycling";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kSequenceStart")) -addControl "startCycleExtension";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kSequenceEnd")) -addControl "endCycleExtension";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kSequenceIncrement")) -addControl "byCycleIncrement";
+		editorTemplate -endLayout;
+   	
+		editorTemplate -beginLayout (uiRes("m_AEfileTemplate.kHighDynamicRangeImage"));
+			editorTemplate -label (uiRes("m_AEfileTemplate.kFloatToFixedPoint")) -addControl "hdrMapping" "checkHDRMapping";
+			editorTemplate -label (uiRes("m_AEfileTemplate.kExposure")) -addControl "hdrExposure";
+		editorTemplate -endLayout;		
+
+		// suppressed attributes
+		editorTemplate -suppress "noiseUV";
+		editorTemplate -suppress "blendForInteractive";
+		
+
+		// include/call base class/node attributes
+		AEtexture2dCommon $nodeName;
+
+	editorTemplate -addExtraControls;
+	editorTemplate -endScrollLayout;
+}
+
+// added by huangzhongwei@idmt.org.cn, 20081024
+global proc AEfileTextureExploreCmd (string $ftn)
+{
+	string $currFile = `getAttr $ftn`;
+	$currFile = `workspace -expandName $currFile`;
+	$currFile = `substitute "[/\\][^/\\]+$" $currFile ""`;
+	if (`filetest -d $currFile`)
+	{
+		$currFile = `substituteAllString $currFile "/" "\\"`;
+		system ("load \"" + $currFile + "\"");
+	}
+}

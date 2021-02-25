@@ -1,0 +1,1591 @@
+// template.mel (c) 2007 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	
+Use:
+	template arg
+
+Arguments:
+	arg (string)	- some argument
+
+Returns:
+	
+Dependancies:
+
+	listShots
+	stringArrayFindIndex
+	parseXML.mel
+	xml_parser plug-in
+	getNamespaceFromString
+	padNumber
+	getVersion
+	getPath
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	03/12/07
+Revisions:	03/25/07	Rev 1.0
+		- Fixed problem in logic deciding whether to remap the name of something or not.
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// latest dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/clothExportUI.2.1.mel"
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+	if (!`pluginInfo -q -l "exportPointCache"`)
+		loadPlugin "exportPointCache";
+
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+}
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// Util
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+proc getSequenceAndShotFromString (string $input, string $seq[], string $shot[])
+{
+	clear $seq;
+	clear $shot;
+	string $buf[];
+	tokenize ($input,"_",$buf);
+	
+	for ($i=0;$i<size($buf)-1;$i++)
+	{
+		$seq[0] = $seq[0] + $buf[$i];
+		if ($i<size($buf)-2)
+			$seq[0] = $seq[0] + "_";	
+	}
+	$shot[0] = $buf[size($buf)-1];
+}
+// ---------------------------------------------------------------------------------------------------
+// getPointCachingData - get a list of assets for the show that are to be pointCache exporters
+// ---------------------------------------------------------------------------------------------------
+proc string [] getPointCachingData ()
+{
+	// get the point caching assets for the show
+	string $namesAndExporters[];
+
+	string $file = getPath ("ProjectGlobals",{})+"/PointCache.xml";
+	if (!`filetest -f $file`)
+	{
+		warning ("PointCachePreExport: "+$file+" not found. No point cache will be exported.");
+		return {};
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $filename = xml_getVar ($nodes[$i],"filename");
+		string $assetName = getPath ("AssetNameFromFilename",{$filename});
+		$namesAndExporters[size($namesAndExporters)] = $assetName;
+		$namesAndExporters[size($namesAndExporters)] = getPath ("ConformPath",{$filename});
+	}
+
+	return $namesAndExporters;
+}
+// ---------------------------------------------------------------------------------------------------
+proc getAssetsFromStructureFile (string $seq, string $shot, string $namespaces[], string $names[], string $types[])
+{
+	string $struc = getPath ("ShotInfoDir",{$seq,$shot})+"/"+$seq+"_"+$shot+"_structure.xml";
+	if (!`filetest -f $struc`)
+	{
+		error ("clothExportUI: No structure file found for seq "+$seq+", "+$shot);
+	}
+
+	clear $namespaces;
+	clear $names;
+	clear $types;
+
+	string $xml = readXML ($struc,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		$namespaces[$i] = xml_getVar ($nodes[$i],"Namespace");
+		$names[$i] = xml_getVar ($nodes[$i],"Name");
+		string $assetTypeID = xml_getVar ($nodes[$i],"AssetTypeID");
+
+		switch ($assetTypeID)
+		{
+			case "1":
+				$types[$i] = "character";
+				break;
+			case "2":
+				$types[$i] = "vehicle";
+				break;
+			case "3":
+				$types[$i] = "prop";
+				break;
+			case "4":
+				$types[$i] = "set";
+				break;
+			default:
+				warning ("clothExportUI: Unknown asset type for "+$names[$i]+", found in structure file. Skipping...");
+				continue;
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// Functionality
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+proc updatePointCacheExportData (string $seq,string $shot, string $namespaces[], string $names[], string $versions[])
+{
+	string $pointCacheAttrNames[] = {
+		"namespace",
+		"pointCacheVersion",
+		"filename",
+		"assetVersion",
+		"assetStamp",
+		"shotVersion",
+		"shotStamp"
+	};
+
+	string $pointCacheAttrVals[];
+	int $numPointCacheAttrs = size($pointCacheAttrNames);
+	string $clothNamespaces[];
+	string $clothNames[];
+	string $clothVersions[];
+	string $assets[];
+
+	// get the existing data
+
+	string $file = getPath ("ShotInfoDir",{$seq,$shot})+"/"+$seq+"_"+$shot+"_pointCacheExport.xml";
+	if (`filetest -f $file`)
+	{
+		string $xml = readXML ($file,0);
+		$assets = xml_getTag ($xml,"Asset");
+		string $cloth[] = xml_getTag ($xml,"Cloth");
+
+		for ($i=0;$i<size($assets);$i++)
+		{
+			for ($j=0;$j<$numPointCacheAttrs;$j++)
+			{
+				$pointCacheAttrVals[$i*$numPointCacheAttrs+$j] = xml_getVar ($assets[$i],$pointCacheAttrNames[$j]);
+			}
+		}
+
+		if (size($cloth))
+		{
+			string $objects[] = xml_getTag ($cloth[0],"Object");
+			for ($i=0;$i<size($objects);$i++)
+			{
+				$clothNamespaces[$i] = xml_getVar ($objects[$i],"namespace");
+				$clothNames[$i] = xml_getVar ($objects[$i],"name");
+				$clothVersions[$i] = xml_getVar ($objects[$i],"version");
+			}
+		}
+	}
+	
+
+	// rebuild the data
+	string $xml = "<PointCacheExport>\n";
+	for ($i=0;$i<size($assets);$i++)
+	{
+		$xml += "\t<Asset";
+		for ($j=0;$j<$numPointCacheAttrs;$j++)
+		{
+			$xml += " "+$pointCacheAttrNames[$j]+"=\""+$pointCacheAttrVals[$i*$numPointCacheAttrs+$j]+"\"";
+		}
+		$xml += " />\n";
+	}
+	// cloth
+	$xml += "\t<Cloth>\n";
+	// merge the new cloth we have just exported with any old cloth that was present in the xml
+	for ($i=0;$i<size($clothNamespaces);$i++)
+	{
+		int $okToAdd = true;
+		for ($j=0;$j<size($namespaces);$j++)
+		{
+			if ($clothNamespaces[$i] == $namespaces[$j] && $clothNames[$i] == $names[$j])
+			{
+				$okToAdd = false;
+				break;
+			}
+		}
+		if (!$okToAdd)
+			continue;
+
+		$xml += "\t\t<Object namespace=\""+$clothNamespaces[$i]+"\" name=\""+$clothNames[$i]+"\" version=\""+$clothVersions[$i]+"\" />\n";
+	}
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		$xml += "\t\t<Object namespace=\""+$namespaces[$i]+"\" name=\""+$names[$i]+"\" version=\""+$versions[$i]+"\" />\n";
+	}
+
+	$xml += "\t</Cloth>\n";
+
+	$xml += "</PointCacheExport>\n";
+
+	print ($xml+"\n");
+	writeFile ($file,$xml);
+}
+/*
+<PointCacheExport>
+	<Asset namespace="donkey" pointCacheVersion="0010" filename="/diskx/entertainment/15730_shrek_marketing/animation/cpsv/characters/donkey/donkey_animProxyRig.ma" assetVersion="0004" assetStamp="1173405080" shotVersion="5" shotStamp="1173686614" />
+</PointCacheExport>
+
+// with cloth:
+<PointCacheExport>
+	<Asset namespace="donkey" pointCacheVersion="0010" filename="/diskx/entertainment/15730_shrek_marketing/animation/cpsv/characters/donkey/donkey_animProxyRig.ma" assetVersion="0004" assetStamp="1173405080" shotVersion="5" shotStamp="1173686614" />
+	<Cloth>
+		<Object namespace="shrek" name=”shirtShape” version="0003"  />
+		<Object namespace="fiona" name=”dressShape” version="0004"  />
+	</Cloth>
+</PointCacheExport>
+*/
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportDoIt()
+{
+	if (!clothExportCheckNames())
+		return;
+
+	// get sequence and shot from UI (not necessary to check that they have been filled in since clothExportCheckNames does this check)
+	string $seq = strip(`textField -q -tx clothExportSeq`);
+	string $shot = strip(`textField -q -tx clothExportShot`);
+	// and other data from the ui that will be needed to do the export
+	int $fs = `intField -q -v clothExportStart`;
+	int $fe = `intField -q -v clothExportEnd`;
+
+	int $frVal = `optionMenu -q -sl clothExportFrameRate`;
+
+	// get names from UI
+	string $names[], $resolvedNames[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,$resolvedNames, false);
+
+	// sort the items by resolved name - this will get all the namespaces sequential
+	string $sorted[];
+	for ($i=0;$i<size($names);$i++)
+		$sorted[$i] = $resolvedNames[$i]+","+$names[$i];
+
+	$sorted = sort ($sorted);
+	string $buf[];
+
+	for ($i=0;$i<size($sorted);$i++)
+	{
+		tokenize ($sorted[$i],",",$buf);
+		$names[$i] = $buf[1];
+		$resolvedNames[$i] = $buf[0];
+	}
+	
+	// build the data necessary to find the pointCacheGeo.xml from a namespace
+	string $namespaces[], $assetNames[], $assetTypes[];
+	getAssetsFromStructureFile ($seq, $shot, $namespaces, $assetNames, $assetTypes);
+
+	string $files[];	// for each namespace the file to look for
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		$files[$i] = getPath ("AssetInfoDir",{$assetTypes[$i],$assetNames[$i]})+"/pointCacheGeo.xml";
+	}	
+	
+
+	string $mapping = "", $currentNs = "";
+	string $transforms[], $shapes[];
+	string $finalOutputNames[];
+	for ($i=0;$i<size($names);$i++)
+	{
+		// add attributes to object, so that the tool will remember them for subsequent exports
+		if (!`objExists ($names[$i]+".exportCloth")`)
+		{
+			addAttr -ln "exportCloth" -at "message" $names[$i];
+		}
+		if (!`objExists ($names[$i]+".exportClothAs")`)
+		{
+			if ($names[$i] != $resolvedNames[$i])
+			{
+				addAttr -ln "exportClothAs" -dt "string" $names[$i];
+				setAttr -type "string" ($names[$i]+".exportClothAs") $resolvedNames[$i];
+			}
+		}
+		else
+		{
+			if ($names[$i] != $resolvedNames[$i])
+			{
+				setAttr -type "string" ($names[$i]+".exportClothAs") $resolvedNames[$i];
+			}
+			else
+			{
+				deleteAttr ($names[$i]+".exportClothAs");
+			}
+		}
+		string $ns = getNamespaceFromString ($resolvedNames[$i]);
+		if ($ns != $currentNs)
+		{
+			// we need to read the pointCacheGeo for this asset.
+			clear $transforms;
+			clear $shapes;
+			int $idx = stringArrayFindIndex ($ns, $namespaces);
+			string $xml = readXML ($files[$idx],0);
+			string $nodes[] = xml_getTag ($xml,"Object");
+			for ($j=0;$j<size($nodes);$j++)
+			{
+				$transforms[$j] = xml_getVar ($nodes[$j],"transform");
+				$shapes[$j] = xml_getVar ($nodes[$j],"shape");
+			}
+
+			$currentNs = $ns;
+		}
+		// find the resolvedName in the pointCache data
+		string $strippedName = substitute ("^"+$ns+":",$resolvedNames[$i],"");
+		int $idx = stringArrayFindIndex ($strippedName,$transforms);
+
+		// get the shape name of the unresolved object
+		string $curShape[] = `listRelatives -s -ni -pa $names[$i]`;
+		$curShape = `ls -type mesh -type subdiv -type nurbsSurface -type nurbsCurve $curShape`;
+
+		// reasons for re-mapping:
+		// either the transform or the shape of the unresolved name don't match what has been looked up in the pointCacheGeo.xml
+		int $doMapping = false;
+		
+		print ("names["+$i+"] = "+$names[$i]+"\n");
+
+		string $tmp = getNamespaceFromString ($names[$i]);
+		$tmp = substitute ("^"+$tmp+":",$names[$i],"");
+		if ($tmp != $transforms[$idx])
+			$doMapping = true;
+
+		if ($names[$i] != ($tmp+":"+$transforms[$idx]))
+			$doMapping = true;
+
+		if (!$doMapping)
+		{
+			$tmp = getNamespaceFromString ($curShape[0]);
+			$tmp = substitute ("^"+$tmp+":",$curShape[0],"");
+			if ($tmp != $shapes[$idx])
+				$doMapping = true;
+
+			if ($curShape[0] != ($tmp+":"+$shapes[$idx]))
+				$doMapping = true;
+		}
+
+		// Add to the mapping string
+		if ($doMapping)
+		{
+			if (size($mapping))
+				$mapping += ",";
+			$mapping += $curShape[0]+"-"+($ns+":"+$shapes[$idx]);
+			$finalOutputNames[size($finalOutputNames)] = ($ns+":"+$shapes[$idx]);
+		}
+		else
+		{
+			$finalOutputNames[size($finalOutputNames)] = $curShape[0];
+		}
+	}
+
+	print ("ClothExportUI: DEBUG: Mapping string: "+$mapping+"\n");
+	print ("Final output names: \n");
+	print $finalOutputNames;
+
+	// if the frame rate is set to "From Project Globals", read the globals
+	string $rate;
+	if ($frVal == 1)
+	{
+		string $globals = getPath ("ProjectGlobals",{})+"/project.xml";
+		string $xml = readXML ($globals,0);
+	
+		string $node[] = xml_getTag ($xml,"frameRate");
+		$rate = xml_getVar ($node[0],"name");
+	}
+	else if ($frVal == 2)
+		$rate = "film";
+	else if ($frVal == 3)
+		$rate = "ntsc";
+	else
+		$rate = "scene";
+
+	// ---------------------------------
+	// Make a temp directory and do the export
+	// ---------------------------------
+
+	string $tempOutputDir = getPath ("TempFileUnique",{"clothExport"});
+	if (!`filetest -d $tempOutputDir`)
+		sysFile -md $tempOutputDir;
+
+	print ("ClothExportUI: Exporting frames "+$fs+"-"+$fe+" at frame rate \""+$rate+"\"\n");
+
+	string $cmd = "exportPointCache -s "+$fs+" -e "+$fe+" -b 1 -m 1 -fr \""+$rate+"\" ";
+	if ($mapping != "")
+		$cmd += "-r \""+$mapping+"\" ";
+	$cmd += "-o \""+$tempOutputDir+"\"";
+	for ($i=0;$i<size($names);$i++)
+	{
+		$cmd += " "+$names[$i];
+	}
+
+	evalEcho ($cmd);
+
+	print ("ClothExportUI: Export DONE.\n");
+
+	// Now copy the files to the final location and store the data we will need to update the pointCacheExport.xml
+	int $hadMissingFiles = false;
+	string $ver_ns[], $ver_names[], $ver_version[];
+	for ($i=0;$i<size($finalOutputNames);$i++)
+	{
+		string $ns = getNamespaceFromString ($finalOutputNames[$i]);
+		string $strippedName = substitute ("^"+$ns+":",$finalOutputNames[$i],"");
+
+		string $tempPath = $tempOutputDir+"/"+$ns+"/"+$strippedName+".pc";
+		if (!`filetest -f $tempPath`)
+		{
+			warning ("ClothExportUI: "+$finalOutputNames[$i]+" did not export! Skipping.");
+			$hadMissingFiles = true;
+			continue;
+		}
+
+		string $ver = getVersion ("ShotClothCache",{$seq,$shot,$ns,$strippedName});
+		$ver = padNumber (((int)$ver)+1,4);
+
+		// build the output path
+		string $outputDir = getPath ("ShotBase",{$seq,$shot})+"/cache/cloth/"+$ns+"/"+$strippedName;
+		if (!`filetest -d $outputDir`)
+			sysFile -md $outputDir;
+
+		string $tgt = $outputDir+"/"+$strippedName+"."+$ver+".pc";
+		print ("cp "+$tempPath+" "+$tgt+"\n");
+		sysFile -cp $tgt $tempPath;
+
+		if (!`filetest -f $tgt`)
+		{
+			warning ("ClothExportUI: Couldn't copy pointCache for "+$finalOutputNames[$i]+"! Skipping.");
+			$hadMissingFiles = true;
+			continue;
+		}
+
+		// store some data for later...
+		int $c = size($ver_ns);
+		$ver_ns[$c] = $ns;
+		$ver_names[$c] = $strippedName;
+		$ver_version[$c] = $ver;
+	}
+	
+
+	// remove temp output dir when done
+	print ("ClothExportUI: Cleaning up temp files...\n");
+	system ("rm -r "+$tempOutputDir);	// will this work on Windows with cygwin installed?
+
+	// update pointCacheExport.xml
+	updatePointCacheExportData ($seq, $shot, $ver_ns, $ver_names, $ver_version);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// UI
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+proc arrangeMainForm (string $form)
+{
+	string $children[] = `layout -q -ca $form`;
+	for ($i=0;$i<size($children);$i++)
+	{
+		formLayout -e -af $children[$i] left 0 $form;
+		formLayout -e -af $children[$i] right 0 $form;
+	}
+	formLayout -e -af $children[0] top 0 $form;
+	formLayout -e -attachControl $children[0] bottom 0 $children[1] $form;
+
+	formLayout -e -aof $children[1] top -25 $form;
+	formLayout -e -af $children[1] bottom 0 $form;
+}
+// ---------------------------------------------------------------------------------------------------
+proc arrangeRowNEven(string $form)
+{
+	string $children[] = `layout -q -ca $form`;
+	for ($i=0;$i<size($children);$i++)
+	{
+		formLayout -e -af $children[$i] top 0 $form;
+		formLayout -e -af $children[$i] bottom 0 $form;
+
+		if ($i == 0)
+		{
+			formLayout -e -af $children[$i] left 0 $form;
+		}
+		else
+		{
+			int $pos = (int)((float)$i/size($children)*100);
+			formLayout -e -attachPosition $children[$i] left 0 $pos $form;
+		}
+		if ($i == size($children)-1)
+		{
+			formLayout -e -af $children[$i] right 0 $form;
+		}
+		else
+		{
+			int $pos = (int)((float)($i+1)/size($children)*100);
+			formLayout -e -attachPosition $children[$i] right 0 $pos $form;
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc arrangeRow3 (string $form, int $off1, int $off2)
+{
+	string $c[] = `layout -q -ca $form`;
+	formLayout -e
+		-af $c[0] left 0
+		-attachPosition $c[0] right 0 $off1
+
+		-attachPosition $c[1] left 0 $off1
+		-attachPosition $c[1] right 0 $off2
+
+		-attachPosition $c[2] left 0 $off2
+		-af $c[2] right 0
+			$form;
+
+	for ($i=0;$i<size($c);$i++)
+		formLayout -e -af $c[$i] bottom 0 -af $c[$i] top 0 $form; 
+}
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+proc arrangeFormChildrenInColumn (string $form, int $attachLast)
+{
+	int $offset = 3;
+
+	string $children[] = `layout -q -ca $form`;
+	string $prevChild;
+
+	for ($i=0;$i<size($children);$i++)
+	{
+		//formLayout -e -attachPosition $children[$i] left 0 15 $form;
+		//formLayout -e -attachPosition $children[$i] right 0 75 $form;
+		formLayout -e -af $children[$i] left 3 $form;
+		//formLayout -e -af $children[$i] right 0 $form;
+		formLayout -e -attachPosition $children[$i] right 2 100 $form;
+		if ($i)
+			formLayout -e -attachControl $children[$i] top 0 $prevChild $form;
+		else
+			formLayout -e -af $children[$i] top 1 $form;
+		
+		if ($i<size($children)-1 || (!$attachLast))
+		{
+			formLayout -e -attachNone $children[$i] bottom $form;
+		}
+		else
+		{
+			formLayout -e -af $children[$i] bottom 0 $form;
+		}
+
+		$prevChild = $children[$i];
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc arrangeFormChildrenInColumn2 (string $form)
+{
+	int $offset = 3;
+
+	string $children[] = `layout -q -ca $form`;
+
+	for ($i=0;$i<size($children);$i++)
+	{
+		formLayout -e -af $children[$i] left 3 $form;
+		formLayout -e -af $children[$i] right 3 $form;
+
+		// attach top
+		if ($i)
+		{
+			formLayout -e -attachControl $children[$i] top 0 $children[$i-1] $form;
+		}
+		else
+		{	
+			formLayout -e -af $children[$i] top 1 $form;
+		}
+
+		if ($i<size($children)-1)
+		{
+			formLayout -e -attachControl $children[$i] bottom 0 $children[$i+1] $form;
+		}
+		else
+		{
+			formLayout -e -af $children[$i] bottom 1 $form;
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc arrangeFormChildrenInColumnAdj (string $form, int $adj)
+{
+	string $children[] = `layout -q -ca $form`;
+	int $h;
+
+	for ($i=0;$i<size($children);$i++)
+	{
+		formLayout -e -af $children[$i] left 0 $form;
+		formLayout -e -af $children[$i] right 0 $form;
+
+		// get original height
+		if (`layout -q -exists $children[$i]`)
+			$h = `layout -q -h $children[$i]`;
+		else
+			$h = `control -q -h $children[$i]`;
+
+		// attach top
+		if ($i==0)
+		{
+			formLayout -e -af $children[$i] top 0 $form;
+		}
+		else if ($i<=$adj)
+		{
+			formLayout -e -attachControl $children[$i] top 0 $children[$i-1] $form;
+		}
+		else if ($i<size($children)-1)
+		{
+			formLayout -e -attachOppositeControl $children[$i] top (-$h) $children[$i+1] $form; 
+		}
+		else
+		{
+			formLayout -e -aof $children[$i] top (-$h) $form;
+		}
+
+		// attach bottom
+		if ($i<$adj)
+		{
+			formLayout -e -attachNone $children[$i] bottom $form;
+		}
+		else if ($i==size($children)-1)
+		{
+			formLayout -e -af $children[$i] bottom 0 $form;
+		}
+		else if ($i>=$adj)
+		{
+			formLayout -e -attachControl $children[$i] bottom 0 $children[$i+1] $form;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------
+proc checkSequenceAndShot ()
+{
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// getPointCachingData - get a list of assets for the show that are to be pointCache exporters
+// ---------------------------------------------------------------------------------------------------
+proc string [] getPointCachingData ()
+{
+	// get the point caching assets for the show
+	string $namesAndExporters[];
+
+	string $file = getPath ("ProjectGlobals",{})+"/PointCache.xml";
+	if (!`filetest -f $file`)
+	{
+		warning ("PointCachePreExport: "+$file+" not found. No point cache will be exported.");
+		return {};
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $filename = xml_getVar ($nodes[$i],"filename");
+		string $assetName = getPath ("AssetNameFromFilename",{$filename});
+		$namesAndExporters[size($namesAndExporters)] = $assetName;
+		$namesAndExporters[size($namesAndExporters)] = getPath ("ConformPath",{$filename});
+	}
+
+	return $namesAndExporters;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportSetFrameRange(int $throwError)
+{
+	string $seq = strip(`textField -q -tx clothExportSeq`);
+	string $shot = strip(`textField -q -tx clothExportShot`);
+
+	if ($seq == "" || $shot == "")
+	{
+		if ($throwError)
+			error ("clothExportUI: No sequence and/or shot selected.");
+		else
+			return;
+	}
+
+	int $range[];
+	getInsightShotGroupLength($seq,$shot,$range);
+
+	intField -e -v $range[0] clothExportStart;
+	intField -e -v $range[1] clothExportEnd;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResPopulateGeomList (string $assetType, string $assetName)
+{
+	textScrollList -e -ra clothExportPointCacheList;
+
+	string $file = getPath ("AssetInfoDir",{$assetType,$assetName})+"/pointCacheGeo.xml";
+	if (!`filetest -f $file`)
+	{
+		error ("clothExportUI: No pointCacheGeo file found for "+$assetType+" "+$assetName);
+	}
+
+	string $xml = readXML($file,0);
+	string $nodes[] = xml_getTag ($xml,"Object");
+
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $xform = xml_getVar ($nodes[$i],"transform");
+		textScrollList -e -append $xform clothExportPointCacheList;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResAssetSelectCmd ()
+{
+	string $sel[] = `textScrollList -q -si clothExportAssetList`;
+	if (!size($sel))
+	{
+		return;
+	}
+
+	string $buf[];
+	tokenize ($sel[0]," (/)",$buf);
+	clothExportResPopulateGeomList ($buf[1],$buf[2]);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResObjectSelectCmd ()
+{
+	textScrollList -e -da clothExportAssetList;
+	textScrollList -e -da clothExportPointCacheList;
+}
+// ---------------------------------------------------------------------------------------------------
+
+global proc clothExportResPopulateAssetList(string $seq, string $shot, int $pointCachingOnly)
+{
+	textScrollList -e -ra clothExportAssetList;
+	
+	string $names[],$namespaces[],$types[];
+	getAssetsFromStructureFile ($seq,$shot,$namespaces,$names,$types);
+
+	string $pointCachingData[];
+	if ($pointCachingOnly)
+	{
+		$pointCachingData = getPointCachingData();
+	}
+
+	for ($i=0;$i<size($names);$i++)
+	{
+		if ($pointCachingOnly)
+		{
+			if (stringArrayFindIndex ($names[$i],$pointCachingData) == -1)
+				continue;
+		}
+
+		string $txt = $namespaces[$i]+"     ("+$types[$i]+"/"+$names[$i]+")";
+		textScrollList -e -append $txt clothExportAssetList;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc clothExportResAssetListClear()
+{
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResObjectListGet (string $ui, string $names[], string $resolvedNames[], int $selectedOnly)
+{
+	clear $names;
+	clear $resolvedNames;
+
+	if (!`control -exists $ui`)
+		return;
+
+	string $items[];
+	if ($selectedOnly)
+		$items = `textScrollList -q -si $ui`;
+	else
+		$items = `textScrollList -q -ai $ui`;
+	
+	for ($i=0;$i<size($items);$i++)
+	{
+		string $buf[];
+		tokenize ($items[$i]," ->",$buf);
+
+		$names[$i] = $buf[0];
+		if (size($buf) == 1)
+			$resolvedNames[$i] = $buf[0];
+		else
+			$resolvedNames[$i] = $buf[1];
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+proc clothExportResObjectListClear()
+{
+	textScrollList -e -ra clothExportObjectList;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResObjectListAdd (string $object, string $resolvedName)
+{
+	string $names[];
+	clothExportResObjectListGet ("clothExportObjectList",$names,{}, false);
+
+	if (stringArrayFindIndex ($object,$names) == -1)
+	{
+		string $item = $object;
+		if ($resolvedName != $object && $resolvedName != "")
+			$item = $item +"    ---->    "+$resolvedName;
+		textScrollList -e -append $item clothExportObjectList;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportCheckForCollisions (string $name, string $resolvedName)
+{
+	string $edNames[], $edNamesResolved[];
+	string $mainNames[], $mainNamesResolved[];
+
+	// get all names from res manager
+	clothExportResObjectListGet ("clothExportObjectList",$edNames,$edNamesResolved, false);
+
+	// and from the main ui
+	clothExportResObjectListGet ("clothExportGeomList",$edNames,$edNamesResolved, false);
+
+	// search the data for another occurence of resolvedName
+
+	for ($i=0;$i<size($edNames);$i++)
+	{
+		if ($edNames[$i] != $name)
+		{
+			if ($edNamesResolved[$i] == $resolvedName)
+			{
+				error ("Resolved name "+$resolvedName+" for "+$name+" clashes with "+$edNames[$i]);
+			}
+		}
+	}
+
+	for ($i=0;$i<size($mainNames);$i++)
+	{
+		if ($mainNames[$i] != $name)
+		{
+			if (stringArrayFindIndex ($mainNames[$i],$edNames) == -1)
+			{
+				if ($mainNamesResolved[$i] == $resolvedName)
+				{
+					error ("Resolved name "+$resolvedName+" for "+$name+" clashes with "+$mainNames[$i]);
+				}
+			}
+		}
+	}	 
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResolveSelected()
+{
+	string $object[] = `textScrollList -q -si clothExportObjectList`;
+	int $index[] = `textScrollList -q -sii clothExportObjectList`;
+	string $asset[] = `textScrollList -q -si clothExportAssetList`;
+	string $geom[] = `textScrollList -q -si clothExportPointCacheList`;
+
+	if (!size($object))
+		error ("clothExportUI: No object selected.");
+
+	if (!size($asset))
+		error ("clothExportUI: No asset selected.");
+
+	if (!size($geom))
+		error ("clothExportUI: No pointCache geom selected.");
+
+	string $buf[];
+	tokenize ($object[0]," ->",$buf);
+
+	string $objectName = $buf[0];
+
+	tokenize ($asset[0]," (/)",$buf);
+	string $namespace = $buf[0];
+
+	string $newResolvedName = $namespace+":"+$geom[0];
+
+	clothExportCheckForCollisions ($objectName,$newResolvedName);
+	
+
+	string $result = $objectName+"    ---->    "+$namespace+":"+$geom[0];
+	textScrollList -e -rii $index[0] clothExportObjectList;
+	textScrollList -e -ap $index[0] $result clothExportObjectList;
+	
+	// To-do: check for collions in the resolved names.
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportApplyResolvedNames()
+{
+	string $edNames[],$edNamesResolved[];
+	string $mainNames[];
+
+	// Get list from name resolution manager
+	clothExportResObjectListGet ("clothExportObjectList",$edNames,$edNamesResolved, false);
+
+	// Get list from main ui
+	clothExportResObjectListGet ("clothExportGeomList",$mainNames,{}, false);
+
+	// apply resolved names
+	for ($i=0;$i<size($mainNames);$i++)
+	{
+		int $idx = stringArrayFindIndex ($mainNames[$i],$edNames);
+		if ($idx == -1)
+			continue;
+
+		if ($edNamesResolved[$idx] == $mainNames[$i])
+			continue;
+
+		string $newItem = $mainNames[$i]+"    ---->    "+$edNamesResolved[$idx];
+		textScrollList -e -rii ($i+1) clothExportGeomList;
+		textScrollList -e -appendPosition ($i+1) $newItem clothExportGeomList;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportFindItemInList (string $textField, string $scrollList, int $dir)
+{
+/*
+	AEmeshSelectorMeshPackViewerField - textScrollList
+	AEmeshSelectorMeshPackViewerNavField - textField
+*/	
+	string $contents[] = `textScrollList -q -ai $scrollList`;
+	int $selectedIndex[] = `textScrollList -q -sii $scrollList`;
+	string $searchStr = "*"+`textField -q -tx $textField`+"*";
+
+	textScrollList -e -da $scrollList;
+
+	int $startIndex = 0;
+	if (size($selectedIndex))
+	{
+		if ($dir == 1)
+			$startIndex = $selectedIndex[0]; 
+		else
+			$startIndex = $selectedIndex[0]-1;
+		
+	}
+
+	//print ("Starting search at "+$startIndex+" text = "+$contents[$startIndex]+"\n");
+	string $cmd = `textScrollList -q -sc $scrollList`;
+
+	if ($dir == 1)
+	{
+		for ($i=0;$i<size($contents);$i++)
+		{
+			int $index = ($startIndex + $i) % size($contents);
+			if (gmatch ($contents[$index],$searchStr))
+			{
+				textScrollList -e -showIndexedItem (1+$index) $scrollList;
+				textScrollList -e -sii (1+$index) $scrollList;
+				evalEcho ($cmd);
+				break;
+			}	
+		}
+	}
+	else
+	{
+		for ($i=size($contents)-1;$i>=0;$i--)
+		{
+			int $index = ($startIndex + $i) % size($contents);
+			if (gmatch ($contents[$index],$searchStr))
+			{
+				textScrollList -e -showIndexedItem (1+$index) $scrollList;
+				textScrollList -e -sii (1+$index) $scrollList;
+				evalEcho ($cmd);
+				break;
+			}	
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc string clothExportResolveNamesMakeListUI (string $baseName, string $title)
+{
+	string $form = `formLayout`;
+		text -l $title -align "left" -font "boldLabelFont";
+		separator -st "single";
+		textScrollList ($baseName+"List");
+		separator -st "single";
+		rowLayout -nc 5 -adj 2 -cw 1 30 -cw 3 40 -cw 4 40 -cw 5 10 -h 25;
+			text -label "Find" -align "left";
+			string $field = `textField`;
+			textField -e -cc ("clothExportFindItemInList "+$field+" "+$baseName+"List 1") $field;
+			button -label "Prev" -w 40 -c ("clothExportFindItemInList "+$field+" "+$baseName+"List 0");
+			button -label "Next" -w 40 -c ("clothExportFindItemInList "+$field+" "+$baseName+"List 1");
+			separator -horizontal false -st "double" -h 25;
+		setParent ..;
+		separator -st "single";
+	setParent ..;
+	// end form
+	arrangeFormChildrenInColumnAdj ($form,2);
+	return $form;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResolveExportNamesUI()
+{
+	if (`window -exists clothExportResolveExportNamesWin`)
+	{
+		showWindow clothExportResolveExportNamesWin;
+		return;
+	}
+	if (`windowPref -exists clothExportResolveExportNamesWin`)
+		windowPref -r clothExportResolveExportNamesWin;
+
+	string $title = "Resolve Export Names";
+	window -wh 900 530 -t $title clothExportResolveExportNamesWin;
+		string $mainForm = `formLayout`;
+			string $mainArea = `formLayout`;
+				string $exportObjectsForm = clothExportResolveNamesMakeListUI("clothExportObject","Export Objects");
+				string $assetsForm = clothExportResolveNamesMakeListUI("clothExportAsset","Assets");
+				string $pointCacheObjectsForm = clothExportResolveNamesMakeListUI("clothExportPointCache","Point Cache Geometry");
+			setParent ..;
+			// end mainArea
+			arrangeRow3 ($mainArea,45,75);
+			string $actionsForm = `formLayout`;
+				button -label "Apply and Close" -c "clothExportApplyResolvedNames; deleteUI clothExportResolveExportNamesWin";
+				button -label "Resolve Selected" -c "clothExportResolveSelected";
+				button -label "Cancel" -c "deleteUI clothExportResolveExportNamesWin";
+			setParent ..;
+			arrangeRowNEven ($actionsForm);
+		setParent ..;
+		// end mainForm
+		arrangeMainForm ($mainForm);
+
+	showWindow clothExportResolveExportNamesWin;
+
+	textScrollList -e -sc "clothExportResAssetSelectCmd" clothExportAssetList;
+	textScrollList -e -sc "clothExportResObjectSelectCmd" clothExportObjectList;
+}
+// ---------------------------------------------------------------------------------------------------
+// clothExportCheckNames - make sure all the objects we are exporting correspond to known pointCache objects
+// ---------------------------------------------------------------------------------------------------
+global proc int clothExportCheckNames()
+{
+	string $seq = strip(`textField -q -tx clothExportSeq`);
+	string $shot = strip(`textField -q -tx clothExportShot`);
+
+	if ($seq == "" || $shot == "")
+	{
+		error ("clothExportUI: No sequence and/or shot selected.");
+	}
+
+	string $names[],$resolvedNames[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,$resolvedNames, false);
+
+	for ($i=0;$i<size($resolvedNames);$i++)
+	{
+		print ("Name: "+$names[$i]+",     Resolved Name: "+$resolvedNames[$i]+"\n");
+	}
+
+	// Read the structure xml to get a list of namespaces, assetTypes and assetNames
+	string $namespaces[],$assetNames[],$assetTypes[];
+	getAssetsFromStructureFile ($seq,$shot,$namespaces,$assetNames,$assetTypes);
+	
+	// get data about what is a pointCaching asset
+	string $pointCacheData[] = getPointCachingData();
+
+	// build some uber arrays of all the known pointCaching objects for the assets in the shot
+	int $s[];	// start index into pointCacheGeom for each element in assetNames, etc.
+	int $e[];	// end index.....
+	string $pointCacheGeom[];	// all pointCacheGeom
+	
+
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		// is this a pointCaching asset?
+		if (stringArrayFindIndex ($assetNames[$i],$pointCacheData) == -1)
+			continue;
+
+		// have we already encountered this asset? If so, no need to re-read the pointCacheGeo.xml
+		int $done = false;
+		for ($j=0;$j<$i;$j++)
+		{
+			if ($assetNames[$i] == $assetNames[$j] && $assetTypes[$i] == $assetTypes[$j])
+			{
+				$s[$i] = $s[$j];
+				$e[$i] = $e[$j];
+				$done = true;
+				break;
+			}
+		}
+		if ($done)
+			continue;
+
+		$s[$i] = size($pointCacheGeom);
+		// read the pointCacheGeo.xml
+		string $file = getPath ("AssetInfoDir",{$assetTypes[$i],$assetNames[$i]})+"/pointCacheGeo.xml";
+		if (!`filetest -f $file`)
+		{
+			error ("clothExportUI: No pointCacheGeo file found for "+$assetTypes[$i]+" "+$assetNames[$i]);
+		}
+
+		string $xml = readXML($file,0);
+		string $nodes[] = xml_getTag ($xml,"Object");
+
+		for ($j=0;$j<size($nodes);$j++)
+		{
+			$pointCacheGeom[size($pointCacheGeom)] = xml_getVar ($nodes[$j],"transform");
+			
+		}
+		$e[$i] = size($pointCacheGeom);
+	}
+
+	// To-do: Make it clear if there are no point caching assets in this shot
+
+	// build a list of names (if any) that will need to be resolved
+	string $namesToResolve[],$currentResolvedNames[];
+
+	for ($i=0;$i<size($resolvedNames);$i++)
+	{
+		string $ns = getNamespaceFromString ($resolvedNames[$i]);
+		int $addToList = true;
+		if ($ns != "")
+		{
+			// find namespace in list of namespaces
+			int $idx = stringArrayFindIndex ($ns,$namespaces);
+			if ($idx != -1)
+			{
+				// remove namespace from name
+				string $strippedName = substitute ("^"+$ns+":",$resolvedNames[$i],"");
+				// find this in the pointCacheGeom
+				for ($j=$s[$idx];$j<=$e[$idx];$j++)
+				{
+					if ($pointCacheGeom[$j] == $strippedName)
+					{
+						$addToList = false;
+						break;
+					}
+				}
+
+			}
+		}
+
+		if ($addToList)
+		{
+			print ($names[$i]+" will need to be resolved.\n");
+			$namesToResolve[size($namesToResolve)] = $names[$i];
+			$currentResolvedNames[size($currentResolvedNames)] = $resolvedNames[$i];
+		}
+		else
+			print ($resolvedNames[$i]+" passed inspection!\n");
+		
+	}
+
+	if (size($namesToResolve))
+	{
+		clothExportResolveExportNamesUI();
+		clothExportResObjectListClear();
+
+		for ($i=0;$i<size($namesToResolve);$i++)
+		{
+			clothExportResObjectListAdd ($namesToResolve[$i],$currentResolvedNames[$i]);
+		}
+		
+		clothExportResPopulateAssetList($seq,$shot,true);
+		return false;
+	}
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportShotBrowserPick()
+{
+	string $selected[] = `textScrollList -q -si clothExportShotBrowserList`;
+	if (!size($selected))
+		error ("clothExportUI: No shot selected.");
+
+	// set main UI
+	//clothExportSeq
+	string $seq[],$shot[];
+	getSequenceAndShotFromString ($selected[0],$seq,$shot);
+	
+	textField -e -tx $seq[0] clothExportSeq;
+	textField -e -tx $shot[0] clothExportShot;
+
+	clothExportSetFrameRange(false);
+
+	deleteUI clothExportShotBrowserWin;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportShotBrowserPopulate ()
+{
+	string $filter = `textField -q -tx clothExportShotBrowserFilterField`;
+	if (strip ($filter) == "")
+		$filter = "*";
+
+	string $shots[] = listShots ($filter,2);	// phase filter 2 = animation
+	
+	textScrollList -e -ra clothExportShotBrowserList;
+	for ($shot in $shots)
+		textScrollList -e -append $shot clothExportShotBrowserList;
+
+	// save the filter
+	optionVar -stringValue "ovClothExportShotBrowserFilter" $filter;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportShotBrowserUI()
+{
+	if (`window -exists clothExportShotBrowserWin`)
+	{
+		showWindow clothExportShotBrowserWin;
+		clothExportShotBrowserPopulate();
+		return;
+	}
+	if (`windowPref -exists clothExportShotBrowserWin`)
+		windowPref -r clothExportShotBrowserWin;
+
+	string $title = "Shot Browser";
+	string $filter = "*";
+	if (`optionVar -exists "ovClothExportShotBrowserFilter"`)
+		$filter = `optionVar -q "ovClothExportShotBrowserFilter"`;
+
+	window -wh 350 330 -t $title clothExportShotBrowserWin;
+		string $mainForm = `formLayout`;
+			string $mainArea = `formLayout`;
+				rowColumnLayout -nc 2 -cw 1 105 -cw 2 100;
+					text -label "Filter (e.g 150_*)" -align "left";
+					textField -tx $filter -cc "clothExportShotBrowserPopulate" clothExportShotBrowserFilterField;
+				setParent ..;
+				separator -st "single";
+				textScrollList -dcc "evalDeferred clothExportShotBrowserPick" clothExportShotBrowserList;
+			setParent ..;
+			// end mainArea
+			arrangeFormChildrenInColumn ($mainArea,true);
+			string $actionsForm = `formLayout`;
+				button -label "Pick" -c "clothExportShotBrowserPick";
+				button -label "Close" -c "deleteUI clothExportShotBrowserWin";
+			setParent ..;
+			arrangeRowNEven ($actionsForm); 
+		setParent ..;
+		// end mainForm
+		arrangeMainForm ($mainForm);
+	showWindow clothExportShotBrowserWin;
+	clothExportShotBrowserPopulate();
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportAddSelected()
+{
+	string $sel[] = `ls -sl`;
+	if (!size($sel))
+		return;
+
+	string $shapes[] = `listRelatives -ad -pa -ni $sel`;
+	if (!size($shapes))
+		return;
+
+	$shapes = `ls -type mesh -type subdiv -type nurbsSurface -type nurbsCurve $shapes`;
+	if (!size($shapes))
+		return;
+
+	string $xforms[] = `listRelatives -p -pa $shapes`;
+	$xforms = stringArrayRemoveDuplicates ($xforms);
+	string $names[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,{}, false);
+
+	for ($i=0;$i<size($xforms);$i++)
+	{
+		if (stringArrayFindIndex ($xforms[$i],$names) == -1)
+		{
+			textScrollList -e -append $xforms[$i] clothExportGeomList;
+		}
+	}
+
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportRemoveSelected ()
+{
+	string $sel[] = `ls -sl`;
+	if (!size($sel))
+		return;
+
+	string $shapes[] = `listRelatives -ad -pa -ni $sel`;
+	if (!size($shapes))
+		return;
+
+	$shapes = `ls -type mesh -type subdiv -type nurbsSurface -type nurbsCurve $shapes`;
+	if (!size($shapes))
+		return;
+
+	string $xforms[] = `listRelatives -p -pa $shapes`;
+	$xforms = stringArrayRemoveDuplicates ($xforms);
+	string $names[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,{}, false);
+
+	for ($i=0;$i<size($xforms);$i++)
+	{
+		if (stringArrayFindIndex ($xforms[$i],$names) != -1)
+		{
+			textScrollList -e -ri $xforms[$i] clothExportGeomList;
+			if (`objExists ($xforms[$i]+".exportCloth")`)
+				catch (`deleteAttr ($xforms[$i]+".exportCloth")`);
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportRemoveHighlighted()
+{
+	string $selected[] = `textScrollList -q -si clothExportGeomList`;
+	string $names[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,{}, true);
+
+	for ($i=0;$i<size($selected);$i++)
+	{
+		textScrollList -e -ri $selected[$i] clothExportGeomList;
+		if (`objExists ($names[$i]+".exportCloth")`)
+			catch (`deleteAttr ($names[$i]+".exportCloth")`);
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportRemoveAll()
+{
+	string $names[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,{}, false);
+	for ($i=0;$i<size($names);$i++)
+		if (`objExists ($names[$i]+".exportCloth")`)
+			catch (`deleteAttr ($names[$i]+".exportCloth")`);
+
+	textScrollList -e -ra clothExportGeomList;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportSelectHightlighted()
+{
+	select -cl;
+	string $selected[];
+	clothExportResObjectListGet ("clothExportGeomList",$selected,{}, true);
+
+	for ($i=0;$i<size($selected);$i++)
+	{
+		if (`objExists $selected[$i]`)
+			select -add $selected[$i];
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportHighlightSelected ()
+{
+	string $sel[] = `ls -sl`;
+	if (!size($sel))
+		return;
+
+	string $shapes[] = `listRelatives -ad -pa -ni $sel`;
+	if (!size($shapes))
+		return;
+
+	$shapes = `ls -type mesh -type subdiv -type nurbsSurface -type nurbsCurve $shapes`;
+	if (!size($shapes))
+		return;
+
+	string $xforms[] = `listRelatives -p -pa $shapes`;
+	$xforms = stringArrayRemoveDuplicates ($xforms);
+	string $contents[] = `textScrollList -q -ai clothExportGeomList`;
+	string $names[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,{}, false);
+	textScrollList -e -da clothExportGeomList;
+
+	for ($i=0;$i<size($contents);$i++)
+	{
+		if (stringArrayFindIndex ($names[$i],$xforms) != -1)
+			textScrollList -e -si $contents[$i] clothExportGeomList;
+
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportSortItems()
+{
+	string $contents[] = `textScrollList -q -ai clothExportGeomList`;
+	if (!size($contents))
+		return;
+
+	textScrollList -e -ra clothExportGeomList;
+	$contents = sort ($contents);
+	
+	for ($i=0;$i<size($contents);$i++)
+	{
+		textScrollList -e -append $contents[$i] clothExportGeomList;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportResolveMisc()
+{
+	string $seq = strip(`textField -q -tx clothExportSeq`);
+	string $shot = strip(`textField -q -tx clothExportShot`);
+
+	if ($seq == "" || $shot == "")
+	{
+		error ("clothExportUI: No sequence and/or shot selected.");
+	}
+
+	string $names[], $resolvedNames[];
+	clothExportResObjectListGet ("clothExportGeomList",$names,$resolvedNames, true );
+
+	if (!size($names))
+	{
+		error ("clothExportUI: No items selected in list.");
+	}
+	
+	clothExportResolveExportNamesUI();
+	clothExportResObjectListClear();
+
+	for ($i=0;$i<size($names);$i++)
+	{
+		clothExportResObjectListAdd ($names[$i],$resolvedNames[$i]);
+	}
+	
+	clothExportResPopulateAssetList($seq,$shot,true);
+}
+// ---------------------------------------------------------------------------------------------------
+proc clothExportPopulateGeometryList ()
+{
+	textScrollList -e -ra clothExportGeomList;
+	string $xforms[] = `ls -tr`;
+	
+	for ($i=0;$i<size($xforms);$i++)
+	{
+		if (`objExists ($xforms[$i]+".exportCloth")`)
+		{
+			string $item = $xforms[$i];
+			if (`objExists ($xforms[$i]+".exportClothAs")`)
+			{
+				string $resolvedName = `getAttr ($xforms[$i]+".exportClothAs")`;
+				$item += "    ---->    "+$resolvedName;
+			}
+			textScrollList -e -append $item clothExportGeomList;
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc clothExportLoadShotInfo ()
+{
+	string $seq,$shot;
+	string $tmp[] = `fileInfo -q "sequence"`;
+	if (size($tmp))
+		$seq = $tmp[0];
+
+	$tmp = `fileInfo -q "shot"`;
+	if (!size($tmp))
+		$tmp = `fileInfo -q "shotGroup"`;
+	if (size($tmp))
+		$shot = $tmp[0];
+
+	if (strip ($seq) != "" && strip ($shot) != "")
+	{
+		textField -e -tx $seq clothExportSeq;
+		textField -e -tx $shot clothExportShot;
+
+		clothExportSetFrameRange(false);
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportHelp()
+{
+	if (`about -linux`)
+	{
+		system ("mozilla file:/diskx/film/apps/reelfx/docs/cloth/clothExportUI.html&");
+	}
+	else
+	{
+		showHelp -a "film/apps/reelfx/docs/cloth/clothExportUI.html";
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc createMainListPopupMenu()
+{
+	popupMenu -p "clothExportGeomList";
+		menuItem -l "Export Geometry";
+		menuItem -d true;
+		menuItem -d true;
+		menuItem -l "Add Selected" -c "clothExportAddSelected";
+		menuItem -l "Remove Selected" -c "clothExportRemoveSelected";
+		menuItem -l "Remove Highlighted" -c "clothExportRemoveHighlighted";
+		menuItem -l "Remove All" -c "clothExportRemoveAll";
+		menuItem -d true;
+		menuItem -l "Select Highlighted" -c "clothExportSelectHightlighted";
+		menuItem -l "Highlight Selected" -c "clothExportHighlightSelected";
+		menuItem -d true;
+		menuItem -l "Sort Contents" -c "clothExportSortItems";
+		menuItem -d true;
+		menuItem -l "Resolve Export Filenames..." -c "clothExportResolveMisc";
+}
+// ---------------------------------------------------------------------------------------------------
+global proc clothExportUI() 
+{
+	loadDependencies();
+
+	if (`window -exists clothExportWin`)
+	{
+		showWindow clothExportWin;
+		return;
+	}
+	if (`windowPref -exists clothExportWin`)
+		windowPref -r clothExportWin;
+
+	string $title = "RFX Cloth Export Utility Rev 2.0 03/12/07";
+	window -wh 500 530 -t $title clothExportWin;
+		string $mainForm = `formLayout`;
+			string $mainArea = `columnLayout -adjustableColumn true`;
+				frameLayout -label "General" -collapsable true -collapse false -borderStyle "etchedIn";
+					columnLayout -adjustableColumn true -rowSpacing 3 -co "left" 2;
+						separator -st "single";
+						rowColumnLayout -nc 4 -cw 1 120 -cw 2 60 -cw 3 60 -cw 4 28 -cat 4 "left" 3;
+							text -label "Sequence/Shot" -align "left";
+							textField -cc "clothExportSetFrameRange 0" clothExportSeq;
+							textField -cc "clothExportSetFrameRange 0" clothExportShot;
+							symbolButton -i "navButtonBrowse.xpm" -c "clothExportShotBrowserUI";
+						setParent ..;
+						rowColumnLayout -nc 4 -cw 1 160 -cw 2 40 -cw 3 40 -cw 4 70 -cat 4 "left" 3;
+							text -label "Frame Range" -align "left";
+							intField -w 40 clothExportStart;
+							intField -w 40 clothExportEnd ;
+							button -l "From Insight" -c "clothExportSetFrameRange 1";
+						setParent ..;
+						rowColumnLayout -nc 2 -cw 1 120 -cw 2 200;
+							text -label "Frame Rate" -align "left";
+							optionMenu clothExportFrameRate;
+								menuItem -l "From Project Globals";
+								menuItem -l "Film";
+								menuItem -l "NTSC";
+								menuItem -l "From Scene";
+						setParent ..;
+					setParent ..;
+				setParent ..;
+				// end general layout
+				frameLayout -label "Geometry" -collapsable true -collapse false -borderStyle "etchedIn";
+					columnLayout -adjustableColumn true -rowSpacing 3 -co "left" 2;
+						separator -st "single";
+						textScrollList -h 330 -ams true clothExportGeomList;
+						createMainListPopupMenu();
+						rowLayout -nc 4 -adj 2 -cw 1 40 -cw 3 40 -cw 4 40;
+							text -label "Find" -align "left";
+							string $field = `textField`;
+							textField -e -cc ("clothExportFindItemInList "+$field+" clothExportGeomList 1") $field;
+							button -label "Prev" -w 40 -c ("clothExportFindItemInList "+$field+" clothExportGeomList 0");
+							button -label "Next" -w 40 -c ("clothExportFindItemInList "+$field+" clothExportGeomList 1");
+						setParent ..;
+					setParent ..;
+				setParent ..;
+			setParent ..;
+			// end mainArea
+			string $actionsForm = `formLayout`;
+				button -label "Export" -c "clothExportDoIt";
+				button -label "Help" -c "clothExportHelp";
+				button -label "Close" -c "deleteUI clothExportWin; if (`window -exists \"clothExportResolveExportNamesWin\"`) deleteUI clothExportResolveExportNamesWin";
+			setParent ..;
+			arrangeRowNEven ($actionsForm);
+		setParent ..;
+		// end mainForm
+		arrangeMainForm ($mainForm);
+	showWindow clothExportWin;
+	clothExportLoadShotInfo();
+	clothExportPopulateGeometryList();
+}

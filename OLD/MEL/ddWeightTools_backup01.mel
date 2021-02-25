@@ -1,0 +1,301 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddWeightTools
+//	Verision: 0.51 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: July 08 2006
+//	Changed Projcet Date: 
+//	Last Updated: August 11 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note: Weight Tools
+//	这个脚本可能会比较大,目前第一部分就是poly smooth bind权重导入导出
+//	
+//////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBrowerFileName
+// 
+// 给fileBrower用的全局变量
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddBrowerFileName (string $fileName, string $fileType)
+{
+ global string $ddBrowerFileName ;
+ $ddBrowerFileName = $fileName ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddPolySmoothBindWeightsImport
+// 
+// 导入polygon 物体的smooth skin weight
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddPolySmoothBindWeightsImport(string $polyObject,string $spwfile)
+{
+ int $i,$ii,$countVtx,$vtxCount,$count,$howManyJoints,
+	$SkinClusterConnectionCount,$totalSkinClusters,
+	$nextLineArray ;
+ string $selected[],$filePath,$poly,$tempArray[],
+	$skinedPolyWeightFileName,$skinCluster[],
+	$tempArray[],$vtxrange[],$vtxUnit[],
+	$nextLine[], ;
+ 
+ $filePath = (`workspace -query -act` + "/spw/" + "*.spw");
+ $skinedPolyWeightFileName = `fileDialog -dm $filePath`;
+
+ $selected = `ls -sl` ;
+ for ($poly in $selected)
+ { 
+
+  $tempArray = `ls  -dagObjects -sl -hd 1 -type mesh $poly` ;
+  $vtxrange = `polyListComponentConversion -toVertex $tempArray[0]`;
+  $vtxUnit = `filterExpand -ex true -sm 31 $vtxrange[0]` ;
+  $vtxCount = `size $vtxUnit` ;
+
+  if($tempArray[0] == "")
+  {
+   error "Please select polygon object." ;
+  }
+  else
+  {
+   $tempArray = `listHistory $tempArray[0]` ;
+   $skinCluster = `ls -typ skinCluster $tempArray` ;
+   $totalSkinClusters = `size $skinCluster`;
+   if($totalSkinClusters != 0)
+   {
+
+    string $SkinClusterConnections[] = `listConnections ($skinCluster[0] + ".matrix")`;
+
+    $fileId=`fopen $skinedPolyWeightFileName "r"`;
+    $nextLineArray = 0;
+
+    $nextLine[0] = `fgetline $fileId`;
+    while ( size ($nextLine[$nextLineArray]) != 0 )
+    {
+     $nextLineArray++;
+     $nextLine[$nextLineArray] = `fgetline $fileId`;
+    }
+
+    $howManyJoints = ((`size $nextLine`) -1);
+
+    int $normalizeWeightsStatus = `getAttr ($skinCluster[0] + ".normalizeWeights")`;
+    if ($normalizeWeightsStatus == 1)
+    setAttr ($skinCluster[0] + ".normalizeWeights") false;
+
+    waitCursor -state on;
+    skinPercent -rtd $skinCluster[0];
+
+    for ($ii = 0; $ii <= 1; $ii++)
+     for ( $count=0;  $count < ($howManyJoints); $count++ )
+     {
+      string $currentPaintOnConnection[] = `listConnections ($skinCluster[0] + ".ptt")`;
+      
+      if (`size $currentPaintOnConnection` != 0)
+      disconnectAttr ($currentPaintOnConnection[0]+ ".message") ($skinCluster[0] + ".ptt");
+      string $jjjunk[];
+      tokenize $nextLine[$count] "\n" $jjjunk;
+      connectAttr ($jjjunk[0] + ".message") ($skinCluster[0] + ".ptt");
+      $count++;
+
+      $runThis = ("setAttr " + $skinCluster[0] + ".ptw -type doubleArray " + $vtxCount + " " + $nextLine[$count]);
+      eval $runThis;
+      refresh;
+      currentTime `currentTime -q`;  //just another way of refreshing
+       
+     }
+
+   if ($normalizeWeightsStatus == 1)
+   setAttr ($skinCluster[0] + ".normalizeWeights") true;
+   refresh;
+
+   fclose $fileId ;
+   }
+  
+  }
+ }
+
+ hilite -unHilite "*" ;
+ waitCursor -state off ;
+
+}
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddPolySmoothBindWeightsExport
+// 
+// 导出polygon 物体的smooth skin weight
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddPolySmoothBindWeightsExport(string $polyObject,string $spwfile)
+{
+ int $i,$j,$intArray[],$totalSkinClusters,$totalJoints,$countVtx ;
+ float $jointWeights ;
+ string $selected[],$temp,$tempArray[],
+	$workSpaceDirectory,$skinedPolyWeightFileName,
+	$skinClusterJointsList[],$poly ;
+
+ global string $ddBrowerFileName ;
+
+ $selected = `ls -sl` ;
+
+ if(`size $selected` == 0)
+ {
+  error "Please select polygon object." ;
+ }
+
+ for ($poly in $selected)
+ { 
+  //查看是不是polygon物体
+  $tempArray = `ls  -dagObjects -sl -hd 1 -type mesh $poly` ;
+  if($tempArray[0] == "")
+  {
+   error "Please select polygon object.";
+  }
+  else
+  {
+   $tempArray = `listHistory $tempArray[0]` ;
+   $skinCluster = `ls  -typ  skinCluster $tempArray` ;
+
+   $totalSkinClusters = `size $skinCluster` ;
+   if($totalSkinClusters == 0)
+   {
+    error "Don't found skinCluster!" ;
+   }
+   else
+   {
+
+    //处理导出的权重文件放于何处
+    $poly = `substitute "|" $poly "_"` ;
+    $workSpaceDirectory = `workspace -query -rootDirectory` ;
+
+    if (!`filetest -d ($workSpaceDirectory + "spw")`)
+    {
+     sysFile -makeDir ($workSpaceDirectory + "spw") ;
+    }
+    
+    fileBrowser ("ddBrowerFileName", "Export", "", 1) ;
+
+    if($ddBrowerFileName == "")
+    {
+     $skinedPolyWeightFileName = ($workSpaceDirectory + "spw/" + $poly +".spw" ) ;
+    }
+    else
+    {
+     tokenize $skinedPolyWeightFileName "." $tempArray ;
+     $skinedPolyWeightFileName = ($tempArray[0] + ".spw") ;
+    }
+
+    $fileIdw=`fopen $skinedPolyWeightFileName "w"` ;
+    fprint $fileIdw ("//This is a polygon smooth bind weight info file.=^_^=\n") ;
+    fclose $fileIdw ;
+
+    $fileIda=`fopen $skinedPolyWeightFileName "a"` ;
+
+    //查询skinCluster下的influence
+    $skinClusterJointsList = `skinCluster -query -influence $skinCluster[0]` ;
+    $totalJoints = `size $skinClusterJointsList` ;
+    //在文件中写下influence List
+    fprint $fileIdw ("//Influence List: \n") ;
+    for($i=0;$i<$totalJoints;$i++)
+    {
+     fprint $fileIdw ($skinClusterJointsList[$i] + "\n") ;
+    }
+
+    //查询poly有多少个点
+    $intArray = `polyEvaluate -vertex $poly` ;
+    $countVtx = $intArray[0] ;
+    fprint $fileIdw ("//Total Vertex: " + $countVtx + "\n") ;
+//    print ("TOTAL JOINTS: "+$totalJoints+"\n") ;
+
+    waitCursor -state on ;
+
+    for($i=0;$i<$countVtx;$i++)
+    { 
+     fprint $fileIdw ("vtx#" + $i + "\n") ;
+     for($j=0;$j<$totalJoints;$j++)
+     {
+      $jointWeights = `getAttr ($skinCluster[0] + ".weightList[" +$i + "].weights[" + $j + "]")` ;
+      if($jointWeights > 0.000001)
+      {
+       fprint $fileIdw ("joint#" + $i + "[" + $jointWeights + "]" );
+      }
+     }
+     fprint $fileIdw ("\n") ;
+    }
+    
+    fprint $fileIdw ("//End of file.=>_<=") ;
+    fclose $fileIda ;
+    waitCursor -state off ;
+   }
+  }
+  print ("\nExport is OK.\n") ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddWTDialog
+// 
+// 
+// Arguments:
+//	$turnover  improt (导入)  export(导出)
+//
+//////////////////////////////////////////////////////////
+global proc ddWTDialog(string $turnover)
+{
+ if($turnover == "import")
+ {
+ }
+ else if($turnover == "export")
+ {
+ }
+ else
+ {
+  error "parameter error..."
+ }
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddWeightToolsUI
+// 
+// 用户界面
+// Arguments:
+//  
+//////////////////////////////////////////////////////////
+global proc ddWeightToolsUI()
+{
+ if ((`window -exists ddWeightToolsWin`) == true)
+ {
+  deleteUI ddWeightToolsWin ;
+  if(`windowPref -exists ddWeightToolsWin`)
+  {
+   windowPref -remove ddWeightToolsWin ;
+  }
+ }
+
+ window -widthHeight 320 240
+	-title "durdur's Polygon Smooth Weights Tools 0.11 beta"
+	ddWeightToolsWin ;
+ columnLayout -adjustableColumn true ;
+    button -label "Export Polygon Smooth Weights ..." 
+	 -height 28
+	 -width 120
+	 -command "ddPolySmoothBindWeightsExport" ;
+
+    button -label "Import Polygon Smooth Weights ..." 
+	 -height 28
+	 -width 120
+	 -command "ddPolySmoothBindWeightsImport" ;
+
+ setParent.. ;
+
+ showWindow ddWeightToolsWin ;
+}
+
+
+//End of file.

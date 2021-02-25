@@ -1,0 +1,66 @@
+global proc ysCastShadowRenderLayer()
+{
+	string $allShape[] = `ls -geometry`;
+	//string $allTransform[] = `listRelatives -parent $allShape`;
+	string $Top[] = `ls -sl`;
+	string $shapes[] = `ls -dag $Top`;
+	string $others[] = stringArrayRemove($shapes, $allShape);
+	string $lightShape[] = `listRelatives -shapes $Top`;
+	string $light[] = `ls -lights $lightShape`;
+	int $countLights;
+	// check light and selected objects
+	if(size($Top) == 0)
+	{
+		confirmDialog -message "没有选择任何物体" -button "请选择需要投影的物体";
+		return;		
+	}	
+	if(size($light)==0)
+	{
+		confirmDialog -message "没有选择灯光" -button "请选择投影灯光";
+		return;
+	}
+	
+	//Make cast render layer and overrides use background material 
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}		
+
+	if(!(`objExists "cShadow"`))
+	{
+		string $cShadow = `shadingNode -asShader useBackground -name "cShadow"`;
+		setAttr ($cShadow + ".reflectivity") 0;
+		setAttr ($cShadow + ".reflectionLimit") 0;
+		string $cShadowSG = `sets -renderable true -noSurfaceShader true -empty -name ($cShadow+"SG")`;
+		connectAttr ($cShadow +".outColor") ( $cShadowSG +".surfaceShader");
+		layerEditorHandleNodeDrop "castShadow" $cShadow;
+	}
+	
+	createRenderLayer -name "castShadow";
+	editRenderLayerMembers -noRecurse "castShadow" $allShape;
+	editRenderLayerGlobals -currentRenderLayer "castShadow";
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	
+	//Set up  visible attribute	
+	for($item in $shapes)
+	{
+		if(`objExists ($item + ".primaryVisibility")`)
+		{
+			setAttr ($item + ".primaryVisibility") 0;
+			setAttr ($item + ".castsShadows") 1;
+			setAttr ($item + ".receiveShadows") 0;
+		}
+	}
+	for($item in $others)
+	{
+		if(`objExists ($item + ".castsShadows")`)	
+		{
+			setAttr ($item + ".primaryVisibility") 1;
+			setAttr ($item + ".castsShadows") 0;
+			setAttr ($item + ".receiveShadows") 1;
+		}
+		sets -e -forceElement "cShadowSG" $item;
+	}
+}

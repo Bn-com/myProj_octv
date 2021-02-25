@@ -1,0 +1,189 @@
+
+global proc float AstronomicJulianDate(int $iYear, int $iMonth, int $iDay, float $fLocalTime, float $fTimezone) // Astronomisches Julianisches Datum
+{
+	
+	int $M;
+	int $Y;
+
+	if ($iMonth>2) {$Y=$iYear; $M = $iMonth;}
+	else {$Y=$iYear-1; $M = $iMonth+12;}
+	
+	
+	
+	float $UT= $fLocalTime - $fTimezone;	// Weltzeit UT
+	float $hour = $UT / 24;								//Tagesanteil von 0 bis 1
+	int $A= int($Y/100);
+	int $B= 2-$A+int($A/4);								// gregorianisches Datum
+	float $JD = trunc(365.25*($Y+4716)) + trunc(30.6001*($M+1))+ $iDay+ $hour + $B - 1524.5;	// Astronomisches Julianisches Datum
+	
+	return $JD;
+}
+
+global proc float[] sunData (float $Latitude, float $Longitude, int $Year, int $Month, int $Day, float $LocalTime, float $Timezone)
+{
+	float $JD= AstronomicJulianDate($Year, $Month, $Day, $LocalTime, $Timezone);
+	
+	
+	
+	float $phi = $Latitude;
+	float $lambda = $Longitude;
+	
+	float $n = $JD-2451545.0; 								// Julianische Tageszahl incl. Tagesbruchteil bezogen auf 1.1.2000
+	float $LDeg = (280.460 + .9856474*$n) - (trunc((280.460 + .9856474*$n)/360) * 360); 		// mittlere ekliptikale Laenge L der Sonne in Grad inkl. Einfluss der Aberration im Bereich von 0-360 Grad
+	float $gDeg = (357.528 + .9856003*$n) - (trunc((357.528 + .9856003*$n)/360) * 360);			// mittlere Anomalie g in Grad im Bereich von 0-360 Grad
+	float $LambdaDeg = 	$LDeg + 1.915 * sind($gDeg) + 0.02 * sind(2*$gDeg);			// ekliptikale Laenge Lambda der Sonne in Grad
+	
+
+	
+	float $epsilonDeg = 23.439-.0000004*$n;	// Schiefe der Ekliptik
+	
+
+	
+	float $alphaDeg = atand( (cosd($epsilonDeg)*sind($LambdaDeg)) / cosd($LambdaDeg) ); 		// Rektaszension alpha in Grad
+	if (cosd($LambdaDeg)<0) $alphaDeg = $alphaDeg + 180;
+	
+
+	float $deltaDeg = asind(sind($epsilonDeg)*sind($LambdaDeg));  // Deklination delta (senkrecht zum Himmelsaequator)
+	
+
+
+	
+	float $JDNull = AstronomicJulianDate($Year, $Month, $Day, 0, 0);  // Astronomisches Julianisches Datum 00:00 h UT am gewaehlten Tag
+	
+
+	
+	float $TNull = ( ($JDNull - 2451545.0) / 36525);										// Astronomisches Julianisches Datum 00:00 h UT am gewaehlten Tag in julianischen Jahrhunderten ab J2000
+	float $T = $LocalTime-$Timezone;																	// Weltzeit UT in Stunden
+	
+	float $thetaGh = 6.697376 + 2400.05134*$TNull + 1.002738*$T;				// mittlere Sternzeit in Greenwich im Zeitmass 
+	$thetaGh = $thetaGh - (trunc($thetaGh/24) * 24);							// mittlere Sternzeit in Greenwich im Zeitmass bereinigt um Vielfache von 24
+	
+	
+
+	
+	
+	float $thetaG = $thetaGh*15;																// mittlere Sternzeit in Greenwich im Stundenwinkel 
+	
+	float $theta = $thetaG + $lambda;													// Stundenwinkel des Fruehlingspunktes am gewaehlten Ort
+	
+
+	
+	float $tau = $theta - $alphaDeg;												// Stundenwinkel tau der Sonne für jenen Ort
+	
+
+	
+	float $a	= atand ( sind($tau) /  ( cosd($tau)*sind($phi) - tand($deltaDeg)*cosd($phi)));  // Azimut
+	if (cosd($tau)*sind($phi) - tand($deltaDeg)*cosd($phi)<0) $a=$a+180;
+	
+
+	
+	float $h = asind(cosd($deltaDeg)*cosd($tau)*cosd($phi) + sind($deltaDeg)*sind($phi));   // Hoehenwinkel h (inklination);
+	
+
+	
+	// Refraktionskorrektur
+	
+	float $R = 1.02 / (tand ($h+(10.3/($h+5.11)))); 			// Mittlere Refraktion in Bogenminuten
+	float $hR = $h + $R/60;
+	
+
+
+	float $sunData[];
+	$sunData[0]=$a;
+	$sunData[1]=$hR;
+	return $sunData;
+}
+
+		
+global proc geoSun()
+{
+	string $sunShape[]=`ls "sunShape""sunDirectionShape"`;
+	if (!objExists($sunShape[0])) {error "Create Mental Ray Physical Sun first!";}
+	string $sunShapeName=$sunShape[0];
+		if (attributeExists("latitude","sunDirection|sunDirectionShape")) {error "Sun already linked";}
+
+
+// Add Attrs
+	addAttr -ln latitude -at double  -min -90 -max 90 -dv 22 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".latitude");
+	
+	addAttr -ln longitude -at double  -min -180 -max 180 -dv 114 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".longitude");
+
+	addAttr -ln timeZone -at "enum" -dv 27 -en "-12.00:-11.00:-10.00 US/Hawaii:-9.30:-9.00 CAN/Yukon:-8.30:-8.00 US/Pacific:-7.00 US/Mountain:-6.00 US/Central:-5.00 US/Eastern:-4.00 Caracas:-3.30:-3.00 Rio:-2.0:-1.00:GMT London:+1.00 Paris:+2.00 Cairo:+3.00 Jeddah:+3.30 Tehran:+4.00 Dubai:+4.30 Kabul:+5.00 Karachi:+5.30 Delhi:+6.00 Dhaka:+6.30 Rangoon:+7.00 Bangkok:+8.00 Hong Kong:+9.00 Tokyo:+9.30 Adelaide:+10.00 Sydney:+10.30:+11.00 Noumea:+11.30:+12.00 Wellington:+13.00:" $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".timeZone");
+	
+	
+	addAttr -ln localHour -at long  -min 0 -max 23 -dv 14 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".localHour");
+	
+	addAttr -ln localMinute -at long  -min 0 -max 59 -dv 0 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".localMinute");
+	
+	addAttr -ln "useHourValue" -at bool  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".useHourValue");
+	
+	addAttr -ln "localHourValue" -at double  -min 0 -max 24 -dv 14 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".localHourValue");
+	
+	
+	addAttr -ln day -at long  -min 1 -max 31 -dv 21 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".day");
+	
+	addAttr -ln month -at "enum" -dv 5 -en "Jan:Feb:Mar:Apr:May:Jun:Jul:Aug:Sep:Oct:Nov:Dec:" $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".month");
+	
+	addAttr -ln year -at long  -min 2000 -max 3000 -dv 2007 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".year");
+		
+	addAttr -ln "useDayValue" -at bool  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".useDayValue");
+	
+	addAttr -ln "dayValue" -at double  -min 1 -max 365 -dv 172 $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".dayValue");
+	
+	
+	
+	addAttr -ln "effectiveLocalHour" -at long  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".effectiveLocalHour");
+	
+	addAttr -ln "effectiveLocalMinute" -at long  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".effectiveLocalMinute");
+	
+	addAttr -ln "effectiveDay" -at long  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".effectiveDay");
+	
+	addAttr -ln "effectiveMonth" -at "enum" -en "Jan:Feb:Mar:Apr:May:Jun:Jul:Aug:Sep:Oct:Nov:Dec:"  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".effectiveMonth");
+	
+	addAttr -ln elevation -at double  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".elevation");
+	
+	addAttr -ln azimuth -at double  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".azimuth");
+	
+	
+	addAttr -ln "zUp" -at bool -dv 0  $sunShapeName;
+	setAttr -e -keyable true ($sunShapeName+".zUp");
+
+
+// Link Elevation and Azimuth To Rotation of sunDirection and make -Z be North @ y-Up and +Y be North @ z-Up
+
+string $cmdTemp="if ("+$sunShapeName+".zUp==1){sunDirection.rotateX = 90-"+$sunShapeName+".elevation; sunDirection.rotateY=0; sunDirection.rotateZ=-"+$sunShapeName+".azimuth;} else { sunDirection.rotateX =180+"+$sunShapeName+".elevation; sunDirection.rotateY =180-"+$sunShapeName+".azimuth; sunDirection.rotateZ=0;}";
+expression -s $cmdTemp -o $sunShapeName -ae 1 -uc all;
+
+// Link Y-Up of MR Sun
+
+ 
+// Calculate Azimut and Elevation
+
+disconnectAttr "mia_physicalsky1.y_is_up" "mia_physicalsun1.y_is_up";
+$cmdTemp="if("+$sunShapeName+".zUp==1) {mia_physicalsky1.y_is_up=0; mia_physicalsun1.y_is_up=0;} else {mia_physicalsky1.y_is_up=1; mia_physicalsun1.y_is_up=1;} ";
+expression -s $cmdTemp -o mia_physicalsky1 -ae 1 -uc all;
+
+
+
+$cmdTemp="\r\n	float $Latitude = "+$sunShapeName+".latitude;\r\n	float $Longitude = "+$sunShapeName+".longitude;\r\n\r\n	float $tz = 0;\r\n	if ("+$sunShapeName+".timeZone==0) $tz = -12;\r\n		else if ("+$sunShapeName+".timeZone==1) $tz = -11;\r\n		else if ("+$sunShapeName+".timeZone==2) $tz = -10;\r\n		else if ("+$sunShapeName+".timeZone==4) $tz = -9.5;\r\n		else if ("+$sunShapeName+".timeZone==5) $tz = -9;\r\n		else if ("+$sunShapeName+".timeZone==6) $tz = -8.5;\r\n		else if ("+$sunShapeName+".timeZone==7) $tz = -8;\r\n		else if ("+$sunShapeName+".timeZone==8) $tz = -7;\r\n		else if ("+$sunShapeName+".timeZone==9) $tz = -6;\r\n		else if ("+$sunShapeName+".timeZone==10) $tz = -5;\r\n		else if ("+$sunShapeName+".timeZone==11) $tz = -4;\r\n		else if ("+$sunShapeName+".timeZone==12) $tz = -3.5;\r\n		else if ("+$sunShapeName+".timeZone==13) $tz = -3;\r\n		else if ("+$sunShapeName+".timeZone==14) $tz = -2;\r\n		else if ("+$sunShapeName+".timeZone==15) $tz = -1;\r\n		else if ("+$sunShapeName+".timeZone==16) $tz = 0;\r\n		else if ("+$sunShapeName+".timeZone==17) $tz = 1;\r\n		else if ("+$sunShapeName+".timeZone==18) $tz = 2;\r\n		else if ("+$sunShapeName+".timeZone==19) $tz = 3;\r\n		else if ("+$sunShapeName+".timeZone==20) $tz = 3.5;\r\n		else if ("+$sunShapeName+".timeZone==21) $tz = 4;\r\n		else if ("+$sunShapeName+".timeZone==22) $tz = 4.5;\r\n		else if ("+$sunShapeName+".timeZone==23) $tz = 5;\r\n		else if ("+$sunShapeName+".timeZone==24) $tz = 5.5;\r\n		else if ("+$sunShapeName+".timeZone==25) $tz = 6;\r\n		else if ("+$sunShapeName+".timeZone==26) $tz = 6.5;\r\n		else if ("+$sunShapeName+".timeZone==27) $tz = 7;\r\n		else if ("+$sunShapeName+".timeZone==28) $tz = 8;\r\n		else if ("+$sunShapeName+".timeZone==29) $tz = 9;\r\n		else if ("+$sunShapeName+".timeZone==30) $tz = 9.5;\r\n		else if ("+$sunShapeName+".timeZone==31) $tz = 10;\r\n		else if ("+$sunShapeName+".timeZone==32) $tz = 10.5;\r\n		else if ("+$sunShapeName+".timeZone==33) $tz = 11;\r\n		else if ("+$sunShapeName+".timeZone==34) $tz = 11.5;\r\n		else if ("+$sunShapeName+".timeZone==35) $tz = 12;\r\n		else $tz = 13;\r\n\r\n	float $fLocalTime = 0;\r\n	\r\n	if ("+$sunShapeName+".useHourValue){\r\n		$fLocalTime = "+$sunShapeName+".localHourValue;\r\n		\r\n	} else {\r\n		$fLocalTime = (("+$sunShapeName+".localHour) + ("+$sunShapeName+".localMinute)/60);\r\n	}\r\n	\r\n	"+$sunShapeName+".effectiveLocalHour=int(floor($fLocalTime));\r\n	"+$sunShapeName+".effectiveLocalMinute=int(($fLocalTime-floor($fLocalTime))*60);\r\n	\r\n	if ("+$sunShapeName+".useDayValue)\r\n	{\r\n		int $mon = 0;\r\n		int $effFullMonthDays = 0;\r\n		if ("+$sunShapeName+".dayValue<=31) $mon = 0;\r\n		else if ("+$sunShapeName+".dayValue<=59) {$mon = 1; $effFullMonthDays = 31;}\r\n		else if ("+$sunShapeName+".dayValue<=90) {$mon = 2; $effFullMonthDays = 59;}\r\n		else if ("+$sunShapeName+".dayValue<=120) {$mon = 3; $effFullMonthDays = 90;}\r\n		else if ("+$sunShapeName+".dayValue<=151) {$mon = 4; $effFullMonthDays = 120;}\r\n		else if ("+$sunShapeName+".dayValue<=181) {$mon = 5; $effFullMonthDays = 151;}\r\n		else if ("+$sunShapeName+".dayValue<=212) {$mon = 6; $effFullMonthDays = 181;}\r\n		else if ("+$sunShapeName+".dayValue<=243) {$mon = 7; $effFullMonthDays = 212;}\r\n		else if ("+$sunShapeName+".dayValue<=273) {$mon = 8; $effFullMonthDays = 243;}\r\n		else if ("+$sunShapeName+".dayValue<=304) {$mon = 9; $effFullMonthDays = 273;}\r\n		else if ("+$sunShapeName+".dayValue<=334) {$mon = 10; $effFullMonthDays = 304;}\r\n		else {$mon = 11;  $effFullMonthDays = 334;}\r\n		\r\n		"+$sunShapeName+".effectiveMonth = $mon;\r\n		"+$sunShapeName+".effectiveDay = int("+$sunShapeName+".dayValue)-$effFullMonthDays;\r\n	} else {\r\n		"+$sunShapeName+".effectiveMonth = "+$sunShapeName+".month;\r\n		"+$sunShapeName+".effectiveDay = "+$sunShapeName+".day;\r\n	}\r\n\r\n	int $Day = "+$sunShapeName+".effectiveDay;\r\n	int $Month = "+$sunShapeName+".effectiveMonth+1;\r\n	int $Year = "+$sunShapeName+".year;\r\n	\r\n	float $sun[]= sunData ($Latitude, $Longitude, $Year, $Month, $Day, $fLocalTime, $tz);\r\n	\r\n	"+$sunShapeName+".azimuth = $sun[0];\r\n	"+$sunShapeName+".elevation = $sun[1];\r\n	";
+expression -s $cmdTemp -o $sunShapeName -ae 1 -uc all;
+
+}

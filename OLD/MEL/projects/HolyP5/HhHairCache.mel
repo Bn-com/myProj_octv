@@ -1,0 +1,150 @@
+global proc HhCreatHairCache()
+{
+	string $Master[]=`ls "*Master" "*:Master"`;
+	string $filetype[]=`file -query -type -sceneName`;
+	for($m in $Master)
+	{
+		string $hairvis=$m+".hair_vis";
+		string $HuziVis=$m+".huzi_vis";
+		if(`objExists $hairvis`)
+		{
+			setAttr $hairvis 1;
+			setAttr $HuziVis 1;
+		}
+	}
+	select -cl  ;
+	string $HairSets[]=`ls -sets "HRS" "*:HRS"`;
+	select -cl  ;
+	if (size($HairSets)!=0)
+	{
+		for ($hairset in $HairSets)
+		{
+			string $hairs[]=`sets -q $hairset`;
+			select -add $hairs;
+		}
+	}
+	string $allHairs[]=`ls -sl`;
+	select -cl  ;
+	if(size($allHairs)!=0)
+	{
+		int  $minFram=`playbackOptions -q -min`-12;
+		int  $maxFram=`playbackOptions -q -max`;
+		currentTime $minFram;
+		for($selectHair in $allHairs)
+		{
+			string $oldcache[]=`listConnections -type "diskCache" $selectHair`;
+			if(size($oldcache)!=0)
+			{
+				select $selectHair;
+				DeleteHairCache;
+				select -d $selectHair;
+			}
+			else
+			{
+				select -add $selectHair;
+			}
+		}
+	    doHairDiskCache 1 { "3", 1, $minFram, $maxFram , 1 };
+	}
+	file -f -save  -options "v=0" -type $filetype[0];
+
+}
+global proc HhCopyHairCache()
+{
+	string $objselects[]=`ls -sl`;
+	string $sceName=`file -q -sn -shn`;
+	string $dataNetPath=`zwGetPath data $sceName`;
+	string $localPaths=`workspace -expandName "cache"`;
+	string $nethairPath=$dataNetPath+"/hair";
+	string $filetype[]=`file -query -type -sceneName`;
+	for($hairsy in $objselects)
+	{
+		string $HairHis[]=`listHistory $hairsy`;
+		for($his in $HairHis)
+		{
+			string $nodetype=`nodeType $his`;
+			if(`match "diskCache" $nodetype`!="" )
+			{
+				//print $his;
+				string $cacheBaseName=`getAttr ($his+".cacheName")`;
+				if(size ($cacheBaseName)!=0)
+				{
+					string $cacheNetName = $nethairPath + "/" + $cacheBaseName;
+					string $cacheLocalName = $localPaths + "/" + $cacheBaseName;
+					//print $cacheNetName;
+					//print $cacheLocalName;
+					if(`filetest -d  $nethairPath`<1)
+					{
+						sysFile -md $nethairPath;
+					}
+					sysFile -cp    $cacheLocalName $cacheNetName;
+					setAttr -type "string" ($his+".cacheName") $cacheNetName;
+				}
+			}
+		}
+	}
+	file -f -save  -options "v=0" -type $filetype[0];
+}
+global proc HhImportHairCache()
+{
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjReturnMatList.mel";
+	zzjGetMatList;
+	HhCreatHairCache();
+	file -save;
+	string $objselects[]=`ls -sl`;
+	string $sceName=`file -q -sn -shn`;
+	string $dataNetPath=`zwGetPath data $sceName`;
+	string $localPaths=`workspace -expandName "cache"`;
+	string $nethairPath=$dataNetPath+"/hair/";
+	string $filetype[]=`file -query -type -sceneName`;
+	for($hairsy in $objselects)
+	{
+		string $HairHis[]=`listHistory $hairsy`;
+		for($his in $HairHis)
+		{
+			string $nodetype=`nodeType $his`;
+			if(`match "diskCache" $nodetype`!="" )
+			{
+				//print $his;
+				string $cacheBaseName=`getAttr ($his+".cacheName")`;
+				string $filename = `match "[^/\\]+$" $cacheBaseName`;
+				$filename = `substitute "^[^/\\.]+[.][^/\\.]{2}_" $filename ""`;
+				string $cacheNetName = $nethairPath  + $cacheBaseName;
+				string $nets[]=`getFileList -folder $nethairPath`;
+				
+				if(size ($nets)!=0)
+				{
+					for($netfile in $nets)
+					{
+						if(`match $filename $netfile`!=""&&`match "an" $netfile`!="")
+						{
+							string $copyfile=$nethairPath+$netfile;
+							sysFile -ren  $cacheNetName $copyfile;
+						}
+					}
+					setAttr -type "string" ($his+".cacheName") $cacheNetName;
+				}
+			}
+		}
+	}
+	zzjSetMatList();
+	file -f -save  -options "v=0" -type $filetype[0];
+	print "import HairCache";
+
+}
+
+global proc HhApplyMaterialcache()
+
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zjApplyMaterialcache.mel";
+	string $refs[]=`file -q -r `;
+	for($filename in $refs)
+	{
+		if(`match "c001001SantaClau" $filename`!="")
+		{
+			zjApplyMaterialcache($filename);
+		}
+	}
+}
+

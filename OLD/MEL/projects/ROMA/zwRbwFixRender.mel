@@ -1,0 +1,196 @@
+global proc zwRbwFixRender()
+{
+//	zwRbwFixLayer;
+//	zwRbwFixMayaMan;
+
+	rnd_wxII_setSpotLightFocus;
+	eval "source \"rnd_wxII_FixBeforeRender.mel\"";
+	wxII_FixBeforeRender "project";
+
+//	zwRbwFixMayaManUserRibOptions;
+}
+
+global proc zwRbwFixLayer()
+{
+	string $sceneName = `file -query -sceneName -shortName`;
+
+	string $renderLayers[]= `listConnections "renderLayerManager.renderLayerId"`;
+	for ($i=0; $i<size($renderLayers); $i++)
+	{
+		string $renderLayer = $renderLayers[$i];
+
+		if (`match "_env[0-9]*_occ" $sceneName` != "" || `match "_c[0-9]*_occ" $sceneName` != "")
+		{
+			if (`match "_env[0-9]*_nrm" $renderLayer` != "" || `match "_c[0-9]*_nrm" $renderLayer` != "")
+			{
+				delete $renderLayer;
+				continue;
+			}
+		}
+
+		string $layerName = `substitute "^sq_[^_]+_sc_[^_]+_" $renderLayer ""`;
+		$layerName = `substitute "^sc_[^_]+_" $layerName ""`;
+		if ($i != 0 && `match "_left[0-9]*$" $layerName` == "" && `match "_right[0-9]*$" $layerName` == "")
+		{
+			$layerName = $layerName + "_left";
+		}
+		if ($layerName != $renderLayer && $layerName != "")
+		{
+			$renderLayer = `evalEcho ("rename \"" + $renderLayer + "\" \"" + $layerName + "\"")`;
+		}
+
+		string $attr = zwGetOverrideAttr($renderLayer, "defaultRenderGlobals.imageFilePrefix");
+		string $imageFilePrefix = `getAttr $attr`;
+		if ($imageFilePrefix != "")
+		{
+			if (`editRenderLayerGlobals -query -currentRenderLayer` != $renderLayer)
+			{
+				editRenderLayerGlobals -currentRenderLayer $renderLayer;
+			}
+			zwSetAttrStr "defaultRenderGlobals.imageFilePrefix" "";
+		}
+
+// 2010/11/24
+// zhaozhijie(赵志杰Tazz) 13:44:50
+// Roman：
+// 建层---
+// 1.amb  lgt  eyes  idp  应该关掉光线追踪选项。
+// 2.rfl  spc  素材输出地址有问题，工程目录image里面reflections和specular文件夹会生
+//  成 名称正确效果错误 的素材，mayaman层输出效果正确的素材在reflections和specular 
+//  文件夹外面但是名称不正确。
+	//	if (`match "_amb[0-9]*_" $renderLayer` != "" || `match "_lgt[0-9]*_" $renderLayer` != "" || `match "_eyes[0-9]*_" $renderLayer` != "" || `match "_idp[0-9]*_" $renderLayer` != "")
+	//	{
+	//		string $attr = zwGetOverrideAttr($renderLayer, "defaultRenderQuality.enableRaytracing");
+	//		int $enableRaytracing = `getAttr $attr`;
+	//		if ($enableRaytracing)
+	//		{
+	//			if (`editRenderLayerGlobals -query -currentRenderLayer` != $renderLayer)
+	//			{
+	//				editRenderLayerGlobals -currentRenderLayer $renderLayer;
+	//			}
+	//			zwSetAttrInt "defaultRenderQuality.enableRaytracing" false;
+	//		}
+	//	}
+		if (`match "_spc[0-9]*_" $renderLayer` != "")
+		{
+			source "//file-cluster/GDC/Resource/Support/Maya/projects/ROMA/rnd_wxII_setMayamanOutputPath.mel";
+			string $path = rnd_wxII_getMayamanOutputPath("reflection_project") + "\\" + `zwGetPath "RibBase" ""` + "_" + `substitute "_spc[0-9]*_" $renderLayer "_rfl_"`;
+
+			MayaManAddExtraOutputChannel("__reflect", 3, true, 0, 0, 1, 0, 65535, 0, 65535, "", 0, 0, "", "", "", "");
+			MayaManSetData -setstring "EOPath" $path 0;
+		}
+	}
+}
+
+global proc zwRbwFixMayaMan()
+{
+	string $RibBase = `zwGetPath "RibBase" ""`;
+	if ($RibBase != "")
+	{
+		zwSetAttrStr "MayaManNugget.RibBase" $RibBase;
+	}
+
+	zwSetAttrStr "MayaManNugget.CustomDisplay" "it";
+	zwSetAttrStr "MayaManNugget.RenderDisplayDriver" "mayaiff";
+	zwSetAttrStr "MayaManNugget.DisplayExtension" "iff";
+
+//	string $sceneName = `file -query -sceneName -shortName`;
+//	if (`match "_beauty[_.]" $sceneName` != "")
+//	{
+//		int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+//		for ($i=$noOfElements-1; $i>=0; $i--)
+//		{
+//			string $EOChannel = `MayaManInfo -getrawstring "EOChannel" $i`;
+//			if ($EOChannel == "__extra" || $EOChannel == "__extrashadow" || $EOChannel == "__extrashadows" || $EOChannel == "__refract")
+//			{
+//				MayaManSetData -delarrayelement "EOChannel"		$i;
+//				MayaManSetData -delarrayelement "EOEnabled"		$i;
+//				MayaManSetData -delarrayelement "EOType"		$i;
+//				MayaManSetData -delarrayelement "EODoDither"		$i;
+//				MayaManSetData -delarrayelement "EODitherValue"		$i;
+//				MayaManSetData -delarrayelement "EOQuantization"	$i;
+//				MayaManSetData -delarrayelement "EOQuantMin"		$i;
+//				MayaManSetData -delarrayelement "EOQuantMax"		$i;
+//				MayaManSetData -delarrayelement "EOQuantZero"		$i;
+//				MayaManSetData -delarrayelement "EOQuantOne"		$i;
+//				MayaManSetData -delarrayelement "EOFilter"		$i;
+//				MayaManSetData -delarrayelement "EOFilterX"		$i;
+//				MayaManSetData -delarrayelement "EOFilterY"		$i;
+//				MayaManSetData -delarrayelement "EOPath"		$i;
+//				MayaManSetData -delarrayelement "EODriver"		$i;
+//				MayaManSetData -delarrayelement "EODriverArgs"		$i;
+//				MayaManSetData -delarrayelement "EOExt"			$i;
+//			}
+//		}
+//
+//		int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+//		for ($i=0; $i<$noOfElements; $i++)
+//		{
+//			string $buf[];
+//			string $EOPath = `MayaManInfo -getrawstring "EOPath" $i`;
+//			if (`tokenize $EOPath "/" $buf` < 3)
+//			{
+//				continue;
+//			}
+//			$EOPath = `substitute ("/" + $buf[size($buf)-2] + "/") $EOPath "/occlusion/"`;
+//			if (`tokenize $buf[size($buf)-1] "_" $buf` < 3)
+//			{
+//				continue;
+//			}
+//			$EOPath = `substitute ("_" + $buf[size($buf)-2] + "_") $EOPath "_occ_"`;
+//			MayaManAddExtraOutputChannel("__occ", 1, true, 0, 0, 1, 0, 65535, 0, 65535, "", 0, 0, "", "", "", "");
+//			MayaManSetData -setstring "EOPath" $EOPath $noOfElements;
+//			$noOfElements ++;
+//			$EOPath = `substitute "/occlusion/" $EOPath "/ambient/"`;
+//			$EOPath = `substitute "_occ_" $EOPath "_amb_"`;
+//			MayaManAddExtraOutputChannel("__amb", 1, true, 0, 0, 1, 0, 65535, 0, 65535, "", 0, 0, "", "", "", "");
+//			MayaManSetData -setstring "EOPath" $EOPath $noOfElements;
+//			break;
+//		}
+//	}
+}
+
+global proc zwRbwFixMayaManUserRibOptions()
+{
+//	python ("try:\n\treload(insaov)\nexcept:\n\timport RBW.MC.texturing.setAOV as insaov ");
+//	string $ribOptions = python ("insaov.ribOptions.__doc__");
+//	$ribOptions = `substitute "Attribute \"user\" \"float occflag\" [[]0]" $ribOptions "Attribute \"user\" \"float occflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float uvwflag\" [[]0]" $ribOptions "Attribute \"user\" \"float uvwflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float nrmflag\" [[]0]" $ribOptions "Attribute \"user\" \"float nrmflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float xyzflag\" [[]0]" $ribOptions "Attribute \"user\" \"float xyzflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float ambflag\" [[]0]" $ribOptions "Attribute \"user\" \"float ambflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float lgtflag\" [[]0]" $ribOptions "Attribute \"user\" \"float lgtflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float mvflag\" [[]0]" $ribOptions "Attribute \"user\" \"float mvflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"float zdpflag\" [[]0]" $ribOptions "Attribute \"user\" \"float zdpflag\" [1]"`;
+//	$ribOptions = `substitute "Attribute \"user\" \"uniform float pointbased\" [[]1]" $ribOptions "Attribute \"user\" \"uniform float pointbased\" [0]"`;
+//	setAttr -type "string" "MayaManNugget.UserRibOptions" $ribOptions;
+}
+
+global proc zwReadArchiveFilename()
+{
+	string $files[] = `ls -type "file"`;
+	for ($file in $files)
+	{
+		string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+		string $str = `substitute ".*/MC_[^/]+/" $fileTextureName "${MC_roma}/"`;
+		if ($str != $fileTextureName)
+		{
+			string $expandName = `workspace -expandName $str`;
+			if (`filetest -f $expandName`)
+			{
+				evalEcho ("setAttr -type \"string\" \"" + $file + ".fileTextureName\" \"" + $str + "\"");
+			}
+		}
+	}
+
+	string $MayaManAttributes[] = `ls -type "MayaManAttributes"`;
+	for ($MayaManAttribute in $MayaManAttributes)
+	{
+		string $mmma_ReadArchiveFilename = `getAttr ($MayaManAttribute + ".mmma_ReadArchiveFilename")`;
+		string $str = `substitute ".*/MC_[^/]+/" $mmma_ReadArchiveFilename "${MC_roma}/"`;
+		if ($str != $mmma_ReadArchiveFilename)
+		{
+			evalEcho ("setAttr -type \"string\" \"" + $MayaManAttribute + ".mmma_ReadArchiveFilename\" \"" + $str + "\"");
+		}
+	}
+}

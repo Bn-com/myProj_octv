@@ -1,0 +1,134 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: “¸Í…
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//The program be Changed by huangzhongwei.
+global proc string ycExportClip(string $ClipSource)
+{
+	string $ClipLib[]=`listConnections -c 0 -type "clipLibrary" $ClipSource`;
+        string $AnimCurve[]=`listConnections -s 1 $ClipLib[0]`;
+	string $AnimClipName[]=`listConnections -c 0 -type "animClip" $ClipLib[0]`;
+	clipSchedule -in $AnimClipName[0] $AnimCurve[0];
+	string $AllAnimCurve[];
+	int $AnimNum=0;
+	for ($i=0;$i<size($AnimCurve);$i++)
+	{
+		if (`nodeType $AnimCurve[$i]`=="animCurveTA"||`nodeType $AnimCurve[$i]`=="animCurveTL"||
+		`nodeType $AnimCurve[$i]`=="animCurveTT"||`nodeType $AnimCurve[$i]`=="animCurveTU"||
+		`nodeType $AnimCurve[$i]`=="animCurveUA"||`nodeType $AnimCurve[$i]`=="animCurveUL"||
+		`nodeType $AnimCurve[$i]`=="animCurveUT"||`nodeType $AnimCurve[$i]`=="animCurveUU")
+		{
+			$AllAnimCurve[$AnimNum]=$AnimCurve[$i];
+			$AnimNum++;
+		}
+	}
+
+	string $ClipStartID[]=`connectionInfo -destinationFromSource ($ClipSource+".start")`;
+	string $SplitStringBuffer[];
+	int $SplitSize=`tokenize  $ClipStartID[1] ".[]" $SplitStringBuffer`;
+	int $ID=$SplitStringBuffer[$SplitSize-1];
+	string $FinalAnimCurve[];
+	int $FinalAnimNum=0;
+	for ($i=0;$i<size($AllAnimCurve);$i++)
+	{
+		string $AnimConnectAttr[]=`connectionInfo -destinationFromSource ($AllAnimCurve[$i]+".apply")`;
+		string $PickIDBuffer[];
+		tokenize $AnimConnectAttr[0] "[]" $PickIDBuffer;
+		int $PickID=$PickIDBuffer[1];
+		if ($PickID==$ID)
+		{
+			$FinalAnimCurve[$FinalAnimNum]=$AllAnimCurve[$i];
+			$FinalAnimNum++;
+		}
+	}
+
+	string $ClipSchedulerName[]=`listConnections -c 0 -type "clipScheduler" $ClipLib[0]`;
+	string $ListIndex[]=`clipSchedule  -q -clipIndex  $AnimCurve[0]`;
+	string $ListIndexBuffer[];
+	tokenize $ListIndex[0] "," $ListIndexBuffer;
+	int $ListIndexID=$ListIndexBuffer[1];
+	string $ListConnectAttr[]=`clipSchedule -clipIndex $ListIndexID -q -listPairs $AnimCurve[0]`; 
+	undo;
+
+	string $clipAnim;
+	for ($i=0;$i<size($FinalAnimCurve);$i++)
+	{
+		int $keyCount = `keyframe -q -keyframeCount $FinalAnimCurve[$i]`;
+		float $time[] = `keyframe  -query -timeChange  $FinalAnimCurve[$i]`;
+		float $key[] = `keyframe  -query -valueChange $FinalAnimCurve[$i]`;
+		string $inTangent[] = `keyTangent  -query -inTangentType $FinalAnimCurve[$i]`;
+		string $outTangent[] = `keyTangent -query -outTangentType $FinalAnimCurve[$i]`;
+		string $AnimCurveBuff[];
+		int $AnimCurveNameSplitNum=`tokenize $ListConnectAttr[$i] " " $AnimCurveBuff`;
+
+		if ($i != 0)
+			$clipAnim += "\n";
+		$clipAnim += $AnimCurveBuff[0] + "\t" + $keyCount;
+		for ($k=0; $k<$keyCount; $k++)
+			$clipAnim += "\t" + $time[$k];
+		for ($k=0; $k<$keyCount; $k++)
+			$clipAnim += "\t" + $key[$k];
+		for ($k=0; $k<$keyCount; $k++)
+			$clipAnim += "\t" + $inTangent[$k];
+		for ($k=0; $k<$keyCount; $k++)
+			$clipAnim += "\t" + $outTangent[$k];
+	}
+	return $clipAnim;
+}
+
+global proc ycImportClip(string $GetClipKeyDate, float $ClipScale, int $ClipCycle)
+{
+	string $GetClipKeyDateBuff[];
+	tokenize $GetClipKeyDate "\t\n" $GetClipKeyDateBuff;
+	string $KeyAttr = $GetClipKeyDateBuff[0];
+	string $ObjectName = ycPickUp($KeyAttr);
+	string $KeyFrameAttr[]=`keyframe -q -n $ObjectName`;
+
+	int $numKey = $GetClipKeyDateBuff[1];
+	float $time=0;
+	for ($j=0;$j<$ClipCycle;$j++)
+	{
+		for ($i=0;$i<$numKey;$i++)
+		{
+			if ($i==0)
+			{
+				$time=$time+0;
+			}
+			else
+			{
+				float $Time2=$GetClipKeyDateBuff[$i+2];
+				float $Time1=$GetClipKeyDateBuff[2];
+				$time=($Time2-$Time1)/$ClipScale+$time;
+			}
+			float $key=$GetClipKeyDateBuff[$i+($numKey-2)+4];
+			string $inTangent = $GetClipKeyDateBuff[$i+($numKey-2)+($numKey-2)+6];
+			string $outTangent = $GetClipKeyDateBuff[$i+$numKey+($numKey-2)+($numKey-2)+6];
+			int $CurrentTimeList=`currentTime -q`;
+			if ($inTangent=="spline"||$inTangent=="linear"||$inTangent=="clamped"||$outTangent=="spline"||$outTangent=="linear"||$outTangent=="clamped")
+			{
+				setKeyframe -time ($time+$CurrentTimeList) -value $key -inTangentType $inTangent -outTangentType $outTangent $KeyAttr;
+			}
+		}
+	}
+}
+
+global proc string ycPickUp(string $Name)
+{
+	string $Buffer[];
+	int $Num=`tokenize $Name "." $Buffer`;
+	string $ReturnValve=$Buffer[0];
+	if ($Num>2)
+	{
+		for ($i=1;$i<$Num-1;$i++)
+		{
+			$ReturnValve=$ReturnValve+"."+$Buffer[1];
+		}
+	}
+	return $ReturnValve;
+}

@@ -1,0 +1,199 @@
+
+global proc yuCbCreateCacheAuto()
+{
+
+	string $project = zwGetProject("");
+	string $fileName=`file -q -sn -shortName`;
+	string $fulldataDir=`zwGetPath "geoCache" $fileName`;
+	string $dataDair=`substitute "geoCache" $fulldataDir ""`;
+	string $renderFileName[];
+	tokenize $fileName "_" $renderFileName;
+	string $renderFile=$renderFileName[0]+"_"+$renderFileName[1]+"_"+$renderFileName[2];
+
+	if($project=="ChangBaiShan")
+	{
+		string $files[]=`file -q -reference`;
+		string $RN;
+		for($singleFile in $files)
+		{
+			$RN=`referenceQuery -referenceNode $singleFile`;
+			print ($RN+"\n");
+			//file -loadReference $RN;
+		}
+	}
+
+	string $cacheFile[]=`ls -type "cacheFile"`;
+	if (size($cacheFile)>0)
+	{
+    	for($cache in $cacheFile)
+    	{
+    		delete $cache;
+    	}
+	}
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	if (size($setsName)>0)
+	{
+		createGeoCache;
+		print "正在创建cache";
+		source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhHairCache.mel";
+		HhCreatHairCache();
+		HhCopyHairCache();
+		string $fsFileName=createRenderFileFuc($dataDair,$renderFile);
+		string $winFsFileName=substituteAllString($fsFileName,"/","\\");
+
+		//print $winFsFileName;
+		system("mayabatch -batch -file \""+$winFsFileName+"\" -command \"source yuCbCreateCacheAuto.mel;importCache_Checkin();\"");
+		print "已上传finish文件";
+
+	}
+	else
+	{
+		error "文件里没有需要创建geometry cache的模型!";
+	}
+
+}
+
+
+//创建geometry cache
+global proc createGeoCache()
+{
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	string $slpName[]=`ls "*:*_SLP" "*:*:*_SLP" "*:*:*:*_SLP"`;
+    for($each in $slpName)
+    {
+        $setsName[size($setsName)]=$each;
+    }
+	string $characterName[];
+	int $compareReslut;
+
+	string $cache[]=`ls -type cacheFile`;
+	string $hisSwitch=`ls -type historySwitch`;
+	if(size($cache)>0)
+	{
+	 
+		delete `ls -type cacheFile`;
+	}
+	if(size($hisSwitch)>0)
+	{
+		delete `ls -type historySwitch`;
+	}
+
+	//delete `ls -type cacheFile`;
+	//delete `ls -type historySwitch`;
+
+
+	if(size($setsName)<=0)
+	{
+		error "此文件没有需要做geometry cache的模型!!";
+	}
+	else
+	{
+		for ($cacheFolder in $setsName)
+		{
+			select  $cacheFolder;
+			string $setContent[];
+			if(`gmatch $cacheFolder "*SLP"` <1)
+			{
+			    $setContent=`sets -q $cacheFolder`;
+			}
+			string $chrNameSpace;
+			if(`gmatch $cacheFolder "*SLP"` <1)
+			{
+				$chrNameSpace=basename($cacheFolder,":CACHE_OBJS");
+			}
+			else
+			{
+				string $slpNameSpace[];
+				tokenize $cacheFolder ":" $slpNameSpace;
+				$chrNameSpace=$slpNameSpace[0];
+			}
+			$compareReslut=`compareName($chrNameSpace)`;
+			clear $characterName;
+			string $buff[];
+			int $num = `tokenize $cacheFolder ":" $buff`;
+			tokenize $buff[$num-2] "_" $characterName;
+			string $fullFileName=`file -q -sn -shortName`;
+			string $simple_dir=`zwGetPath "geoCache" $fullFileName`;
+			string $fullFileNames[];
+			tokenize $fullFileName (".") $fullFileNames;
+			string $fileName=$fullFileNames[0];
+			//project name
+			string $projcetName=`zwGetProject $fullFileNames[0]`;
+			//camera name and scene name
+			string $fileNames[];
+			tokenize $fullFileNames[0] ("_") $fileNames;
+			string $camName=$fileNames[1];
+			string $sceneName=$fileNames[2];
+			string $cache_direc;
+			string $cacheName;
+			if(`match "[0-9]$" $chrNameSpace`!="")
+			{
+				  $cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_h_ms_render_"+`match "[0-9]$" $chrNameSpace`);
+				  $cacheName=$characterName[0]+"_"+$characterName[1]+"_h_ms_cache_"+`match "[0-9]$" $chrNameSpace`;
+			}
+			else
+			{
+				   $cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_h_ms_render");
+				   $cacheName=$characterName[0]+"_"+$characterName[1]+"_h_ms_cache";
+			}
+			if(`gmatch $cacheFolder "*SLP"` >=1)
+			{
+			    $cache_direc+="_SLP";
+			    $cacheName+="_SLP";
+			}
+			string $minFrame=`playbackOptions -q -min`;
+			string $maxFrame=`playbackOptions -q -max`;
+			if(`gmatch $cacheFolder "*SLP"` <1)
+			{
+			    select(`sets -q $setContent[0]`);
+			}
+			else
+			{
+			    select($cacheFolder);
+			}
+			python("import sys");
+			python("sys.path.append(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT/\")");
+			python("from yuCreateGeoCmd import *");
+			python("yuCreateGeoCmd(\""+$cache_direc+"\",\""+$cacheName+"\",\""+$minFrame+"\",\""+$maxFrame+"\")");
+		}
+
+	}
+}
+
+global proc string createRenderFileFuc(string $dataPath,string $fileName)
+{
+	string $snName=`file -q -sn -shortName`;
+	string $filetypes[]=`file -query -type -sceneName`;
+	string $filetype=`match "[^.]+$"$snName`;
+	string $srctFile="//file-cluster/gdc/Projects/ChangBaiShan/Project/data/cb_0010_0010_lr.ma";
+	string $destFile=$dataPath+$fileName+"_fs_c001."+$filetype;
+	sysFile -copy $destFile $srctFile;
+	file -f -new;
+	file -rename $destFile;
+	file -f -save  -options "v=0" -type $filetypes[0];
+	return $destFile;
+}
+
+global proc importCache_Checkin()
+{
+	source yuCbImportCache.mel;
+	importGeoCache();
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhHairCache.mel";
+	HhImportHairCache();
+	idmtProject -checkin;
+}
+/*
+global proc importhairCache()
+{
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT/yyScripts/yyCreateCache_HH.py\")");
+	python("HhImportHairCachestatic()");
+
+}
+
+global proc HhcreathairCache()
+{
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT/yyScripts/yyCreateCache_HH.py\")");
+	python("HhCreateHairCachestatic_hh()");
+
+}
+*/

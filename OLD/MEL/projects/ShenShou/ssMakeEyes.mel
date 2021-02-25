@@ -1,0 +1,92 @@
+global proc ssMakeEyes()
+{	
+	//source "ysMakeEyes.mel";
+	source "zxEdgeConstrain.mel";
+	// Make matte shader and assign it to objects
+	if(!(`objExists "MatteSG"`) && !(`objExists "Matte"`))
+	{
+		shadingNode -asShader lambert -name Matte;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr Matte.matteOpacityMode 0;
+		sets -renderable true -noSurfaceShader true -empty -name "MatteSG";
+		connectAttr -force Matte.outColor MatteSG.surfaceShader;
+	}
+	string $allObjects[] = `ls -geometry -ni`;
+	string $allEyes[] = `ls -geometry -ni "*eye_L*" "*:*_eye_L2*"`;
+	string $rEye[] = `ls -geometry -ni "*eye_R*" "*:*_eye_R2*"`;
+	int $countEyes = size($rEye);
+	appendStringArray($allEyes, $rEye, $countEyes);
+	string $allObjects[] = stringArrayRemove($allEyes, $allObjects);
+
+	string $allEyes1[] = `ls -geometry -ni "*eye_L*" "*:*_eye_L4*"`;
+	string $rEye1[] = `ls -geometry -ni "*eye_R*" "*:*_eye_R4*"`;
+	int $countEyes1 = size($rEye1);
+	appendStringArray($allEyes1, $rEye1, $countEyes1);
+
+	string $allObjects[] = stringArrayRemove($allEyes1, $allObjects);
+
+	//Create Eye's render layer
+	createRenderLayer -name "CharEyes" -number 1 -makeCurrent -noRecurse $allObjects $allEyes `ls -lights`;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	setAttr "defaultRenderLayer.renderable" 0;
+	for ($obj in $allObjects )
+	{
+		string $parent[] = `listRelatives -p -f $obj`;
+		catch(`sets -e -forceElement MatteSG  $parent`);
+	}
+	
+	// Looking for namespace of reference nodes 
+	//string $rfNodes[] = `ls -type "reference"`;
+	/*string $rfNodes[];
+	for ($eyes in $allEyes)
+	{
+		string $buff[];
+		int $num = `tokenize $eyes ":" $buff`;
+		string $pre = `substring $eyes 1 (size($eyes)-size($buff[$num-1])-1)`;
+		$rfNodes[size($rfNodes)] = $pre;
+	}
+	$rfNodes = stringArrayRemoveDuplicates($rfNodes);
+	for($item in $rfNodes)
+	{
+			string $rfSN = $item;
+			string $leftEye_01 = $rfSN + ":MSH_eye_L1_";
+			string $rightEye_01 = $rfSN + ":MSH_eye_R1_";		
+			
+			$leftEyeEdgeL_01 = $rfSN + ":MSH_eye_L_.e[769]" ;
+			$leftEyeEdgeR_01 = $rfSN + ":MSH_eye_L_.e[779]" ;
+			$rightEyeEdgeL_01 = $rfSN + ":MSH_eye_R_.e[769]" ;
+			$rightEyeEdgeR_01 = $rfSN + ":MSH_eye_R_.e[779]";
+			select $leftEyeEdgeL_01 $leftEyeEdgeR_01;
+			ysApplyPointLight($leftEye_01);
+			ssRenderSetMat($leftEye_01);
+			select $rightEyeEdgeL_01 $rightEyeEdgeR_01;
+			ysApplyPointLight($rightEye_01);	
+			ssRenderSetMat($rightEye_01);
+	}*/
+}
+
+
+
+global proc ssRenderSetMat(string $item)
+{
+	string $buff[] = `listRelatives -c $item`;
+	$item = $buff[0];
+	string $sgs[] = `listConnections -type shadingEngine $item`;
+	for ($sg in $sgs)
+	{
+		string $allUPs[] = `hyperShade -lun $sg`;
+		for ($node in $allUPs)
+		{
+			if (nodeType($node) == "phongE" && match("eye",$node) != "")
+			{
+				string $set = `sets -renderable true -noSurfaceShader true -empty -name ($node+"SG")`;
+				connectAttr -force ($node+".outColor") ($set+".surfaceShader");
+				sets -e -forceElement $set $item;
+
+				setAttr ($node+".transparency") -type double3 0 0 0;
+				setAttr ($node+".roughness") 1.322;
+				setAttr ($node+".highlightSize") 0.074;
+			}
+		}
+	}
+}

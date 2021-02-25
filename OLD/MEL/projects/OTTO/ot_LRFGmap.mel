@@ -1,0 +1,222 @@
+///
+/// Copyright (C) 2000-2010 IDMT. All rights reserved.
+///
+/// Author: 李锐（重庆）
+///
+/// Creation Date: 2011/09/14
+///
+/// Description:  自动创建fg光子图
+
+global proc ot_LRFGmapUI() 
+{
+int $SF=`getAttr "defaultRenderGlobals.startFrame"` ;
+int $EF=`getAttr "defaultRenderGlobals.endFrame"`;
+int $BF=`getAttr "defaultRenderGlobals.byFrameStep"`;
+
+string $Fname = `file -q -ns`;
+
+    if (`window -exists ot_LRFGmap`)
+		deleteUI ot_LRFGmap;
+	window -title "计算光子图"  -s 1
+	       -widthHeight 500 220 -resizeToFitChildren true
+	       ot_LRFGmap;
+	       columnLayout -adjustableColumn true;
+
+		         frameLayout   -label "Frame Range:"
+	                       -bs "etchedIn"
+			       -la "center";		   
+
+  
+				   columnLayout -adjustableColumn true;
+					intFieldGrp
+					   -label "Start frame:"
+					   -value1  $SF
+					   StarFrame
+					   ;
+					intFieldGrp
+					-numberOfFields 1
+					   -label "End frame:"
+					   -value1  $EF
+					   EndFrame
+					   ;
+					 intFieldGrp
+					 -numberOfFields 1
+					   -label "By frame:"
+					   -value1 $BF
+					   ByFrame
+					  ;
+				    setParent..;
+				    setParent..;
+
+		         frameLayout   -label "FG settings:"
+	                       -bs "etchedIn"
+			       -la "center" test;	
+
+				   columnLayout -adjustableColumn true;
+					intFieldGrp
+					   -label "Accuracy:"
+					   -value1  100
+					   Accuracy
+					   ;
+
+					floatFieldGrp
+					   -label "Point Density:"
+					   -value1  1
+					   PointDensity
+					   ;
+
+                     
+                                    setParent..;
+				    setParent..;
+
+
+
+
+
+				    textFieldGrp 
+				      -adjustableColumn 2
+				      -label "光子图储存路径及名称:" 
+				      -text ("\\\\file-cluster\\GDC\\Projects\\OTTO\\OTTO_Scratch\\TD\\NoDel\\FGmap\\" +$Fname+".fgmap")
+                                         Mpath
+				       ;
+			   button -label "开始创建FG光子图" -c "ot_LRFGmap"  ;
+			       checkBoxGrp
+				  -numberOfCheckBoxes 1
+				  -label "渲染完毕自动关机:"
+				-label1 "插件会在关机前 在d:\\盘新储存算好\n后的文件，请确保d:盘有足够空间"
+				  shutdown;
+
+
+setParent ..;
+
+    showWindow ot_LRFGmap;
+}
+
+
+global proc ot_LRFGmap() 
+{
+/////打开mentalray
+ if (!`pluginInfo -query -loaded "Mayatomr.mll"`) loadPlugin "Mayatomr.mll";
+	miCreateDefaultNodes();
+	miCreateOtherOptionsNodesForURG();
+	setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+
+   string $path = `textFieldGrp -q -text Mpath`;
+
+    string $buff2[];
+    tokenize $path "." $buff2;
+    string $buff3[];
+    tokenize $path "\\" $buff3;
+    $filename = $buff3[`size $buff3`-1];
+    $shutdown=`checkBoxGrp -q -v1 shutdown`;
+
+/////确认命名正确
+
+  if (`size $buff2` != 2 || `gmatch  $path  "*.fgmap"`!=1)
+  {
+    error ("请输入光子图名称以.fgmap结尾");
+  }
+
+/////确认路径可创建文件
+$testpa =` fopen  ($buff2[0]+".txt") "w"`;
+    fprint $testpa "test";
+    fclose $testpa;
+  if (`filetest -r  ($buff2[0]+".txt")`)
+      {
+          sysFile -delete ($buff2[0]+".txt");
+      }
+
+      else 
+      {
+        error ("无法在"+$path+"创建文件");
+      }
+/////确认文件是否存在
+	if (`filetest -r $path`)
+	{
+          $conf=` confirmDialog -title "Confirm" -message "文件已经存在"
+           -button "删除并新建" -button "添加" -button "重命名"  -defaultButton "Yes"
+              -cancelButton "No" -dismissString "No"`;
+
+	      if ($conf == "重命名")
+	      {
+	         string $filenamenew ;
+	         $filenamenew =("NewOf"+$filename);
+		 $path = `substitute $filename $path $filenamenew `;
+                 textFieldGrp -e -text $path  Mpath;
+	      }
+	      if ($conf == "删除并新建")
+	      {
+	         sysFile -delete $path;
+	      }
+	}
+
+
+
+
+clear $buff2;
+
+ $selecte = `ls -sl `;
+ $selecteshape= `select -hi  $selecte`;
+ $cam = `ls -sl -type "camera"`;
+ int $StartF = `intFieldGrp -q -value1 StarFrame`;
+ int $EndF = `intFieldGrp -q -value1  EndFrame`;
+ int $ByF = `intFieldGrp -q -value1 ByFrame`;
+ int $Ac = `intFieldGrp -q -value1  Accuracy`;
+ float $PD = `floatFieldGrp -q -value1  PointDensity`;
+
+
+
+ if (`size $cam`==0)
+ {
+  error "请选择一个相机";
+ }
+ if ($StartF >$EndF)
+ {
+   error "请不要让 Start Frame > End Frame";
+ }
+
+setAttr "miDefaultOptions.finalGather" 1;
+eval("setAttr \"miDefaultOptions.finalGatherRays\""+$Ac);
+eval("setAttr \"miDefaultOptions.finalGatherPresampleDensity\""+$PD);
+setAttr miDefaultOptions.finalGatherRebuild 0;
+setAttr mentalrayGlobals.renderMode 3;
+setAttr "miDefaultOptions.finalGatherMapVisualizer" 1;
+setAttr -type "string" miDefaultOptions.finalGatherFilename $path;
+
+
+ for ($camin in $cam)
+ {
+ eval ("lookThroughModelPanel "+$camin+" modelPanel4");
+  for ($i=$StartF;$i<=$EndF;$i=$i+$ByF)
+  {
+   currentTime $i ;
+    eval("renderWindowRenderCamera render renderView "+$camin);
+  }
+
+ }
+
+setAttr mentalrayGlobals.renderMode 0;
+setAttr miDefaultOptions.finalGatherRebuild 2;
+
+
+ if ($shutdown == 1)
+ {
+   string $sn;
+  $pn =`file -q -sceneName`;
+  $sn =`file -query -shortName -sceneName`;
+  string $buf [];
+
+  tokenize $sn "." $buf;
+  $newname=("d:\\\\"+$buf[0]+"_fgmap.mb");
+   print $newname;
+   file -rename $newname; 
+   file -save -type "mayaBinary";
+  shutdown();
+ }
+
+}
+global proc shutdown()
+{
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/projects/JT/shutdown.py\")");
+}
+ ot_LRFGmapUI;

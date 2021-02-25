@@ -1,0 +1,801 @@
+	string $serviceState = system("sc query seclogon | findstr /i \"STATE\"");
+	string $OCTV_PROJECTS = `getenv "OCTV_PROJECTS"`;	//production shared folder
+	string $fileName = `file -q -sn`;
+	string $shortName = `file -q -sn -shortName`;
+	string $upfilename = "";	//上传后的文件名
+	string $destFolder = "";	//上传目录
+	string $destMapFolder = "";	//上传贴图目录
+	string $idName = "";
+	string $ext = fileExtension($shortName);
+
+	string $project = octvGetCurrentProject($shortName);
+	string $asset_type = zwGetAssetType($shortName);
+	string $mode = zwGetMode($shortName);
+	string $renname=`getenv username`;
+
+	string $nameArray[]={"lixj","jiangc","tanyj","liangb","yangh","kuangyh","xiaoj","tanjun","wangwk","huanglm","pangcx","zhangyl","liuling","yangxp","huangwl","hulp","yuanyu","dul","zhouzq","hezhj","rentm","liangdj","zhouk","chenhx","pengrw","maoww","caijianjia","weiwy","pengrw","caoxf"};
+	int $found = stringArrayContains($renname, $nameArray);
+
+	if(($asset_type=="characters" || $asset_type=="props" || $asset_type=="sets")&&$mode=="master" && $found!=1){
+		string $message="characters、props和sets不能直接上传到master文件夹中!";
+		confirmDialog -message $message -button "OK";
+		error "characters、props和sets不能直接上传到master文件夹中!";
+	}
+	print "\n";
+	string $buf[];
+	clear $buf;
+	//2015.12.8
+    tokenize $shortName "_." $buf;
+    if ((size($buf) >= 5 && size($buf) <= 7)&& $mode != "")
+    {
+        string $testName = $buf[3];
+        if (`match "mo" $testName` != ""||`match "rg" $testName` != ""||`match "mt" $testName` != ""||`match "al" $testName` != ""||`match "dy" $testName` != ""||`match "tx" $testName` != ""||`match "msAnim" $testName` != ""||`match "msCache" $testName` != ""||`match "msTex" $testName` != ""||`match "msNoTex" $testName` != ""||`match "lt" $testName` != "")	//$testName is mode-segment
+        {
+            string $testModel = $buf[2];
+            if($testModel!="h" && $testModel!="l" && $testModel!="mc"){
+                error "文件命名错误，正确的名字格式为：项目名_编号名_描述字段(可忽略)_h/l/mc_环节名，例如 PROJ_ch001001GirlSmall_h_msAnim.mb";
+            }
+
+            $idName = $buf[1];
+            $upfilename = $buf[0] + "_" + $buf[1] + "_" + $buf[2] + "_" + $buf[3];
+            $upfilename += "." + $ext;
+
+            $destFolder = $OCTV_PROJECTS + "/" + $project + "/Project/scenes/" + $asset_type + "/" + $idName + "/" + $mode;
+
+            $destMapFolder = $OCTV_PROJECTS + "/" + $project + "/Project/sourceimages/" + $asset_type + "/" + $idName;
+        }
+        else
+        {
+            $testName = $buf[4];	//$buf[4] is mode-segment
+            if (`match "mo" $testName` != ""||`match "rg" $testName` != ""||`match "mt" $testName` != ""||`match "al" $testName` != ""||`match "dy" $testName` != ""||`match "tx" $testName` != ""||`match "msAnim" $testName` != ""||`match "msCache" $testName` != ""||`match "msTex" $testName` != ""||`match "msNoTex" $testName` != ""||`match "lt" $testName` != "")	//$testName is mode-segment
+            {
+                string $testModel = $buf[3];
+                if($testModel!="h" && $testModel!="l" && $testModel!="mc"){
+                    error "文件命名错误，正确的名字格式为：项目名_编号名_描述字段(可忽略)_h/l/mc_环节名，例如 PROJ_ch001001GirlSmall_h_msAnim.mb";
+                }
+
+                $idName = $buf[1];
+                $upfilename = $buf[0] + "_" + $buf[1] + "_" + $buf[2] + "_" + $buf[3] + "_" + $buf[4];
+                $upfilename += "." + $ext;
+
+                $destFolder = $OCTV_PROJECTS + "/" + $project + "/Project/scenes/" + $asset_type + "/" + $idName + "/" + $mode;
+
+                $destMapFolder = $OCTV_PROJECTS + "/" + $project + "/Project/sourceimages/" + $asset_type + "/" + $idName;
+            }
+            else
+                error "文件命名错误，正确的名字格式为：项目名_编号名_描述字段(可忽略)_h/l_环节名_版本(可忽略)，例如 PROJ_ch001001GirlSmall_h_rg_001.mb";
+        }
+    }
+
+	string $mapFolder =  `substitute "//octvision.com/CG" $destFolder "Z:"`;
+	string $slashDestfolder = `substituteAllString $mapFolder "/" "\\\\"`;
+	string $web =  "http://192.168.80.200:801/content.htm";
+
+	//error report
+	if (($asset_type == "characters" || $asset_type == "props" )&& (`match "msTex" $upfilename` != ""||`match "msNoTex" $upfilename` != ""))
+		error "只有set才可以上传msTex/msNoTex文件";
+
+	if ($project == "")
+		error "文件名不匹配运行中项目";
+
+	if (!`filetest -d $destFolder`)
+		error "找不到对应编号目录，请检查文件名或联系PA张春月";
+
+	if (!`filetest -d $destMapFolder`)
+		error "找不到对应贴图目录，请检查文件名或联系PA张春月";
+//test checkout user
+	string $db;
+		$db = "asset";
+		string $upUser = `getenv username`;
+		python("import octvDB");
+
+		string $dbreturn[] = `python("octvDB.queryCheckUserDB('" + $db + "','" + $upfilename +"')")`;
+		if($dbreturn[0] != ""){
+			string $checkUser = $dbreturn[0];
+			int $dbreturn1[] = `python("octvDB.queryCheckoutStateDB('" + $db + "','" + $upfilename +"')")`;
+			if($dbreturn1[0] != ""){
+				int $checkState = $dbreturn1[0];
+
+				string $dbreturn2[]=`python("octvDB.queryDB('" + $db + "','" + $upfilename +"')")`;
+
+				//if ($checkState == 1 && strip($checkUser) == "")
+				//	error "必须先在文件网页上checkout才能checkin";
+
+				//if ($checkUser != $upUser && strip($checkUser)!= "")
+				//	error ( $checkUser + " 正在checkout，请联系对方确认上传事项");
+
+				if($dbreturn2[0]!="" && strip($checkUser)!="" && $checkUser != $upUser)
+					error ( $checkUser + " 正在checkout，请联系对方确认上传事项");
+			}
+		}
+
+
+
+
+
+
+
+	//interface
+	if (`window -q -exists ocvtCheckinWindow`)
+		deleteUI ocvtCheckinWindow;
+
+	window -title "Octopus(Checkin Tool) v1.5" ocvtCheckinWindow;
+		menuBarLayout;
+			menu -label "Help";
+				menuItem -label "Help on Octopus(Checkin Tool)..." -command "showHelp -absolute \"//octvision.com/cg/Tech/maya/Doc/Help_for_Checkin.mht\";";
+			setParent ..;
+		string $form1 = `formLayout`;
+			string $b1 = `textFieldGrp -label "Source:" -adjustableColumn 2 -editable false oCTCtrlb1`;
+			string $b2 = `textFieldGrp -label "Target Name:" -editable false oCTCtrlb2`;
+			string $b3 = `iconTextButton -style "textOnly" -label "Web" -backgroundColor 0.2 0.2 0.2 -command ("system \"start explorer /n,/e, " + $web + " \"") oCTCtrlb2a`;
+			string $b4 = `iconTextButton -style "textOnly" -label "Target  Folder" -backgroundColor 0.2 0.2 0.2 -command ("system \"start explorer /n,/e, " + $slashDestfolder + " \"") oCTCtrlb2b`;
+			string $b5 = `intSliderGrp -label "Progress:" -field true -min 1 -max 100 -v 100 oCTCtrlb3`;
+
+			string $b6 = `checkBoxGrp -numberOfCheckBoxes 4 -label "Optimize:" -labelArray4 "Optimize scene size" "Copy local maps" "Remove imagePlanes" "Copy cache" -valueArray4 1 1 1 1 oCTCtrlb4`;
+			string $b7 = `textFieldGrp -label "Note:" -adjustableColumn 2 oCTCtrlb4a`;
+			string $b9 = `text -label "" oCTCtrlb6`;
+			string $b8 = `button -label "Attached File" -command  ("oAttachImage(\"" + $asset_type + "\", \"" + $b9 + "\",\"" + $mode+ "\")") oCTCtrlb5`;
+			string $b10 = `button -label "Checkin"  -w 160 -command  ("octvCheckinMain(\"" + $project + "\", \"" + $upfilename + "\", \"" + $destFolder + "\", \"" + $mode + "\", \"" + $destMapFolder + "\", \"" + $asset_type + "\")")`;
+			string $b11 = `text -label "Note: 首先存盘再Checkin，Checkin之后不要存盘！！！" -font "boldLabelFont" -backgroundColor 0 1 0`;
+			string $b12 = `image -image "octopus.png"`;
+			formLayout -edit
+
+				-attachForm	$b1	"top"	10
+				-attachForm	$b1	"left"	0
+				-attachPosition	$b1	"right"	0	90
+
+				-attachControl	$b2	"top"	10	$b1
+				-attachForm	$b2	"left"	0
+
+				-attachControl	$b3	"top"	10	$b1
+				-attachControl	$b3	"left"	10	$b2
+				-attachPosition	$b3	"right"	0	60
+
+				-attachControl	$b4	"top"	10	$b1
+				-attachControl	$b4	"left"	10	$b3
+				-attachPosition	$b4	"right"	0	80
+
+				-attachControl	$b5	"top"	10	$b2
+				-attachForm	$b5	"left"	0
+				-attachPosition	$b5	"right"	0	60
+
+				-attachControl	$b6	"top"	10	$b5
+				-attachForm	$b6	"left"	0
+				-attachPosition	$b6	"right"	0	90
+
+				-attachControl	$b7	"top"	10	$b6
+				-attachForm	$b7	"left"	0
+				-attachPosition	$b7	"right"	0	90
+
+				-attachControl	$b8	"top"	10	$b7
+				-attachForm	$b8	"left"	40
+				-attachPosition	$b8	"right"	0	30
+
+				-attachControl	$b9	"top"	10	$b7
+				-attachControl	$b9	"left"	20	$b8
+				-attachPosition	$b9	"right"	0	90
+
+				-attachControl	$b10	"top"	20	$b8
+				-attachForm	$b10	"left"	30
+				-attachPosition	$b10	"right"	0	90
+
+				-attachControl	$b11	"top"	20	$b10
+				-attachForm	$b11	"left"	20
+				-attachPosition	$b11	"right"	0	90
+
+				-attachControl	$b12	"top"	20	$b11
+				-attachForm	$b12	"left"	20
+				-attachPosition	$b12	"right"	0	90
+			$form1;
+			setParent ..;
+		setParent ..;
+
+	showWindow ocvtCheckinWindow;
+
+	textFieldGrp -e -text $fileName oCTCtrlb1;
+	textFieldGrp -e -text $upfilename oCTCtrlb2;
+
+	//2015.6.9
+
+	if ($asset_type == "characters" || $asset_type == "props" || $asset_type == "sets")
+	{
+		checkBoxGrp -e -value2 1 oCTCtrlb4;
+		/*if ($mode == "texture" || $mode == "dynamic" ||$mode == "rigging"|| $mode == "action"||$mode == "lighting"||`match "msTex" $upfilename` != ""||`match "msNoTex" $upfilename` != "")
+			checkBoxGrp -e -value2 1 oCTCtrlb4;
+		else
+			checkBoxGrp -e -value2 0 oCTCtrlb4;*/
+
+		if ($mode == "action")
+			checkBoxGrp -e -value4 1 oCTCtrlb4;
+	}
+	else
+	{
+		//checkBoxGrp -e -value2 0 oCTCtrlb4;
+
+		checkBoxGrp -e -value2 1 oCTCtrlb4;
+		if ($mode == "cache")
+			checkBoxGrp -e -value4 1 oCTCtrlb4;
+	}
+
+	scriptJob -event "SceneOpened" "if (`window -q -exists ocvtCheckinWindow`) deleteUI ocvtCheckinWindow";
+
+}
+
+string $cmdStr  = "octvCheckinMain(\"" + $project + "\", \"" + $upfilename + "\", \"" + $destFolder + "\", \"" + $mode + "\", \"" + $destMapFolder + "\", \"" + $asset_type + "\")";
+
+string $filename = $upfilename;
+
+int $optimize = `checkBoxGrp -q -value1 oCTCtrlb4`;
+int $copyCache = `checkBoxGrp -q -value4 oCTCtrlb4`;
+int $optimizeImagePlane = `checkBoxGrp -q -value3 oCTCtrlb4`;
+int $copyMaps = `checkBoxGrp -q -value2 oCTCtrlb4`;
+int $progress = `intSliderGrp -q -v oCTCtrlb3`;
+string $attached = `text -q -label oCTCtrlb6`;
+string $desc = `textFieldGrp -q -text oCTCtrlb4a`;
+
+	if (strip($desc) == "")
+		error "描述字段不能为空";
+
+	if($copyMaps==0){
+		error "必须勾选Copy local maps";
+	}
+
+	if (($mode == "texture"||$mode == "lighting"||$mode == "action") && strip($attached) == "")
+		error "必须添加附件";
+
+	if($mode == "anim" && strip($attached) == ""){
+		error "必须添加附件*.avi *.mov";
+	}
+	int $val = zwCheckinPreMel($project, $asset_type, $mode);
+	if ($val)
+	{
+		string $parameters[] = {$project,$filename,$destFolder,$copyMaps,$copyCache,$optimizeImagePlane,$progress,$optimize,$mode,$destMapFolder,$asset_type,$attached,$desc};
+		octvCheckinCleanup($parameters);
+
+		print "Checkin Succeeds!";
+	}
+	deleteUI ocvtCheckinWindow;
+}
+
+// start checkin clean up
+string $parameters[] = {$project,$filename,$destFolder,$copyMaps,$copyCache,$optimizeImagePlane,$progress,$optimize,$mode,$destMapFolder,$asset_type,$attached,$desc};
+string $args[] = $parameters;
+eval "source zwCopyTextureImage.mel";
+eval "source zwSysFile.mel";
+eval "source zwNamespace.mel";
+
+	string $project;		// 项目
+	string $filename;		// 上传后的文件名
+	string $destFolder;		// 上传目录
+	int $copyMaps;			// 是否上传本机贴图
+	int $copyCache;			// 是否上传hair cache, particle cache
+	int $optimizeImagePlane;	// 是否删除所有imagePlane
+	int $progress;			// 进度
+	int $optimize = true;		// Optimize Scene Size
+	string $mode = "";
+	string $asset_type = "";
+
+	$project		= $args[0];
+	$filename		= $args[1];
+	$destFolder		= $args[2];
+	$copyMaps		= $args[3];
+	$copyCache		= $args[4];
+	$optimizeImagePlane	= $args[5];
+	$progress		= $args[6];
+	$optimize		= $args[7];
+	$mode			= $args[8];
+	$destMapFolder		= $args[9];
+	$asset_type		= $args[10];
+	$attached		= $args[11];
+	$desc			= `strip $args[12]`;
+
+
+	string $fileExt = fileExtension($filename);
+
+	//判断是否有"D:/octvTemp"目录，无就创建此目录
+	string $tempDir = "D:/octvTemp";
+	if (!`filetest -d $tempDir`)
+		sysFile -makeDir $tempDir;
+
+	string $version = `about -version`;
+	$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+
+	//连接后缀名相同的置换贴图
+	if($asset_type !=""){
+		if ($asset_type == "sets" || $asset_type == "props"){
+			string $allDisplacementShader[]=`ls -type "displacementShader"`;
+			if(size($allDisplacementShader)>0){
+				confirmDialog -title "置换贴图" -message "场景和道具中存在置换节点！";
+				error("场景和道具中存在置换节点！");
+			}
+		}else{
+			string $allDisplacementShader[]=`ls -type "displacementShader"`;
+			for($displacement in $allDisplacementShader){
+				string $buffer[];
+				int $num = `tokenize $displacement "_" $buffer`;
+				if($num>1 && `match "^disSG" $buffer[$num-1]`!=""){
+					string $allShadingEngine[]=`ls -type "shadingEngine"`;
+					for($shadings in $allShadingEngine){
+						string $buf[];
+						int $numken = `tokenize $shadings "_" $buf`;
+						if ($buffer[$num-1]==$buf[$numken-1]){
+							string $cons[]=`listConnections -s off -d on ($displacement+".displacement")`;
+						    if(size($cons)<1 && $cons[0]!=$shadings){
+							    connectAttr($displacement+".displacement",$shadings+".displacementShader");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	string $buf[];
+	clear $buf;
+
+//警告有同名的物体
+	check_same_name();
+//警告有多余的显示层
+	check_Display();
+
+// 检查 - 前期
+
+	if ($asset_type != "")
+	{
+		// 检查是否存在点、面数为零的mesh 物体
+		string $error = `tazz_CheckEmptyMesh`;
+		if ($error != "")
+			error ("发现空的mesh 物体：\n" + $error);
+	}
+
+// 检查 - 动画
+
+	// 只能参考master 文件，不能参考rigging 文件
+	zwCheckinCheckReferenceRigging;
+	zwCheckinCheckTextureCompareMaster;
+// 优化
+	// 将所有hairSystem 的simulationMethod 设为static
+	if ($mode == "texture" ||  $mode == "rigging")
+	{
+		zwSetIntAttrAll "hairSystem" "simulationMethod" 1;
+	}
+
+
+	// 前期文件去除namespace
+	if ($asset_type != "")
+	{
+		zjRemoveNamespace;
+	}
+
+	//string $allDisplacement[]=`ls -type "displacementShader"`;
+	//if(size($allDisplacement)>0){
+		//confirmDialog -title "displacementShader" -message ("文件中存在置换节点(displacementShader),请清除置换节点！");
+		//error("文件中存在置换节点(displacementShader),请清除文件中所有的置换节点！");
+	//}
+
+	// file -lockFile false
+	if ($asset_type == "sets" || $asset_type == "props")
+	{
+	//	eval "file -lockFile false";
+	}
+
+
+// 不能有指向本机的Reference
+
+
+	setAttr -lock false defaultRenderGlobals.byFrameStep;
+	setAttr defaultRenderGlobals.byFrameStep 1;
+
+	//删除"D:/octvTemp"目录下的当前文件名
+	string $temp = $tempDir + "/" + $filename;
+	sysFile -delete $temp;
+	file -rename $temp;
+
+
+	if ($optimizeImagePlane)	// 删imagePlane
+	{
+		$buf = `ls -type "imagePlane"`;
+		for ($imagePlane in $buf)
+		{
+			if (!`reference -isNodeReferenced $imagePlane`)
+			{
+				lockNode -lock false $imagePlane;	// 文件有时候节点被锁了
+				delete $imagePlane;
+			}
+		}
+	}
+
+	if ($optimize)
+	{
+		cleanUpScene 0;
+	}
+
+checkingNoAnyMat();
+
+
+
+// start copy maps
+
+//if ($copyMaps)
+//	{
+print ("\nproject:" + $project);
+print ("\nmode:" + $mode);
+print ("\ndestFolder:" + $destFolder);
+print ("\nprogress:" + $progress);
+
+//
+//检查贴图的大小与格式
+string $files[] = `ls -type "file"`;
+int $i=0;
+int $flag=0;
+string $info="";
+string $infos="";
+string $checkMaps[];
+clear $checkMaps;
+
+//for ($file in $files)
+//{
+//    $file = "file_6";
+    string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+    int $flags=0;
+    for($map in $checkMaps){
+        if($map==$fileTextureName){
+            $flags=1;
+            break;
+        }
+    }
+    if($flags==1){
+        continue;
+    }
+    if(`filetest -f $fileTextureName`){
+        float $ImageoutSizeX=`getAttr ($file+".outSizeX")`;
+        float $ImageoutSizeY=`getAttr ($file+".outSizeY")`;
+        if($ImageoutSizeX>4096 || $ImageoutSizeY>4096){
+            $i=$i+1;
+            $info=$info+$fileTextureName+"\n";
+        }
+
+        string $ext=`fileExtension($fileTextureName)`;
+        if($ext!="JPG" && $ext!="jpg" && $ext!="jpeg" && $ext!="JPEG" && $ext!="HDR" && $ext!="hdr" && $ext!="TX" && $ext!="tx" && $ext!="PNG" && $ext!="png" ){
+            $flag=1;
+            $infos=$infos+$fileTextureName+"\n";
+        }
+    }
+    $checkMaps[size($checkMaps)]=$fileTextureName;
+//}
+
+if($i>4){
+    //string $renname=`getenv username`;
+    //if($renname!="liangb"){
+        confirmDialog -title "贴图分辨率" -message ($info+"超过四张贴图的分辨率大于4096");
+        error ($info+"贴图的分辨率大于4096");
+    //}
+}
+if($flag>0){
+    confirmDialog -title "贴图格式" -message ($infos+"贴图格式不正确,正确的格式(JPG,HDR,TX,PNG)");
+    error($infos+"贴图格式不正确,正确的格式(JPG,HDR,TX,PNG)");
+}
+
+
+//检查arnold代理与非代理文件
+if($mode=="cache" || $mode=="anim"){
+
+}else{
+    zwCheckArnoldTx();
+}
+
+//
+//zwCheckinCopyTextureImage($project, $mode, $destFolder, $progress);
+//	}
+
+// start copy single map test
+
+
+$maps = `substitute "/[^/]*$" $destFolder ""`;
+$maps = `substitute "/scenes/" $maps "/sourceimages/"`;
+print ("\nmaps:" + $maps);
+string $OCTV_PROJECTS = tolower(`getenv "OCTV_PROJECTS"`);
+string $production = `getenv "OCTV_PROJECTS"` + "/" + $project + "/Project";
+print ("\nproduction:" + $production);
+string $error = `zwCheckTextureImage 1 {"file", "fileTextureName", $production, $project, $mode, $destFolder}`;
+if (`pluginInfo -query -loaded "Mayatomr"`)
+{
+    $error += `zwCheckTextureImage 1 {"mentalrayTexture", "fileTextureName", $production, $project, $mode, $destFolder}`;
+    $error += `zwCheckTextureImage 1 {"mentalrayIblShape", "texture", $production, $project, $mode, $destFolder}`;
+}
+$error += `zwCheckTextureImage 1 {"imagePlane", "imageName", $production, $project, $mode, $destFolder}`;
+
+//yeti贴图的上传
+if(`pluginInfo -query -loaded "pgYetiMaya"`){
+    print("\n yeti上传："+$destFolder+"\n");
+
+    $error+=zwYetiCheckCopyTextureImage($destFolder);
+}
+
+if ($error != "")
+{
+    if ($progress >= 100)
+    {
+        error $error;
+    }
+    else
+    {
+        warning $error;
+    }
+}
+// start check map process check============
+zwCopyTextureImage(3, {"file", "fileTextureName", $maps, "1", "1", $progress, $project, "0"});
+
+
+string $version = 3;
+string $args[] = {"file", "fileTextureName", $maps, "1", "1", $progress, $project, "0"}
+
+string $OCTV_PROJECTS = `getenv "OCTV_PROJECTS"`;	//production shared folder
+
+string $nodeType;	// 节点类型，例如：file、brush、imagePlane
+string $attr;		// 节点属性，例如：fileTextureName、leafImage、flowerImage、imageName
+string $destFolder;	// 目标目录
+int $modifyPath;	// 修改贴图路经
+int $errorStop;		// 当出错时error 而不是warning
+int $percentage;	// 进度
+string $exceptFolder;	// 排除的目录
+string $project;
+int $selectionOnly = false;
+
+//deal with photo map and final gather map
+
+if ($version == 3)
+{
+    $nodeType	= $args[0];
+    $attr		= $args[1];
+    $destFolder	= $args[2];
+    $modifyPath	= $args[3];
+    $errorStop	= $args[4];
+    $percentage	= $args[5];
+    $project	= $args[6];
+    $selectionOnly	= $args[7];
+}
+
+int $batchMode = `about -batch`;
+
+string $rs, $message, $iff, $all[], $buf2[], $buf4[];
+
+string $allnoSetNodePath[];
+clear $allnoSetNodePath;
+
+$destFolder = `zwFullPath $destFolder`;
+
+
+if (`match "OCTVRENDERFARM/" $destFolder` != "")	// Netrender
+{
+    $exceptFolder = "//*";
+}
+
+string $nodes[];
+if ($selectionOnly)
+{
+    $nodes = `zwTextureNetwork`;
+}
+else
+{
+    catch($nodes = `ls -type $nodeType`);
+}
+int $max = `size $nodes`;
+int $progress = 0;
+if ($max && !$batchMode)
+    progressWindow -progress $progress -max $max -title "Copy Maps" -status ($progress + "/" + $max) -isInterruptable true;
+
+print $nodes;
+
+//for ($node in $nodes)  // $node = $nodes[7]
+//{
+//
+    //print ("\n---------------node:" + $node);
+
+    $node = "file_6"
+
+    string $file = `getAttr ($node + "." + $attr)`;
+    $file = `workspace -expandName $file`;
+
+    $file = `zwFullPath $file`;
+    string $texture = $file;
+
+    print ("\n---------------texture:" + $texture);
+
+    int $except = false;
+    if (`gmatch (tolower($file)) (tolower($exceptFolder))`||`gmatch (tolower($texture)) (tolower($OCTV_PROJECTS  + "/" + $project + "/Project/sourceimages/*"))`||`gmatch (tolower($texture)) (tolower("${OCTV_PROJECTS}/" + $project + "/Project/sourceimages/*"))`)
+        $except = true;
+    print ("\n---------------except:" + $except);
+
+    clear $buf4;
+    //
+    string $filename = `match "[^/\\]+$" $file`;
+    string $folder = `substring $file 1 (size($file) - size($filename))`;
+    $texture = $destFolder + "/" + $filename;
+
+//    if(!$except)	// 需要上传
+//    {
+    print ("\n---------------desttexture:" + $texture);
+    $buf4[size($buf4)] = $file;
+//    if (`attributeExists "useFrameExtension" $node`)
+//    {
+//        if (`getAttr ($node + ".useFrameExtension")`)
+//        {
+//            string $buf2[] = zwGetSequence($folder + "/" + $filename);
+//            for ($seq in $buf2)
+//            {
+//                $buf4[size($buf4)] = $folder + "/" + $seq;
+//            }
+//        }
+//    }
+
+    //
+
+//    if (`attributeExists "uvTilingMode" $node`){
+
+        if(`getAttr ($node + ".uvTilingMode")` == 2 || `getAttr ($node + ".uvTilingMode")` == 3)
+        {
+            string $path = "//octvision.com/cg/Tech/maya_sixteen/scripts/checkin/zwGetUVSequence.mel";
+
+            eval ("source \"" + $path + "\"");
+
+            string $buf3[] = zwGetUVSequence($folder + "/" + $filename);
+            for ($seq in $buf3)
+            {
+                $buf4[size($buf4)] = $folder + "/" + $seq;
+            }
+            string $buf5[] = zwGetSequence($folder + "/" + $filename);
+            for ($seq in $buf5)
+            {
+                int $f = stringArrayContains($folder + "/" + $seq, $buf4);
+                if($f != 1){
+                    $buf4[size($buf4)] = $folder + "/" + $seq;
+                }
+            }
+        }
+    }
+
+    //
+
+    $modifyPath = 1;
+//    }
+    else
+        $modifyPath = 0;
+
+    print $buf4;
+    print $batchMode;
+
+        /*
+        for($i=0;$i<size($buf4);$i++)
+    {
+        print ($buf4[$i] + "::::" + $i + "\n");
+        }
+
+     */
+
+    for ($source in $buf4)
+    //$source = $buf4[330]
+    {
+        $all[size($all)] = $source;
+        string $filename = `match "[^/\\]+$" $source`;
+        string $dest = $destFolder;
+        print ("\n--source:::" + $source);
+        while(true){
+            //if `filetest -f $source` == 0 : continue
+            $rs = `zwSysFile "fcopy" $source $dest 0`;
+            if ($rs != "")
+            {
+                $message = "拷贝文件出错：" + $node + "." + $attr + "\n" + $rs + "\n" + $source + $dest+ "请检查网络？";
+                if ($errorStop)
+                {
+                    if (!$batchMode)
+                        progressWindow -endProgress;
+                    if ($percentage >= 100){
+                        error $message;
+                        break;
+                    }else{
+                       string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+                        if($result=="stop"){
+                            error $message;
+                            break;
+                        }
+                        //warning $message;
+                    }
+                }
+                else
+                {
+                    string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+                    if($result=="stop"){
+                         error $message;
+                         break;
+                    }
+                    //warning $message;
+                    //continue;
+                }
+            }
+            else{
+               print ($dest + "\n");
+               break;
+            }
+        }
+        pause -sec 3;
+    }
+
+    string $sourceUrl = `getAttr ($node + "." + $attr)`;
+    $sourceUrl = `substituteAllString $sourceUrl "\\" "/"`;
+    string $destUrl = $texture;
+
+    print ("\nmodifyPath:" + $modifyPath);
+    print("---------------------------\n");
+    //if ($modifyPath && `filetest -f $texture` && tolower($sourceUrl) != tolower($destUrl))
+
+    //2015.6.5
+    /*if (`filetest -f $texture`)
+    {
+            print("node:"+$node);
+            print("seting:"+$destUrl+"\n");
+
+            setAttr ($node + "." + $attr) -type "string" $destUrl;
+    }*/
+
+    //2016.12.14
+    if($modifyPath && `filetest -f $texture`){
+        print("node:"+$node);
+        print("seting:"+$destUrl+"\n");
+
+        $destUrl = `zwFullPath $destUrl`;
+        string $destUrl_tmp = `substitute "//octvision.com/CG/Themes" $destUrl "Z:/Themes"`;
+        $destUrl_tmp = `substituteAllString $destUrl_tmp "${OCTV_PROJECTS}" "Z:/Themes"`;
+
+        setAttr ($node + "." + $attr) -type "string" $destUrl_tmp;
+
+    }else if($modifyPath && (!`filetest -f $texture`)){
+        $allnoSetNodePath[size($allnoSetNodePath)] = $node;
+        $allnoSetNodePath[size($allnoSetNodePath)] = $attr;
+        $allnoSetNodePath[size($allnoSetNodePath)] = $destUrl;
+    }
+
+}
+string $allNodePath[];
+string $tempNode[];
+clear $allNodePath;
+clear $tempNode;
+$allNodePath=$allnoSetNodePath;
+
+string $infos = "";
+string $message = "";
+while(size($allNodePath)>0){
+    $infos = "";
+    for($i=0; $i<size($allNodePath); $i = $i+3){
+        if(`filetest -f $allNodePath[$i+2]`){
+
+            $dest_t = `zwFullPath $allNodePath[$i+2]`;
+            string $destPath_tmp = `substitute "//octvision.com/CG/Themes" $dest_t "Z:/Themes"`;
+            $destPath_tmp = `substituteAllString $destPath_tmp "${OCTV_PROJECTS}" "Z:/Themes"`;
+            setAttr ($allNodePath[$i] + "." + $allNodePath[$i+1]) -type "string" $destPath_tmp;
+            print("node:"+$allNodePath[$i]);
+            print("seting:"+$allNodePath[$i+2]+"\n");
+        }else{
+            $tempNode[size($tempNode)] = $allNodePath[$i];
+            $tempNode[size($tempNode)] = $allNodePath[$i+1];
+            $tempNode[size($tempNode)] = $allNodePath[$i+2];
+            $infos = $infos + $allNodePath[$i]+"."+$allNodePath[$i+1]+"\n贴图"+$allNodePath[$i+2]+"\n";
+        }
+    }
+    if($infos!= ""){
+        $message = "设置贴图出错：" + $infos +"请检查贴图是否存在或网络是否正常？";
+        string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+        if($result=="stop"){
+            error $message;
+            break;
+        }
+    }
+    clear $allNodePath;
+    $allNodePath = $tempNode;
+    clear $tempNode;
+}
+
+if ($max && !$batchMode)
+    progressWindow -endProgress;
+}
+

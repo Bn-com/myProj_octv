@@ -1,0 +1,206 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// Given a string of "node.attr", return the node name
+//
+proc string kcBSgetNode(string $nodeAttr)
+{
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+		return $buf[0];
+
+	return $nodeAttr;
+}
+
+proc int kcBSisScaleAttr(string $nodeAttr)
+{
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+		if (`gmatch $buf[size($buf) - 1] "scale*"`)
+			return true;
+
+	return false;
+}
+
+global proc kcBSrecordDrivenKey()
+{
+	if (`window -q -exists kcBSrecordDrivenKeyWnd`)
+		deleteUI -window kcBSrecordDrivenKeyWnd;
+
+	window -title "Record Driven Key" -resizeToFitChildren true kcBSrecordDrivenKeyWnd;
+
+		string $formLayout = `formLayout`;
+			string $text = `text -label "NOTE: Select channels in the blend shape node before record driven keys."`;
+			string $separator = `separator`;
+			string $control = `textFieldGrp -label "Character" -text "kingtor"`;
+			string $button = `button -label "Record Driven Keys" -command ("kcBSrecordCB " + $control)`;
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$text	"top"	5
+			-attachForm		$text	"left"	5
+			-attachForm		$text	"right"	5
+
+			-attachControl	$separator	"top"	5	$text
+			-attachForm		$separator	"left"	5
+			-attachForm		$separator	"right"	5
+
+			-attachControl	$control	"top"	5	$separator
+			-attachForm		$control	"left"	5
+			-attachForm		$control	"right"	5
+
+			-attachControl	$button		"top"	5	$control
+			-attachForm		$button		"left"	5
+			-attachForm		$button		"right"	5
+		$formLayout;
+
+	showWindow kcBSrecordDrivenKeyWnd;	
+}
+
+global proc kcBSrecordCB(string $control)
+{
+	string $char = `textFieldGrp -q -text $control`;
+	string $CHARACTER = $char + "_tongue_curve";
+
+	string $selection[] = `ls -long -selection`;
+
+	if (`size $selection` == 0)
+		error("Select the blend shape node.");
+
+	if (`nodeType $selection[0]` != "blendShape")
+		error("Select the blend shape node.");
+
+	string $blendShape = $selection[0];
+
+    string $channelAttr[] = `channelBox -q -selectedHistoryAttributes mainChannelBox`;
+
+	if (`size $channelAttr` == 0)
+		$channelAttr = `channelBox -q -selectedMainAttributes mainChannelBox`;
+
+	for ($channel in $channelAttr)
+	{
+		string $drivenNode[];
+		int $keyCount[];
+		float $time[];
+		float $key[];
+		string $inTangent[];
+		string $outTangent[];
+
+		clear $drivenNode;
+		clear $keyCount;
+		clear $time;
+		clear $key;
+		clear $inTangent;
+		clear $outTangent;
+
+		string $nodes[] = `listConnections -destination true -source false -skipConversionNodes true ($blendShape + "." + $channel)`;
+
+		for ($node in $nodes)
+			if ((`nodeType $node` == "animCurveUA") || 
+				(`nodeType $node` == "animCurveUL") || 
+				(`nodeType $node` == "animCurveUT") || 
+				(`nodeType $node` == "animCurveUU"))
+			{
+				// is a set driven key node
+
+				string $drivenNode_temp[] = `listConnections -destination true -source false -plugs true -skipConversionNodes true ($node + ".output")`;
+
+				if (`size $drivenNode_temp` > 0)
+				{
+					string $destNode = kcBSgetNode($drivenNode_temp[0]);
+
+					if (`nodeType $destNode` == "blendWeighted")
+					{
+						$drivenNode_temp = `listConnections -destination true -source false -plugs true -skipConversionNodes true ($destNode + ".output")`;
+
+						string $destNode = kcBSgetNode($drivenNode_temp[0]);
+	
+						if (`nodeType $destNode` == "tweak")
+						{
+							string $buf[];
+
+							if (`tokenize $drivenNode_temp[0] "." $buf` == 4)
+								$drivenNode_temp[0] = $CHARACTER + "." + $buf[2] + "." + $buf[3];
+						}
+					}
+					else
+						if (`nodeType $destNode` == "tweak")
+						{
+							string $buf[];
+
+							if (`tokenize $drivenNode_temp[0] "." $buf` == 4)
+								$drivenNode_temp[0] = $CHARACTER + "." + $buf[2] + "." + $buf[3];
+						}
+
+					int $isScale = false;
+
+					if (kcBSisScaleAttr($drivenNode_temp[0]))
+						$isScale = true;
+
+
+					int $keyCount_temp = `keyframe -q -keyframeCount $node`;
+
+					float $time_temp[] = `keyframe -float ":" -query -floatChange $node`;
+					float $key_temp[] = `keyframe -float ":" -query -valueChange $node`;
+					string $inTangent_temp[] = `keyTangent -float ":" -query -inTangentType $node`;
+					string $outTangent_temp[] = `keyTangent -float ":" -query -outTangentType $node`;
+
+					$drivenNode[size($drivenNode)] = $drivenNode_temp[0];
+					$keyCount[size($keyCount)] = $keyCount_temp;
+
+					for ($i = 0; $i < size($time_temp); $i++)
+					{
+						$time[size($time)] = $time_temp[$i];
+
+						if (!$isScale)
+							$key[size($key)] = $key_temp[$i];
+						else
+							if ($key_temp[$i] < 1.0)						// when blendWeighted node exists, add 1 to $key
+								$key[size($key)] = 1.0 + $key_temp[$i];		// 2 cases: a) driven key = 0.5 when actual scale = 1.5
+							else											//			b) driven key = -0.5 when actual scale = 0.5
+								$key[size($key)] = $key_temp[$i];
+
+						$inTangent[size($inTangent)] = $inTangent_temp[$i];
+						$outTangent[size($outTangent)] = $outTangent_temp[$i];
+					}
+				}
+			}
+
+		// add attribute to record driven key information
+
+		if (size(`ls ($channel + ".drivenKey")`) == 0)
+			// add attribute
+			addAttr -longName "drivenKey" -dataType "string" $channel;
+
+		// form string
+
+		int $count = 0;
+		string $attr = "";
+
+		for ($i = 0; $i < size($drivenNode); $i++)
+		{
+			$attr += $drivenNode[$i] + " " + $keyCount[$i] + " ";
+
+			for ($j = 0; $j < $keyCount[$i]; $j++)
+			{
+				$attr += $time[$count] + " " + $key[$count] + " " + $inTangent[$count] + " " + $outTangent[$count] + " ";
+				$count++;
+			}
+		}
+
+		setAttr -type "string" ($channel + ".drivenKey") $attr;
+		print("setAttr " + $channel + ".drivenKey " + $attr + "\n");
+	}
+}
+
+

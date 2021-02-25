@@ -1,0 +1,417 @@
+global proc zwWinxCheckSets()
+{
+	string $sceneName = `file -query -sceneName`;
+	if ($sceneName == "")
+	{
+		return;
+	}
+	$sceneName = `match "[^/\\]+$" $sceneName`;
+	string $str = `zwWinxCheckSetsProc $sceneName`;
+	if ($str == "")
+	{
+		confirmDialog -message "没有发现错误" -button "OK";
+	}
+	else
+	{
+		idmtDHtmlDlg -width 600 -height 600 -title "检查environments、sets" -body $str;
+	}
+}
+
+global proc zwWinxCheckSetsBatch()
+{
+	string $html = "";
+	int $count = 0;
+
+	int $fileId = `fopen "D:/检查environments、sets.txt" "w"`;
+
+	string $aniFolder = "//file-cluster/GDC/Projects/WinxClubII/Project/data/AssetList";
+	string $aniLogs[] = `getFileList -filespec ($aniFolder + "/*_DYN.txt")`;
+	for ($aniLog in $aniLogs)
+	{
+		string $str = `zwWinxCheckSetsProc $aniLog`;
+		if ($str != "")
+		{
+			string $sceneName = `substitute "[.]txt$" $aniLog ".mb"`;
+			print ($sceneName + "\n");
+
+			fprint $fileId ($sceneName + "\r\n");
+
+			$count ++;
+			$html += "<p><span style=\"font-size: 16px; font-weight: bold; color: #FF0000\">" + $sceneName + "</span></p>\n<hr>\n" + $str + "<p>&nbsp;</p>\n";
+		}
+	}
+	$html = "<p>共检查了 " + (size($aniLogs)) + " 个文件，其中有 " + $count + " 个疑似个案</p>\n" + $html;
+
+	fclose $fileId;
+
+	int $fileId = `fopen "D:/检查environments、sets.html" "w"`;
+	if ($fileId)
+	{
+		fprint $fileId "<html>\n<head>\n<title>检查environments、sets</title>\n</head>\n<body>\n";
+		fprint $fileId $html;
+		fprint $fileId "</body>\n</html>";
+		fclose $fileId;
+	}
+
+	idmtDHtmlDlg -width 600 -height 600 -title "检查environments、sets" -body $html;
+
+	print $html;
+}
+
+global proc string zwWinxCheckSetsProc(string $sceneName)
+{
+	string $aniFolder = "//file-cluster/GDC/Projects/WinxClubII/Project/data/AssetList";
+
+	string $rs = "";
+
+	string $references[];
+	if (`match "[.]txt$" $sceneName` == "")
+	{
+		$references = zwWinxCheckSetsGetBuf();
+	}
+	else
+	{
+		$references = `zwWinxCheckSetsFile2Buf ($aniFolder + "/" + $sceneName)`;
+	}
+
+	string $dbStr = `idmtService "GetAssetInAnim" ($sceneName + "|sets|set")`;
+	if ($dbStr == "")
+	{
+		$dbStr = `idmtService "GetAssetInAnim" ($sceneName + "|environments|modeling")`;
+		$rs = `zwWinxCheckSetsEnv $dbStr $sceneName $references`;
+	}
+	else
+	{
+		$rs = `zwWinxCheckSetsSet $dbStr $sceneName $references`;
+	}
+
+	return $rs;
+}
+
+global proc string zwWinxCheckSetsSet(string $dbStr, string $sceneName, string $references[])
+{
+	string $setFolder = "//file-cluster/GDC/Projects/WinxClubII/WinxClubII_Scratch/pa/sets/AssetList";
+
+	string $rs = "";
+
+	string $dbBuf[];
+	int $size = `tokenize $dbStr "|" $dbBuf`;
+	if ($size == 0)
+	{
+		return $rs;
+	}
+
+	string $str = "";
+	for ($reference in $references)
+	{
+		if (`match "[/\\]sets[/\\]" $reference` == "" && `match "[/\\]setDressing[/\\]" $reference` == "")
+		{
+			continue;
+		}
+		string $referenced = `zwWinxCheckSetsGetAsset $reference`;
+		int $find = false;
+		for ($i=1; $i<$size; $i+=2)
+		{
+			string $db = `zwWinxCheckSetsGetAsset $dbBuf[$i]`;
+			if ($referenced == $db)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			string $filename = zwWinxCheckSetsGetFilename($reference);
+			$str += "<tr><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsSelect &quot;" + `substituteAllString $reference "\\" "/"` + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsRemove &quot;" + `substituteAllString $reference "\\" "/"` + "&quot;\">删除</span></td><td style=\"background-color:#FFFFFF\"><span>" + $filename + "</span></td></tr>\n";
+		}
+	}
+	if ($str != "")
+	{
+		$rs += "<p><b>参考了不该参考的sets</b></p>\n";
+		$rs += "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\" bgcolor=\"#999999\">" + $str + "</table>\n";
+	}
+
+	for ($i=1; $i<$size; $i+=2)
+	{
+		string $db = `zwWinxCheckSetsGetAsset $dbBuf[$i]`;
+		int $find = false;
+		for ($reference in $references)
+		{
+			if (`match "[/\\]sets[/\\]" $reference` == "" && `match "[/\\]setDressing[/\\]" $reference` == "")
+			{
+				continue;
+			}
+			string $referenced = `zwWinxCheckSetsGetAsset $reference`;
+			if ($referenced == $db)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+
+		string $setLog = $setFolder + "/" + `substitute "[^.]+$" $dbBuf[$i] "txt"`;
+		if (!`filetest -f $setLog`)
+		{
+			continue;
+		}
+
+		int $success = true;
+		string $str = "";
+		string $elements[] = `zwWinxCheckSetsFile2Buf $setLog`;
+		for ($element in $elements)
+		{
+			string $db = `zwWinxCheckSetsGetAsset $element`;
+			int $find = false;
+			string $myReferenced = "";
+			for ($reference in $references)
+			{
+				string $referenced = `zwWinxCheckSetsGetAsset $reference`;
+				if ($referenced == $db)
+				{
+					$find = true;
+					$myReferenced = $reference;
+					break;
+				}
+			}
+			string $filename = zwWinxCheckSetsGetFilename($element);
+			if ($find)
+			{
+				$str += "<tr><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsSelect &quot;" + `substituteAllString $myReferenced "\\" "/"` + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsRemove &quot;" + `substituteAllString $myReferenced "\\" "/"` + "&quot;\">删除</span></td><td style=\"background-color:#FFFFFF\"><span>" + $filename + "</span></td></tr>\n";
+			}
+			else
+			{
+				$success = false;
+				$str += "<tr><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsSelect &quot;" + `substituteAllString $element "\\" "/"` + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsAdd &quot;" + `substituteAllString $element "\\" "/"` + "&quot;\">参考</span></td><td style=\"background-color:#C6EC8D\"><span>" + $filename + "</span></td></tr>\n";
+			}
+		}
+		if (!$success)
+		{
+			$rs += "<p><b>没有参考这个set</b></p>\n";
+			$rs += "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\" bgcolor=\"#999999\"><tr><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsSelect &quot;" + zwWinxCheckSetsGetPath($dbBuf[$i], "sets") + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsAdd &quot;" + zwWinxCheckSetsGetPath($dbBuf[$i], "sets") + "&quot;\">参考</span></td><td style=\"background-color:#C6EC8D\"><span>" + $dbBuf[$i] + "</span></td></tr></table>\n";
+			$rs += "<p><b>或者set里面的元素</b></p>\n";
+			$rs += "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\" bgcolor=\"#999999\">" + $str + "</table>\n";
+		}
+	}
+
+	return $rs;
+}
+
+global proc string zwWinxCheckSetsEnv(string $dbStr, string $sceneName, string $references[])
+{
+	string $rs = "";
+
+	string $dbBuf[];
+	int $size = `tokenize $dbStr "|" $dbBuf`;
+	if ($size == 0)
+	{
+		return $rs;
+	}
+
+	string $str = "";
+	for ($reference in $references)
+	{
+		if (`match "[/\\]environments[/\\]" $reference` == "")
+		{
+			continue;
+		}
+		string $referenced = `zwWinxCheckSetsGetAsset $reference`;
+		int $find = false;
+		for ($i=1; $i<$size; $i+=2)
+		{
+			string $db = `zwWinxCheckSetsGetAsset $dbBuf[$i]`;
+			if ($referenced == $db)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			string $filename = zwWinxCheckSetsGetFilename($reference);
+			$str += "<tr><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsSelect &quot;" + `substituteAllString $reference "\\" "/"` + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#FFFFFF\"><span mel=\"zwWinxCheckSetsRemove &quot;" + `substituteAllString $reference "\\" "/"` + "&quot;\">删除</span></td><td style=\"background-color:#FFFFFF\"><span>" + $filename + "</span></td></tr>\n";
+		}
+	}
+	if ($str != "")
+	{
+		$rs += "<p><b>参考了不该参考的environment</b></p>\n";
+		$rs += "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\" bgcolor=\"#999999\">" + $str + "</table>\n";
+	}
+
+	string $str = "";
+	for ($i=1; $i<$size; $i+=2)
+	{
+		string $db = `zwWinxCheckSetsGetAsset $dbBuf[$i]`;
+		int $find = false;
+		for ($reference in $references)
+		{
+			if (`match "[/\\]environments[/\\]" $reference` == "")
+			{
+				continue;
+			}
+			string $referenced = `zwWinxCheckSetsGetAsset $reference`;
+			if ($referenced == $db)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			string $filename = $dbBuf[$i];
+			$str += "<tr><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsSelect &quot;" + zwWinxCheckSetsGetPath($filename, "environments") + "&quot;\">选择</span></td><td width=\"50\" align=\"center\" style=\"background-color:#C6EC8D\"><span mel=\"zwWinxCheckSetsAdd &quot;" + zwWinxCheckSetsGetPath($filename, "environments") + "&quot;\">参考</span></td><td style=\"background-color:#C6EC8D\"><span>" + $filename + "</span></td></tr>\n";
+		}
+	}
+	if ($str != "")
+	{
+		$rs += "<p><b>没有参考以下environment</b></p>\n";
+		$rs += "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\" bgcolor=\"#999999\">" + $str + "</table>\n";
+	}
+
+	return $rs;
+}
+
+global proc string[] zwWinxCheckSetsGetBuf()
+{
+	string $buf[];
+	clear $buf;
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		$reference = `referenceQuery -withoutCopyNumber -filename $reference`;
+		$reference = `workspace -expandName $reference`;
+		$reference = `substituteAllString $reference "/" "\\"`;
+	//	$reference = `substituteAllString $reference "\\\\" "\\"`;
+
+		int $find = false;
+		for ($i=0; $i<size($buf); $i++)
+		{
+			if ($buf[$i] == $reference)
+			{
+				$find = true;
+				break;
+			}
+		}
+
+		if (!$find)
+		{
+			$buf[size($buf)] = $reference;
+		}
+	}
+
+	return $buf;
+}
+
+global proc string[] zwWinxCheckSetsFile2Buf(string $path)
+{
+	string $buf[];
+
+	int $fileId = `fopen $path "r"`;
+	if (!$fileId)
+	{
+		return $buf;
+	}
+	while (!`feof $fileId`)
+	{
+		string $line = `fgetline $fileId`;
+		$line = strip($line);
+		if ($line != "")
+		{
+			$buf[size($buf)] = $line;
+		}
+	}
+	fclose $fileId;
+
+	return $buf;
+}
+
+global proc string zwWinxCheckSetsGetAsset(string $path)
+{
+	string $asset = `match "[^/\\]+$" $path`;
+	$asset = `substitute "_[^_]+$" $asset ""`;
+	return $asset;
+}
+
+global proc string zwWinxCheckSetsGetFilename(string $path)
+{
+	string $filename = `match "[^/\\]+$" $path`;
+	return $filename;
+}
+
+global proc string zwWinxCheckSetsGetPath(string $filename, string $assetType)
+{
+	string $path = "";
+
+	string $buf[];
+	tokenize $filename "_" $buf;
+	if (`match "^setD_" $filename` != "")
+	{
+		$path = "//Serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_{0}/winxII_sq_" + $buf[2] + "_sc_" + $buf[4] + "/scenes/setDressing/" + $filename;
+	}
+	else
+	{
+		string $mode = "";
+		if ($assetType == "environments")
+		{
+			$mode = "modeling";
+		}
+		else if ($assetType == "sets")
+		{
+			$mode = "set";
+		}
+		$path = "//Serverone/CONTENT_4_GLOBAL/PRJ_winxII/MC_winxII/scenes/" + $assetType + "/" + $buf[0] + "/" + $buf[1] + "/" + $buf[2] + "/" + $mode + "/" + $filename;
+	}
+
+	return $path;
+}
+
+global proc zwWinxCheckSetsSelect(string $path)
+{
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		if (tolower($reference) == tolower($path))
+		{
+			file -selectAll $reference;
+			break;
+		}
+	}
+}
+
+global proc zwWinxCheckSetsAdd(string $path)
+{
+	
+	$path = `substituteAllString $path "\\" "/"`;
+
+	int $find = false;
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		$reference = `referenceQuery -filename -withoutCopyNumber $reference`;
+		if (tolower($reference) == tolower($path))
+		{
+			$find = true;
+			break;
+		}
+	}
+
+	if (!$find)
+	{
+		slImportRef $path "mayaBinary";
+	}
+}
+
+global proc zwWinxCheckSetsRemove(string $path)
+{
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		if ($reference == $path)
+		{
+			file -removeReference $reference;
+		}
+	}
+}

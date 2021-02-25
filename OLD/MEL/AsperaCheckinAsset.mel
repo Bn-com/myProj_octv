@@ -1,0 +1,53 @@
+// Aspera自动Checkin前期文件、交Daily
+global proc AsperaCheckinAsset(int $logIdScene, int $logIdRender, string $account, string $asset_name, string $asset_type, string $filename, string $mode, string $attachment)
+{
+	string $state = "success";
+	int $rs = catch(`AsperaCheckinAssetProc $account $asset_name $asset_type $filename $mode $attachment`);
+	if ($rs)
+	{
+		$state = "fail";
+		print "\n\n\n";
+		int $fileId = `fopen "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\scripts\\gdc.txt" "r"`;
+		while (!`feof $fileId`)
+		{
+			string $line = `fgetline $fileId`;
+			print $line;
+		}
+		fclose $fileId;
+		print "\n\n\n";
+	}
+
+	idmtService "AsperaMusterLog" ("" + $logIdScene + "|" + $logIdRender + "|" + $state + "|" + $filename);
+}
+
+global proc AsperaCheckinAssetProc(string $account, string $asset_name, string $asset_type, string $filename, string $mode, string $attachment)
+{
+	string $source = `file -query -sceneName`;
+	if (!`filetest -f $source`)
+	{
+		error "文件不存在或者使用了错误的maya版本或文件已损坏";
+	}
+
+	string $project = zwGetProject("");
+	string $accountName = `idmtService "AsperaGetAccountName" ($project + "|" + $account)`;
+	putenv "USERNAMExxx" $accountName;
+
+	string $temp = `internalVar -userTmpDir` + $filename;
+	sysFile -delete $temp;
+	file -rename $temp;
+
+	string $folder = "//file-cluster/GDC/Projects/XJCS/Project/scenes/" + $asset_type + "/" + $asset_name + "/" + $mode;
+	zjCheckinClean(5, {$project, $filename, $folder, "1", "0", "0", "1", "100", "1", $mode, $asset_type, "0"});
+	file -rename $temp;
+
+	if (`filetest -f $attachment`)
+	{
+		idmtProject -checkin -description "Aspera" -checkLock false -attachment $attachment;
+	}
+	else
+	{
+		idmtProject -checkin -description "Aspera" -checkLock false;
+	}
+
+	sysFile -delete $temp;
+}

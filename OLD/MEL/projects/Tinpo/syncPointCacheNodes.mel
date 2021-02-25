@@ -1,0 +1,462 @@
+// syncPointCacheNodes.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Finds pointCache files on disk, and points nodes in the scene at them.
+Use:
+	syncPointCacheNodes sequence shot
+Options:
+	sequence (string)	- Sequence, taken from fileInfo if an empty string is passed
+	shot (string)		- Shot, taken from fileInfo if an empty string is passed
+	
+Dependancies:
+
+	mel:
+
+	getNamespaceFromString
+	findAssetsByType
+	getPath
+	parseXML
+	isPointCachingAsset
+
+	plug-ins:
+
+	pointCache
+	animCache
+	xml_parser
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	09/01/06
+Revisions:	09/01/06	Rev 3.0
+		
+		03/05/07	Rev 3.2
+		- Upgrading to deal with versioning.
+
+		03/16/07	Rev 3.3
+		- Upgrade to deal with versioned cloth
+
+		03/29/07	Rev 3.4
+		- Addressed unitToTimeConversion bug
+
+		04/20/07	Rev 3.5
+		- Removed excessive printing (was killing performance)
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// latest dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/syncPointCacheNodes.3.5.mel"
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "pointCache"`)
+		loadPlugin "pointCache";
+	if (!`pluginInfo -q -l "animCache"`)
+		loadPlugin "animCache";
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+proc buildAssetList (string $namespaces[], int $types[], string $filenames[])
+{
+/*
+	Values for types:	0 = pointCaching
+				1 = pointCachingProxy
+				2 = non pointCaching
+				3 = pointCaching, but loaded file is not point cache (e.g. for FX/Cloth pipe)
+*/	
+	
+	string $allCharGrps[] = findAssetsByType ("cpsvt",0);
+	
+	for ($i=0;$i<size($allCharGrps);$i++)
+	{
+		$namespaces[$i] = getNamespaceFromString ($allCharGrps[$i]);
+		string $file = "";
+		if (`reference -q -inr $allCharGrps[$i]`)
+		{
+			$file = `reference -q -f $allCharGrps[$i]`;
+		}
+		$filenames[$i] = $file;
+		if ($file == "")
+		{
+			$types[$i] = 2;	// non pointCaching
+			continue;
+		}
+	
+		if (!`objExists ($allCharGrps[$i]+".pointCache")`)
+		{
+			if (isPointCachingAsset($file))
+				$types[$i] = 3;	 // pointCaching asset, but loaded file is not point cache (e.g. for FX/Cloth pipe)
+			else
+				$types[$i] = 2; 	// non pointCaching
+
+			continue;
+		}
+
+		if (`getAttr ($allCharGrps[$i]+".pointCache")` == "pointCacheProxy")
+		{
+			$types[$i] = 1;	// pointCachingProxy
+			continue;	
+		}
+
+		if (gmatch (basename($file,""),"*_cachingProxy*"))
+		{
+			$types[$i] = 1; // pointCachingProxy
+			continue;	
+		}
+
+		// pointCaching asset
+		$types[$i] = 0;
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc string[] getVersionData (string $namespaces[], string $clothNamespaces[], string $clothNames[], string $clothVersions[])
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+
+	string $versions[];
+	for ($i=0;$i<size($namespaces);$i++)
+		$versions[$i] = "0000";
+
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot+"_pointCacheExport.xml";
+	if (!`filetest -f $file`)
+	{
+		warning ("syncPointCacheNodes: "+$file+" doesn't exist. ");
+		return $versions;
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+ 
+	// put a version with each namespace
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $ns = xml_getVar ($nodes[$i],"namespace");
+		string $ver = xml_getVar ($nodes[$i],"pointCacheVersion");
+
+		int $idx = stringArrayFindIndex ($ns,$namespaces);
+		if ($idx != -1)
+			$versions[$idx] = $ver;
+	}
+
+	// read the cloth data
+	clear $clothNamespaces;
+	clear $clothNames;
+	clear $clothVersions;
+
+	$nodes = xml_getTag ($xml,"Cloth");
+	if (size($nodes))
+		$nodes = xml_getTag ($nodes[0],"Object");
+
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		$clothNamespaces[$i] = xml_getVar ($nodes[$i],"namespace");
+		$clothNames[$i] = xml_getVar ($nodes[$i],"name");
+		$clothVersions[$i] = xml_getVar ($nodes[$i],"version");
+	}
+
+	return $versions;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getCacheFile (string $namespace, string $name, int $type, string $version)
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+
+	string $basePath = getPath ("ShotBase",{$gSequence,$gShot})+"/cache";
+
+	string $point;
+	if ($version == "0000")
+	{
+		$point = $basePath+"/point/"+$namespace+"/"+$name+(($type)?"_boundingBox":"")+".pc";
+	}
+	else
+	{
+		$point = $basePath+"/point/"+$namespace+"/versions/"+$version+"/"+$name+(($type)?"_boundingBox":"")+".pc";
+	}
+	
+	if (`filetest -f $point`)
+		return $point;
+
+	return "";
+
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getClothCacheFile (string $namespace, string $name, string $version)
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+
+	string $cloth = getPath ("ShotBase",{$gSequence,$gShot})+"/cache/cloth/"+$namespace+"/"+$name+"/"+$name+"."+$version+".pc";
+	if (`filetest -f $cloth`)
+		return $cloth;
+
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+proc keyInTime (string $node)
+{
+	
+	string $input[] = `listConnections -s 1 -d 0 -scn true ($node+".inTime")`;
+	if (size(`ls -type animCurve $input`))
+	{
+		string $plug[] = `listConnections -s 1 -d 0 -p 1 -scn true ($node+".inTime")`;
+		disconnectAttr $plug[0] ($node+".inTime");
+		// if there are no remaning outputs to the animCurve, delete so they don't build up in the scene
+		if (!size(`listConnections -s 0 -d 1 $plug[0]`))
+			delete $input[0];
+
+		clear $input;
+	}
+	if (!size($input))
+	{
+		// precreate the curve as time to unitless
+		string $crv = `createNode animCurveTU`;
+		connectAttr ($crv+".o") ($node+".inTime");
+		eval ("setKeyframe -t 0 -v 0 -itt linear -ott linear "+$node+".inTime");
+		eval ("setKeyframe -t 1 -v 1 -itt linear -ott linear "+$node+".inTime");
+		eval ("setAttr "+$crv+".pre 1");
+		eval ("setAttr "+$crv+".pst 1");
+
+		// tweak the unitToTimeConversionNode
+		string $uc[] = `listConnections -s 1 -d 0 -scn false ($node+".inTime")`;
+		eval ("setAttr "+$uc[0]+".cf 250.0002");
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc string applyCachePerAsset (string $namespace, string $filename, int $type, string $version, string $clothNamespaces[], string $clothNames[], string $clothVersions[])
+{
+	// type: 0 = caching, 1 = caching proxy
+
+	// returns a re-mapping string for animCache to apply the viz cache - mapping is shape -> transform
+	string $mappingStr = "";
+
+	// get the xml for this asset
+	string $assetType = getPath ("AssetTypeFromFilename",{$filename});
+	string $assetName = getPath ("AssetNameFromFilename",{$filename});
+
+	string $file = getPath ("AssetInfoDir",{$assetType,$assetName})+"/pointCacheGeo.xml";
+	if (!`filetest -f $file`)
+	{
+		warning ("syncPointCacheNodes: "+$file+" not found. Skipping this asset...");
+		return "";
+	}
+	string $xml = readXML ($file,0);
+
+	string $nodes[] = xml_getTag ($xml,"Object");
+	for ($i = 0; $i < size($nodes); $i ++)
+	{
+		string $transformInXML = xml_getVar ($nodes[$i],"transform");
+		string $shapeInXML = xml_getVar ($nodes[$i],"shape");
+
+		// find the transform in the scene
+		string $transform = $namespace+":"+$transformInXML;
+		if (!`objExists $transform`)
+		{
+			warning ("syncPointCacheNodes: "+$transform+" not found. Skipping...");
+			continue;
+		}
+		// got it. Find the pointCache node
+		string $shape[] = `listRelatives -s -ni -pa $transform`;
+		if (!size($shape))
+		{
+			warning ("syncPointCacheNodes: no shape node found beneath "+$transform+". Skipping...");
+			continue;
+		}
+
+		string $pointCacheNode[] = `listHistory $shape[0]`;
+		$pointCacheNode = `ls -type pointCache $pointCacheNode`;
+
+		if (!size($pointCacheNode))
+			continue;
+
+		
+		// look up this object in the cloth data to see if we should use it. But only if we have the real caching rig, don't sweat it for caching proxy (also no bounding boxes
+		// are exported for cloth so we CAN'T sweat it!)
+		string $cache = "";
+		if ($type == 0)
+		{
+			for ($j = 0; $j < size ($clothNamespaces); $j++)
+			{
+				if ($clothNamespaces[$j] == $namespace && $clothNames[$j] == $shapeInXML)
+				{
+					print ("syncPointCacheNodes: DEBUG: Found "+$namespace+":"+$shapeInXML+" in cloth data.\n");
+					$cache = getClothCacheFile ($namespace,$shapeInXML,$clothVersions[$j]);
+					break;
+				}
+			}
+		}
+
+		// either there was no cloth or it was missing, do we have any pointCache?
+		if (!`filetest -f $cache`)
+		{
+			$cache = getCacheFile ($namespace, $shapeInXML, $type, $version);
+		}
+
+		// if there is still no pointCache or it doesn't exist, we are SOL
+		if (!`filetest -f $cache`)
+		{
+			continue;
+		}
+
+		if (!`filetest -f $cache`)
+			continue;
+
+		// apply
+		setAttr -type "string" ($pointCacheNode[0]+".cacheFile") $cache;
+		keyInTime ($pointCacheNode[0]);
+		setAttr ($pointCacheNode[0]+".mode") 2;
+
+		// set to extrapolate
+		if (`getAttr -se ($pointCacheNode[0]+".pre")` && !size(`listConnections -s 1 -d 0 ($pointCacheNode[0]+".pre")`))
+			setAttr ($pointCacheNode[0]+".pre") 3;	// extrapolate
+		
+		if (`getAttr -se ($pointCacheNode[0]+".pst")` && !size(`listConnections -s 1 -d 0 ($pointCacheNode[0]+".pst")`))
+			setAttr ($pointCacheNode[0]+".pst") 3;	// extrapolate
+
+		$mappingStr += "-r \""+$namespace+":"+$shapeInXML+"\" \""+$transform+"\" ";
+		
+	}
+	return $mappingStr;
+}
+// ---------------------------------------------------------------------------------------------------
+proc applyVizCache (string $namespace, string $mapping, string $version)
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+
+	string $basePath = getPath ("ShotBase",{$gSequence,$gShot})+"/cache/";
+
+	string $cache;
+	if ($version == "0000")
+		$cache = $basePath+"/point/"+$namespace+"/visibility.bcf";
+	else
+		$cache = $basePath+"/point/"+$namespace+"/versions/"+$version+"/visibility.bcf";
+	 
+
+	if (!`filetest -f $cache`)
+	{
+		warning ("syncPointCacheNodes: "+$cache+" not found. Skipping for this asset...");
+		return ;
+	}
+
+	// do it.
+	string $cmd = "animCache -bk -c \""+$cache+"\" ";
+	if (size($mapping))
+		$cmd += $mapping+" -er ";
+	$cmd += " -itt \"linear\" -ott \"linear\" -pre \"constant\" -pst \"constant\" ";
+
+	evalEcho ($cmd);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc syncPointCacheNodes( string $sequence, string $shot) 
+{
+	// load plug-ins, source scripts
+	loadPlugins();
+	eval ("source \"parseXML.mel\"");
+
+	// globals
+	global string $gSequence;
+	global string $gShot;
+
+	// if the sequence and shot are not passed as args, get from fileInfo
+
+	if ($sequence == "")
+	{
+		string $tmp[] = `fileInfo -q "sequence"`;
+		if (size($tmp))
+			$sequence = $tmp[0];	
+	}
+
+	if ($shot == "")
+	{
+		string $tmp[] = `fileInfo -q "shotGroup"`;
+		if (size($tmp))
+			$shot = $tmp[0];	
+	}
+
+	// check that we have the data we need
+	if ($sequence == "" || $shot == "")
+	{
+		warning ("syncPointCacheNodes: Sequence and/or shot not defined. Skipping...");
+		return;	
+	}
+
+	$gSequence = $sequence;
+	$gShot = $shot;
+
+	// build an asset list, so we know whether an asset (by namespace) is pointCaching, a pointCachingProxy asset, or a non-pointCache asset.
+	string $namespaces[], $filenames[];
+	int $types[];
+	
+	buildAssetList ($namespaces, $types, $filenames);
+
+	// get version data
+	string $clothNamespaces[], $clothNames[], $clothVersions[];
+	string $versions[] = getVersionData ($namespaces, $clothNamespaces, $clothNames, $clothVersions );
+
+	print ("syncPointCacheNodes: DEBUG: Cloth Versioning data:\n");
+	for ($i=0;$i<size($clothNamespaces);$i++)
+	{
+		print ($clothNamespaces[$i]+"	"+$clothNames[$i]+"	"+$clothVersions[$i]+"\n");
+	}
+
+
+	// loop through assets
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		switch ($types[$i])
+		{
+			case 0:
+				// caching
+				string $mapping = applyCachePerAsset ($namespaces[$i],$filenames[$i],$types[$i],$versions[$i],$clothNamespaces,$clothNames,$clothVersions);
+				applyVizCache ($namespaces[$i],$mapping,$versions[$i]);
+				break;
+			case 1:
+				// cachingProxy
+				string $mapping = applyCachePerAsset ($namespaces[$i],$filenames[$i],$types[$i],$versions[$i],$clothNamespaces,$clothNames,$clothVersions);
+				applyVizCache ($namespaces[$i],$mapping,$versions[$i]);
+				break;
+
+			case 2:
+				// non-pointCaching - To do: check for custom point cache 
+				break;
+
+			case 3:
+				// asset is pointCaching, but some other version is loaded.
+
+				break;
+
+			default:
+				break;
+
+		};
+
+	}
+		
+	print ("syncPointCacheNodes: DONE.\n");
+}
+
+

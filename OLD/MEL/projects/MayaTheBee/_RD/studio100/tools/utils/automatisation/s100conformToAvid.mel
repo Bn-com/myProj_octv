@@ -1,0 +1,254 @@
+//convert sequences to mov
+
+
+global proc s100cToAvidUI()
+{
+
+	if(`window -ex s100cToAvidUI`)
+		deleteUI s100cToAvidUI ;
+
+
+window s100cToAvidUI ;
+
+columnLayout -adj 1 ;
+
+text -label "window to convert a lot";
+text -label "of sequence to mov for avid";
+separator;
+
+text -label "select a folder To scan" ;
+textFieldButtonGrp  -eb 1  -buttonLabel  "select" -buttonCommand s100cToAvidUIChoseScanFolder s100cToAvidUIScanPath;
+
+separator;
+
+text -label "select a folder To export" ;
+textFieldButtonGrp  -eb 1  -buttonLabel  "select" -buttonCommand s100cToAvidUIChoseExportFolder s100cToAvidUIExportPath;
+
+separator;
+
+
+button -label "convert" -c s100CTAConvertCheck ;
+
+
+showWindow ;
+}
+
+
+global proc  s100cToAvidUIChoseScanFolder()
+{
+
+$return = `fileBrowserDialog -fc "s100CTAScanFolder" -ft "folder" -an "chose"  -mode 4 -om "Import"  `;
+
+
+}
+
+
+
+global proc s100CTAScanFolder(string $filename, string $fileType )
+{
+textFieldButtonGrp -e -text $filename s100cToAvidUIScanPath ;
+
+}
+
+global proc  s100cToAvidUIChoseExportFolder()
+{
+
+$return = `fileBrowserDialog -fc "s100CTAExportFolder" -ft "folder" -an "chose"  -mode 4 -om "Import"  `;
+
+
+}
+
+
+
+global proc s100CTAExportFolder(string $filename, string $fileType )
+{
+textFieldButtonGrp -e -text $filename s100cToAvidUIExportPath ;
+
+}
+
+
+
+global proc s100CTAConvertCheck()
+{
+
+string $toScan = `textFieldButtonGrp -q -text  s100cToAvidUIScanPath ` ;
+string $toExport = `textFieldButtonGrp -q -text  s100cToAvidUIExportPath ` ;
+
+	if(`filetest -d $toScan`)
+	{
+
+		if(`filetest -d $toExport`)
+		{
+		print "\nstarting converting" ;
+		s100CTAConvert($toScan,$toExport)  ;
+
+        }else{
+		warning "error" ;
+        }
+    }else{
+	warning "error" ;
+    }
+
+
+
+}
+
+global proc s100CTAConvert(string $toScan,string $toExport)
+{
+string $r[] = `s100CTAreturnSubFolder($toScan ) `;
+string $filL[] ;
+int $start ;
+int $end  ;
+string $name ;
+string $input ;
+string $ouput  ;
+
+progressWindow -title "creating and submiting comp" -minValue 0 -maxValue `size $r`  -progress 0 ;
+
+
+	for($tmp in $r)
+	{
+	progressWindow -e -step -status ("shot " + $tmp);
+	$pathS = $toScan +"/" + $tmp +"/" ;
+	print ("\nfolder: " +  $pathS ) ;
+
+	$filL = sort( `getFileList -filespec "*.png"  -folder $pathS `);
+
+	$size = size($filL) ;
+		if($size > 0)
+		{
+		$arr   = stringToStringArray($filL[0],"." );
+		$arr1   = stringToStringArray($arr[0],"_" );
+		$start = $arr1[size($arr1) -1 ] ;
+		$arr   = stringToStringArray($filL[$size -1],"." );
+		$arr1   = stringToStringArray($arr[0],"_" );
+		$end = $arr1[size($arr1) -1 ] ;
+
+		$name =  $arr1[0] +"_" + $arr1[1] +"_" + $arr1[3] +"_" + $arr1[5];
+		$input = $pathS + (substituteAllString($arr[0] , $arr1[size($arr1) -1 ] , "")) ;
+		$ouput = $toExport +"/" + $name  ;
+
+		//
+		print ("\nmodifying comp");
+		$ouput =s100PCmodifyPathForQTRender($ouput) ;
+		$comp = s100CTAcreateCompQT($name , $start , $end , $input , $ouput ) ;
+		print ("\nsubmitting comp");
+
+		s100PCSubmitPreCompForNuke({}, $name ,"" , $start,$end , "10000" , $comp  ,"nukewithoutplug","");
+
+
+
+        }else{
+		print ("\nfolder " +  $pathS + "skipped because it's empty");
+
+        }
+
+
+    }
+
+
+progressWindow -endProgress ;
+}
+
+
+
+global proc string  s100CTAcreateCompQT(string $name,int $start ,int $end , string $input , string $output )
+{
+global string $basePathToTools;
+$oldComp = $basePathToTools +"studio100/reference_files/ConvertImageToMov/convertImagesToMov.nk"  ;
+$comp = "Y:/006_POST_PROD/_tmp/" +$name +".nk";
+s100CTAmodifyCompForQT($oldComp, $comp , $start , $end ,$input ,$output) ;
+return $comp ;
+
+
+}
+
+
+
+
+
+
+global proc s100CTAmodifyCompForQT(string $oldComp,string $comp, string $start, string $end , string $input , string $output )
+{
+//$oldComp = $oFile ;
+
+
+
+string $get = `s100converFileToString($oldComp ) `;
+string $arr[]= stringToStringArray($get , "\n");
+string $toCheck[] = {"startframe",
+					"endframe",
+					"outputname",
+					"filename"
+
+					} ;
+
+string $value[] = { $start,
+					$end,
+					$input,
+					$output
+					} ;
+
+int $chA[] ;
+
+
+
+
+	for($i = 0 ; $i < size($arr) ; $i++)
+	{
+
+ 	//$i++ ;
+ 	//print $arr[$i] ;
+
+
+
+		for($j = 0 ; $j < size($toCheck) ; $j++)
+		{
+			if(`gmatch $arr[$i] ("*addUserKnob*" +$toCheck[$j] +"*")  `)
+			{
+				if(!`gmatch $arr[$i] ("* T *")  `)
+				{
+
+				print "vi" ;
+				$arr[$i + 1 ] = $toCheck[$j] +" " + $value[$j] ;
+				$chA[$j] = 1 ;
+
+                }
+			}
+
+        }
+
+		if(`gmatch $arr[$i] ("*first_frame*")  `)
+		{
+		$arr[$i] = "first_frame " + $start  ;
+
+        }
+		if(`gmatch $arr[$i] ("*last_frame*")  `)
+		{
+		$arr[$i] = "last_frame " + $end  ;
+        }
+
+    }
+
+
+//print $arr ;
+string $toPut = stringArrayToString($arr ,"\n") ;
+s100convertStringToFile( ($comp), $toPut) ;
+print $get ;
+
+
+}
+
+global proc string[] s100CTAreturnSubFolder(string $toScan)
+{
+
+return ` s100ListOnlyFolder($toScan+"/")` ;
+
+
+}
+
+
+
+
+/*
+s100cToAvidUI ;

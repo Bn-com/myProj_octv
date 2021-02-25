@@ -1,0 +1,153 @@
+global proc zzjAniGeoCacheBatch()
+{
+	source "//file-cluster/gdc/Resource/Support/Maya/projects/Ninjago/nj_Rnd_GeoCacheHighend.mel";
+	source "zzjUtilityTools.mel";
+	
+	//避免弹出警告
+	cycleCheck -e off;	
+	
+	nj_Rnd_GeoCacheHighend_importAll();
+
+	string $shapes[]=`ls -dag -type mesh -type nurbsSurface  "yd_c*:MODEL" "yd_c*:*:MODEL" "*:yd_c*:MODEL" "yd_p*:MODEL" "yd_p*:*:MODEL" "*:yd_p*:MODEL"`;
+	if (`size $shapes`)
+	{
+		
+	//	load,再import所有的Reference
+		lr_Rnd_GeoCacheHighend_importReference();
+
+		string $doCacheGroup[]={};
+		clear $doCacheGroup;
+		int $tmp = 0;
+		
+		//	检查shape节点是否隐藏		
+		for ($s in $shapes)
+		{
+			
+			if (nodeIsVisible($s)==0)	continue;
+			$doCacheGroup[$tmp++]=$s;		
+		}
+			
+		select -r $doCacheGroup;
+		pickWalk -d up;	
+	
+		clear $doCacheGroup;
+		$tmp = 0;		
+		string $sl[]=`ls -sl`;
+		for ($s in $sl)
+		{
+//			检查是否带cache
+			string $his[]=`listHistory $s`;
+			int $ifNoCache=1;
+			for ($h in $his)
+			{
+				if (`nodeType $h`=="cacheFile")
+				{
+					$ifNoCache=0;
+					break;	
+				}					
+			}
+			
+			if ($ifNoCache==1)		$doCacheGroup[$tmp++]=$s;
+		}
+		
+		select -r $doCacheGroup;
+
+		if (`objExists "GEO_CACHE_SET"`)   delete GEO_CACHE_SET;
+		
+		sets -name "GEO_CACHE_SET";
+		select -r -ne "GEO_CACHE_SET";	
+		
+		
+		zjRemoveNamespace;
+		
+		select -r `sets -q GEO_CACHE_SET`;
+
+//		独立显示，modelPanel
+		string $scripts = "";
+		string $modelPanels[] = `getPanel -visiblePanels`;
+		for ($modelPanel in $modelPanels)
+		{
+			if (`getPanel -typeOf $modelPanel` == "modelPanel")
+			{
+				if (!`isolateSelect -query -state $modelPanel`);
+				{
+					isolateSelect -state true $modelPanel;
+					$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+				}
+			}
+		}
+
+
+		
+		nj_Rnd_GeoCacheHighend_copyModel();
+		nj_Rnd_GeoCacheHighend_recordMaterial();
+		nj_Rnd_GeoCacheHighend_createCeoCache();
+		nj_Rnd_GeoCacheHighend_deleteCeoCache();
+		nj_Rnd_GeoCacheHighend_deleteParticles();
+		nj_Rnd_GeoCacheHighend_importCeoCache();
+		nj_Rnd_GeoCacheHighend_returnMaterial();
+		nj_Rnd_GeoCacheHighend_BakeFiles();
+		
+		pre_BakeFileNode_ImageNumber();
+	//		共用cache；
+		evalDeferred ("zwOptimizeGeoCache");		
+		
+//		恢复显示	
+		if ($scripts != "")
+		{
+			eval $scripts;
+		}
+
+//		删除原始的物体，只留下“GEO的组”
+		evalEcho "delete `ls -type transform \"yd*\"`";
+
+//	删除灰色节点
+		string $ioList[]=`ls -io -type mesh`;
+		for ($i in $ioList)
+		{
+			evalEcho ("delete "+$i);
+		}
+
+//	自动checkin Finishing文件				
+//		global string $nj_Rnd_GeoCacheHighend_geoGroupName;
+//		select $nj_Rnd_GeoCacheHighend_geoGroupName;
+
+		select -r `sets -q GEO_CACHE_SET`;
+		
+//		copy cache到网上
+		python("try:\n\treload(idmt.maya.cache)\nexcept:\n\timport idmt.maya.cache\nidmt.maya.cache.UploadCacheFileForNinjago()");		
+
+		string $sceneName=`file -q -sn -shn`;
+		string $sceneNameSplit[]=stringToStringArray($sceneName,"_");
+		string $newSceneName= "yd_"+ $sceneNameSplit[1]+"_"+	$sceneNameSplit[2]+"_"+	$sceneNameSplit[3]+"_"+	"fs_001.mb";
+		string $outputPath= `workspace -q -rd`+"scenes/"+$newSceneName;
+		
+		string $exportFile=`file -force -options "v=0" -typ "mayaBinary" -pr -es $outputPath`;
+		file -f -options "v=0"  -typ "mayaBinary" -o $exportFile;
+
+
+
+//	自动checkin
+		idmtProject -checkin -description "自动生成的Cache";
+	}
+}
+
+global proc lr_Rnd_GeoCacheHighend_importReference()
+{
+	string $refPath[]=`file -q -r`;
+	for ($r in $refPath)
+	{
+			string $refRN = `file -q -rfn $r`;
+			if (`file -q -dr $r`)	{
+				if (!`gmatch $refRN "yd_s*"`){
+					file -loadReference $refRN;			
+				}
+			}
+			if (!`file -q -dr $r`) {
+				file -ir $r;
+			}
+	}	
+}
+zzjAniGeoCacheBatch();
+
+

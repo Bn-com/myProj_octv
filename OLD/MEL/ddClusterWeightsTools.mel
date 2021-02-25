@@ -1,0 +1,648 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddClusterWeightTools
+//	Verision: 0.16 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: October 24, 2004
+//	Changed Projcet Date: November 3 2006
+//	Last Updated: December 20 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note:
+//		2006 12 15 增加cluster的点对点权重copy，不过比较初级，只考虑了最简单的情况和功能
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddExportCluster
+//
+//	export cluster weight
+// Arguments :
+//	string $clusterHandle 导出的clusterHandle
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddExportCluster(string $clusterHandle)
+{
+ int $fileId,$i ;
+ float $weights[],$clusterPostion[3] ;
+ string $clusterNode,$workPath,$tempStringArray[] ;
+
+ //get clusterNode name
+ $tempStringArray = `listConnections ($clusterHandle + ".worldMatrix")` ;
+ $clusterNode = $tempStringArray[0] ;
+
+ //get cluster component
+ select -r `listConnections ($clusterNode + ".message")` ;
+ $clusterComponent = `ls -sl` ;
+ $clusterComponent = `filterExpand -ex true -sm 28 -sm 31 -sm 46 $clusterComponent` ;
+ 
+ 
+ //get work path
+ $workPath = `workspace -query -rootDirectory` + "cluster" ;
+
+ if (!`filetest -d $workPath`)
+ {
+  sysFile -makeDir $workPath ;
+ }
+ tokenize $clusterHandle "|" $tempStringArray ;
+ 
+ if (`filetest -s ($workPath + "/" + $tempStringArray[size($tempStringArray)-1] + ".clu")`)
+ {
+  warning "Over elder file!" ;
+ }
+ //create file
+ $fileId = `fopen ($workPath + "/" + $tempStringArray[size($tempStringArray)-1] + ".clu") "w"` ;
+ fprint $fileId "" ;
+ fclose $fileId ;
+ $fileId = `fopen ($workPath + "/" + $tempStringArray[size($tempStringArray)-1] + ".clu") "a"` ;
+ 
+ for($i=0;$i<size($clusterComponent);$i++ )
+ {
+  $weights = `percent -query -value $clusterNode $clusterComponent[$i]` ;
+  $content = $clusterComponent[$i] + " " + $weights[0] + "\n" ;
+  fprint $fileId $content ;
+ }
+
+ $clusterPostion = `xform -q -worldSpace -rotatePivot $clusterHandle` ;
+ $content = ($clusterPostion[0] + "||" + $clusterPostion[1] + "||" + $clusterPostion[2] + "\n") ;
+ fprint $fileId $content ;
+ 
+ fclose $fileId ;
+
+ select -clear ;
+ print ("Export " + $clusterHandle + " is OK!\n") ;
+
+}
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddExportClusterCMD
+//
+//	import cluster weight
+// Arguments : NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddExportClusterCMD()
+{
+ string $selected[],$temp ;
+
+ $selected = `ls -sl` ;
+
+ for ($temp in $selected)
+ {
+  if(nodeType(`listConnections ($temp + ".worldMatrix")`) != "cluster") return;
+  ddExportCluster($temp) ;   
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddImportCluster
+//	import cluster weight
+//
+// Arguments : NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddImportCluster(string $targetObject)
+{
+ int $i=0,$fileId ;
+ float $weights[],$clusterPostion[3] ;
+ string $workPath,
+	$clusterWeightsFile,
+	$content[],
+	$newClusterComponent[],
+	
+	$tempStringArray[],
+	$newClusterHandle,
+	$newClusterNode,
+	$nextLine,
+	$temp ;
+ 
+ //open Dailog get cluster weights file
+ $workPath = `workspace -query -rootDirectory` + "cluster" ;
+ $clusterWeightsFile = `fileDialog -directoryMask ($workPath + "/*.clu")` ;
+ if($clusterWeightsFile == "") return ;
+
+ $fileId = `fopen $clusterWeightsFile "r"` ;
+ 
+ select -clear ;
+ //read database
+ $nextLine = `fgetline $fileId` ;
+ while(size($nextLine)>0)
+ {
+  $content[$i] = $nextLine ;
+  $nextLine = `fgetline $fileId` ;
+  //print ("content: "+$content[$i]+" "+$i+"\n");
+  if(`match "||" $content[$i]` == "||")
+  {
+	  tokenize $content[$i] "||" $tempStringArray ;
+	  $clusterPostion[0] = $tempStringArray[0] ;
+	  $clusterPostion[1] = $tempStringArray[1] ;
+	  $clusterPostion[2] = $tempStringArray[2] ;
+	  break ;
+  }
+  tokenize $content[$i] " " $tempStringArray ;
+  $newClusterComponent[$i] = $tempStringArray[0] ;
+
+  //print ("vtx: "+$clusterComponent[$i]+"\n");
+  $weights[$i] = $tempStringArray[1] ;
+  //print ("weights: "+$weights[$i]+"\n");
+  if($targetObject != "")
+  {
+   tokenize $newClusterComponent[$i] "." $tempStringArray ;
+   $newClusterComponent[$i] = $targetObject + "." + $tempStringArray[1] ;
+  }
+  select -tgl $newClusterComponent[$i] ;
+  $i++ ;
+ }
+ fclose $fileId ;
+
+ //create copy cluster
+// $tempStringArray = `cluster -foc -rel` ;
+ $tempStringArray = `cluster` ;
+ //get new cluster node
+ $newClusterNode = $tempStringArray[0] ;//print($newClusterNode+"\n");
+ $newClusterHandle = $tempStringArray[1] ;
+
+ for ($i=0;$i<size($newClusterComponent);$i++)
+ {
+  percent -value $weights[$i] $newClusterNode $newClusterComponent[$i] ;
+ }
+
+ //rename new cluster
+ tokenize $clusterWeightsFile "/" $tempStringArray ;
+ tokenize $tempStringArray[size($tempStringArray)-1] "." $tempStringArray ;
+ rename $newClusterHandle $tempStringArray[0];
+ xform -ws -rp $clusterPostion[0] $clusterPostion[1] $clusterPostion[2] ;
+ xform -ws -sp $clusterPostion[0] $clusterPostion[1] $clusterPostion[2] ;
+}
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddImportClusterCMD
+//	import cluster weight
+//
+// Arguments : NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddImportClusterCMD()
+{
+ string $selected[] ;
+ $selected = `ls -sl` ;
+
+ ddImportCluster($selected[0]) ;
+
+ if(size($selected[0]))
+ {
+  select -r $selected[0] ;
+ }
+
+}
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddCopyCluster
+//	Copy Cluster
+//
+// Arguments :
+//	string $originalClusterHandle
+//	string $destinationObject
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddCopyCluster(string $originalClusterHandle,string $destinationObject)
+{
+ int $i ;
+ float $weights[],$tempfloatArray[] ;
+ string $originalClusterComponent[],
+	$originalClusterNode,
+	$originalObject,
+	$destinationClusterComponent[],
+	$destinationClusterNode,
+	$destinationClusterHandle,
+	$tempStringArray[] ;
+
+ $tempStringArray = `listConnections ($originalClusterHandle + ".worldMatrix")` ;
+ $originalClusterNode = $tempStringArray[0] ;
+ select -r `listConnections ($originalClusterNode + ".message")` ;
+ $originalClusterComponent = `ls -sl` ;
+ $originalClusterComponent = `filterExpand -ex true -sm 28 -sm 31 -sm 46 $originalClusterComponent` ;
+
+ tokenize $originalClusterComponent[0] "." $tempStringArray ;
+ $oringinalObject = $tempStringArray[0] ;
+ //print($oringinalObject+"\n") ;
+ select -clear ;
+
+ for ($i=0;$i<size($originalClusterComponent);$i++)
+ {
+  $tempfloatArray = `percent -query -value $originalClusterNode $originalClusterComponent[$i]` ;
+  $weights[$i] = $tempfloatArray[0] ;
+  //print $tempfloatArray;print("\n");
+  //print $weights[$i];print("\n");
+  //$weights = `percent -query -value $clusterNode $clusterComponent[$i]` ;
+  //print($originalClusterComponent[$i]+"\n") ;
+  //print($destinationObject+"\n") ;
+  $destinationClusterComponent[$i] = `substitute $oringinalObject $originalClusterComponent[$i] $destinationObject` ;
+  select -tgl $destinationClusterComponent[$i] ;
+  //print ($destinationClusterComponent[$i]+"\n") ;
+
+ }
+
+ //create copy cluster
+ $tempStringArray = `cluster -foc -rel` ;
+ $destinationClusterNode = $tempStringArray[0] ;
+ $destinationClusterHandle = $tempStringArray[1] ;
+
+ for ($i=0;$i<size($destinationClusterComponent);$i++)
+ {
+  percent -value $weights[$i] $destinationClusterNode $destinationClusterComponent[$i] ;
+ }
+
+}
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddCopyClusterCMD
+//	Copy Cluster
+//
+// Arguments : NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddCopyClusterCMD()
+{
+ string $selected[] ;
+
+ $selected = `ls -sl` ;
+
+ ddCopyCluster($selected[0],$selected[1]);
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddMirrorCluster
+//	Mirror Cluster
+//
+// Arguments :
+//	string $clusterHandle	操作的clusterHandle
+//	int $mirrorAxisOption	镜像的轴像
+//	float $precision		精度
+//	float $offset[]			偏移
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddMirrorCluster(string $clusterHandle,int $mirrorAxisOption,float $precision,float $offset[])
+{
+ int $vertexCount,
+	 $i,
+	 $tmp[],
+	 $clusterCount,
+	 $newClusterCount,
+	 $clusterCountU,
+	 $cluVtx[] ;
+
+ float $clusterPivotPosition[3],
+	   $clusterComponentWeights[],
+	   $tempPostion1[3],
+	   $tempPostion2[3],
+	   $temp[],
+	   $weightValue[] ;
+
+ string $clusterNode,
+	$clusterComponent[],
+	$originalObject,
+	$tempArray[],
+	$newClusterHandle,
+	$newClusterComponent[],
+	$newClusterNode,
+	$tempVertex ;
+
+ if ($clusterHandle == "")
+ {
+  error "Please selected a cluster!" ;
+ }
+ 
+ //print ("\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\" + "\n") ;
+
+ //get clusterNode name
+ $tempArray = `listConnections ($clusterHandle + ".worldMatrix")` ;
+ $clusterNode = $tempArray[0] ;
+ print ("clusterNode : ") ;print $clusterNode ; print("\n") ;
+
+ //get cluster component
+ select -r `listConnections ($clusterNode + ".message")` ;
+ $clusterComponent = `ls -sl`; 
+ $clusterComponent = `filterExpand -ex true -sm 28 -sm 31 -sm 46 $clusterComponent` ;
+ print ("clusterComponent : \n") ;print $clusterComponent ; print("\n") ;
+
+ //get cluster original object
+ $tempArray = `cluster -query -geometry $clusterHandle` ;
+ $originalObject = $tempArray[0] ;
+ print ("originalObject = " + $originalObject) ; print("\n") ;
+ 
+ //get number of verticas original object
+ $tmp = `polyEvaluate -vertex $originalObject` ; //print ("vertexConut = ") ;print $vertexCount ;print("\n") ;
+ $vertexCount = $tmp[0] ;
+
+ //get cluster Handle Pivot Position
+ $clusterPivotPosition = `xform -q -rp $clusterHandle` ;
+
+ select -cl ;
+ 
+ $newClusterCount = 0 ;
+ 
+ for($tempVertex in $clusterComponent)
+ {
+  //print $tempVertex ;print ("\n") ;
+  //get vertex weight
+  $temp = `percent -q -v $clusterNode $tempVertex` ;
+  $clusterComponentWeights[$i] = $temp[0] ;
+  //print ($clusterComponentWeights[$i]);print("\n");
+  //get original vertex position
+  $tempPostion1 = `pointPosition -w $tempVertex` ;
+  //print $tempPostion1 ; print ("\n") ;
+
+  $clusterCountU = $clusterCount ;
+
+  for($i=0;$i<$vertexCount;$i++)
+  {
+   //print ("ok!\n") ;
+   $tempPostion2 = `pointPosition -w ($originalObject + ".vtx[" + $i + "]")` ;
+   
+   //print ($originalObject + ".vtx[" + $i + "]\n" ) ;print $tempPostion2 ; print("\n") ;
+
+   switch ($mirrorAxisOption)
+   {
+    case 1://XY
+	   if((abs($tempPostion1[2] + $tempPostion2[2]) - $offset[2]) < $precision)
+	   {
+		if((abs($tempPostion1[0] - $tempPostion2[0]) - $offset[0]) < $precision)
+		{
+		 if((abs($tempPostion1[1] - $tempPostion2[1]) - $offset[1]) < $precision)
+		 {
+		  select -tgl ($originalObject + ".vtx[" + $i + "]") ;
+		  $clusterCount++ ;
+		 }
+		}
+	   }
+	   break ;
+
+	case 2://YZ
+	   if((abs($tempPostion1[0] + $tempPostion2[0]) - $offset[0]) < $precision)
+	   {
+	    if((abs($tempPostion1[1] - $tempPostion2[1]) - $offset[1]) < $precision)
+	    {
+	     if((abs($tempPostion1[2] - $tempPostion2[2]) - $offset[2]) < $precision)
+		 {
+		  $cluVtx[$newClusterCount] = $i ;
+		  $temp = `percent -q -v $clusterNode $tempVertex` ;
+		  $weightValue[$newClusterCount] = $temp[0] ;
+		  print $temp;print "\n" ;
+		  $newClusterCount++ ;
+		  select -tgl ($originalObject + ".vtx[" + $i + "]") ;
+	      $clusterCount++ ;
+	      //print ($originalObject + ".vtx[" + $i + "]\n") ;
+	     }
+	    }
+	   }
+	   break ;
+
+	case 3://ZX
+	   if((abs($tempPostion1[1] + $tempPostion2[1]) - $offset[1]) < $precision)
+	   {
+	    if((abs($tempPostion1[0] - $tempPostion2[0]) - $offset[0]) < $precision)
+	    {
+	     if((abs($tempPostion1[2] - $tempPostion2[2]) - $offset[2]) < $precision)
+		 {
+		  $cluVtx[$i] = ($originalObject + ".vtx[" + $i + "]") ;
+	      select -tgl ($originalObject + ".vtx[" + $i + "]") ;
+	      $clusterCount++ ;
+	      //return ;
+	     }
+	    }
+	   }
+   }
+
+  }
+  //if($clusterCount == $clusterCountU) print ($originalObject + ".vtx[" + $i + "] no mirror point!\n") ;
+  //return ;
+ }
+ 
+ //print ("newCluster component ") ;print `ls -sl` ;//return ;
+
+ 
+ $newClusterComponent = `ls -sl` ;
+ $newClusterComponent = `filterExpand -ex true -sm 28 -sm 31 -sm 46 $newClusterComponent` ;
+ print ("new clusterComponent : \n") ;print $newClusterComponent ; print("\n") ;
+
+ if (size($newClusterComponent) == 0)
+ {
+  error "Cann't Mirror Cluster!" ;
+ }
+
+ //print (size($newClusterComponent)) ;print("\n") ;
+ //print (size($clusterComponent)) ;print("\n") ;
+ if (size($newClusterComponent) != size($clusterComponent))
+ {
+  warning "Mirror Cluster be differ from Original Cluster!" ;
+ }
+ //create new cluster
+ $tempStringArray = `cluster -foc -rel` ;
+
+ $newClusterNode = $tempStringArray[0] ;
+ $newClusterHandle = $tempStringArray[1] ;
+ 
+ switch ($mirrorAxisOption)
+ {
+  case 1:
+         xform -rp $clusterPivotPosition[0] $clusterPivotPosition[1] (0 - $clusterPivotPosition[2]) $newClusterHandle ;
+	 break ;
+  case 2:
+         xform -rp (0 - $clusterPivotPosition[0]) $clusterPivotPosition[1] $clusterPivotPosition[2] $newClusterHandle ;
+	 break ;
+  case 3:
+	 xform -rp $clusterPivotPosition[0] (0 - $clusterPivotPosition[1]) $clusterPivotPosition[2] $newClusterHandle ;
+ }
+ 
+
+ for($i=0;$i<size($cluVtx);$i++)
+ {
+  percent -v $weightValue[$i] $newClusterNode ($originalObject + ".vtx[" + $cluVtx[$i] + "]") ;
+//  print $cluVtx[$i] ;print (" -> ");
+//  print $weightValue[$i] ;print ("\n");
+ }
+}
+
+/////////////////////////////////////////////
+//Procedure Name: ddMirrorClusterCMD
+//  Mirror Cluster
+//
+/////////////////////////////////////////////
+global proc ddMirrorClusterCMD()
+{
+ float $offset[3] ;
+ string $selected[],$temp ;
+ 
+ $offset = `floatFieldGrp -q -value mirrorClusterOffsetWidget` ;
+ //print $offset ;print("\n") ;
+ //return ;
+ $selected = `ls -sl` ;
+ for ($temp in $selected)
+ {
+  //ddMirrorCluster($temp,`radioButtonGrp -query -select mirrorClusterAxisWidget`,`textFieldGrp -query -text mirrorClusterPrecisionWidget`,$offset) ;
+  ddMirrorCluster($temp,`radioButtonGrp -query -select mirrorClusterAxisWidget`,0.01,$offset) ;
+ }
+}
+
+/////////////////////////////////////////////
+//Procedure Name: ddMirrorClusterPicCMD
+//  Mirror Cluster
+//
+/////////////////////////////////////////////
+global proc ddMirrorClusterPicCMD()
+{
+ float $offset[3] = {0,0,0} ;
+ string $selected[],$temp ;
+ 
+ $offset = `floatFieldGrp -q -value mirrorClusterOffsetWidget` ;
+ //print $offset ;print("\n") ;
+ //return ;
+ $selected = `ls -sl` ;
+ for ($temp in $selected)
+ {
+  ddMirrorCluster($temp,`radioButtonGrp -query -select mirrorClusterAxisWidget`,0.001,$offset) ;
+ }
+}
+
+/////////////////////////////////////////////
+//Procedure Name: ddMirrorClusterWeightToolsUI
+//  Mirror Cluster UI
+//
+/////////////////////////////////////////////
+global proc ddClusterWeightsToolsUI()
+{
+ 
+ if ((`window -ex ddClusterWeightTools`) == true)
+ {
+  deleteUI ddClusterWeightTools ;
+ }
+ 
+ window -wh 460 300 -title "durdur's Cluster Weights Tools v0.16 beta" ddClusterWeightTools;
+ if ((`window -ex ddClusterWeightTools`) == true)
+ {
+  //windowPref -remove orientjointtools;
+ }
+ menuBarLayout ;
+ menu -label "Edit" editmenu;
+      menuItem -label "Save Settings";
+      menuItem -label "Reset Settings";
+ menu -label "Help" helpmenu;
+      menuItem -label "Help on orient joint tools...";
+ setParent .. ;
+ 
+ columnLayout -adjustableColumn 1;
+
+   radioButtonGrp -numberOfRadioButtons 3
+		  -label "Mirror Axis" 
+		  -labelArray3 "XY" "YZ" "XZ"
+		  -changeCommand1 ("checkBoxGrp -edit -label1 " + "\"" + "Positive to Negative [+Z to -Z]" + "\"" + " mirrorClusterInverseWidget")
+		  -changeCommand2 ("checkBoxGrp -edit -label1 " + "\"" + "Positive to Negative [+X to -X]" + "\"" + " mirrorClusterInverseWidget")
+		  -changeCommand3 ("checkBoxGrp -edit -label1 " + "\"" + "Positive to Negative [+Y to -Y]" + "\"" + " mirrorClusterInverseWidget")
+		  mirrorClusterAxisWidget ;
+   checkBoxGrp
+		-label "Direction"
+		-label1 "Positive to Negative [+X to -X]"
+		-adjustableColumn 2
+		-numberOfCheckBoxes 1
+		mirrorClusterInverseWidget ;
+ 
+   textFieldGrp -label "Precision"
+		 -text 0.001
+		 mirrorClusterPrecisionWidget ;
+
+   floatFieldGrp -label "Offset"
+		-numberOfFields 3
+		mirrorClusterOffsetWidget ;
+
+ rowLayout -numberOfColumns 3 
+	     -columnWidth 1 151
+	     -columnWidth 2 150
+	     -columnWidth 3 151
+	     -columnAttach3 "both" "both" "both"
+	     -columnAlign3 "center" "center" "center"
+	     ;
+
+  button -label "Mirror"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "ddMirrorClusterCMD ;deleteUI ddClusterWeightTools ;"
+	     -ann "" ;
+
+  button -label "Apply"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "ddMirrorClusterCMD() ;"
+	     -ann "" ;
+
+  button -label "Close"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "deleteUI ddClusterWeightTools ;"
+	     -ann "" ;
+ setParent.. ;
+ separator ;
+ rowLayout -numberOfColumns 3 
+	     -columnWidth 1 151
+	     -columnWidth 2 150
+	     -columnWidth 3 151
+	     -columnAttach3 "both" "both" "both"
+	     -columnAlign3 "center" "center" "center"
+	     ;
+
+  button -label "Copy Cluster"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "ddCopyClusterCMD() ;"
+	     -ann "" ;
+
+  button -label "Export Cluster"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "ddExportClusterCMD() ;"
+	     -ann "" ;
+
+  button -label "Import Cluster"
+	     -width 120
+	     -height 28
+	     -align "center"
+	     -command "ddImportClusterCMD() ;"
+	     -ann "" ;
+
+ radioButtonGrp -edit -select 2 mirrorClusterAxisWidget ;
+ checkBoxGrp -edit -value1 1 mirrorClusterInverseWidget ;
+ 
+ showWindow ddClusterWeightTools ;
+}
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddClusterP2P
+//
+//
+// Arguments :NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddClusterP2P()
+{
+ int $numTokens ;
+ float $value,$tmpFloat[] ;
+ string $selected[],$object,$cluster,$tempStr[],$buffer[] ;
+ $selected = `ls -sl` ;
+
+ $numTokens = `tokenize $selected[0] "." $buffer`;
+ $temp = `listHistory $buffer[0]` ;
+ select -r $temp ;
+ $temp = `ls -sl -type "cluster"` ;
+ $cluster = $temp[0] ;
+ $tmpFloat = `percent -query -v $cluster $selected[0]` ;
+ $value = $tmpFloat[0] ;
+ percent -v $value $cluster $selected[1] ;
+ select -clear ;
+}
+
+//End of file.

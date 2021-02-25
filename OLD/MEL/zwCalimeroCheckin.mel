@@ -1,0 +1,1218 @@
+// 本函数是供N534的Muster任务调用的
+// http://N534:7690/index.html
+// 帐号：admin，无密码
+global proc zwCalimeroCheckin()
+{
+	string $IDMT_CHECKIN_TEST = `getenv "IDMT_CHECKIN_TEST"`;
+	putenv "IDMT_CHECKIN_TEST" "";
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (`match "sk_.*_ly_.*" $sceneName` != "")
+	{
+		zwStrawberryDollarPath;
+		return;
+	}
+	else if (`match "yd_.*_an[_.]" (tolower($sceneName))` != "" || `match "yd_.*_fs[_.]" (tolower($sceneName))` != "" || `match "nj_.*_an[_.]" (tolower($sceneName))` != "" || `match "Xyj_.*_an[_.]" (tolower($sceneName))` != "")
+	{
+		if (`about -batch`)
+		{
+			int $rs = catch(`zwCalimeroCheckinProc`);
+
+			if (`getenv "REFERENCE_FILE_NOT_FOUND"` != "")
+			{
+				print "\n\n有参考文件找不到，请留意上面的Reference file not found字样\n\n";
+				$rs = true;
+			}
+
+			if ($rs)
+			{
+				print "\n\n\n";
+				int $fileId = `fopen "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\scripts\\gdc.txt" "r"`;
+				while (!`feof $fileId`)
+				{
+					string $line = `fgetline $fileId`;
+					print $line;
+				}
+				fclose $fileId;
+				print "\n\n\n";
+			}
+
+			if (`about -batch`)
+			{
+				python "import os";
+				int $pid = `python "os.getpid()"`;
+				system ("shell idmtKillProcess2.exe 30000 " + $pid);
+			}
+		}
+		else
+		{
+			zwCalimeroCheckinProc;
+		}
+		return;
+	}
+
+	if ($IDMT_CHECKIN_TEST != "")
+	{
+		//print "\n\n\n";
+		//int $fileId = `fopen "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\scripts\\gdc.txt" "r"`;
+		//while (!`feof $fileId`)
+		//{
+		//	string $line = `fgetline $fileId`;
+		//	print $line;
+		//}
+		//fclose $fileId;
+		//print "\n\n\n";
+		zwCalimeroCheckinProc;
+		return;
+	}
+	int $rs = catch(`zwCalimeroCheckinProc`);
+
+	$sceneName = `file -query -shortName -sceneName`;
+
+	if (($rs && `getenv "CHECKIN_CLEAN_ERROR"` != "WebService错误") || `getenv "REFERENCE_FILE_NOT_FOUND"` != "")// && `getenv "USERNAME"` != "huangzhongwei")
+	{
+		string $project = zwGetProject($sceneName);
+		if ($project != "")
+		{
+			idmtService "CheckinCleanFailRTX" ($project + "|" + $sceneName);
+		}
+	}
+
+	if (`getenv "REFERENCE_FILE_NOT_FOUND"` != "")
+	{
+		print "\n\n有参考文件找不到，请留意上面的Reference file not found字样\n\n";
+		$rs = true;
+	}
+
+	if ($rs)
+	{
+		print "\n\n\n";
+		int $fileId = `fopen "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\scripts\\gdc.txt" "r"`;
+		while (!`feof $fileId`)
+		{
+			string $line = `fgetline $fileId`;
+			print $line;
+		}
+		fclose $fileId;
+		print "\n\n\n";
+	}
+
+	if (`about -batch`)
+	{
+		python "import os";
+		int $pid = `python "os.getpid()"`;
+		system ("shell idmtKillProcess2.exe 30000 " + $pid);
+	}
+}
+
+global proc zwCalimeroCheckinProc()
+{
+	int $isFromZj = zwCalimeroCheckinIsFromZj();
+
+	string $dest = `file -query -sceneName`;	// 当前文件为通过daily或者maya批处理器已经上传到网上的文件
+	string $project = zwGetProject("");
+	if (!`filetest -f $dest` && !$isFromZj)
+	{
+		$dest = `getenv "MUSTER_MAYAFILENAME"`;
+		if (`filetest -f $dest`)
+		{
+			warning "直接打开网上的文件报错，尝试复制到本机重新打开";
+			putenv "MUSTER_MAYAFILENAME" "";
+			string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+			sysFile -copy $temp $dest;
+			catch(`file -force -open $temp`);
+			$temp = `file -query -sceneName`;
+			if ($temp == "")
+			{
+				//error "文件不存在或者使用了错误的maya版本或文件已损坏";
+				file -rename $dest;
+			}
+			$project = zwGetProject("");
+		}
+		else
+		{
+			error "文件不存在或者使用了错误的maya版本或文件已损坏";
+		}
+	}
+
+	if (`getenv "REFERENCE_FILE_NOT_FOUND"` != "")
+	{
+		return;
+	}
+
+	string $history = `substitute "[^/\\]+$" $dest "history/"` + `match "[^/\\]+$" $dest`;
+	string $historyNew = `substitute "[/\\]scenes[/\\].*$" $dest "/history"`;
+	if (`filetest -d $historyNew`)
+	{
+		$history = `substitute "[/\\]history[/\\]" $history "/"`;
+		$history = `substitute "[/\\]scenes[/\\]" $history "/history/"`;
+	}
+	if (!`filetest -f $history` && !$isFromZj)
+	{
+		zwSysFile "copy" $dest $history true;
+	}
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $temp = `internalVar -userTmpDir` + $sceneName;
+	sysFile -delete $temp;
+	
+	string $type = "mayaBinary";
+	if (`match "[.]ma$" $sceneName` != "")
+	{
+		$type = "mayaAscii";
+	}
+	else if (`match "[.]mb$" $sceneName` != "")
+	{
+		$type = "mayaBinary";
+	}
+	string $types[] = `file -query -type`;
+	if ($type != $types[0])
+	{
+		string $unknowns[] =  `ls -type "unknown"`;
+		for ($unknown in $unknowns)
+		{
+			if (!`reference -isNodeReferenced $unknown`)
+			{
+				lockNode -lock false $unknown;
+				delete $unknown;
+			}
+		}
+	}
+	file -rename $temp;	// 设置到临时文件夹
+	
+	string $description = "";
+	
+	// 在这里进行处理
+	$project = zwGetProject($sceneName);
+	// Calimero
+	python("from idmt.maya.commonCore.core_mayaCommon import sk_infoConfig");
+	python("reload(sk_infoConfig)");
+	string $shotInfos[] = `python("sk_infoConfig.sk_infoConfig().checkShotInfo(1)")`;
+	if($shotInfos[0] == "cl")
+	{
+		python("from idmt.maya.Calimero import sk_calimeroProjectTools");
+		python("reload(sk_calimeroProjectTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+		if($shotInfos[3] == "an"|| $shotInfos[3] == "ly")
+		{
+			//清除可能的CAMERA namespace
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_pyCommon");
+			python("reload(sk_pyCommon)");
+			print "\n001";
+//			catch(python("sk_pyCommon.sk_pyCommon().sk_deleteNamespace(\'CAMERA\')"));
+//			print "\n002";
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+			//等内部制作再处理相机
+			python("from idmt.maya.py_common import sk_sceneConfig");
+			python("reload(sk_sceneConfig)");
+			python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,info = 2)");
+			//清理工具
+			$description = python("sk_calimeroProjectTools.sk_clProjectTools().sk_rebuildClean()");
+			$description = `getenv "zwCalimeroCheckinReferenceErr"`;
+		}
+
+		if($shotInfos[3] == "an")
+		{
+			/*int $find = false;       /////////////取消参考客户相机   wanshoulong 2015/4/20
+			string $referencs[] = `file -query -reference -shortName -withoutCopyNumber`;
+			for ($referenc in $referencs)
+			{
+				if ($referenc == "CAL_CAMERA_00.ma")
+				{
+					$find = true;
+					break;
+				}
+			}
+			if (!$find)
+			{
+				file -reference -namespace "CAMERA" "Z:/Projects/Calimero/Common_Sync/CAL_MAYA/scenes/CAMERA/CAL_CAMERA_00.ma";
+			}*/
+		}
+	}
+	// ZoomWhiteDolphin
+	if($shotInfos[0] == "zm" )
+	{
+		python("from idmt.maya.ZoomWhiteDolphin import sk_zoomWhiteDolphinProjectTools");
+		python("reload(sk_zoomWhiteDolphinProjectTools)");
+		if($shotInfos[3]=="an"|| $shotInfos[3] == "ly" )
+		{
+			//输出相机
+			python("from idmt.maya.py_common import sk_sceneConfig");
+			python("reload(sk_sceneConfig)");
+			python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1)");
+			//清理工具
+			putenv "zwCalimeroCheckinReferenceErr" "";	// 文件增减
+			python("sk_zoomWhiteDolphinProjectTools.sk_zmProjectTools().sk_rebuildClean()");
+			$description = `getenv "zwCalimeroCheckinReferenceErr"`;
+		}	
+	}
+	// SK
+	if($shotInfos[0] == "sk" )
+	{
+		python("from idmt.maya.Strawberry import sk_projectTools_Strawberry");
+		python("reload(sk_projectTools_Strawberry)");
+		if($shotInfos[3]=="an")
+		{
+			//清理工具
+			python("sk_projectTools_Strawberry.sk_projectTools_Strawberry().sk_rebuildClean(1)");
+		}	
+	}
+	
+	// dod系列
+	if($shotInfos[0] == "do5" )//==========================
+	{
+		if($shotInfos[3]=="an")
+		{
+			//输出相机
+			python("from idmt.maya.py_common import sk_sceneConfig");
+			python("reload(sk_sceneConfig)");
+			python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1)");
+
+		  //参考了一个相机进来
+			python("from idmt.maya.py_common import sk_hbExceptCam");
+			python("reload(sk_hbExceptCam)");
+			python("sk_hbExceptCam.sk_hbExceptCam().camServerReference()");
+			
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck");
+			python("reload(sk_animFileCheck)");
+			python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck('an',1)");
+		}
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+	}
+	// 顺溜
+	if($shotInfos[0] == "csl")
+	{
+		if($shotInfos[4] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+		//python("from idmt.maya.ShunLiu import sk_ProjectTools_ShunLiu");
+		//python("reload(sk_ProjectTools_ShunLiu)");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+        if ($shotInfos[4] == "ly")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_csl;reload(sk_projTools_csl);");
+			python("sk_projTools_csl.sk_projTools_csl().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			//动画要求，先加相机上传（moca)
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,3)");
+			//清理工具
+			//$description = python("sk_ProjectTools_ShunLiu.sk_ProjectTools_ShunLiu().csl_rebuildClean()");
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+		if ($shotInfos[4] == "an" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_csl;reload(sk_projTools_csl);");
+			python("sk_projTools_csl.sk_projTools_csl().checkShotDetails(backMode=1,returnMode=1)");
+		}
+
+	}
+
+	//----------------------------------------------------//
+	// MTD ManTou 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "mtd")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_mtd;reload(sk_projTools_mtd);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_mtd.sk_projTools_mtd().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" )
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_mtd.sk_projTools_mtd().checkShotDetails(backMode=1,returnMode=1)");
+		}
+
+		if ($shotInfos[3] == "sa" || $shotInfos[3] =="dy")
+		{
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+		}
+
+		// sd
+        if ($shotInfos[3] =="sd")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mtd");
+			python("reload(sk_projTools_mtd)");
+			python("sk_projTools_mtd.sk_projTools_mtd().checkShotDetails(backMode=1,returnMode=1,anMode=2)");
+		}
+
+		if ($shotInfos[3] =="lr" || $shotInfos[4] =="lr" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_renderFileCheck_base");
+			python("reload(sk_renderFileCheck_base)");
+			python("sk_renderFileCheck_base.sk_renderFileCheck_base().checkPerform()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().checkArnoldShotFix()");
+		}
+
+	}
+
+	//----------------------------------------------------//
+	// MK 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "mk")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_mk;reload(sk_projTools_mk);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_mk.sk_projTools_mk().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" || $shotInfos[3] == "sa")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_mk.sk_projTools_mk().checkShotDetails(backMode=1,returnMode=1)");
+			//a2 modify by zhangben 2017.11.14 replace BullKing reference fix namespace
+			if($shotInfos[3] == "sa" && $shotInfos[1] == "260")
+			{
+				python("import Other.studio_a2.scripts.common.AmendMayaFileData as amfd");
+				python("reload(amfd)");
+				python("ins_main = amfd.AmendMayaFileData()");
+				string $py_cmd = "ins_main.fixRefNameSpace(\""+"mk_cBullKingBNew_h_ms_anim"+"\")";
+				python($py_cmd);
+			}
+		}
+
+		if ($shotInfos[3] =="dy")
+		{
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,2)");
+		}
+
+		// sd
+        if ($shotInfos[3] =="sd")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mk");
+			python("reload(sk_projTools_mk)");
+			python("sk_projTools_mk.sk_projTools_mk().checkShotDetails(backMode=1,returnMode=1,anMode=2)");
+		}
+
+		if ($shotInfos[3] =="lr" || $shotInfos[4] =="lr" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_renderFileCheck_base");
+			python("reload(sk_renderFileCheck_base)");
+			python("sk_renderFileCheck_base.sk_renderFileCheck_base().checkPerform()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().checkArnoldShotFix()");
+		}
+
+	}
+
+	//----------------------------------------------------//
+	// Do6 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "do6")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_do6;reload(sk_projTools_do6);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_do6.sk_projTools_do6().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+        if ($shotInfos[3] == "sl")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_do6.sk_projTools_do6().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" )
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_do6.sk_projTools_do6().checkShotDetails(backMode=1,returnMode=1)");
+
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+		}
+
+		if ($shotInfos[3] == "sa" || $shotInfos[3] =="dy")
+		{
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+
+			python("sk_projTools_do6.sk_projTools_do6().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+		}
+
+		// sd
+        if ($shotInfos[3] =="sd")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_do6");
+			python("reload(sk_projTools_do6)");
+			python("sk_projTools_do6.sk_projTools_do6().checkShotDetails(backMode=1,returnMode=1,anMode=2)");
+		}
+
+		if ($shotInfos[3] =="lr" || $shotInfos[4] =="lr" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_renderFileCheck_base");
+			python("reload(sk_renderFileCheck_base)");
+			python("sk_renderFileCheck_base.sk_renderFileCheck_base().checkPerform()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().checkArnoldShotFix()");
+		}
+	}
+	//----------------------------------------------------//
+	// ddz 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "ddz")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_ddz;reload(sk_projTools_ddz);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_ddz.sk_projTools_ddz().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" )
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_ddz.sk_projTools_ddz().checkShotDetails(backMode=1,returnMode=1)");
+		}
+
+	}
+
+	//----------------------------------------------------//
+	// NZTF 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "NZTF")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_nztf;reload(sk_projTools_nztf);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_nztf.sk_projTools_nztf().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" )
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_nztf.sk_projTools_nztf().checkShotDetails(backMode=1,returnMode=1)");
+		}
+
+	}
+
+//YODA项目
+	if($shotInfos[0] == "yd")
+	{
+		if($shotInfos[4] == "an")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+		python("from idmt.maya.py_common import sk_ProjectTools_Yoda");
+		python("reload(sk_ProjectTools_Yoda)");
+		//python("reload(sk_calimeroProjectTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+		python("from idmt.maya.py_common import sk_sceneConfig");
+		python("reload(sk_sceneConfig)");
+		python("from idmt.maya.py_common import GDC_checkin");
+		python("reload(GDC_checkin)");
+		if ($shotInfos[4] == "an" )
+		{
+			//清理工具
+			$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean(0,0,0)");
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+			//
+			python("GDC_checkin.GDC_checkin().YD_animFrame()");
+			//等内部制作再处理相机
+			//python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+
+			if (!`objExists "time1.version"`)
+			{
+				addAttr -shortName "ver" -longName "version" -dataType "string" "time1";
+			}
+			setAttr -type "string" "time1.version" $sceneName;
+		}
+        if ($shotInfos[4] == "ly")
+		{
+			//动画要求，先加相机上传（moca)
+			python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+			//清理工具
+			$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean()");
+			python("GDC_checkin.GDC_checkin().YD_animLayerCheck()");
+			python("GDC_checkin.GDC_checkin().YD_animFrame()");
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+			//等内部制作再处理相机
+			//python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+		}
+        if ($shotInfos[4] == "fs")
+		{
+			string $an = "";
+			if (`objExists "time1.version"`)
+			{
+				$an = `getAttr "time1.version"`;
+			}
+			string $result = `idmtService "CheckFinishing" ($project + "|" + $sceneName + "|" + $an)`;
+			if ($result != "")
+			{
+				error $result;
+			}
+
+			source zwRemoveAllProxy;
+        	zwRemoveAllProxy();
+        	//$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean(0,0,1)");
+        	//print u'==========================已删除参考代理========================================'
+			python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().AudiosDelete()");
+			python("GDC_checkin.GDC_checkin().YD_CachePathCheck()");
+			python("GDC_checkin.GDC_checkin().YD_animLayerCheck()");
+		}
+	}
+	if (($shotInfos[0] == "nj" && !($shotInfos[1] == "E0011" || $shotInfos[1] == "E0012")) || $shotInfos[0] == "Xyj")
+	{
+		if (($shotInfos[0] == "nj" && $shotInfos[4] == "an" && python("re.search('^nj_(Clancy|Dogshank|Duobloon|Flintlocke|Intro|MonkeyWretch|SquiffyNBucko|E0011|E0012)_', '" + $sceneName + "') != None")) || ($shotInfos[0] == "Xyj" && $shotInfos[4] == "ly"))
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+		python("from idmt.maya.py_common import sk_ProjectTools_Yoda");
+		python("reload(sk_ProjectTools_Yoda)");
+		//python("reload(sk_calimeroProjectTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+		python("from idmt.maya.py_common import sk_sceneConfig");
+		python("reload(sk_sceneConfig)");
+		python("from idmt.maya.py_common import GDC_checkin");
+		python("reload(GDC_checkin)");
+		if ($shotInfos[4] == "an" )
+		{
+			//清理工具
+			$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean(0,0,0,1,1)");
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+			//
+			python("GDC_checkin.GDC_checkin().YD_animFrame()");
+			//等内部制作再处理相机
+			//python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+
+			if (!`objExists "time1.version"`)
+			{
+				addAttr -shortName "ver" -longName "version" -dataType "string" "time1";
+			}
+			setAttr -type "string" "time1.version" $sceneName;
+		}
+        if ($shotInfos[4] == "ly")
+		{
+			//动画要求，先加相机上传（moca)
+			python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+			//清理工具
+			$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean()");
+			python("GDC_checkin.GDC_checkin().YD_animLayerCheck()");
+			python("GDC_checkin.GDC_checkin().YD_animFrame()");
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+			//等内部制作再处理相机
+			//python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1,3)");
+		}
+        if ($shotInfos[4] == "fs")
+		{
+			string $an = "";
+			if (`objExists "time1.version"`)
+			{
+				$an = `getAttr "time1.version"`;
+			}
+			string $result = `idmtService "CheckFinishing" ($project + "|" + $sceneName + "|" + $an)`;
+			if ($result != "")
+			{
+				error $result;
+			}
+
+			source zwRemoveAllProxy;
+        	zwRemoveAllProxy();
+        	//$description = python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().yd_rebuildClean(0,0,1)");
+        	//print u'==========================已删除参考代理========================================'
+			python("sk_ProjectTools_Yoda.sk_ProjectTools_Yoda().AudiosDelete()");
+			python("GDC_checkin.GDC_checkin().YD_CachePathCheck()");
+			python("GDC_checkin.GDC_checkin().YD_animLayerCheck()");
+		}
+	}
+	//北极熊
+	if($shotInfos[0] == "ice")
+	{
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+		python("from idmt.maya.ShunLiu import sk_ProjectTools_ShunLiu");
+		python("reload(sk_ProjectTools_ShunLiu)");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		if ($shotInfos[3] == "an" )
+		{
+			//清理工具
+			$description = python("sk_ProjectTools_ShunLiu.sk_ProjectTools_ShunLiu().csl_rebuildClean()");
+			//等内部制作再处理相机
+			
+			//python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate()");
+			python("sk_sceneTools.sk_sceneTools().LY_CameraABC()");
+
+			python("from idmt.maya.norch import North_Ankey");
+			python("North_Ankey.north_anKEY()");
+			python("North_Ankey.north_anRender()");
+			python("North_Ankey.north_checkANGEO()");
+
+		}
+
+	}
+
+	if($shotInfos[0] == "mi")
+	{
+		python("from idmt.maya.ShunLiu import sk_ProjectTools_ShunLiu");
+		python("reload(sk_ProjectTools_ShunLiu)");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+        if($shotInfos[3] == "sl" || $shotInfos[3] == "sa")
+        {
+            python("import Other.minitiger.mi_base_proc as mibp");
+            python("reload(mibp)");
+            python("mibp.mi_sl_checkin_clean()");
+        }
+        // 相机缩放检测
+		if($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+		}
+		if($shotInfos[3] == "an" || $shotInfos[3] == "sl" || $shotInfos[3] == "sa")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+		}
+        // 仅仅ly覆盖，原创用
+        if($shotInfos[3] == "ly" || $shotInfos[3] == "sl")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mi");
+			python("reload(sk_projTools_mi)");
+			python("sk_projTools_mi.sk_projTools_mi().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,2,0)");
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+		// 动画检测
+        if ($shotInfos[3] =="an" || $shotInfos[3] == "sa" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mi");
+			python("reload(sk_projTools_mi)");
+			python("sk_projTools_mi.sk_projTools_mi().checkShotDetails(backMode=1,returnMode=1)");
+			/*
+			string $erro_detail[] = python("sk_sceneTools.sk_sceneTools().checkCleanDisplayLayers([],['norender','near','mid','far'],0)");
+			if(size($erro_detail)> 0)
+			{
+				error "========场景里有非noRender层，请清理============";
+			 }
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck");
+			python("reload(sk_animFileCheck)");
+			python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck('an',1)");
+
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,2,1)");
+			print "++++++++++++++++++++++相机处理完毕++++++++++++++++++++++++++";
+			*/
+			//print "++++++++++++++++camera upload to server++++++++++++++++++++++++";
+			//参考检测。 add by zhangben 16.9.13
+			//			zhanghongxiang(张洪香 Lisa) 09-13 11:48:16
+			//康康，贲贲，我们现在动画上传文件的时候会不会检测角色场景道具多余或是少的参考？
+			//zhangben(张贲  常思一二 不想八九) 09-13 11:54:46
+			//我看了下，是有ly 的时候，更新数据库的asset list
+			//zhangben(张贲  常思一二 不想八九) 09-13 11:55:24
+			//检测这部分的，我没看到。不知道是不是包含在 调用的 函数里面了。再看看。
+			//zhanghongxiang(张洪香 Lisa) 09-13 11:55:47
+			//嗯，layout上传的时候就自动建立了asset list。目前观察上传文件的时候是没有检测的
+			//python("from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck");
+			//python("reload(sk_animFileCheck)");
+			//python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck('an',0)");
+			  //参考了一个相机进来 sylvain不需要
+			//	python("from idmt.maya.py_common import sk_hbExceptCam");
+			//	python("reload(sk_hbExceptCam)");
+			//	python("sk_hbExceptCam.sk_hbExceptCam().camServerReference()");
+			//	print "+++++++++++++++ camera reference DONE!!!!!+++++++++++++++++";
+			//}
+            //移除天空球参考
+            python("from Other.minitiger.mi_kit_ani import rm_skyBall");
+            python("rm_skyBall()");
+	    	OptimizeScene;
+            //清理工具
+			$description = python("sk_ProjectTools_ShunLiu.sk_ProjectTools_ShunLiu().csl_rebuildClean()");
+            //print "======================开始处理Camera ABC=====================";
+			//python("sk_sceneTools.sk_sceneTools().LY_CameraABC()");
+            //print "============================KEY 帧保证ABC 缓存输出===============";
+			//python("from idmt.maya.norch import North_Ankey");
+			//python("North_Ankey.north_anKEY()");
+			//python("North_Ankey.north_anRender()");
+		}
+		if ($shotInfos[3] == "sa" || $shotInfos[3] =="dy")
+		{
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+		}
+        if ($shotInfos[3] =="dy" )
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,2)");
+		}
+		// sd
+        if ($shotInfos[3] =="sd")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mi");
+			python("reload(sk_projTools_mi)");
+			python("sk_projTools_mi.sk_projTools_mi().checkShotDetails(backMode=1,returnMode=1,anMode=2)");
+		}
+		if ($shotInfos[3] =="lr" || $shotInfos[4] =="lr" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_renderFileCheck_base");
+			python("reload(sk_renderFileCheck_base)");
+			python("sk_renderFileCheck_base.sk_renderFileCheck_base().checkPerform()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().checkArnoldShotFix()");
+		}
+	}
+
+	//----------------------------------------------------//
+	// Mi2 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "mi2")
+	{
+		python("from idmt.maya.commonPerform.projectTools import sk_projTools_mi2;reload(sk_projTools_mi2);");
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+		python("reload(sk_sceneTools)");
+		python("from idmt.maya.py_common import sk_checkCommon");
+		python("reload(sk_checkCommon)");
+
+		if($shotInfos[3] == "ly")
+		{
+			// 关联Asset
+			string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+			string $argv = $sceneName + "|";
+			for ($i=0; $i<size($references); $i++)
+			{
+				if ($i != 0)
+				{
+					$argv += ",";
+				}
+				$argv += $references[$i];
+			}
+			idmtService "AssetFileSerInAnim_Update" $argv;
+		}
+
+        if ($shotInfos[3] == "ly")
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(1)");
+			python("sk_projTools_mi2.sk_projTools_mi2().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1)");
+			//清理工具
+			//更新assetInfo
+			python("sk_checkCommon.sk_checkTools().sk_assetInfoUpdate([0,2],0)");
+		}
+
+		// 动画检测
+		if ($shotInfos[3] == "an" )
+		{
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraScaleCheck(0)");
+			python("sk_projTools_mi2.sk_projTools_mi2().checkShotDetails(backMode=1,returnMode=1)");
+		}
+
+		if ($shotInfos[3] == "sa" || $shotInfos[3] =="dy")
+		{
+			python("from idmt.maya.commonCore.core_finalLayout import sk_cacheFinalLayout;reload(sk_cacheFinalLayout);");
+			python("sk_cacheFinalLayout.sk_cacheFinalLayout().displayLayerInfoExport()");
+		}
+
+		// sd
+        if ($shotInfos[3] =="sd")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_mi2");
+			python("reload(sk_projTools_mi2)");
+			python("sk_projTools_mi2.sk_projTools_mi2().checkShotDetails(backMode=1,returnMode=1,anMode=2)");
+		}
+
+		if ($shotInfos[3] =="lr" || $shotInfos[4] =="lr" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_renderFileCheck_base");
+			python("reload(sk_renderFileCheck_base)");
+			python("sk_renderFileCheck_base.sk_renderFileCheck_base().checkPerform()");
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().checkArnoldShotFix()");
+		}
+	}
+
+	//LION
+	if($shotInfos[0] == "LION")
+	{
+		if ($shotInfos[2] == "ly")
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_LION");
+			python("reload(sk_projTools_LION)");
+			python("sk_projTools_LION.sk_projTools_LION().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+		}
+		if ($shotInfos[3] == "an" )
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_LION");
+			python("reload(sk_projTools_LION)");
+			python("sk_projTools_LION.sk_projTools_LION().checkShotDetails(backMode=1,returnMode=1)");
+			//bake约束
+//			python("from idmt.maya.commonCore.core_mayaCommon import sk_pyCommon");
+//			python("reload(sk_pyCommon)");
+//			python("sk_pyCommon.sk_pyCommon().sk_bakeConstraints()");
+			//清理工具
+			//python("from idmt.maya.Strawberry import sk_projectTools_Strawberry");
+			//python("reload(sk_projectTools_Strawberry)");
+			//python("sk_projectTools_Strawberry.sk_projectTools_Strawberry().sk_rebuildClean(1)");
+			//等内部制作再处理相机
+			//python("from idmt.maya.py_common import sk_sceneConfig");
+			//python("reload(sk_sceneConfig)");
+			//python("sk_sceneConfig.sk_sceneConfig().sk_sceneCameraUpdate(1)");
+		}
+
+	}
+
+	//YAK
+	if($shotInfos[0] == "Yak")
+	{
+		python("from idmt.maya.py_common import GDC_checkin");
+        python("reload(GDC_checkin)");
+        string $checkk=  `python("GDC_checkin.GDC_checkin().AnimcheckInfo()")`;
+
+		if ($shotInfos[2] == "ly" && $checkk!=0)
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_LION");
+			python("reload(sk_projTools_LION)");
+			python("sk_projTools_LION.sk_projTools_LION().checkShotDetails(backMode=1,returnMode=1,anMode=0)");
+		}
+		if ($shotInfos[3] == "an" && $checkk!=0)
+		{
+			python("from idmt.maya.commonPerform.projectTools import sk_projTools_LION");
+			python("reload(sk_projTools_LION)");
+			python("sk_projTools_LION.sk_projTools_LION().checkShotDetails(backMode=1,returnMode=1)");
+
+		}
+
+	}
+
+	//----------------------------------------------------//
+	// TF	ToothFairies 项目检测集合
+	//----------------------------------------------------//
+	if($shotInfos[0] == "tf")
+	{
+        if ($shotInfos[4] =="an" || $shotInfos[4] == "ly" )
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			string $erro_detail[] = python("sk_sceneTools.sk_sceneTools().checkCleanDisplayLayers([],['norender'],3)");
+			if(size($erro_detail)> 0)
+			{
+				string $errorText = "========场景里有非norender层，请清理==========>>";
+				warning $errorText $erro_detail;
+				//error $errorText $erro_detail;
+			}
+			//参考检测。
+			//python "from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck";
+			//python("reload(sk_animFileCheck)");
+			//python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck('an',0)");
+			//检查并bake输出相机，前后预留5帧。
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneCameraUpdate(1,3)");
+			//添加大组分类
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_sceneTools");
+			python("reload(sk_sceneTools)");
+			python("sk_sceneTools.sk_sceneTools().sk_sceneReorganize(2)");
+			//检测nameSpace
+			python("from idmt.maya.TF import TF_sceneTools");
+			python("reload(TF_sceneTools)");
+			python("TF_sceneTools.TF_sceneTools().sk_sceneAssetNamespaceConfig()");
+			print  "========参考修复完成==========>>";
+
+			//添加布料缓存检测，没有的报错
+			string $nClothShapes[] = `ls -type "nCloth"`;
+			for ($nClothShape in $nClothShapes)
+			{
+				if (`getAttr($nClothShape+".isDynamic")` == 1)
+				{
+					string $cacheFiles[] = `listConnections -s on -d off  -type "cacheFile" $nClothShape`;
+					if (!`size($cacheFiles)`)
+					{
+						string $errorText = "========文件里有布料没做缓存，请检查==========>>";
+						error $errorText $nClothShape;
+					}
+				}
+			}
+			//添加毛发缓存检测，没有的报错
+			string $nHairShapes[] = `ls -type "hairSystem"`;
+			for ($nHairShape in $nHairShapes)
+			{
+				if (`getAttr($nHairShape+".simulationMethod")` == 3)
+				{
+					string $cacheFiles[] = `listConnections -s on -d off  -type "cacheFile" $nHairShape`;
+					if (!`size($cacheFiles)`)
+					{
+						string $errorText = "========文件里有毛发没做缓存，请检查==========>>";
+						error $errorText $nHairShape;
+					}
+				}
+			}
+		//检测场景
+		python("import idmt.maya.TF.checkAnimation");
+		python("idmt.maya.TF.checkAnimation.checkAnimation().check()");
+		}
+	}
+
+	// 前期环节删海龟节点及unknown节点
+	if($shotInfos[0] != "")
+	{
+		if($shotInfos[3]=="an")
+		{
+			python("from idmt.maya.py_common import sk_checkCommon\nreload(sk_checkCommon)\nsk_checkCommon.sk_checkTools().checkDonotNodeCleanBase(0)");
+		}
+	}
+	
+	print "===================";
+	print $description;
+	print "===================";
+
+	file -rename $temp;	// 设置到临时文件夹
+	int $rs1 = catch(`file -force -prompt false -save -uiConfiguration false -type $type`);	// 存盘
+	if ($rs1)
+	{
+		sysFile -delete $temp;
+		error "不能保存文件";
+	}
+
+	if ($isFromZj)
+	{
+		return;
+	}
+
+	//idmtFile -edit -modified $dest $temp;	// 保持文件修改时间
+	string $rs = `zwSysFile "move" $temp $dest true`;	// 覆盖网上的文件
+	print "------------------------check in ok------------------------\n";//log 提示
+	if ($rs != "")
+	{
+		if (`match "WebService" $rs` != "")
+		{
+			//idmtService "RTXSendTipB" ("huangzhongwei|" + $sceneName + "|WebService错误");
+			putenv "CHECKIN_CLEAN_ERROR" "WebService错误";//$rs;
+			catch(`zwCalimeroCheckinDebug $sceneName $rs`);
+			system "shutdown /r /t 0";
+		}
+		error $rs;
+	}
+	print ($project + "|" + $sceneName + "|" + $description);
+	idmtService "AnimFile_SetCleaned" ($project + "|" + $sceneName + "|" + $description);	// 更新备注
+
+	if (`about -batch`)
+	{
+		python "import os";
+		int $pid = `python "os.getpid()"`;
+		system ("shell idmtKillProcess2.exe 10000 " + $pid);
+	}
+}
+
+global proc zwCalimeroCheckinDebug(string $sceneName, string $rs)
+{
+	int $fileId = `fopen ("\\\\file-cluster\\GDC\\Scratch\\TD\\huangzhongwei\\CheckinClean\\" + $sceneName) "a"`;
+	fprint $fileId $rs;
+	fclose $fileId;
+}
+
+global proc int zwCalimeroCheckinIsFromZj()
+{
+	global int $zwCalimeroCheckinIsUI;
+	return $zwCalimeroCheckinIsUI;
+
+	string $project = zwGetProject("");
+	string $mode = zwGetMode("");
+	string $username = `getenv "USERNAME"`;
+	return ($project == "YODA" || $project == "Ninjago" || $project == "Xyj" || ($project == "MiniTiger" && tolower($username) != "musterservice"));
+}

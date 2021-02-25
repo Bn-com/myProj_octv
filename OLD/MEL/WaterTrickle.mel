@@ -1,0 +1,408 @@
+global proc zzyCreateWaterTrickleNParticle()
+//
+//函数描述：
+//         
+//
+{
+	
+	string $asSelect[]=`filterExpand -ex true -sm 10 `;
+	string $asSelectObjectShape[];
+	clear  $asSelectObjectShape;
+
+	if(size($asSelect)!=1)
+	{
+		error "Please select single Nurbs object";
+	}
+
+	
+	string $sObjectType=`objectType $asSelect[0]`;
+
+	if($sObjectType== "mesh" || $sObjectType == "nurbsSurface" ) 
+	{
+		$asSelectObjectShape[0]=$asSelect[0];
+		string $asTemp[]=`listRelatives -p $asSelect[0]`;
+		$asSelect[0]=$asTemp[0];
+	}
+	else
+	{
+		$asSelectObjectShape=`listRelatives -s $asSelect[0]`;
+
+	}
+	
+	//选择物体，从物体曲面发射粒子。
+	string $asFlowEmitter[]=`emitter -type surface -r 100 -sro 0 -nuv 0 -cye none -cyi 1 -spd 1 -srn 0 -nsp 1 -tsp 0 -mxd 0 -mnd 0 -dx 1 -dy 0 -dz 0 -sp 0 `;
+  
+	string $asFlowParticle[]=`nParticle`;
+	//string $asFlowParticle[]=`particle`;
+	string $asFlowPartilceShape[]=`listRelatives -s $asFlowParticle[0]`;
+
+	connectDynamic -em $asFlowEmitter[1] $asFlowParticle[0];
+
+	//把曲面设为物体的goal曲面。
+	goal -w 1 -utr 0   -g $asSelect[0]  $asFlowParticle[0];
+
+	//parentUV, goalU goalV 
+	setAttr ($asFlowEmitter[1]+".needParentUV") 1;
+
+	addAttr -ln goalU	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalU0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalV	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalV0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentU	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentU0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentV	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentV0	-dt doubleArray		$asFlowPartilceShape[0];
+
+	//创建gravity属性
+	addAttr -ln "gravity"	-at double3		$asFlowPartilceShape[0];
+	addAttr -ln "gravityX"  -at double -p gravity	$asFlowPartilceShape[0];
+	addAttr -ln "gravityY"  -at double -p gravity	$asFlowPartilceShape[0];
+	addAttr -ln "gravityZ"  -at double -p gravity	$asFlowPartilceShape[0];
+
+	setAttr -type double3   ($asFlowPartilceShape[0]+".gravity") 0 0 0;
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravity");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityX");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityY");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityZ");
+
+	addAttr -ln slopeThreshold -at double -min -1 -max 1 -dv -.9 $asFlowPartilceShape[0]; 
+
+	//创建closestPointOnSurface
+	string $cps=`createNode closestPointOnSurface`;
+
+	connectAttr ($asSelectObjectShape[0]+".worldSpace[0]") ($cps+".inputSurface");//链接曲面和closestPointOnSurface Node;
+
+	string $psi=`createNode pointOnSurfaceInfo`; 
+
+	connectAttr -f ($asSelectObjectShape[0]+".worldSpace[0]") ($psi+".inputSurface");//链接曲面和pointOnSurfaceInfo Node;
+
+	connectAttr -f ($cps+".parameterU") ($psi+".parameterU");
+
+	dynExpression -s "goalU=parentU;\r\ngoalV=parentV;" -c $asFlowPartilceShape[0];
+	dynExpression -s ("if ("+$asFlowPartilceShape[0]+".goalPP) {\n\n\tvector $pos = "+$asFlowPartilceShape[0]+".position + <<"+$asFlowPartilceShape[0]+".gravityX,"+$asFlowPartilceShape[0]+".gravityY,"+$asFlowPartilceShape[0]+".gravityZ>>/30;\n\n\tsetAttr "+$cps+".inPositionX ($pos.x);\n\tsetAttr "+$cps+".inPositionY ($pos.y);\n\tsetAttr "+$cps+".inPositionZ ($pos.z);\n\n\t"+$asFlowPartilceShape[0]+".goalU = `getAttr "+$cps+".parameterU`;\n\t"+$asFlowPartilceShape[0]+".goalV = `getAttr "+$cps+".parameterV`;\n\n\tfloat $slope = `getAttr "+$psi+".normalY`;\n\n\tif ($slope < "+$asFlowPartilceShape[0]+".slopeThreshold) "+$asFlowPartilceShape[0]+".goalPP = 0;\n\n\n}") -rbd $asFlowPartilceShape[0];
+
+	//给曲面新的材质球
+	string $sFlowShader=`shadingNode -asShader lambert`;
+
+	string $sFlowShaderSG=($sFlowShader+"SG");
+	sets -renderable true -noSurfaceShader true -empty -name $sFlowShaderSG;
+	connectAttr -f ($sFlowShader+".outColor") ($sFlowShaderSG+".surfaceShader");
+	sets -edit -forceElement $sFlowShaderSG $asSelectObjectShape[0];
+
+	//创建发射贴图
+
+	string $sEmitterTextureFile=`shadingNode -asTexture file`;
+	string $sPlace2dTexture2=`shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($sPlace2dTexture2+".outUV")		($sEmitterTextureFile+".uvCoord");
+	connectAttr -f ($sPlace2dTexture2+".outUvFilterSize")	($sEmitterTextureFile+".uvFilterSize"); 
+	connectAttr -f ($sPlace2dTexture2+".coverage")		($sEmitterTextureFile+".coverage"); 
+	connectAttr -f ($sPlace2dTexture2+".translateFrame")	($sEmitterTextureFile+".translateFrame"); 
+	connectAttr -f ($sPlace2dTexture2+".rotateFrame")	($sEmitterTextureFile+".rotateFrame"); 
+	connectAttr -f ($sPlace2dTexture2+".mirrorU")		($sEmitterTextureFile+".mirrorU"); 
+	connectAttr -f ($sPlace2dTexture2+".mirrorV")		($sEmitterTextureFile+".mirrorV"); 
+	connectAttr -f ($sPlace2dTexture2+".stagger")		($sEmitterTextureFile+".stagger"); 
+	connectAttr -f ($sPlace2dTexture2+".wrapU")		($sEmitterTextureFile+".wrapU"); 
+	connectAttr -f ($sPlace2dTexture2+".wrapV")		($sEmitterTextureFile+".wrapV"); 
+	connectAttr -f ($sPlace2dTexture2+".repeatUV")		($sEmitterTextureFile+".repeatUV"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvOne")	($sEmitterTextureFile+".vertexUvOne"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvTwo")	($sEmitterTextureFile+".vertexUvTwo"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvThree")	($sEmitterTextureFile+".vertexUvThree"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexCameraOne")	($sEmitterTextureFile+".vertexCameraOne"); 
+	connectAttr -f ($sPlace2dTexture2+".noiseUV")		($sEmitterTextureFile+".noiseUV"); 
+	connectAttr -f ($sPlace2dTexture2+".offset")		($sEmitterTextureFile+".offset"); 
+	connectAttr -f ($sPlace2dTexture2+".rotateUV")		($sEmitterTextureFile+".rotateUV");
+	connectAttr -force ($sEmitterTextureFile+".outColor")	($sFlowShader+".color");
+
+		
+	//art3dPaintCtx -e -floodselect art3dPaintContext;
+	
+	connectAttr -f ($sEmitterTextureFile+".outColor") ($asFlowEmitter[1]+".textureRate");
+	setAttr ($asFlowEmitter[1]+".enableTextureRate") 1;
+
+	select -r $asSelectObjectShape[0];
+	select -add $sFlowShader;
+	
+	Art3dPaintTool;
+	toolPropertyWindow;//创建贴图文件
+	art3dPaintCtx -e -painttxtattr Color `currentCtx`;
+	art3dPaintCtx  -e -rgbflood 0 0 0 `currentCtx`;
+	art3dPaintCtx -e -floodselect  `currentCtx`;
+	art3dPaintAssignFileTexture( "art3dFileTextureFrame");
+	art3dPaintAssignFileTextureNow;
+	art3dPaintHardwareSetup;
+	autoUpdateAttrEd;
+	updateAnimLayerEditor("AnimLayerTab");
+	statusLineUpdateInputField;
+
+	zzySetWhiteBrush;
+	//zzyFloodPaintBlackTexture
+
+/*
+	Art3dPaintTool;
+	toolPropertyWindow;
+	art3dPaintCtx -e -painttxtattr Color `currentCtx`;
+	//colorSliderGrp -e -rgb 0.5 0.5 1 art3dFloodColorSlider;
+	art3dPaintCtx  -e -rgbflood 0.5 0.5 1 `currentCtx`;
+	art3dPaintCtx -e -floodselect  `currentCtx`;
+	
+	//zzyFloodPaintBlueTexture;
+	zzySetDirectionBrush;
+
+*/
+
+}
+
+global proc zzyCreateWaterTrickleParticle()
+//
+//函数描述：
+//         
+//
+{
+	
+	string $asSelect[]=`filterExpand -ex true -sm 10 `;
+	string $asSelectObjectShape[];
+	clear  $asSelectObjectShape;
+
+	if(size($asSelect)!=1)
+	{
+		error "Please select single Nurbs object";
+	}
+
+	
+	string $sObjectType=`objectType $asSelect[0]`;
+
+	if($sObjectType== "mesh" || $sObjectType == "nurbsSurface" ) 
+	{
+		$asSelectObjectShape[0]=$asSelect[0];
+		string $asTemp[]=`listRelatives -p $asSelect[0]`;
+		$asSelect[0]=$asTemp[0];
+	}
+	else
+	{
+		$asSelectObjectShape=`listRelatives -s $asSelect[0]`;
+
+	}
+	
+	//选择物体，从物体曲面发射粒子。
+	string $asFlowEmitter[]=`emitter -type surface -r 100 -sro 0 -nuv 0 -cye none -cyi 1 -spd 1 -srn 0 -nsp 1 -tsp 0 -mxd 0 -mnd 0 -dx 1 -dy 0 -dz 0 -sp 0 `;
+  
+	//string $asFlowParticle[]=`nParticle`;
+	string $asFlowParticle[]=`particle`;
+	string $asFlowPartilceShape[]=`listRelatives -s $asFlowParticle[0]`;
+
+	connectDynamic -em $asFlowEmitter[1] $asFlowParticle[0];
+
+	//把曲面设为物体的goal曲面。
+	goal -w 1 -utr 0   -g $asSelect[0]  $asFlowParticle[0];
+
+	//parentUV, goalU goalV 
+	setAttr ($asFlowEmitter[1]+".needParentUV") 1;
+
+	addAttr -ln goalU	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalU0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalV	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln goalV0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentU	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentU0	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentV	-dt doubleArray		$asFlowPartilceShape[0];
+	addAttr -ln parentV0	-dt doubleArray		$asFlowPartilceShape[0];
+
+	//创建gravity属性
+	addAttr -ln "gravity"	-at double3		$asFlowPartilceShape[0];
+	addAttr -ln "gravityX"  -at double -p gravity	$asFlowPartilceShape[0];
+	addAttr -ln "gravityY"  -at double -p gravity	$asFlowPartilceShape[0];
+	addAttr -ln "gravityZ"  -at double -p gravity	$asFlowPartilceShape[0];
+
+	setAttr -type double3   ($asFlowPartilceShape[0]+".gravity") 0 0 0;
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravity");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityX");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityY");
+	setAttr -e-keyable true ($asFlowPartilceShape[0]+".gravityZ");
+
+	addAttr -ln slopeThreshold -at double -min -1 -max 1 -dv -.9 $asFlowPartilceShape[0]; 
+
+	//创建closestPointOnSurface
+	string $cps=`createNode closestPointOnSurface`;
+
+	connectAttr ($asSelectObjectShape[0]+".worldSpace[0]") ($cps+".inputSurface");//链接曲面和closestPointOnSurface Node;
+
+	string $psi=`createNode pointOnSurfaceInfo`; 
+
+	connectAttr -f ($asSelectObjectShape[0]+".worldSpace[0]") ($psi+".inputSurface");//链接曲面和pointOnSurfaceInfo Node;
+
+	connectAttr -f ($cps+".parameterU") ($psi+".parameterU");
+
+	dynExpression -s "goalU=parentU;\r\ngoalV=parentV;" -c $asFlowPartilceShape[0];
+	dynExpression -s ("if ("+$asFlowPartilceShape[0]+".goalPP) {\n\n\tvector $pos = "+$asFlowPartilceShape[0]+".position + <<"+$asFlowPartilceShape[0]+".gravityX,"+$asFlowPartilceShape[0]+".gravityY,"+$asFlowPartilceShape[0]+".gravityZ>>/30;\n\n\tsetAttr "+$cps+".inPositionX ($pos.x);\n\tsetAttr "+$cps+".inPositionY ($pos.y);\n\tsetAttr "+$cps+".inPositionZ ($pos.z);\n\n\t"+$asFlowPartilceShape[0]+".goalU = `getAttr "+$cps+".parameterU`;\n\t"+$asFlowPartilceShape[0]+".goalV = `getAttr "+$cps+".parameterV`;\n\n\tfloat $slope = `getAttr "+$psi+".normalY`;\n\n\tif ($slope < "+$asFlowPartilceShape[0]+".slopeThreshold) "+$asFlowPartilceShape[0]+".goalPP = 0;\n\n\n}") -rbd $asFlowPartilceShape[0];
+
+	//给曲面新的材质球
+	string $sFlowShader=`shadingNode -asShader lambert`;
+
+	string $sFlowShaderSG=($sFlowShader+"SG");
+	sets -renderable true -noSurfaceShader true -empty -name $sFlowShaderSG;
+	connectAttr -f ($sFlowShader+".outColor") ($sFlowShaderSG+".surfaceShader");
+	sets -edit -forceElement $sFlowShaderSG $asSelectObjectShape[0];
+
+	//创建发射贴图
+
+	string $sEmitterTextureFile=`shadingNode -asTexture file`;
+	string $sPlace2dTexture2=`shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($sPlace2dTexture2+".outUV")		($sEmitterTextureFile+".uvCoord");
+	connectAttr -f ($sPlace2dTexture2+".outUvFilterSize")	($sEmitterTextureFile+".uvFilterSize"); 
+	connectAttr -f ($sPlace2dTexture2+".coverage")		($sEmitterTextureFile+".coverage"); 
+	connectAttr -f ($sPlace2dTexture2+".translateFrame")	($sEmitterTextureFile+".translateFrame"); 
+	connectAttr -f ($sPlace2dTexture2+".rotateFrame")	($sEmitterTextureFile+".rotateFrame"); 
+	connectAttr -f ($sPlace2dTexture2+".mirrorU")		($sEmitterTextureFile+".mirrorU"); 
+	connectAttr -f ($sPlace2dTexture2+".mirrorV")		($sEmitterTextureFile+".mirrorV"); 
+	connectAttr -f ($sPlace2dTexture2+".stagger")		($sEmitterTextureFile+".stagger"); 
+	connectAttr -f ($sPlace2dTexture2+".wrapU")		($sEmitterTextureFile+".wrapU"); 
+	connectAttr -f ($sPlace2dTexture2+".wrapV")		($sEmitterTextureFile+".wrapV"); 
+	connectAttr -f ($sPlace2dTexture2+".repeatUV")		($sEmitterTextureFile+".repeatUV"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvOne")	($sEmitterTextureFile+".vertexUvOne"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvTwo")	($sEmitterTextureFile+".vertexUvTwo"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexUvThree")	($sEmitterTextureFile+".vertexUvThree"); 
+	connectAttr -f ($sPlace2dTexture2+".vertexCameraOne")	($sEmitterTextureFile+".vertexCameraOne"); 
+	connectAttr -f ($sPlace2dTexture2+".noiseUV")		($sEmitterTextureFile+".noiseUV"); 
+	connectAttr -f ($sPlace2dTexture2+".offset")		($sEmitterTextureFile+".offset"); 
+	connectAttr -f ($sPlace2dTexture2+".rotateUV")		($sEmitterTextureFile+".rotateUV");
+	connectAttr -force ($sEmitterTextureFile+".outColor")	($sFlowShader+".color");
+
+		
+	//art3dPaintCtx -e -floodselect art3dPaintContext;
+	
+	connectAttr -f ($sEmitterTextureFile+".outColor") ($asFlowEmitter[1]+".textureRate");
+	setAttr ($asFlowEmitter[1]+".enableTextureRate") 1;
+
+	select -r $asSelectObjectShape[0];
+	select -add $sFlowShader;
+	
+	Art3dPaintTool;
+	toolPropertyWindow;//创建贴图文件
+	art3dPaintCtx -e -painttxtattr Color `currentCtx`;
+	art3dPaintCtx  -e -rgbflood 0 0 0 `currentCtx`;
+	art3dPaintCtx -e -floodselect  `currentCtx`;
+	art3dPaintAssignFileTexture( "art3dFileTextureFrame");
+	art3dPaintAssignFileTextureNow;
+	art3dPaintHardwareSetup;
+	autoUpdateAttrEd;
+	updateAnimLayerEditor("AnimLayerTab");
+	statusLineUpdateInputField;
+
+	zzySetWhiteBrush;
+	//zzyFloodPaintBlackTexture
+
+/*
+	Art3dPaintTool;
+	toolPropertyWindow;
+	art3dPaintCtx -e -painttxtattr Color `currentCtx`;
+	//colorSliderGrp -e -rgb 0.5 0.5 1 art3dFloodColorSlider;
+	art3dPaintCtx  -e -rgbflood 0.5 0.5 1 `currentCtx`;
+	art3dPaintCtx -e -floodselect  `currentCtx`;
+	
+	//zzyFloodPaintBlueTexture;
+	zzySetDirectionBrush;
+
+*/
+
+}
+
+global proc zzySetWhiteBrush()
+//
+//
+//
+//
+{
+	zzyIsSelectPloygonOrNurbs;
+	Art3dPaintTool;
+	toolPropertyWindow;
+	string $sDefaultBrush=`getDefaultBrush`;
+	brushPresetSetup();
+	bPset "time" 1; 
+	bPset "globalScale" 1.450555676; 
+
+	bPset "color1R" 1; 
+	bPset "color1G" 1; 
+	bPset "color1B" 1; 
+
+	setAttr ($sDefaultBrush+".tubes") 0;
+	//rename (getDefaultBrush()) blueBrush; 
+
+}
+
+global proc zzySetBlackBrush()
+//
+//
+//
+//
+{
+	zzyIsSelectPloygonOrNurbs;
+	Art3dPaintTool;
+	toolPropertyWindow;
+	string $sDefaultBrush=`getDefaultBrush`;
+	brushPresetSetup();
+	bPset "time" 1; 
+	bPset "globalScale" 1.450555676; 
+
+	bPset "color1R" 0; 
+	bPset "color1G" 0; 
+	bPset "color1B" 0; 
+
+	setAttr ($sDefaultBrush+".tubes") 0;
+	//rename (getDefaultBrush()) blueBrush; 
+
+}
+
+
+
+global proc zzyFloodPaintBlackTexture()
+//
+//
+//
+//
+{
+	zzyIsSelectPloygonOrNurbs;
+	Art3dPaintTool;
+	toolPropertyWindow;
+	art3dPaintCtx -e -painttxtattr `attributeToPaint_uiToMel("Color")` `currentCtx`;
+	//colorSliderGrp -e -rgb 0.5 0.5 1 art3dFloodColorSlider;
+	art3dPaintCtx  -e -rgbflood 0 0 0 `currentCtx`;
+
+	art3dPaintCtx -e -floodselect  `currentCtx`;
+
+}
+
+global proc zzyIsSelectPloygonOrNurbs()
+//
+//
+//
+//
+{
+	string $asSelect[]=`filterExpand -ex true -sm 10 `;
+	if(size($asSelect)!=1)
+	{
+		error "Please select single Nurbs object";
+	}
+
+}
+
+
+global proc zzyWaterTrickleWindow()
+//
+//
+//
+//
+{
+	if(`window -q -ex WaterTrickle`)
+		deleteUI WaterTrickle;
+	window -title "WaterTrickle"  WaterTrickle;
+
+	columnLayout -adjustableColumn true;
+	    button -label "CreateWaterTrickleNParticle" -command "zzyCreateWaterTrickleNParticle";
+	    button -label "CreateWaterTrickleParticle" -command "zzyCreateWaterTrickleParticle";
+	    button -label "FloodPaintBlackTexture"-command "zzyFloodPaintBlackTexture";
+	    button -label "SetWhiteBrush"	  -command "zzySetWhiteBrush";
+	    button -label "SetBlackBrush"	  -command "zzySetBlackBrush";
+
+	showWindow WaterTrickle;
+}
+

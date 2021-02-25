@@ -1,0 +1,204 @@
+global proc s100ClLayoutScene()
+{
+
+string $fNameT= `file -q -sn `;
+string $fNameT2= `file -q -sn -shortName `;
+
+	if(`gmatch $fNameT2 "*_toCheck.ma"`)
+	{
+	}else{
+
+
+	$fNameT =substituteAllString($fNameT ,".ma", "_toCheck.ma") ;
+	file -rename $fNameT ;
+
+	$newNameSpace = "L_ForestFern_01";
+	$newNameSpaceTmp = $newNameSpace  +"_tmp";
+
+	string $arrREf[] =  `s100findAllSceneReferences` ;
+	string $toMatch = "*MA_L_*";
+
+
+	string $rArr[];
+
+	$j = 0 ;
+		for($i = 0 ;$i < size($arrREf) ; $i++)
+		{
+			if(`gmatch $arrREf[$i] $toMatch`)
+			{
+			$rArr[$j] = $arrREf[$i] ;
+			$j++;
+			}
+
+		}
+
+	$location = $rArr[0] ;
+	//print $location ;
+
+	file -e -namespace $newNameSpaceTmp $location ;
+	$refS = `file -q -rfn $location` ;
+
+	$arrName = stringToStringArray($location,"/") ;
+	$toR = size($arrName) -2;
+
+	$sub = substituteAllString($location,($arrName[$toR] +"/") , "");
+	$sub = substituteAllString($sub,"_Hi.ma" , ".ma");
+	file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace $newNameSpace -options "v=0;p=17" $sub;
+
+	namespace -setNamespace $newNameSpaceTmp ;
+	$list3 = `namespaceInfo -listOnlyDependencyNodes`;
+
+	$ls = `ls -type "reference" $list3` ;
+	namespace -setNamespace ":";
+	namespace -setNamespace $newNameSpace ;
+	$list3 = `namespaceInfo -listOnlyDependencyNodes`;
+
+	$lsNew = `ls -type "reference" $list3` ;
+
+	$ref = `s100findAllReferenceNode`;
+		 int $amount = 0;
+
+		 progressWindow
+			 -title "Doing Nothing"
+			 -progress $amount
+			 -status "Sleeping: 0%"
+			 -isInterruptable true;
+
+
+	namespace -setNamespace ":";
+
+
+	namespace -setNamespace ($newNameSpaceTmp) ;
+	string $depand[] = `namespaceInfo -listOnlyDependencyNodes`;
+	string $listAnimC[] = `ls -type "transform" $depand` ;
+		for($k = 0 ; $k < size($listAnimC) ;$k++)
+		{
+				$amount = $k / size($listAnimC) *100 ;
+
+				 progressWindow -edit
+				 -progress $amount
+				 -status ("transfering transform local: "+$amount+"%");
+				$sub = substituteAllString($listAnimC[$k] , $newNameSpaceTmp,$newNameSpace) ;
+
+				string $attr[] = `listAttr -k -u -visible   $listAnimC[$k] `;
+				$ch = 0 ;
+							for($m = 0 ; $m < size($attr) ; $m++)
+							{
+							//print ("\n $k ="+$k ) ;
+								if($attr[$i] != "visibility")
+								{
+									float $get = `getAttr ($listAnimC[$k] +"." + $attr[$m]) `;
+									if($get != 0)
+									{
+									setAttr ( $sub +"." + $attr[$m]) $get;
+									setKeyframe ( $sub +"." + $attr[$m]) ;
+									}
+
+								}
+
+							}
+
+
+		}
+	namespace -setNamespace ":";
+
+		for($i = 0 ; $i < size($ls) ; $i++)
+		{
+		//print ("\n ---------$i ="+$i ) ;
+		$amount = $i / size($ls) *100 ;
+		print "ici" ;
+
+				 progressWindow -edit
+				 -progress $amount
+				 -status ("transferring transform ref: "+$amount+"%");
+
+
+			for($j = 0 ; $j < size($ref) ; $j++)
+			{
+			//print ("\n $j ="+$j ) ;
+
+
+			progressWindow -edit
+					 -status ("Transfering Poses: "+$amount+"%");
+
+
+				if($ls[$i] == $ref[$j] )
+				{
+				$fileP = `referenceQuery -filename $ls[$i]`;
+				$nameSpace = `file -referenceNode $ls[$i] -q -ns  $fileP` ;
+				$filePN = `referenceQuery -filename $lsNew[$i]`;
+				$nameSpaceN = `file -referenceNode $lsNew[$i] -q -ns  $filePN` ;
+
+				namespace -setNamespace ":";
+				namespace -setNamespace ($newNameSpaceTmp) ;
+				namespace -setNamespace ($nameSpace ) ;
+
+				string $depand[] = `namespaceInfo -listOnlyDependencyNodes`;
+
+				string $listAnimC[] = `ls -type "transform" $depand` ;
+					for($k = 0 ; $k < size($listAnimC) ;$k++)
+					{
+						if(`gmatch $listAnimC[$k] "*_ctrl"`)
+						{
+						print ("\n" + $listAnimC[$k] +" " + $k  ) ;
+						string $attr[] = `listAttr -k -u -visible   $listAnimC[$k] `;
+						//print "\n";
+						//print $attr ;
+						string $sub = substituteAllString($listAnimC[$k] , $nameSpace,$nameSpaceN) ;
+						string $sub = substituteAllString($sub , $newNameSpaceTmp ,$newNameSpace) ;
+
+							for($m = 0 ; $m < size($attr) ; $m++)
+							{
+							//print ("\n $k ="+$k ) ;
+								if($attr[$i] != "visibility")
+								{
+								float $get = `getAttr ($listAnimC[$k] +"." + $attr[$m]) `;
+								setAttr ( $sub +"." + $attr[$m]) $get;
+								if($get != 0)
+									{
+									setAttr ( $sub +"." + $attr[$m]) $get;
+									setKeyframe ( $sub +"." + $attr[$m]) ;
+									}
+
+								}
+							}
+
+
+						}
+
+					}
+
+					namespace -setNamespace ":";
+
+				}
+
+
+			}
+		progressWindow -endProgress;
+
+		}
+
+
+
+	file -rr $location ;
+	namespace -setNamespace ":";
+	namespace -setNamespace $newNameSpaceTmp  ;
+	string $depand[] = `namespaceInfo -listOnlyDependencyNodes`;
+		for($tmp in $depand)
+		{
+		//print ($tmp +"\n");
+			if(`objExists $tmp`)
+				delete $tmp ;
+
+		}
+
+	namespace -setNamespace ":";
+	namespace -f -moveNamespace  $newNameSpaceTmp ":" ;
+	namespace -f -removeNamespace $newNameSpaceTmp  ;
+	namespace -setNamespace ":";
+
+	file -f -s ;
+}
+
+
+}

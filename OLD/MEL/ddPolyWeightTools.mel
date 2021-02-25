@@ -1,0 +1,221 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddPolyWeightTools
+//	Verision: 0.11 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: July 08 2006
+//	Changed Projcet Date: 
+//	Last Updated: July 28 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note:Polygon Weight Tools
+//		polygon 权重导入导出工具
+//		
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddPolySmoothWeightsImport
+// 
+// 导入polygon 物体的smooth skin weight
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddPolySmoothWeightsImport()
+{
+ int $countVtx = 0;
+ int $SkinClusterConnectionCount = 0;
+ string $usersel[] = `ls -sl` ;
+ string $location_n_wildcard = (`workspace -q -act` + "/pwt/" + "*.pwt");
+ string $file2use = `fileDialog -dm $location_n_wildcard`;
+
+ for ($element in $usersel)
+ { 
+  string $ShapeOfElement[] = `ls  -dagObjects -sl -hd 1 -type mesh $element`;
+  
+  string $vtxrange[] = `polyListComponentConversion -tv $ShapeOfElement[0]`;
+  string $vtxUnit[]=`filterExpand -ex true -sm 31 $vtxrange[0]`;
+  int $vtxCount =  `size $vtxUnit`;
+
+  if ($ShapeOfElement[0] != "")
+  {
+   string $jjunk[] = `listHistory $ShapeOfElement[0]`;
+   string $isBound[] = `ls -typ skinCluster $jjunk`;
+   int $totalSkinClustersFound = `size $isBound`;
+   if  ($totalSkinClustersFound != 0)
+   { 
+    
+    int $normalizeWeightsStatus = `getAttr ($isBound[0] + ".normalizeWeights")`;
+    string $SkinClusterConnections[] = `listConnections ($isBound[0] + ".matrix")`;
+
+    $fileId=`fopen $file2use "r"`;
+    int $nextLineArray = 0;
+    string $nextLine[];
+    $nextLine[0] = `fgetline $fileId`;
+    while ( size ($nextLine[$nextLineArray]) != 0 )
+    {
+     $nextLineArray++;
+     $nextLine[$nextLineArray] = `fgetline $fileId`;
+    }
+    
+    int $howManyJoints = ((`size $nextLine`) -1);
+
+    if ($normalizeWeightsStatus == 1)
+    setAttr ($isBound[0] + ".normalizeWeights") false;
+
+    int $count;
+    waitCursor -state on;
+    skinPercent -rtd $isBound[0];
+    int $ii;
+    for ($ii = 0; $ii <= 1; $ii++)
+     for ( $count=0;  $count < ($howManyJoints); $count++ )
+     {
+      
+      
+      string $currentPaintOnConnection[] = `listConnections ($isBound[0] + ".ptt")`;
+      
+      if (`size $currentPaintOnConnection` != 0)
+      disconnectAttr ($currentPaintOnConnection[0]+ ".message") ($isBound[0] + ".ptt");
+      string $jjjunk[];
+      tokenize $nextLine[$count] "\n" $jjjunk;
+      connectAttr ($jjjunk[0] + ".message") ($isBound[0] + ".ptt");
+      $count++;
+      
+      
+      $runThis = ("setAttr " + $isBound[0] + ".ptw -type doubleArray " + $vtxCount + " " + $nextLine[$count]);
+      eval $runThis;
+      refresh;
+      currentTime `currentTime -q`;  //just another way of refreshing
+       
+     }
+
+    
+
+   if ($normalizeWeightsStatus == 1)
+   setAttr ($isBound[0] + ".normalizeWeights") true;
+   refresh;
+     
+   fclose $fileId;
+   }
+  
+  }
+ }
+ hilite -u "*";
+ waitCursor -state off;
+}
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddPolySmoothWeightsExport
+// 
+// 导出polygon 物体的smooth skin weight
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddPolySmoothWeightsExport()
+{
+
+ string $selected[],$element,$ShapeOfElement[] ;
+
+ $selected = `ls -sl` ;
+
+ for ($element in $selected)
+ { 
+  $ShapeOfElement = `ls  -dagObjects -sl -hd 1 -type mesh $element` ;
+  if ($ShapeOfElement[0] != "")
+  { 
+   string $objHistory[] = `listHistory $ShapeOfElement[0]` ;
+   string $isBound[] = `ls  -typ  skinCluster $objHistory` ;
+
+   int $totalSkinClustersFound = `size $isBound` ;
+   if  ($totalSkinClustersFound != 0)
+   {
+    $element = `substitute "|" $element ""` ;
+    string $directory = `workspace -q -rd` ;
+
+    global string $ddPolyWeightExportFileName ;
+    fileBrowser ("ddPolyWeightExportFileName", "Export", "", 1);
+
+    if($ddPolyWeightExportFileName == "") continue ;
+
+    string $pointWeightsFileName = ($ddPolyWeightExportFileName + ".pwt") ;
+
+    string $buffer[];
+    tokenize $pointWeightsFileName "." $buffer ;
+    $pointWeightsFileName = ($buffer[0] + ".pwt") ;
+    //string $pointWeightsFileName = ( $directory + "pwt/" + $element +".pwt" ) ; 
+
+    $fileIdw=`fopen $pointWeightsFileName "w"` ;
+    fprint $fileIdw ("") ;
+    fclose $fileIdw ;
+
+    $fileIda=`fopen $pointWeightsFileName "a"` ;
+
+    string $skinClusterJoints[] = `listConnections ($isBound[0] + ".matrix")` ;
+    int $totalJointsFound = `size $skinClusterJoints` ;
+    print ("TOTAL JOINTS: "+$totalJointsFound+"\n") ;
+    int $i ;
+    waitCursor -state on ;
+    for ($i = 0 ; $i < $totalJointsFound  ; $i++)
+    { 
+     //print ("\n this is for joint" + $i + "\n") ;
+     string $Attr = ($isBound[0] + ".weightList[*].weights[" + $i + "]") ;
+     float $jointEffects[] =  `getAttr $Attr` ;
+     string $dummy = "" ;
+     for ($jointEffect in $jointEffects)
+     {
+      $dummy = ($dummy +$jointEffect+" " ) ;
+     }
+     print ("JOINT "+$i+": "+$skinClusterJoints[$i] + "\n") ; 
+     fprint $fileIda  ($skinClusterJoints[$i] + "\n") ;
+     $dummy = ($dummy + "\n") ;
+     //print $dummy ;
+     fprint $fileIda $dummy ;
+    }
+    fclose $fileIda ;
+    waitCursor -state off ;
+   }
+  }
+  print ("\nFINISHED WRITING PWT FILE FOR: "+$element+"\n") ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddPolyWeightToolsUI
+// 
+// 用户界面
+// Arguments:
+//  
+//////////////////////////////////////////////////////////
+global proc ddPolyWeightToolsUI()
+{
+ if ((`window -exists ddPolyWeightToolsWin`) == true)
+ {
+  deleteUI ddPolyWeightToolsWin ;
+  if(`windowPref -exists ddPolyWeightToolsWin`)
+  {
+   windowPref -remove ddPolyWeightToolsWin ;
+  }
+ }
+
+ window -widthHeight 320 240
+	-title "durdur's Polygon Smooth Weights Tools 0.11 beta"
+	ddPolyWeightToolsWin ;
+ columnLayout -adjustableColumn true ;
+    button -label "Export Polygon Smooth Weights ..." 
+	 -height 28
+	 -width 120
+	 -command "ddBratzBaseJoint `ddBratzCurrentCharacter`" ;
+
+    button -label "Import Polygon Smooth Weights ..." 
+	 -height 28
+	 -width 120
+	 -command "ddBratzBaseJoint `ddBratzCurrentCharacter`" ;
+
+ setParent.. ;
+
+ showWindow ddPolyWeightToolsWin ;
+}
+
+
+//End of file.

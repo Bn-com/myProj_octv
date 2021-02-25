@@ -1,0 +1,101 @@
+global proc zwWinxClubIIFix()
+{
+// ÐÞ¸ÄreferenceÂ·¾¶
+	int $dirty = false;
+
+	string $err = "";
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $unresolvedName = `referenceQuery -filename -unresolvedName -withoutCopyNumber $reference`;
+		if (`match "^$[{]MC_winxII[}][/\\]" $unresolvedName` != "" && `match "[/\\]environment[/\\]" $unresolvedName` == "")
+		{
+			continue;
+		}
+
+		string $path = zwWinxClubIIFixPath($unresolvedName);
+		if ($path == $unresolvedName)
+		{
+			$err += "\r\n" + `substituteAllString $reference "/" "\\"`;
+		}
+		else
+		{
+			string $url = `workspace -expandName $path`;
+			if (`filetest -f $url`)
+			{
+				string $node = `file -query -referenceNode $reference`;
+				file -loadReference $node $path;
+
+				$unresolvedName = `referenceQuery -filename -unresolvedName -withoutCopyNumber $node`;
+				if (`match "^$[{]MC_winxII[}][/\\]" $unresolvedName` == "")
+				{
+					file -loadReference $node $path;
+				}
+				$unresolvedName = `referenceQuery -filename -unresolvedName -withoutCopyNumber $node`;
+				if (`match "^$[{]MC_winxII[}][/\\]" $unresolvedName` == "")
+				{
+					$err += "\r\n" + `substituteAllString $reference "/" "\\"`;
+				}
+
+				$dirty = true;
+			}
+			else
+			{
+				$err += "\r\n" + `substituteAllString $reference "/" "\\"`;
+			}
+		}
+	}
+
+	if ($err == "")
+	{
+		if ($dirty)
+		{
+			file -force -prompt false -save -uiConfiguration false;
+		}
+	}
+	else
+	{
+		string $sceneName = `file -query -sceneName`;
+		$sceneName = `substituteAllString $sceneName "/" "\\"`;
+		$err = $sceneName + $err + "\r\n\r\n";
+		int $fileId = `fopen "Z:\\Scratch\\TD\\MC_winxII.txt" "a"`;
+		if ($fileId != 0)
+		{
+			fprint $fileId $err;
+			fclose $fileId;
+		}
+	}
+}
+
+global proc string zwWinxClubIIFixPath(string $path)
+{
+	string $url = `zwFullPath $path`;
+	$url = `substitute "/environment/" $url "/environments/"`;
+	string $urlL = tolower($url);
+	if ($urlL == "//file-cluster/gdc/resource/support/maya/import/animpanel/ddaptsmbipedcam.mb")
+	{
+		$path = "${MC_winxII}/data/ddAPTSMBipedCam.mb";
+	}
+	else
+	{
+		if (`match "//file-cluster/gdc/projects/winxclubii/reference/serverone/" $urlL` != "")
+		{
+			$path = "${MC_winxII}/scenes/" + `substring $url 60 (size($url))`;
+		}
+		else
+		{
+			string $MC_winxII = `getenv "MC_winxII"`;
+			int $len = size($MC_winxII);
+			if (size($url) > $len)
+			{
+				string $env = `substring $url 1 $len`;
+				if (tolower($MC_winxII) == tolower($env))
+				{
+					$path = "${MC_winxII}" + `substring $url ($len+1) (size($url))`;
+				}
+			}
+		}
+	}
+
+	return $path;
+}

@@ -1,0 +1,70 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-10-9
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-12-14
+//	Description:
+//				由于物体离原点太远，导致渲染结果异常。此工具目的就解决此类问题。
+//				使用方法，选择渲染相机，点工具即可。
+//				
+//////////////////////////////////////////////////////////
+
+global proc rrRenderRepairDistance()
+{
+	string $cam[] = `ls -sl`;
+	if (size($cam)==0)
+	{
+		error "请选择相机!";
+	}
+	
+	//删除模型smooth节点
+	zjDelsmooth();
+
+	string $shapes[] = `ls -type mesh -dag -ni -v`;
+
+	//获取任意一个shapes的点位移即可
+	float $transform[] = `xform -q -ws -t ($shapes[0]+".vtx[0]")`;
+	for ($shape in $shapes)
+	{
+		
+		float $scales[] = rrRenderRepairDistanceGetScale($shape);
+		
+		int $vertex[] = `polyEvaluate -v $shape`;
+		for ($i=0;$i<$vertex[0];$i++ )
+		{
+			//print ($shape+"\n");
+			catchQuiet(`setAttr ($shape+".vtx["+$i+"].pntx") (-1*$transform[0]*$scales[0])`);
+			catchQuiet(`setAttr ($shape+".vtx["+$i+"].pnty") (-1*$transform[1]*$scales[1])`);
+			catchQuiet(`setAttr ($shape+".vtx["+$i+"].pntz") (-1*$transform[2]*$scales[2])`);
+		}
+		polyQuad  -a 30 -kgb 1 -ktb 1 -khe 1 -ws 1 -ch 1 $shape;
+	}
+
+	string $group = `group -n "camGroup" $cam[0]`;
+	setAttr ($group+".tx") (-1*$transform[0]);
+	setAttr ($group+".ty") (-1*$transform[1]);
+	setAttr ($group+".tz") (-1*$transform[2]);
+}
+
+global proc float[] rrRenderRepairDistanceGetScale(string $shape)
+{
+	float $scales[]={1.0,1.0,1.0};
+	string $fullPath = `firstParentOf $shape`;
+	string $allParent[] = stringToStringArray($fullPath,"|");
+	string $parent;
+	for ($i=0;$i<(size($allParent)-1);$i++)
+	{
+		//print ($shape+"-----"+$parent+"\n");
+		$parent += "|"+$allParent[$i];
+
+		//对应关系  X-Z  Y-Y  Z-X
+		$scales[0] = $scales[0]*(`getAttr ($parent+".scaleZ")`);
+		$scales[1] = $scales[1]*(`getAttr ($parent+".scaleY")`);
+		$scales[2] = $scales[2]*(`getAttr ($parent+".scaleX")`);
+	}
+
+	return $scales;
+}

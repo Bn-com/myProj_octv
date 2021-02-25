@@ -1,0 +1,345 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: colorOccNormalLayersTool
+//	Author: Justin.Chan
+//	Created: 2011/09/03 
+//
+//	Update/Change: 2012/07/13
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+//////////////////////////////////////////////控制窗口
+global proc colorOccNormalLayersTool()
+{
+if (`window -ex colorOccNormalLayersToolWin`)
+    deleteUI colorOccNormalLayersToolWin;
+window -title "一键分层工具" colorOccNormalLayersToolWin;
+string $AboutColayout = `columnLayout -adjustableColumn true`;
+       menuBarLayout;//菜单栏
+	 menu -label "编辑";
+           menuItem -label "删除全部渲染分层" -command "DeleterenderLayersTool" ;
+	 menu -label "帮助说明";
+           menuItem -label "操作说明..." -command "colorOccNormalLayersToolHelp";
+
+             setParent ..;
+string $HbAutoTools = `frameLayout -label "请先选择需要分层的模型(场景或角色)"  -labelAlign "bottom" -cl 0   -cc "" -borderStyle "etchedIn"`;
+        columnLayout -adj 1 ;//竖型布局
+	text "所选物体会被自动分为: Color OCC Normal 三层";
+	button -height 30 -width 90 -bgc 0.8 0.8 0.8 -l "所选模型分层"  -c "Activation";
+             setParent ..;
+             setParent ..;
+string $HbAutoTools = `frameLayout -label "请先选择需要分层的模型(只限女孩们)"  -labelAlign "bottom" -cl 0   -cc "" -borderStyle "etchedIn"`;
+        columnLayout -adj 1 ;//竖型布局
+	text "所选物体会被自动分为: \n RGBh(头部) RGBb(身体) 两层 \n注意：本插件只会自动添加身体的红色材质球.\n其他模型自动附matte材质球";
+	button -height 30 -width 90 -bgc 1 0.5 0.5 -l "所选模型分层"  -c "Activation_02";
+             setParent ..;
+			 setParent..;
+string $NumberColumnLayout = `columnLayout -adjustableColumn true -rs 5 HbRenderToolsUIWin_main02`;
+		frameLayout -l "注意：请先选下面选项再分RGB层" -labelAlign "center"
+			-borderStyle "etchedIn" renOptionFrm; 			
+			columnLayout renOptionLay;
+			radioButtonGrp -numberOfRadioButtons 3
+    				-label "所选角色是否有smooth"
+					-labelArray3 "无级" "一级" "二级" -sl 2 smoothDivisions;
+				setParent..;
+				setParent ..;
+string $HbAutoTools = `frameLayout -label "请选择需要分层的模型(不要选组)"  -labelAlign "bottom" -cl 0   -cc "" -borderStyle "etchedIn"`;
+        columnLayout -adj 1 ;//竖型布局
+	text "所选物体会被自动分为:角色阴影 和 角色OCC阴影 两层。 \n注意：角色阴影层只添加一个层，其他材质需要手动附；\n OCC阴影层每个模型会添加一个miLabel属性，\n 默认为'场景',角色模型需手动改为'角色'。";
+	button -height 30 -width 90 -bgc 0 0.7 0.35 -l "所选模型分层"  -c "Activation_03";
+				setParent ..;
+showWindow colorOccNormalLayersToolWin;
+}
+colorOccNormalLayersTool;
+
+/////////////////////////////////////////////////////////程序
+
+global proc Activation()
+{	 
+string $objects[] = `ls -l -sl`;
+	if (size($objects) == 0)
+	{
+		error "情选择需要分层额模型!";
+	}
+     string $Name = `promptDialog 
+	 -title"为所分渲染层命名" 
+	 -message"只输入开头类型简写即可，如：\n BG 或 S 或 L 等等···"
+     -button"确认" -button"取消" 
+     -defaultButton"确认" 
+	 -cancelButton"取消" 
+	 -dismissString "取消"`;
+     if($Name=="确认")
+       {  
+        string $getName = `promptDialog -query -text`;
+		string $GetObjectName[]=`ls -sl`;
+string $ColorLayer = `createRenderLayer -name ($getName+"Color") -number 1 -noRecurse $GetObjectName`;
+string $OCCLayer = `createRenderLayer -name ($getName+"OCC") -number 1 -noRecurse $GetObjectName`;
+string $NormalLayer = `createRenderLayer -name ($getName+"Normal") -number 1 -noRecurse $GetObjectName`;
+setAttr defaultRenderLayer.renderable 0;
+renderLayerBuiltinPreset occlusion $OCCLayer;
+renderLayerBuiltinPreset normal $NormalLayer;
+refreshAE;
+
+string $occlusion1[] = `ls -type mib_amb_occlusion`;
+		for ($aa in $occlusion1)
+			{
+				float $aaOutput_mode = `getAttr ($aa+".output_mode")`;
+				if ($aaOutput_mode==0)
+				{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0.25 0.25 0.25 ;
+				setAttr ($aa+".max_distance") 10;
+				}
+				else if ($aaOutput_mode==3)
+				{setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0 0 0 ;
+				setAttr ($aa+".max_distance") 0;			
+			}
+		}
+    }
+
+}
+
+global proc Activation_02()
+{	 
+string $GetObjectName02[] = `ls -l -sl`;
+	if (size($GetObjectName02) == 0)
+		{
+		error "情选择需要分层额模型!";
+		}
+     string $Name = `promptDialog 
+	 -title"为所分渲染层命名" 
+	 -message"只输入开头分层简写即可，如：\n 角色开头简写字母 等等···"
+     -button"确认" -button"取消" 
+     -defaultButton"确认" 
+	 -cancelButton"取消" 
+	 -dismissString "取消"`;
+     if($Name=="确认")
+       {  
+		if (!`objExists "ez_matte"`)
+			{
+			shadingNode -asShader lambert -n "ez_matte";
+			sets -renderable true -noSurfaceShader true -empty -name ez_matteSG;
+			connectAttr -f ez_matte.outColor ez_matteSG.surfaceShader;
+			setAttr "ez_matte.color" -type double3 0 0 0 ;
+			setAttr ez_matte.matteOpacityMode 0;
+			}
+
+		if (!`objExists "ez_colorR"`)
+			{
+			shadingNode -asShader surfaceShader -n "ez_colorR";
+			sets -renderable true -noSurfaceShader true -empty -name ez_colorRSG;
+			connectAttr -f ez_colorR.outColor ez_colorRSG.surfaceShader;
+			setAttr "ez_colorR.outColor" -type double3 1 0 0 ;
+			setAttr "ez_colorR.outMatteOpacity" -type double3 0 0 0 ;
+			}
+		string $getName = `promptDialog -query -text`;
+//string $GetObjectName[]=`ls -sl`;
+string $RGBbLayer = `createRenderLayer -name ($getName+"RGBb") -number 1 -noRecurse $GetObjectName02`;
+layerEditorRenderLayerChange;
+layerEditorLayerButtonSelect 0 $RGBbLayer;
+//refreshAE;
+sets -e -forceElement ez_matteSG $GetObjectName02;
+string $body[] = `ls "*:MSH_c_hi_body" "*:MSH_c_hi_bags*" "*:MSH_c_hi_leg*"`;
+			for ($aa in $body)
+				{
+				sets -e -forceElement ez_colorRSG $aa;		
+				}
+
+string $RGBhLayer = `createRenderLayer -name ($getName+"RGBh") -number 1 -noRecurse $GetObjectName02`;
+layerEditorRenderLayerChange;
+layerEditorLayerButtonSelect 0 $RGBhLayer;
+//refreshAE;
+sets -e -forceElement ez_matteSG $GetObjectName02;
+float $smoothDivisions = `radioButtonGrp -q  -sl  smoothDivisions`;
+if ($smoothDivisions ==1)
+{
+string $face[] = `ls "*:MSH_*_hi_eyelashupr" "*:MSH_*_hi_eyelashlwr*" "*:MSH_*_hi_brow" "*:MSH_*_hi_eyes"
+"*:MSH_c_hi_tongue"   "*:MSH_c_hi_upteeth"  "*:MSH_c_hi_upteethridge"  "*:MSH_c_hi_lowteeth"  "*:MSH_c_hi_lowteethridge"
+"*:MSH_c_hi_body.f[0]" 
+"*:MSH_c_hi_body.f[1269:1277]" "*:MSH_c_hi_body.f[1323:1674]" 
+"*:MSH_c_hi_body.f[1683:1684]" "*:MSH_c_hi_body.f[1686:1728]" 
+"*:MSH_c_hi_body.f[1735:1737]" "*:MSH_c_hi_body.f[1744:1864]" 
+"*:MSH_c_hi_body.f[1871:2018]" "*:MSH_c_hi_body.f[2079:2128]" 
+"*:MSH_c_hi_body.f[2162:2270]" "*:MSH_c_hi_body.f[3539:3547]" 
+"*:MSH_c_hi_body.f[3593:3944]" "*:MSH_c_hi_body.f[3953:3954]" 
+"*:MSH_c_hi_body.f[3956:3998]" "*:MSH_c_hi_body.f[4005:4007]" 
+"*:MSH_c_hi_body.f[4014:4134]" "*:MSH_c_hi_body.f[4141:4288]" 
+"*:MSH_c_hi_body.f[4349:4398]" "*:MSH_c_hi_body.f[4432:4539]"`;
+			for ($aa in $face)
+				{
+				sets -e -forceElement ez_colorRSG $aa;		
+				}
+}
+
+if ($smoothDivisions ==2)
+{
+string $face[] = `ls "*:MSH_*_hi_eyelashupr" "*:MSH_*_hi_eyelashlwr*" "*:MSH_*_hi_brow" "*:MSH_*_hi_eyes"
+"*:MSH_c_hi_tongue"   "*:MSH_c_hi_upteeth"  "*:MSH_c_hi_upteethridge"  "*:MSH_c_hi_lowteeth"  "*:MSH_c_hi_lowteethridge"
+"*:MSH_c_hi_body.f[0:3]"
+"*:MSH_c_hi_body.f[5076:5111]" "*:MSH_c_hi_body.f[5292:6698]" 
+"*:MSH_c_hi_body.f[6731:6738]" "*:MSH_c_hi_body.f[6743:6913]" 
+"*:MSH_c_hi_body.f[6938:6949]" "*:MSH_c_hi_body.f[6974:7456]" 
+"*:MSH_c_hi_body.f[7481:8072]" "*:MSH_c_hi_body.f[8313:8511]" 
+"*:MSH_c_hi_body.f[8644:9080]" "*:MSH_c_hi_body.f[14153:14188]" 
+"*:MSH_c_hi_body.f[14369:15775]" "*:MSH_c_hi_body.f[15808:15815]" 
+"*:MSH_c_hi_body.f[15820:15990]" "*:MSH_c_hi_body.f[16015:16026]" 
+"*:MSH_c_hi_body.f[16051:16533]" "*:MSH_c_hi_body.f[16558:17149]" 
+"*:MSH_c_hi_body.f[17390:17588]" "*:MSH_c_hi_body.f[17721:18153]"`;
+			for ($aa in $face)
+				{
+				sets -e -forceElement ez_colorRSG $aa;		
+				}
+}
+
+if ($smoothDivisions ==3)
+{
+string $face[] = `ls "*:MSH_*_hi_eyelashupr" "*:MSH_*_hi_eyelashlwr*" "*:MSH_*_hi_brow" "*:MSH_*_hi_eyes"
+"*:MSH_c_hi_tongue"   "*:MSH_c_hi_upteeth"  "*:MSH_c_hi_upteethridge"  "*:MSH_c_hi_lowteeth"  "*:MSH_c_hi_lowteethridge"
+"*:MSH_c_hi_body.f[0:15]"
+"*:MSH_c_hi_body.f[20304:20447]" "*:MSH_c_hi_body.f[21168:26795]"
+"*:MSH_c_hi_body.f[26924:26955]" "*:MSH_c_hi_body.f[26972:27655]"
+"*:MSH_c_hi_body.f[27752:27799]" "*:MSH_c_hi_body.f[27896:29827]"
+"*:MSH_c_hi_body.f[29924:32291]" "*:MSH_c_hi_body.f[33252:34047]"
+"*:MSH_c_hi_body.f[34576:36323]" "*:MSH_c_hi_body.f[56612:56755]"
+"*:MSH_c_hi_body.f[57476:63103]" "*:MSH_c_hi_body.f[63232:63263]"
+"*:MSH_c_hi_body.f[63280:63963]" "*:MSH_c_hi_body.f[64060:64107]"
+"*:MSH_c_hi_body.f[64204:66135]" "*:MSH_c_hi_body.f[66232:68599]"
+"*:MSH_c_hi_body.f[69560:70355]" "*:MSH_c_hi_body.f[70884:72615]"`;
+			for ($aa in $face)
+				{
+				sets -e -forceElement ez_colorRSG $aa;		
+				}
+}
+
+
+setAttr defaultRenderLayer.renderable 0;
+	   }
+
+}
+
+
+
+
+
+global proc Activation_03()
+{	 
+string $GetObjectName02[] = `ls -l -sl`;
+	if (size($GetObjectName02) == 0)
+		{
+		error "情选择需要分层额模型!";
+		}
+     string $Name = `promptDialog 
+	 -title"为所分渲染层命名" 
+	 -message"只输入开头分层简写即可，如：\n 角色开头简写字母 等等···"
+     -button"确认" -button"取消" 
+     -defaultButton"确认" 
+	 -cancelButton"取消" 
+	 -dismissString "取消"`;
+     if($Name=="确认")
+       {  
+        string $getName = `promptDialog -query -text`;
+		string $GetObjectName[]=`ls -sl`;
+		for ($aa in $GetObjectName)
+			{
+			if (!`objExists ($aa+".miLabel")`)
+				{addAttr -ln "miLabel" -k on  -at "enum" -en "场景:角色:" $aa;}
+			}
+string $ShadowLayer = `createRenderLayer -name ($getName+"Shadow") -number 1 -noRecurse $GetObjectName`;
+string $OCCShadowLayer = `createRenderLayer -name ($getName+"OCCShadow") -number 1 -noRecurse $GetObjectName`;
+editRenderLayerGlobals -currentRenderLayer $OCCShadowLayer;
+		if (!`objExists ($getName+"_OCC_Shadow_surfaceShader")`)
+			{
+			shadingNode -asShader surfaceShader -n ($getName+"_OCC_Shadow_surfaceShader");
+			sets -renderable true -noSurfaceShader true -empty -name OCC_Shadow_surfaceShaderSG;
+			connectAttr -f (($getName+"_OCC_Shadow_surfaceShader")+".outColor") OCC_Shadow_surfaceShaderSG.surfaceShader;
+			setAttr (($getName+"_OCC_Shadow_surfaceShader")+".outColor") -type double3 0 0 0 ;
+			setAttr (($getName+"_OCC_Shadow_surfaceShader")+".outMatteOpacity") -type double3 0 0 0 ;
+
+			if (!`objExists ($getName+"OCC_Shadow_mib_amb_occlusion")`)
+				{shadingNode -asShader mib_amb_occlusion -n ($getName+"OCC_Shadow_mib_amb_occlusion");}
+			connectAttr -f (($getName+"OCC_Shadow_mib_amb_occlusion")+".outValue") (($getName+"_OCC_Shadow_surfaceShader")+".outColor");
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".samples") 100;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".dark") -type double3 0.25 0.25 0.25 ;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".max_distance") 10;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".id_inclexcl") 1;
+			}
+sets -e -forceElement OCC_Shadow_surfaceShaderSG $GetObjectName;
+string $camera[] = `ls -type camera `;
+for ($aa in $camera)
+	{
+	editRenderLayerAdjustment ($aa+".backgroundColor");
+	setAttr ($aa + ".backgroundColor") -type double3 1 1 1 ;	
+	}
+editRenderLayerAdjustment "defaultRenderGlobals.enableDefaultLight";
+setAttr "defaultRenderGlobals.enableDefaultLight" 0;
+editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+setAttr "miDefaultOptions.rayTracing" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxSamples";
+setAttr "miDefaultOptions.maxSamples" 2;
+setAttr "miDefaultOptions.contrastR" 0.02;
+setAttr "miDefaultOptions.contrastG" 0.02;
+setAttr "miDefaultOptions.contrastB" 0.02;
+editRenderLayerAdjustment "miDefaultOptions.contrastA";
+setAttr "miDefaultOptions.contrastA" 0.02;
+editRenderLayerAdjustment "miDefaultOptions.filter";
+setAttr miDefaultOptions.filter 1;
+editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+setAttr "miDefaultOptions.rayTracing" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxReflectionRays";
+setAttr "miDefaultOptions.maxReflectionRays" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxRefractionRays";
+setAttr "miDefaultOptions.maxRefractionRays" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxRayDepth";
+setAttr "miDefaultOptions.maxRayDepth" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxShadowRayDepth";
+setAttr "miDefaultOptions.maxShadowRayDepth" 2;
+
+setAttr defaultRenderLayer.renderable 0;
+		}
+}
+///////////////////////////////////////////////////////编辑
+global proc DeleterenderLayersTool()
+{
+     string $d = `confirmDialog -title"删除全部渲染分层" -message"确定删除全部渲染分层吗？"
+                               -button"删除" -button"取消" 
+                                -defaultButton"删除" -cancelButton"取消" -dismissString "确认"`;
+     if($d=="删除")
+		{ 
+layerEditorLayerButtonSelect 0 defaultRenderLayer;
+        string $get[] = `ls -type renderLayer`;
+		for ($aa in $get)
+			{
+				if ($aa!= "defaultRenderLayer")
+				{delete $aa;}
+			}
+		}
+}
+///////////////////////////////////////////////////////编辑
+global proc DeleterenderLayersTool()
+{
+     string $d = `confirmDialog -title"删除全部渲染分层" -message"确定删除全部渲染分层吗？"
+                               -button"删除" -button"取消" 
+                                -defaultButton"删除" -cancelButton"取消" -dismissString "确认"`;
+     if($d=="删除")
+		{ 
+layerEditorLayerButtonSelect 0 defaultRenderLayer;
+        string $get[] = `ls -type renderLayer`;
+		for ($aa in $get)
+			{
+				if ($aa!= "defaultRenderLayer")
+				{delete $aa;}
+			}
+		}
+}
+
+global proc colorOccNormalLayersToolHelp()
+{
+    string $help = `confirmDialog -title"帮助说明" 
+	-message"如有报错问题请联系：\n设置组：陈嘉伟"
+	-button"OK" 
+	-cancelButton"OK" `;
+}

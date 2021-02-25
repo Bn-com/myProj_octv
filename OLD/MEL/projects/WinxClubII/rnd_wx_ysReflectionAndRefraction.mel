@@ -1,0 +1,105 @@
+global proc rnd_wx_ysReflectionAndRefraction()
+{
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}
+
+	string $allShape[] = `ls -geometry`;
+	string $sel[] = `ls -sl`;
+	string $sel[] = `listRelatives -shapes $sel`;
+
+	//Filter materials which are tuned on refraction
+	int $i = 0;
+	string $refracMat[];
+	string $defaultMat[] = {"lambert1","particleCloud1","shaderGlow1"};
+	string $allMat[] = `ls -materials`;
+	string $allMat[] = stringArrayRemove($defaultMat, $allMat);
+
+	for($item in $allMat)
+	{
+		if((`objExists ($item + ".refractions")`) && (`getAttr ($item + ".refractions")` == 1))
+		{
+			$refracMat[$i++] = $item;
+		}
+	}
+	if(size($refracMat) !=0)
+	{
+		//Create render layer for refraction
+		createRenderLayer -name  "GDCrefracPass"  $allShape `ls -lights`;
+		editRenderLayerGlobals -currentRenderLayer "GDCrefracPass";
+
+		for($item in $refracMat)
+		{
+			float $refracIndex = `getAttr ($item + ".refractiveIndex")`;
+			int $refraclimit = `getAttr ($item + ".refractionLimit")`;
+			int $isDest = `connectionInfo -isDestination ($item + ".transparency")`;
+			vector $transValue = `getAttr ($item + ".transparency")`;
+			string $transConnection[] = `listConnections -plugs on ($item + ".transparency")`;
+
+			if((`mag $transValue` != 0) || ($isDest == 1))
+			{
+				string $selectObjs[] = ` hyperShade -objects $item`;
+				string $selectObjs[] = `ls -sl`;
+
+				//create blinn for refraction material
+				string $refrac = `shadingNode -asShader blinn -name  "GDCrefra"`;
+				setAttr ($refrac + ".refractiveIndex")  $refracIndex;
+				setAttr ($refrac + ".refractionLimit")  $refraclimit;
+				if(`mag $transValue` != 0)
+				{
+					setAttr ($refrac + ".transparency") -type double3 ($transValue.x) ($transValue.y) ($transValue.z);
+				}
+				if($isDest == 1)
+				{
+					connectAttr -force ($transConnection[0]) ($refrac + ".transparency");
+				}
+				setAttr ($refrac + ".color") -type double3 0 0 0;
+				setAttr ($refrac + ".eccentricity") 0;
+				setAttr ($refrac + ".specularRollOff") 0;
+				setAttr ($refrac + ".specularColor") -type double3 0 0 0 ;
+				setAttr ($refrac + ".reflectivity") 0;
+				setAttr ($refrac + ".refractions") 1;
+				string $refracSG = `sets -renderable true -noSurfaceShader true -empty -name ($refrac+"SG")`;
+				connectAttr -force ($refrac + ".outColor") ($refracSG + ".surfaceShader");
+				select $selectObjs;
+				hyperShade -assign  $refrac;
+			}
+		}
+
+		// Turn off  the rest of geometry primary visiblity
+		string $allMatFiltered[] = stringArrayRemove($refracMat, $allMat);
+		for($item in $allMatFiltered)
+		{
+			string $selectObjs[] = `hyperShade  -objects $item`;
+			string $selectObjs[] = `ls -sl`;
+			for($item in $selectObjs)
+			{
+				editRenderLayerAdjustment ($item + ".primaryVisibility");
+				setAttr ($item + ".primaryVisibility") 0;
+			}
+		}
+	}
+
+	// create render layer for reflection
+	createRenderLayer -name  "GDCreflecPass"  $allShape `ls -lights`;
+	editRenderLayerGlobals -currentRenderLayer "GDCreflecPass";
+
+	string $reflec = `shadingNode -asShader useBackground -name "GDCreflec" `;
+	string $reflecSG = `sets -renderable true -noSurfaceShader true -empty -name ($reflec+"SG")`;
+	connectAttr -force ($reflec + ".outColor") ($reflecSG + ".surfaceShader");
+	setAttr ($reflec + ".reflectivity") 1;
+	setAttr ($reflec + ".shadowMask") 0;
+	select $sel;
+	hyperShade -assign  $reflec;
+
+	string $visiableOff[] = stringArrayRemove($sel,$allShape);
+	for($item in $visiableOff)
+	{
+		editRenderLayerAdjustment ($item + ".primaryVisibility");
+		setAttr ($item + ".primaryVisibility") 0;
+	}
+}
+

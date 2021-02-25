@@ -1,0 +1,118 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slAnimRecoveAnimCureFromBaked(string $file)
+{
+	if (!size($file))
+	{
+		string $full = `file -q -sn`;
+		string $name = `file -q -sn -shn`;
+
+		string $post = match(".m.*",$name);
+		string $animfile = substituteAllString($name,$post,".anim");
+		$file = substituteAllString($full,$name,$animfile);
+	}
+	//print $file;
+	
+	$fileId = `fopen $file "r"`;
+	string $nextLine = `fgetline $fileId`;
+	//print $nextLine;
+	while(size($nextLine)>0)
+	{
+		$nextLine = `fgetline $fileId`;
+		if (startsWith($nextLine,"anim "))
+		{
+			string $buff[] = stringToStringArray($nextLine," ;\t\n");
+			string $control = $buff[3];
+			string $attribute = $buff[2];
+			string $key = $buff[3]+"."+$buff[2];
+
+			print ($key+"\n");
+			
+			if (size(`ls $key`) == 1&& `objExists $key` && (!`getAttr -l $key`) && `getAttr -k $key` && `getAttr -se $key`)
+			{
+				//delete old animCurve
+				cutKey -attribute $attribute -option keys $control; 
+
+				//print ($key+"\n");
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				
+				
+				//get Infinity 
+				$nextLine = `fgetline $fileId`;
+				clear $buff;
+				$buff = stringToStringArray($nextLine," ;\t\n");
+				string $preInfinite = $buff[1];
+				$nextLine = `fgetline $fileId`;
+				clear $buff;
+				$buff = stringToStringArray($nextLine," ;\t\n");
+				string $postInfinite = $buff[1];
+
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				string $return="";
+				while(!startsWith($return,"}"))
+				{
+					//print ($nextLine+"\n");
+					clear $buff;
+					$buff = stringToStringArray($nextLine," ;\t\n");
+
+					float $time = (float)$buff[0];
+					float $value = (float)$buff[1];
+					string $inTangentType = $buff[2];
+					string $outTangentType = $buff[3];
+					float $lock = (float)$buff[4];
+					float $weightLock = (float)$buff[5];
+					
+					setKeyframe -time $time -value $value $key;
+					//print ($key+"---"+$time+"---"+$value+"\n");
+					//keyTangent -e -time $time -lock $lock -weightLock $weightLock -attribute $attribute $control;
+					
+					if ($inTangentType == "fixed")
+					{
+						float $inAngle = (float)$buff[7];
+						float $inWeight = (float)$buff[8];
+						keyTangent -e -time $time -inAngle $inAngle -inWeight $inWeight -attribute $attribute $control;
+					}
+					if ($outTangentType == "fixed")
+					{
+						float $outAngle=0;
+						float $outWeight=0;
+						if ($inTangentType == "fixed")
+						{
+							$outAngle = (float)$buff[9];
+							$outWeight = (float)$buff[10];
+						}
+						else
+						{
+							$outAngle = (float)$buff[7];
+							$outWeight = (float)$buff[8];
+						}
+						keyTangent -e -time $time -outAngle $outAngle -outWeight $outWeight -attribute $attribute $control;
+					}
+					$nextLine = `fgetline $fileId`;
+					clear $buff;
+					$buff = stringToStringArray($nextLine," \t\n");
+					$return = $buff[0];
+				}
+				//keyTangent -e -inTangentType $inTangentType -outTangentType $outTangentType -attribute $attribute $control;
+				//selectKey -clear;
+				selectKey -r -k -attribute $attribute  $control;
+				setInfinity -preInfinite $preInfinite -postInfinite $postInfinite;
+			}
+		}
+	}
+	fclose $fileId;
+}

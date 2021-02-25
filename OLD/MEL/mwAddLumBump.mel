@@ -1,0 +1,90 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwAddLumBump(string $shader)
+{
+	string $shaderList[];
+	if(`strcmp $shader "all"`==0)
+	{
+		//APPLY TO ALL SHADERS
+		string $result[] = `ls "*_surfaceShader"`;
+		int $r = 0;
+		string $node;
+		for($node in $result)
+		{
+			$shaderList[$r] = `substitute "_surfaceShader" $node ""`;
+			$r++;
+		}
+	}
+	else
+	{
+		$shaderList[0] = $shader;
+	}
+
+	for($shader in $shaderList)
+	{
+		print ("SHADER: "+$shader+"\n");
+		if(`objExists ($shader+"_lambert")`==0)
+		{
+			string $bump[] = `ls ($shader+"_bumpFile_*")`;
+			if(`size $bump`)
+			{
+				print ("BUMP FILE: "+$bump[0]+"\n");
+				//CREATE LAMBERT NODE
+				if(`objExists ($shader+"_lambert")`==0)
+				{
+					string $lambert = `shadingNode -asShader lambert`;
+					$lambert = `rename $lambert ($shader+"_lambert")`;
+					setAttr ($lambert+".diffuse") 1;
+					connectAttr -f ($bump[0]+".outNormal") ($lambert+".normalCamera");
+					setAttr ($lambert+".color") -type double3 1 1 1 ;
+					print ("CREATED LAMBERT: "+$lambert+"\n");
+
+					//CREATE CLAMP NODE
+					string $clamp = `createNode clamp`;
+					$clamp = `rename $clamp ($shader+"_LUMINANCE_CLAMP")`;
+					setAttr ($clamp+".maxR") 1.0;
+					setAttr ($clamp+".maxG") 1.0;
+					setAttr ($clamp+".maxB") 1.0;
+					connectAttr -f ($lambert+".outColor") ($clamp+".input");
+					print ("CREATED CLAMP: "+$clamp+"\n");
+
+					//CREATE LUMINANCE NODE
+					if(`objExists ($shader+"_LUMINANCE")`)
+					{
+						rename ($shader+"_LUMINANCE") ($shader+"_SPECULAR_LUMINANCE");
+					}		
+					string $lum = `shadingNode -asUtility luminance`;
+					$lum = `rename $lum ($shader+"_LUMINANCE")`;
+					connectAttr -f ($clamp+".output") ($lum+".value");
+					print ("CREATED LUMINANCE: "+$lum+"\n");
+
+					string $lumRamps[] = `ls ("*_"+$shader+"_LUMINANCE_RAMP")`;
+					for($ramp in $lumRamps)
+					{
+						if(`connectionInfo -id ($ramp+".colorEntryList[0].color")`)
+						{
+							string $cons[] = `listConnections -s 1 -d 0 -p 1 ($ramp+".colorEntryList[0].color")`;
+							print ("DISCONNECTING: "+$cons[0]+" "+$ramp+".colorEntryList[0].color\n");
+							disconnectAttr $cons[0] ($ramp+".colorEntryList[0].color");
+						}
+						print ("ADDING BUMP TO RAMP: "+$ramp+"\n");
+						connectAttr -f ($lum+".outValue") ($ramp+".colorEntryList[0].colorR");
+						connectAttr -f ($lum+".outValue") ($ramp+".colorEntryList[0].colorG");
+						connectAttr -f ($lum+".outValue") ($ramp+".colorEntryList[0].colorB");
+						connectAttr -f ($lum+".outValue") ($ramp+".vCoord");
+					}
+				}
+			}
+		}
+		print ("FINISHED SHADER: "+$shader+"\n\n");
+	}
+	print "ALL DONE\n";
+}

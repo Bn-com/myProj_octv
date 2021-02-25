@@ -1,0 +1,432 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// return true if successfully add attribute, else return false
+//
+
+global proc int kcAddRippleAttr(int $type, string $obj, int $startFrame, int $duration, float $amplitude, float $wavelength, float $radius)
+{
+	// add attributes: "startFrame", "duration", "amplitude", "wavelength", "radius";
+
+	string $attr = "startFrame";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType long -defaultValue $startFrame -softMinValue 0 -softMaxValue 100 $obj;
+	else
+		return false;	
+
+	string $attr = "duration";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType long -defaultValue $duration -softMinValue 0 -softMaxValue 200 $obj;	
+	else
+		return false;	
+
+	string $attr = "amplitude";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType "float" -defaultValue $amplitude -softMinValue 0 -softMaxValue 1 $obj;	
+	else
+		return false;	
+
+	string $attr = "wavelength";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType "float" -defaultValue $wavelength -softMinValue 0 -softMaxValue 1 $obj;	
+	else
+		return false;	
+
+	string $attr = "radius";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType "float" -defaultValue $radius -softMinValue 1 -softMaxValue 100 $obj;	
+	else
+		return false;	
+
+	if ($type == 2)
+	{
+		// for ambient ripple, add "speed" attribute
+
+		string $attr = "speed";
+
+		if (!attributeExists($attr, $obj))
+			addAttr -keyable true -longName $attr -attributeType "float" -defaultValue 1.0 -softMinValue 1 -softMaxValue 100 $obj;	
+		else
+			return false;	
+	}
+
+	return true;
+}
+
+global proc string[] kcCreateWaveDeformer(string $surface, string $locator)
+{
+	// delete old wave handle object if it exists
+
+//	if (`objExists ($locator + "_WaveHandle")`)
+//		delete ($locator + "_WaveHandle");
+
+	// keep original selection
+
+	string $orig[] = `ls -selection`;
+
+	// select surface
+
+	select $surface;
+
+	// create wave deformer
+
+	string $nodes[] = `nonLinear -type wave -minRadius 0 -maxRadius 1 -amplitude 0 -wavelength 1 -dropoff 1 -offset 0`;
+
+	// node parenting and renaming
+
+	xform -translation 0 0 0 $nodes[1];
+	parent -relative $nodes[1] $locator;
+
+	string $result[2];
+
+	$result[0] = `rename $nodes[0] ($locator + "_Wave")`;
+	$result[1] = `rename $nodes[1] ($locator + "_WaveHandle")`;
+
+	// restore original selection
+
+	select $orig;
+
+	return $result;
+}
+
+
+//	Example Expression (normal ripple)
+//	----------------------------------
+//
+//	int $startFrame = rippleLocator.startFrame;
+//	int $duration = rippleLocator.duration;
+//	int $endFrame = $startFrame + $duration;
+//	float $wavelength = rippleLocator.wavelength;
+//	float $amplitude = rippleLocator.amplitude;
+//	float $radius = rippleLocator.radius;
+//	
+//	if (frame < $startFrame)
+//		rippleLocator_Wave.amplitude = 0.0;
+//	else
+//		rippleLocator_Wave.amplitude = $amplitude;
+//	
+//	if ($wavelength <= 0)
+//		rippleLocator_Wave.wavelength = 0.2;
+//	else
+//		rippleLocator_Wave.wavelength = $wavelength;
+//	
+//	rippleLocator_Wave.envelope = 1.0 - linstep($startFrame, $endFrame, frame);
+//	rippleLocator_Wave.dropoffPosition = 0.5 + (0.5 * linstep($startFrame, $endFrame, frame));
+//	rippleLocator_Wave.minRadius = linstep($startFrame, $endFrame, frame);
+//	rippleLocator_Wave.maxRadius = 0.25 + (0.75 * hermite(0, 1, 8, -0.001, linstep($startFrame, $endFrame, frame)));
+//	
+//	rippleLocator_WaveHandle.scaleX = $radius;
+//	rippleLocator_WaveHandle.scaleY = $radius;
+//	rippleLocator_WaveHandle.scaleZ = $radius;
+//
+//
+//	Example Expression (ambient ripple)
+//	-----------------------------------
+//
+//	int $startFrame = rippleLocator.startFrame;
+//	int $duration = rippleLocator.duration;
+//	int $endFrame = $startFrame + $duration;
+//	float $wavelength = rippleLocator.wavelength;
+//	float $amplitude = rippleLocator.amplitude;
+//	float $radius = rippleLocator.radius;
+//	float $speed = rippleLocator.speed;
+//	float $rand1 = rand(10000);
+//	float $rand2 = rand(10000);
+//	
+//	if ((frame < $startFrame) || (frame > $endFrame))
+//		rippleLocator_Wave.amplitude = 0.0;
+//	else
+//		rippleLocator_Wave.amplitude = $amplitude * ((noise(time + $rand1) + 1.0) / 2.0);
+//	
+//	if ($wavelength <= 0)
+//		rippleLocator_Wave.wavelength = 0.2;
+//	else
+//		rippleLocator_Wave.wavelength = $wavelength;
+//	
+//	rippleLocator_Wave.envelope = ((noise(time + $rand2) + 1.0) / 4.0) + 0.5;		// scale to [0.5, 1.0]
+//	rippleLocator_Wave.offset = -$speed * linstep($startFrame, $endFrame, frame);
+//	
+//	rippleLocator_WaveHandle.scaleX = $radius;
+//	rippleLocator_WaveHandle.scaleY = $radius;
+//	rippleLocator_WaveHandle.scaleZ = $radius;
+
+
+global proc kcCreateRippleExp(int $type, string $locator, string $names[])
+{
+	string $wave = $names[0];
+	string $waveHandle = $names[1];
+
+	// form the expression command
+
+	string $exp;
+
+	if ($type == 1)
+	{
+		// normal ripple 
+
+		$exp += "int $startFrame = " + $locator + ".startFrame;\n";
+		$exp += "int $duration = " + $locator + ".duration;\n";
+		$exp += "int $endFrame = $startFrame + $duration;\n";
+		$exp += "float $wavelength = " + $locator + ".wavelength;\n";
+		$exp += "float $amplitude = " + $locator + ".amplitude;\n";
+		$exp += "float $radius = " + $locator + ".radius;\n";
+		$exp += "\n";
+		$exp += "if (frame < $startFrame)\n";
+		$exp += "\t" + $wave + ".amplitude = 0.0;\n";
+		$exp += "else\n";
+		$exp += "\t" + $wave + ".amplitude = $amplitude;\n";
+		$exp += "\n";
+		$exp += "if ($wavelength <= 0)\n";
+		$exp += "\t" + $wave + ".wavelength = 0.2;\n";
+		$exp += "else\n";
+		$exp += "\t" + $wave + ".wavelength = $wavelength;\n";
+		$exp += "\n";
+		$exp += $wave + ".envelope = 1.0 - linstep($startFrame, $endFrame, frame);\n";
+		$exp += $wave + ".dropoffPosition = 0.5 + (0.5 * linstep($startFrame, $endFrame, frame));\n";
+		$exp += $wave + ".minRadius = linstep($startFrame, $endFrame, frame);\n";
+		$exp += $wave + ".maxRadius = 0.25 + (0.75 * hermite(0, 1, 8, -0.001, linstep($startFrame, $endFrame, frame)));\n";
+		$exp += "\n";
+		$exp += $waveHandle + ".scaleX = $radius;\n";
+		$exp += $waveHandle + ".scaleY = $radius;\n";
+		$exp += $waveHandle + ".scaleZ = $radius;\n";
+	}
+	else
+	{
+		// ambient ripple
+
+		float $rand1 = rand(10000);
+		float $rand2 = rand(10000);
+
+		$exp += "int $startFrame = " + $locator + ".startFrame;\n";
+		$exp += "int $duration = " + $locator + ".duration;\n";
+		$exp += "int $endFrame = $startFrame + $duration;\n";
+		$exp += "float $wavelength = " + $locator + ".wavelength;\n";
+		$exp += "float $amplitude = " + $locator + ".amplitude;\n";
+		$exp += "float $radius = " + $locator + ".radius;\n";
+		$exp += "float $speed = " + $locator + ".speed;\n";
+		$exp += "float $rand1 = " + $rand1 + ";\n";
+		$exp += "float $rand2 = " + $rand2 + ";\n";
+		$exp += "\n";
+		$exp += "if ((frame < $startFrame) || (frame > $endFrame))\n";
+		$exp += "\t" + $wave + ".amplitude = 0.0;\n";
+		$exp += "else\n";
+		$exp += "\t" + $wave + ".amplitude = $amplitude * ((noise(time + $rand1) + 1.0) / 2.0);\n";
+		$exp += "\n";
+		$exp += "if ($wavelength <= 0)\n";
+		$exp += "\t" + $wave + ".wavelength = 0.2;\n";
+		$exp += "else\n";
+		$exp += "\t" + $wave + ".wavelength = $wavelength;\n";
+		$exp += "\n";
+		$exp += $wave + ".envelope = ((noise(time + $rand2) + 1.0) / 4.0) + 0.5;		// scale to [0.5, 1.0]\n";
+		$exp += $wave + ".offset = -$speed * linstep($startFrame, $endFrame, frame);\n";
+		$exp += "\n";
+		$exp += $waveHandle + ".scaleX = $radius;\n";
+		$exp += $waveHandle + ".scaleY = $radius;\n";
+		$exp += $waveHandle + ".scaleZ = $radius;\n";
+	}
+
+	string $expObj = $locator + "_RippleExp";
+
+//	if (!`objExists $expObj`)
+		expression -name $expObj -string $exp -object $locator -alwaysEvaluate true -unitConversion all;
+//	else
+//		expression -e -string $exp $expObj;
+}
+
+proc string kcCreateRippleLocator(string $obj)
+{
+	// store old selection
+
+	string $selection[] = `ls -selection`;
+
+	// create locator
+
+	float $pos[] = `xform -q -worldSpace -rotatePivot $obj`;
+
+	string $results[] = `spaceLocator -name "rippleLocator"`;
+	xform -centerPivots -worldSpace -translation $pos[0] $pos[1] $pos[2];
+
+	// restore old selection
+
+	select $selection;
+
+	return $results[0];
+}
+
+global proc kcCreateRipple(string $surfaceTextField, string $rippleTypeRadioButton, string $startFrameCheckBox, string $startFrameSlider, string $durationSlider, string $amplitudeSlider, string $wavelengthSlider, string $radiusSlider)
+{
+	// check whether surface exists
+
+	string $surface = `textFieldGrp -q -text $surfaceTextField`;
+
+	if (!`objExists $surface`)
+	{
+		warning($surface + " does not exist.");
+		return;
+	}
+
+	// check whether one or more locators are selected
+
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) == 0)
+	{
+		warning("Select one or more locators.");
+		return;
+	}
+		
+	for ($item in $selected)
+	{
+		string $children[] = `listRelatives -shapes $item`;
+
+		if ((size($children) == 0) || (`nodeType $children[0]` != "locator"))
+		{
+			warning("Make sure all selected objects are locators.");
+			return;
+		}
+	}
+
+	int $startFrame;
+
+	if (`checkBox -q -value $startFrameCheckBox`)
+		$startFrame = `currentTime -q`;
+	else
+		$startFrame = `intSliderGrp -q -value $startFrameSlider`; 
+
+	int $duration = `intSliderGrp -q -value $durationSlider`; 
+	float $amplitude = `floatSliderGrp -q -value $amplitudeSlider`; 
+	float $wavelength = `floatSliderGrp -q -value $wavelengthSlider`; 
+	float $radius = `floatSliderGrp -q -value $radiusSlider`; 
+
+	int $type = `radioButtonGrp -q -select $rippleTypeRadioButton`;
+
+	for ($item in $selected)
+	{
+		string $locator = kcCreateRippleLocator($item);
+//		string $locator = $item;
+
+		// add attributes to the selected locator
+
+		kcAddRippleAttr($type, $locator, $startFrame, $duration, $amplitude, $wavelength, $radius);
+			
+		// create a wave deformer
+
+		string $names[] = kcCreateWaveDeformer($surface, $locator);
+
+		// create expression 
+
+		if ($type == 1)
+			kcCreateRippleExp($type, $locator, $names);		// normal ripple
+		else
+			kcCreateRippleExp($type, $locator, $names);		// ambient ripple
+	}
+}
+
+global proc kcStartFrameCheckBoxCB(string $startFrameSlider, int $state)
+{
+	if ($state == true)
+	{
+		// disable startFrameSlider
+
+		intSliderGrp -e -enable false $startFrameSlider;
+	}
+	else
+	{
+		// enable startFrameSlider
+
+		intSliderGrp -e -enable true $startFrameSlider;
+	}
+}
+
+global proc kcCreateRippleGUI()
+{
+	if (`window -q -exists kcCreateRippleWnd`)
+		deleteUI -window kcCreateRippleWnd;
+
+	window -title "Create Ripple (Wave Deformer)" -resizeToFitChildren true kcCreateRippleWnd;
+		
+		string $formLayout = `formLayout`;
+
+			string $surfaceTextField = `textFieldGrp -label "Surface:" -text "pond"`;
+			string $separator1 = `separator`;
+
+			int $currentTime = `currentTime -q`;
+			int $duration = 100;
+			float $amplitude = 0.05;
+			float $wavelength = 0.2;
+			float $radius = 10;
+
+			string $rippleTypeRadioButton = `radioButtonGrp -select 1 -numberOfRadioButtons 2 -label "Ripple Type:" -labelArray2 "normal" "ambient"`;
+			string $startFrameSlider = `intSliderGrp -enable false -label "Start Frame:" -field true -adjustableColumn 3 -minValue 0 -maxValue 100 -fieldMinValue -10000 -fieldMaxValue 10000 -value $currentTime`; 
+			string $startFrameCheckBox = `checkBox -label "Set start frame to current frame" -value true -onCommand ("kcStartFrameCheckBoxCB " + $startFrameSlider + " 1") -offCommand ("kcStartFrameCheckBoxCB " + $startFrameSlider + " 0")`;
+			string $durationSlider = `intSliderGrp -label "Duration:" -field true -adjustableColumn 3 -minValue 0 -maxValue 200 -fieldMinValue -10000 -fieldMaxValue 10000 -value $duration`; 
+			string $amplitudeSlider = `floatSliderGrp -label "Amplitude:" -field true -adjustableColumn 3 -minValue 0 -maxValue 0.1 -fieldMinValue -10000 -fieldMaxValue 10000 -value $amplitude`;
+			string $wavelengthSlider = `floatSliderGrp -label "Wavelength:" -field true -adjustableColumn 3 -minValue 0.001 -maxValue 1 -fieldMaxValue 10000 -value $wavelength`;
+			string $radiusSlider = `floatSliderGrp -label "Radius:" -field true -adjustableColumn 3 -minValue 0.001 -maxValue 100 -fieldMaxValue 10000 -value $radius`;
+
+			string $separator2 = `separator`;
+			string $button = `button -label "Create Ripple" -command ("kcCreateRipple " + $surfaceTextField + " " + $rippleTypeRadioButton + " " + $startFrameCheckBox + " " + $startFrameSlider + " " + $durationSlider + " " + $amplitudeSlider + " " + $wavelengthSlider + " " + $radiusSlider)`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$surfaceTextField	"top"	5
+			-attachForm		$surfaceTextField	"left"	5
+			-attachForm		$surfaceTextField	"right"	5
+
+			-attachControl	$separator1	"top"		5	$surfaceTextField
+			-attachForm		$separator1	"left"		5
+			-attachForm		$separator1	"right"		5
+
+			-attachControl	$rippleTypeRadioButton	"top"		5	$separator1
+			-attachForm		$rippleTypeRadioButton	"left"		5
+			-attachForm		$rippleTypeRadioButton	"right"		5
+
+			-attachControl	$startFrameCheckBox	"top"		5	$rippleTypeRadioButton
+			-attachForm		$startFrameCheckBox	"left"		150
+			-attachForm		$startFrameCheckBox	"right"		5
+
+			-attachControl	$startFrameSlider	"top"		5	$startFrameCheckBox
+			-attachForm		$startFrameSlider	"left"		5
+			-attachForm		$startFrameSlider	"right"		5
+
+			-attachControl	$durationSlider		"top"		5	$startFrameSlider
+			-attachForm		$durationSlider		"left"		5
+			-attachForm		$durationSlider		"right"		5
+
+			-attachControl	$amplitudeSlider	"top"		5	$durationSlider
+			-attachForm		$amplitudeSlider	"left"		5
+			-attachForm		$amplitudeSlider	"right"		5
+
+			-attachControl	$wavelengthSlider	"top"		5	$amplitudeSlider
+			-attachForm		$wavelengthSlider	"left"		5
+			-attachForm		$wavelengthSlider	"right"		5
+
+			-attachControl	$radiusSlider	"top"		5	$wavelengthSlider
+			-attachForm		$radiusSlider	"left"		5
+			-attachForm		$radiusSlider	"right"		5
+
+			-attachControl	$separator2	"top"		5	$radiusSlider
+			-attachForm		$separator2	"left"		5
+			-attachForm		$separator2	"right"		5
+
+			-attachControl	$button		"top"		5	$separator2
+			-attachForm		$button		"left"		5
+			-attachForm		$button		"right"		5
+		$formLayout;
+
+	showWindow kcCreateRippleWnd;
+}

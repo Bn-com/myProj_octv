@@ -1,0 +1,238 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ¿Ó»Ò
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:    lr_seq_checker.mel
+//     
+//   Description:    Check the image sequence, get the lost frames
+//                                  
+//    Created By:    Larry
+//
+//  Last Updated:    2002.3.6
+//     
+//////////////////////////////////////////////////////////////
+
+//
+//    only support name.####.ext type now
+//
+
+global proc lr_seq_checker()
+{
+	  if(`window -ex seq_checkerUI`) deleteUI seq_checkerUI;
+	  window -title "Sequence Checker V1.0" -sizeable 0 -widthHeight 370 410 seq_checkerUI;
+	        columnLayout;
+
+			     textFieldButtonGrp -label "Start Frame:" -text "" 
+						           -buttonLabel "Browse.." -editable 1
+						           -cw3 100 200 80 -buttonCommand onseqBrowse 
+						           seqbrowseCTL;
+
+				 intSliderGrp -label "End Frame:" -field true
+							  -minValue 0 -maxValue 500
+    	                      -fieldMinValue 0 -fieldMaxValue 500
+    	                      -value 100 -cw3 100 40 280 -ss 1
+							  endsliderCTL;
+
+				 intSliderGrp -label "By Frame:" -field true
+							  -minValue 1 -maxValue 5
+    	                      -fieldMinValue 1 -fieldMaxValue 5
+    	                      -value 1 -cw3 100 40 280 -ss 1
+							  bysliderCTL;
+				 
+				 intSliderGrp -label "Padding:" -field true
+							  -minValue 1 -maxValue 4
+    	                      -fieldMinValue 1 -fieldMaxValue 4
+    	                      -value 4 -cw3 100 40 280 -ss 1 -en 0
+							  digisliderCTL;
+
+				 optionMenuGrp -label"Format:" -en 0 -cw2 100 120 -cat 1 "right" 10 formatCTL;
+								menuItem -label "name.#.ext";
+								menuItem -label "name.ext.#";
+								menuItem -label "name#";
+								menuItem -label "name#.ext";
+
+                
+				separator -style "none" -h 10 -w 400;
+				
+				rowLayout -numberOfColumns 2 -cw2 300 100; 
+						    checkBoxGrp -numberOfCheckBoxes 1 -cw2 200 50
+					                -label "Try to remove *.ng files" -label1 ""
+									-value1 0
+									autoremoveCTL;
+				            button -w 60 -label "  Check" -c onseqcheck;
+				setParent ..;
+				 
+			    separator -style "in" -h 10 -w 400;
+
+				text -label "  Missed frame list:";
+				
+				textScrollList -numberOfRows 10 -w 360 missframeCTL ;
+
+			setParent ..;
+
+
+
+	  showWindow;
+   
+}
+
+global proc onseqBrowse()
+{
+    string $filename = `fileDialog -directoryMask "*"`;
+	if($filename != "")
+	{
+         textFieldButtonGrp -e -text $filename seqbrowseCTL;
+		 textScrollList -e -removeAll missframeCTL;
+	}
+}
+
+
+
+global proc onseqcheck()
+{
+    textScrollList -e -removeAll missframeCTL;
+	string $filename = `textFieldButtonGrp -q -text seqbrowseCTL`;
+	if($filename == "")
+	{
+        warning "Please select the first file";
+		return;
+	}
+
+    int $end = `intSliderGrp -q -value endsliderCTL`;
+	int $by = `intSliderGrp -q -value bysliderCTL`;
+	int $digi = `intSliderGrp -q -value digisliderCTL`;
+	int $format = `optionMenuGrp -q -select formatCTL`;
+
+	string $longnamebuf[];
+	string $shortnamebuf[];
+
+	int $longnum = `tokenize $filename "/" $longnamebuf`;
+    int $shortnum = `tokenize $longnamebuf[$longnum - 1] "." $shortnamebuf`;
+
+// name.#.ext
+
+	if($format == 1)    
+	{
+        if($shortnum !=3) 
+		{
+			warning "Selete file format is not like name.#.ext";
+			return;
+		}
+
+		if(size($shortnamebuf[1]) != $digi)
+		{
+			warning "Wrong Padding Setting";
+			return;
+		}
+		
+		int $start = (int)$shortnamebuf[1];
+		int $tmpnum;
+		
+		string $path = `substring $filename 1 (size($filename) - size($longnamebuf[$longnum -1]))`;
+
+//		print $start;
+// for diffrent padding
+
+string $target_name;
+string $full_name;
+int $comp = 0;	
+
+for($tmpnum = $start; $tmpnum <= $end; $tmpnum ++)
+	{
+		switch ($digi)
+		{
+		    case 1:
+				break;
+			case 2:
+				break;
+			case 3:
+				break;
+			case 4:
+					if($tmpnum < 10)
+					{
+                       $target_name = $shortnamebuf[0] + ".000" + $tmpnum + "." + $shortnamebuf[2];
+					
+					}else if($tmpnum < 100)
+					{
+                        $target_name = $shortnamebuf[0] + ".00" + $tmpnum + "." + $shortnamebuf[2];
+					
+					}else if($tmpnum < 1000)
+					{
+						$target_name = $shortnamebuf[0] + ".0" + $tmpnum + "." + $shortnamebuf[2];
+					}
+
+				break;
+		}    //  end switch
+
+
+		$full_name = $path + $target_name;
+		int $tmp = seqcheckfile($full_name,$target_name);
+		if($tmp != $comp)
+		{
+              int $totalnum = `textScrollList -q -numberOfItems missframeCTL`;
+  		      if($tmp ==0)
+			  {
+			       if($totalnum != 1)
+				   {
+						 textScrollList -e -ap $totalnum ("- - - - - - - - - - - - - - - - - - - " +
+		                  "- - - - - - - - - - - - - - - - - - - ") missframeCTL;
+				   }
+			   }
+			   $comp = $tmp;
+		}
+}   // end for
+
+	}
+//	print $shortnamebuf;
+
+}
+
+global proc int seqcheckfile(string $full,string $target)
+{
+//    checkBoxGrp -q -value1 1 autoremoveCTL;
+
+    string $ng = $full + ".ng";    
+	if(`filetest -f $ng`)
+	{
+		
+		if(`checkBoxGrp -q -value1  autoremoveCTL`)
+		{
+            $ng = substituteAllString($ng,"/","\\");
+			if(`sysFile -delete $ng`)
+			{
+                textScrollList -e -append ($target + ".ng (Removed)") missframeCTL;
+			}else{
+				textScrollList -e -append ($target + ".ng (Cannot removed)") missframeCTL;
+			}
+			
+			$full = substituteAllString($full,"/","\\");
+			if(`sysFile -delete $full`)
+			{
+                textScrollList -e -append ($target + "(Removed)") missframeCTL;
+			}else{
+                textScrollList -e -append ($target + "(Cannot removed)") missframeCTL;
+			}
+
+		}else{
+            textScrollList -e -append ($target + ".ng(not removed)") missframeCTL;
+			textScrollList -e -append ($target + "(not removed)") missframeCTL;
+		}
+
+	   return 0;
+	}
+
+	if(!`filetest -f $full`)
+	{
+		textScrollList -e -append $target missframeCTL;
+		return 0;
+	}
+
+	return 1;
+}

@@ -1,0 +1,224 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc int kcGetMapping(string $obj, int $vtxID, int $vtxIDMapping[], string $vtxIDOffset[])
+{
+	int $offset = 0;
+
+	int $found = false;
+
+	for ($i = 0; $i < size($vtxIDOffset); $i += 2)
+	{
+		if ($vtxIDOffset[$i] == $obj)
+		{
+			$offset = $vtxIDOffset[$i + 1];
+			$found = true;
+
+			break;
+		}
+	}
+
+	if ($found)
+		return $vtxIDMapping[$offset + $vtxID];
+	else
+	{
+		warning("VtxIDMapping file: cannot find mapping vertex ID for " + $obj + ".vtx[" + $vtxID + "]");
+		return -1;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc kcReadVtxIDMapping(string $filename)
+{
+	global int $vtxIDMapping[];
+	global string $vtxIDOffset[];
+
+	clear $vtxIDMapping;
+	clear $vtxIDOffset;
+
+	int $count = -1;
+
+	int $fileID = `fopen $filename "r"`;
+
+	if ($fileID == 0)
+		warning("Cannot open " + $filename);
+	else
+	{
+		string $buffer = `fgetline $fileID`;
+
+		while (size($buffer) > 0) 
+		{
+			$buffer = substituteAllString($buffer, "\n", "");
+
+			string $tokens[];
+			tokenize $buffer " " $tokens;
+			
+			if ($tokens[0] == "//")
+			{
+				$vtxIDOffset[size($vtxIDOffset)] = $tokens[1];
+				$vtxIDOffset[size($vtxIDOffset)] = $count + 1;
+			}
+			else
+			{
+				$vtxIDMapping[size($vtxIDMapping)] = $tokens[1];
+				$count++;
+			}
+
+			$buffer = `fgetline $fileID`;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc string kcGetSkinCluster(string $obj)
+{
+	string $history[] = `listHistory $obj`;
+
+	for ($item in $history)
+		if (`nodeType $item` == "skinCluster")
+			return $item;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+global proc kcImportSkinCluster(string $filename, string $mapFile)
+{
+	// read $vtxIDMapping and $vtxIDOffset
+
+	global int $vtxIDMapping[];
+	global string $vtxIDOffset[];
+
+	kcReadVtxIDMapping($mapFile);
+
+	int $fileID = `fopen $filename "r"`;
+
+	if ($fileID == 0)
+		error("Cannot open " + $filename);
+
+	string $buffer = `fgetline $fileID`;					// first line: mesh (transform)
+	$buffer = substituteAllString($buffer, "\n", "");
+
+
+	string $obj = $buffer;
+	
+	// check there is only one object named $obj
+
+	string $temp[] = `ls $obj`;
+
+	if (size($temp) != 1)
+	{
+		fclose($fileID);
+
+		error($obj + " is not unique. Please make sure there is only one such object in the scene.");
+	}
+
+	// check there is a skin cluster node
+
+	string $skinCluster = kcGetSkinCluster($obj);
+
+	if ($skinCluster == "")	
+		error($obj + " does not have skin cluster node.");
+
+
+	string $buffer = `fgetline $fileID`;					// second line: number of vertices
+	$buffer = substituteAllString($buffer, "\n", "");
+
+	int $numVtx = $buffer;
+
+
+	int $count = 0;
+	int $displayPercentage = 0;
+
+	print("skinning " + $displayPercentage + "%\n");
+
+	$buffer = `fgetline $fileID`;
+
+	float $startTime = `timerX`;
+
+    while (size($buffer) > 0) 
+	{
+		$count++;
+
+		int $currentPercentage = int(100.0 * $count / $numVtx);
+
+		if ($currentPercentage > $displayPercentage)
+		{
+			$displayPercentage = $currentPercentage;
+			print("skinning " + $displayPercentage + "%\n");
+		}
+
+		$buffer = substituteAllString($buffer, "\n", "");
+
+		string $tokens[];
+		
+		tokenize $buffer " " $tokens;
+		string $vtxID = $tokens[0];
+
+		string $joints[];
+		float $weight[];
+
+		clear $joints;
+		clear $weight;
+
+		for ($i = 1; $i < size($tokens); $i += 2)
+		{
+			$joints[size($joints)] = $tokens[$i];
+			$weight[size($weight)] = $tokens[$i + 1];
+		}
+
+		int $id = kcGetMapping($obj, $vtxID, $vtxIDMapping, $vtxIDOffset);
+
+		if ($id != -1)
+		{
+			string $vtx = $obj + ".vtx[" + $id + "]";
+
+			// reset all weights to 0
+
+			string $otherJoints[] = `skinPercent -ib 0.00001 -q -t $skinCluster $vtx`;
+
+			for ($joint in $otherJoints)
+			{
+				int $found = false;
+
+				for ($item in $joints)
+					if ($item == $joint)
+					{
+						$found = true;
+						break;
+					}
+
+				if (!$found)
+				{
+					$joints[size($joints)] = $joint;
+					$weight[size($weight)] = 0.0;
+				}
+			}
+
+//			skinPercent -normalize false -pruneWeights 1.0 $skinCluster $vtx;
+
+			// apply weights
+
+			string $cmd = "skinPercent ";
+
+			for ($i = 0; $i < size($weight); $i++)
+				$cmd = ($cmd + "-tv " + $joints[$i] + " " + $weight[$i] + " ");
+
+			$cmd = ($cmd + $skinCluster + " " + $vtx);
+
+			eval $cmd;
+		}
+
+		$buffer = `fgetline $fileID`;	// get next line
+	}
+
+	float $elapse = `timerX -startTime $startTime`;
+	print("ELAPSED TIME: " + $elapse + " s\n");
+
+	fclose $fileID;
+}

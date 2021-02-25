@@ -1,0 +1,159 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-3-25
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-3-25
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc zmRenderLineLayer(string $type)
+{
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -sl`;
+	string $renderLayer = `createRenderLayer -name $type -makeCurrent -noRecurse $objShape`;
+	
+	
+	editRenderLayerGlobals -currentRenderLayer $renderLayer;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+
+	//contours shader
+	string $contours = `shadingNode -asShader surfaceShader -n propContours`;
+	string $contoursSG = `sets -renderable true -noSurfaceShader true -empty -name propContoursSG`;
+	connectAttr -f ($contours+".outColor") ($contoursSG+".surfaceShader");
+	setAttr ($contours+".outColor") -type double3 1 1 1 ;
+	setAttr ($contoursSG+".miContourEnable") 1;
+	setAttr ($contoursSG+".miContourColor") -type double3 0 0 0 ;
+	setAttr ($contoursSG+".miContourRelativeWidth") 1;
+	switch ($type)
+	{
+		case "outLine" :
+			setAttr ($contoursSG+".miContourWidth") 0.66;
+			break;
+		case "deLine" :
+			setAttr ($contoursSG+".miContourWidth") 0.2;
+			break;
+		case "inLine" :
+			setAttr ($contoursSG+".miContourWidth") 0.08;
+			break;
+	}
+
+	sets -e -forceElement $contoursSG $objShape;
+
+	//renderSetting setup
+	setAttr "miDefaultFramebuffer.contourEnable" 1;
+	editRenderLayerAdjustment "miDefaultFramebuffer.contourEnable";
+	setAttr "miDefaultFramebuffer.contourSamples" 30;
+	setAttr "miDefaultFramebuffer.contourFilter" 2;
+	setAttr "miDefaultFramebuffer.contourClearImage" 1;
+	setAttr "miDefaultFramebuffer.contourClearColor" -type double3 1 1 1 ;
+
+	string $contrast = `mrCreateCustomNode -asUtility "" contour_contrast_function_levels`;
+	string $store = `mrCreateCustomNode -asUtility "" contour_store_function`;
+	defaultNavigation -ce -source $contrast -destination miDefaultOptions.contourContrast;
+	editRenderLayerAdjustment "miDefaultOptions.contourContrast";
+	defaultNavigation -ce -source $store -destination miDefaultOptions.contourStore;
+	editRenderLayerAdjustment "miDefaultOptions.contourStore";
+	setAttr "miDefaultOptions.maxSamples" 3;
+
+	setAttr ($contrast+".diff_index") 0;
+	setAttr ($contrast+".zdelta") 8;
+	switch ($type)
+	{
+		case "outLine" :
+			setAttr ($contrast+".ndelta") 180;
+			break;
+		case "deLine" :
+			setAttr ($contrast+".ndelta") 8;
+			break;
+		case "inLine" :
+			setAttr ($contrast+".ndelta") 8;
+			//只在内线调用遮罩
+			string $reffile[]={};
+			/*for ($obj in $objShape)
+			{
+				$reffile[size($reffile)] = `referenceQuery -f $obj`;
+			}
+			$reffile = stringArrayRemoveDuplicates($reffile);*/
+			for($obj in $objShape)
+			{
+				string $children[] = `listRelatives -ad -f $obj`;
+				for($child in $children)
+				{
+					if(`referenceQuery -inr $child`)
+					{
+						string $rf = `referenceQuery -f $child`;
+						if(!stringArrayCount($rf,$reffile))
+							$reffile[size($reffile)] = $rf;
+					}
+				}
+			}
+
+			//set smooth 0
+			string $smooth[] = `ls -type polySmoothFace`;
+			for($sm in $smooth)
+			{
+				//if(`editRenderLayerGlobals -q -crl` != "defaultRenderLayer")
+					//editRenderLayerAdjustment ($sm+".divisions");
+				setAttr ($sm+".divisions") 0;
+			}
+			
+			for ($file in $reffile)
+			{
+				string $buff[] = {};
+				int $num = `tokenize $file "\/" $buff`;
+				$num = `tokenize $buff[$num-1] "_" $buff`;
+				string $char = $buff[1];
+				string $pre = `file -q -rpr $file`;
+				zmRenderLineGetMatte($char,$pre);
+			}
+			break;
+	}
+	
+	select -cl;
+}
+
+
+global proc zmRenderLineGetMatte(string $char,string $pre)
+{
+	string $sel[] = `ls -sl`;
+	
+	source "ezRenderMainLayoutMaterial.mel";
+	
+	string $txtpath = "//file-cluster/GDC/Projects/Zoomies/Zoomies_scratch/TD/LineTxt/";
+	string $linetxt[] = `getFileList -fld $txtpath -fs ($char+"*.txt")`;
+	for ($txt in $linetxt)
+	{
+		if (gmatch($txt,($char+"*")))
+		{
+			//print $char;
+			$fileID = `fopen ($txtpath+$txt) "r"`;
+			string $next = `fgetline $fileID`;
+			while (size($next) > 0)
+			{
+				string $buff[]={};
+				if (startsWith($next,"//"))
+				{
+					int $num = `tokenize $next " " $buff`;
+					select -cl;
+					for ($i=2;$i<$num-2;$i++)
+					{
+						select -add ($pre+":"+$buff[$i]);
+					}
+					ezRenderMainLayoutMaterial_Assign("matte");
+				}
+				$next = `fgetline $fileID`;
+			}
+			fclose $fileID;
+		}
+	}
+	select -r $sel;
+}

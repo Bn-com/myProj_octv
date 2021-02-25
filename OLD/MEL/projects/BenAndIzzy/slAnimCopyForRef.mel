@@ -1,0 +1,255 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/05/06
+///
+/// Description: 针对目前的动画关键帧全部在set和facial_set里的角色
+///		主要功能：当角色衣服或者身体由于reference原因出现飞点时使用，选择对应角色的master，会找到对应的reference文件，并导动画
+///			目前功能支持多层嵌套（层数取决与*:*:*:*MASTER*）及parent，约束关系。
+///		
+///
+
+
+global proc slAnimCopyForRef()
+{
+	float $time = `currentTime -q`;
+
+	currentTime -31;
+	
+	string $master[]= `ls -sl "*:*MASTER*" "*:*:*MASTER*" "*:*:*:*MASTER*"`;
+	if (!`objExists $master[0]`)
+		error "请选择需要重导动画角色的master！";
+	string $buffer[];
+	tokenize $master[0] ":" $buffer;
+
+	string $pref = $buffer[0];
+	string $prefR = `substring $pref 1 (size($pref)-1)`;
+
+	string $masterR = `substitute $pref $master[0] $prefR`;
+	
+	string $geo = `substitute  "_MASTER" $master[0] "_GEO"` ;
+	string $geoR = `substitute $pref $geo $prefR` ;
+
+
+	string $topRef = `referenceQuery -rfn -tr $master[0]`;
+	string $from = `referenceQuery -f $topRef` ;
+	file -r -gr -ns $prefR $from;
+
+//---------------------------------替换parent关系--------------------------------------------------------------
+	string $parent[] = `listRelatives -p $master[0]`;
+	if (`objExists $parent[0]` && !startsWith($parent[0],$pref))
+	{
+		 parent $masterR $parent[0];
+	}
+	
+	select -hi $master[0] $geo;
+	string $allObj[] = `ls -sl`;
+	string $parentR;
+	for ($obj in $allObj)
+	{
+		if (startsWith($obj, $pref))
+		{
+			string $allChild[] = `listRelatives -c $obj`;
+			for ($child in $allChild)
+			{
+				if (!startsWith($child, $pref))
+				{
+					$parentR = `substitute $pref $obj $prefR` ;
+					parent -w $child;
+					parent $child $parentR;
+				}
+			}
+		}
+	}
+	select -cl;
+
+
+//------------------------------导动画-------------------------------------------------------------------
+
+	currentTime $time;
+	string $set = `substitute "_MASTER$" $master[0] "_set"`;
+	string $facialSet = `substitute "_set" $set "_facial_set"`;
+	string $anim[] ;
+	if (`objExists $facialSet`)
+		 $anim = `sets -query $set $facialSet`;
+	else 
+		 $anim = `sets -query $set`;
+	for ($sourceObj in $anim)
+	{
+		string $destObj = `substitute $pref $sourceObj $prefR`;
+		if (`objExists $destObj`)
+		{
+			if (`copyKey $sourceObj`)
+			{
+				pasteKey -o replaceCompletely $destObj;
+			}
+		}
+	}
+
+
+//-------------------------------------替换约束--------------------------------------------------------------------------
+	string $sourCon;
+	string $destCon;
+	string $conType;
+	int $adj;
+	string $attrs[] = {".tx",".ty",".tz",".rx",".ry",".rz",".sx",".sy",".sz"};
+	string $cons[]= `ls -type constraint`;
+	string $commands[];
+	for ($con in $cons )
+	{
+		if ((startsWith($con,$pref) && !`reference -isNodeReferenced $con`) || !(startsWith($con,$pref)))
+		{
+			string $obj[] = `listConnections $con`;
+			$obj = stringArrayRemoveDuplicates($obj);
+
+			string $conWeight[] = `listAttr -ud $con`;
+			for ($tem in $obj)
+			{
+				if (startsWith($tem,$pref))
+				{
+					$adj = 1;
+					break;
+				}
+				$adj = 0;
+			}
+			
+			if ($adj)
+			{
+				$conType =  `nodeType $con`;
+				
+				clear $obj;
+				$obj = `listConnections -s false -d true $con`;
+				$obj = stringArrayRemoveDuplicates($obj);
+				for ($tem in $obj )
+				{
+					if (`nodeType $tem` == "pairBlend")
+					{
+						string $pobj[] = `listConnections -s false -d true $tem`;
+						for ($ptem in $pobj )
+						{
+							if ($ptem != $con && `nodeType $ptem` != "pairBlend")
+							{
+								$destCon = $ptem;
+								break;
+							}
+						}
+					}
+					else if ($tem != $con && `nodeType $tem` != "pairBlend")
+					{
+						$destCon = $tem;
+						break;
+					}
+				}
+
+				clear $obj;
+				$obj = `listConnections -s true -d false $con`;
+				for ($tem in $obj)
+				{
+					if ($tem != $con && $tem != $destCon)
+					{
+						$sourCon = $tem;
+						break;
+					}
+				}
+			}
+
+
+			if (startsWith($sourCon,$pref) )
+			{
+				//print "\nCon-------------";
+				//print $con;
+				//print "\nSourCon-------------";
+				//print $sourCon;
+				//print "\nDestCon-------------";
+				//print $destCon;
+				for ($attr in $attrs)
+				{
+					string $conattr[] = `listConnections -plugs true ($destCon+$attr)`;
+					if (`objExists $conattr[0]` && startsWith($conattr[0],$con))
+					{
+						disconnectAttr $conattr[0] ($destCon+$attr);
+					}
+
+				}
+				//delete $con;
+				$sourCon = `substitute $pref $sourCon $prefR` ;
+				$commands[size($commands)] = slAnimCopyForRefPosition($con,$sourCon,$destCon);
+			}
+			else if (startsWith($destCon,$pref) )
+			{
+				//print "\nCon-------------";
+				//print $con;
+				//print "\nSourCon-------------";
+				//print $sourCon;
+				//print "\nDestCon-------------";
+				//print $destCon;
+				for ($attr in $attrs)
+				{
+					string $conattr[] = `listConnections -plugs true ($destCon+$attr)`;
+					if (`objExists $conattr[0]` && startsWith($conattr[0],$con))
+					{
+						disconnectAttr $conattr[0] ($destCon+$attr);
+					}
+
+				}
+				//delete $con;
+				$destCon = `substitute $pref $destCon $prefR` ;
+				$commands[size($commands)] = slAnimCopyForRefPosition($con,$sourCon,$destCon);
+			}
+		}
+	}
+	//print $commands;
+	for ($com in $commands)
+	{
+		eval $com;
+	}
+
+}
+
+
+global proc string slAnimCopyForRefPosition(string $constrain,string $sour,string $dest)
+{
+	float $ctx,$cty,$ctz ,$crx ,$cry ,$crz ;
+	string $command;
+
+	string $type = `nodeType $constrain`;
+	
+	switch ($type)
+	{
+		case  "pointConstrain" :
+			$ctx = `getAttr ($constrain+".ctx")`;
+			$cty = `getAttr ($constrain+".cty")`;
+			$ctz = `getAttr ($constrain+".ctz")`;
+			setAttr ($dest+".tx") $ctx;
+			setAttr ($dest+".ty") $cty;
+			setAttr ($dest+".tz") $ctz;
+			break;
+		case  "orientConstraint" :
+			$crx = `getAttr ($constrain+".crx")`;
+			$cry = `getAttr ($constrain+".cry")`;
+			$crz = `getAttr ($constrain+".crz")`;
+			setAttr ($dest+".rx") $crx;
+			setAttr ($dest+".ry") $cry;
+			setAttr ($dest+".rz") $crz;
+			break;
+		case  "parentConstraint" :
+			$ctx = `getAttr ($constrain+".ctx")`;
+			$cty = `getAttr ($constrain+".cty")`;
+			$ctz = `getAttr ($constrain+".ctz")`;
+			$crx = `getAttr ($constrain+".crx")`;
+			$cry = `getAttr ($constrain+".cry")`;
+			$crz = `getAttr ($constrain+".crz")`;
+			setAttr ($dest+".tx") $ctx;
+			setAttr ($dest+".ty") $cty;
+			setAttr ($dest+".tz") $ctz;
+			setAttr ($dest+".rx") $crx;
+			setAttr ($dest+".ry") $cry;
+			setAttr ($dest+".rz") $crz;
+			break;
+	}
+	//eval($type + " -mo " + $sour + " " + $dest);
+	$command = ($type + " -mo " + $sour + " " + $dest);
+	//print $command;
+	return $command;
+}

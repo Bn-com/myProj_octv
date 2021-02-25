@@ -1,0 +1,279 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddGeneralTools
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: June 10 2006
+//	Changed Projcet Date:
+//	Last Updated: January 12 2007
+//	Update/Change this file at: Julii FreeMAN
+//	Note: General Tools 包括以下东东
+//		ddBreakConnection 
+//			属性断开函数 (来原于MAYA 自身的脚本)
+//
+//		ddAddTransform 
+//			给物体translate 清为0 转加到额外的组上
+//
+//		ddCombineShape
+//			将多种Shape合并到一个transform之下 (使用控制器时使用)
+//
+//		ddSmoothBind 2006-10-17
+//			用来代借maya自身的smooth bind 在skin之增加重叠点检查 (未完成)
+//
+//		ddBlendShapeExport 2006-10-22 add
+//			导出blendShape 
+//
+//		ddOffAllKeepBorder 2007-1-12 add
+//			将场景中所有的polySmoothFace 节点中的keep border全部关掉
+//////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBreakConnection
+// 
+// 断开属性连接 (从maya 原生脚本当中COPY出来的)
+// If the specified name is the destination of a connection,
+// then delete that connection.
+//
+// Arguments :
+//	string $destName
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddBreakConnection( string $destName )
+{
+	if ( `connectionInfo -isDestination $destName` ){
+		string $destination = `connectionInfo -getExactDestination $destName`;
+
+		// When deleting a src connection from a character, you must remove
+		// the item from the character set or the character will no longer
+		// work consistently: bug 127212
+		//
+		string $srcConn[] = `listConnections -s 1 -d 0 -type character $destination`;
+		if (size($srcConn)) {
+			string $warnMsg = ("Removed \'"+$destination+"\' from character \'"+$srcConn[0]+"\'.");
+			warning($warnMsg);
+			character -e -rm $srcConn[0] $destination;
+		}
+		
+		// delete -icn doesn't work if destination attr is readOnly 
+		// so use disconnectAttr in this case
+		//
+		string $sArr[1] = `ls -ro $destination`;
+		if (size($sArr)) {
+			string $src = `connectionInfo -sourceFromDestination $destination`;
+			disconnectAttr $src $destination;
+		} else {
+			delete -icn $destination;
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddAddTransform
+//
+//
+// Arguments :
+//	string $object
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAddTransform(string $object,int $par)
+{
+ float $temp[3] ;
+ string $groupName ;
+
+ $groupName = `group -name ($object + "_extraTransform") $object` ;
+
+
+ //translate
+ $temp[0] = `getAttr ($object + ".tx")` ;
+ $temp[1] = `getAttr ($object + ".ty")` ;
+ $temp[2] = `getAttr ($object + ".tz")` ;
+ 
+ setAttr ($groupName + ".tx") $temp[0] ;
+ setAttr ($groupName + ".ty") $temp[1] ;
+ setAttr ($groupName + ".tz") $temp[2] ;
+
+ setAttr ($object + ".tx") 0 ;
+ setAttr ($object + ".ty") 0 ;
+ setAttr ($object + ".tz") 0 ;
+
+ $temp = `xform -query -worldSpace -translation $object` ;
+
+ //xform -worldSpace -rotateAxis $temp[0] $temp[1] $temp[2] $groupName;
+ //xform -worldSpace -scalePivot $temp[0] $temp[1] $temp[2] $groupName;
+ xform -worldSpace -translation $temp[0] $temp[1] $temp[2] $groupName;
+
+ //rotate
+ /*
+ $temp[0] = `getAttr ($object + ".rx")` ;
+ $temp[1] = `getAttr ($object + ".ry")` ;
+ $temp[2] = `getAttr ($object + ".rz")` ;
+ 
+ setAttr ($groupName + ".rx") $temp[0] ;
+ setAttr ($groupName + ".ry") $temp[1] ;
+ setAttr ($groupName + ".rz") $temp[2] ;
+
+ setAttr ($object + ".rx") 0 ;
+ setAttr ($object + ".ry") 0 ;
+ setAttr ($object + ".rz") 0 ;
+ */
+ //scale
+ /*
+ $temp[0] = `getAttr ($object + ".sx")` ;
+ $temp[1] = `getAttr ($object + ".sy")` ;
+ $temp[2] = `getAttr ($object + ".sz")` ;
+ 
+ setAttr ($groupName + ".sx") $temp[0] ;
+ setAttr ($groupName + ".sy") $temp[1] ;
+ setAttr ($groupName + ".sz") $temp[2] ;
+
+ setAttr ($object + ".sx") 1 ;
+ setAttr ($object + ".sy") 1 ;
+ setAttr ($object + ".sz") 1 ;
+ */
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddAddTransformCMD
+//
+//
+// Arguments :
+//	string $object
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAddTransformCMD()
+{
+ string $selected[],$tmp ;
+
+ $selected = `ls -sl` ;
+ 
+ for($tmp in $selected)
+ {
+  ddAddTransform $tmp 0 ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddCombineCurve
+//
+//
+// Arguments :
+//	string $object
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddCombineShape()
+{
+ int $amont ;
+ string $selected[],$combineGroup,$tmp,$shape[],$cmd ;
+ 
+ $selected = `ls -sl` ;
+ $amont = size($selected) ;
+ 
+ $cmd = "parent -addObject -shape " ;
+
+ for($tmp in $selected)
+ {
+  makeIdentity -apply true
+		-t 1
+		-r 1
+		-s 1
+		-n 0
+		$tmp ;
+
+  $combineGroup += $tmp ;
+
+  $shape = `listRelatives -fullPath -shapes $tmp` ;
+  $cmd += ($shape[0] + " ") ;
+ }
+ $combineGroup = `group -empty -name $combineGroup ` ;
+ 
+ $cmd += ($combineGroup + " ;") ;
+ 
+ print $cmd ;
+ eval $cmd ;
+
+ select -r $combineGroup ;
+ $shape = `listRelatives -shapes $combineGroup` ;
+ $amont = 1 ;
+ for( $tmp in $shape )
+ {
+  rename $tmp ($combineGroup + "Shape" + $amont) ;
+  $amont ++ ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddSmoothBind
+//
+//
+// Arguments :
+//	string $object
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddSmoothBind()
+{
+ string $selected[],$mesh,$shape,$shapes[],
+	 $vertexCoincident[],$returnVal ;
+
+ if (!`pluginInfo -query -loaded -name "checkCoincident.mll"`)
+ {
+  loadPlugin -quiet "checkCoincident.mll" ;
+ }
+
+ $selected= `ls -sl` ;
+
+ for($mesh in $selected)
+ {
+  $shapes = `listRelatives -shapes $mesh` ;
+  
+  for ($shape in $shapes)
+  {
+   if(`nodeType $shape` == "mesh")
+   {
+    //check vertx coincident
+    select -r $mesh ;
+    checkCoincident  0.001 ;
+    $vertexCoincident = `ls -sl` ;
+
+    if(size($vertexCoincident))
+    {
+     //error "The mesh has vertex coincident!" ;
+     $returnVal =`confirmDialog -title ($mesh + " has vertex coincident! ")
+		   -message "Are you continue?"
+		   -button "Yes"
+		   -button "No"
+		   -defaultButton "Yes"
+		   -cancelButton "No"
+		   -dismissString "No"` ;
+     print $returnVal ;
+     if($returnVal == "No")
+     {
+      error ($mesh + " has vertex coincident! ") ;
+     }
+    }
+   }
+  }
+ }
+ 
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddOffAllKeepBorder
+// Discription:将场景中所有的polySmoothFace 节点中的keep border全部关掉
+//
+// Arguments : NULL
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddOffAllKeepBorder()
+{
+	string $smoothNodes[],$temp ; 
+	$smoothNodes = `ls -type polySmoothFace` ;
+	for ($temp in $smoothNodes)
+	{
+		setAttr ($temp + ".keepBorder") off;
+	}
+}
+
+
+
+//End of file.

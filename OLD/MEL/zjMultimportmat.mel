@@ -1,0 +1,148 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjMultimportmat()
+{
+	int $i;
+	string $child[];
+
+	if (`window -q -exists multimportmatWin`)
+		return;
+
+	window -title "MultImport" -resizeToFitChildren true multimportmatWin;
+
+		columnLayout -adjustableColumn true;
+
+				$i = 0;
+
+				string $formLayout = `formLayout`;
+  					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Mapping File:" -editable false -text "" multimportmatText`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("mll_brow " + $child[0])`;
+  					$child[$i++] = `intFieldGrp -label "Copies:" -columnWidth 1 75 -value1 50 multimportmatNum`;
+					$child[$i++] = `button -label "Import" -command ("Domultimport " + " " + $child[0] + " " + $child[2])`;
+					$child[$i++] = `button -label "Cancel" -command ("deleteUI -window  multimportmatWin")`;
+
+				formLayout -edit
+
+					-attachForm		$child[1]	"top"		10
+					-attachForm		$child[1]	"right"		5
+
+					-attachForm		$child[0]	"top"		10
+					-attachForm		$child[0]	"left"		0
+					-attachControl		$child[0]	"right"		5	$child[1]
+
+					-attachControl		$child[2]	"top"		10	$child[0]
+					-attachForm		$child[2]	"left"		25
+
+					-attachControl		$child[3]	"top"		10	$child[2]
+					-attachForm		$child[3]	"left"		0
+					-attachPosition		$child[3]	"right"		0	50
+
+					-attachControl		$child[4]	"top"		10	$child[2]
+					-attachControl		$child[4]	"left"		5	$child[3]
+					-attachPosition		$child[4]	"right"		0	100
+
+				$formLayout;
+
+			setParent ..;
+
+		setParent ..;
+	showWindow multimportmatWin;
+
+}
+
+global proc mll_brow(string $control)
+{
+	fileBrowserDialog -mode 0  -fileCommand mll_browProc -actionName "Browse" -operationMode "Reference";
+}
+
+global proc int mll_browProc(string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename multimportmatText;
+
+	return true;
+}
+
+global proc Domultimport(string $file,string $ctl)
+{
+	string $filename = `textFieldGrp -q -text $file`;
+	int $copies = `intFieldGrp -q -value1 $ctl`;
+	if ($copies>0)
+	{
+		waitCursor -state on;
+
+		//output shadingengine txt file
+		print "Output ShadingGroup...";
+		system ("mayabatch -command \"Output_SG_shapes\" -file "+"\""+$filename+"\"");
+		
+		//import scene with material
+		string $prefix = "crowd";
+		 
+		for ($i = 0; $i < $copies; $i++)
+		   file -import -renameAll true -type "mayaBinary" -renamingPrefix ($prefix + $i) $filename;
+		assign2();
+		print "Multimport.";
+		waitCursor -state off;
+	}
+}
+
+
+global proc assign2()
+{
+	$filename = (`internalVar -userAppDir` + "projects/default/scenes/tmpmat.txt");
+
+	$fileID = `fopen $filename r`;
+
+	if ($fileID == 0)
+	{
+		// cannot open the file
+		error("Fail to open " + $filename);
+	}
+
+	string $buffer = `fgetline $fileID`;
+	$buffer = substituteAllString($buffer, "\n", "");
+
+	while (size($buffer) > 0) 
+	{
+		string $buf[];
+
+		if (`tokenize $buffer " " $buf` == 2)
+		{
+			string $SG = "crowd0_" + $buf[0];
+			if (!`objExists $SG`)
+			{
+				warning($SG + " does not exist.");
+
+				$buffer = `fgetline $fileID`;
+				$buffer = substituteAllString($buffer, "\n", "");
+
+				continue;
+			}
+			// apply the material to the shape
+
+			string $shape = $buf[1];
+			string $pbuf[];
+			$num = `tokenize $shape "|" $pbuf`;
+			string $matchshape = "";
+			for ($i=0; $i<$num; $i++)
+				$matchshape += "crowd*_"+$pbuf[$i]+"|";
+			$matchshape = `substring $matchshape 1 (size($matchshape)-1)`;
+			sets -e -forceElement $SG $matchshape;
+
+		}
+		
+		$buffer = `fgetline $fileID`;
+		$buffer = substituteAllString($buffer, "\n", "");
+	}
+
+	fclose $fileID;
+	OptimizeMat();
+}
+

@@ -1,0 +1,243 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwDripsWindow()
+{
+	float $start = `playbackOptions -q -min`;
+	float $end = `playbackOptions -q -max`;
+	eval "string $selected[] = `ls -sl`;";
+	
+	string $drip_window = `window -title "Drip Generator" -iconName "Drip" -widthHeight 200 55`;
+	string $parent = `columnLayout -adjustableColumn true`;
+		intSliderGrp -field true -value 10 -label "Number of Drips" drips;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0
+    			-fieldMinValue 0.0 -fieldMaxValue 1.0 -value 1.0 -step .001 -label "Percentage of U Range" uVal;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0
+    			-fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.75 -step .001 -label "Percentage of V Range" vVal;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0
+    			-fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.25 -step .001 -label "Offset U" uOffset;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0
+    			-fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.25 -step .001 -label "Offset V" vOffset;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0 -value 0.005 -step .001 -label "Drip Scale Min" minScale;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1.0 -value 0.01 -step .001 -label "Drip Scale Max" maxScale;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1000.0 -value 4.0 -step .1 -label "Drip Tail Start" tailStart;
+		floatSliderGrp -field true -minValue -1000.0 -maxValue 1000.0 -value 15.0 -step .1 -label "Drip Tail End" tailEnd;
+		floatSliderGrp -field true -minValue 0.0 -maxValue 1000.0 -value 400.0 -step 1.0 -label "Drip Speed" speed;
+	separator;
+
+	string $cmd = "mwDripsTex";
+	string $undo_cmd = "delete \"DRIP*\";delete `ls -type nurbsCurve`;delete \"place*Texture*\";delete \"projection*\";delete \"surfaceShader*\";toggle -template \$selected;select -r \$selected;";
+
+      button -label "Generate Drips" -command $cmd;
+      button -label "Undo Drips" -command $undo_cmd;
+      button -label "Close" -command ("deleteUI -window " + $drip_window+";unclear \$selected");
+	setParent ..;
+    	showWindow $drip_window;
+}
+
+global proc mwDripsTex()
+{
+	//GET FRAME RANGE
+	float $start = `playbackOptions -q -min`;
+	float $end = `playbackOptions -q -max`;
+	currentTime $start;
+
+	//GET DRIP VARIABLES
+	int $numOfCurves = `intSliderGrp -q -value drips`;
+	float $uVal = `floatSliderGrp -q -value uVal`;			//STARTING POSITION
+	float $vVal = `floatSliderGrp -q -value vVal`;			//STARTING POSITION
+	float $uOffset = `floatSliderGrp -q -value uOffset`;		//WIGGLES ALONG DRIP PATH
+	float $vOffset = `floatSliderGrp -q -value vOffset`;		//MAX STEP SIZE ALONG DRIP PATH
+	float $minScale = `floatSliderGrp -q -value minScale`;	//MIN SCALE OF DRIP
+	float $maxScale = `floatSliderGrp -q -value maxScale`;	//MAX SCALE OF DRIP
+	float $tailStart = `floatSliderGrp -q -value tailStart`;	//OFFSET FOR START OF TAIL DRIP FROM THE START OF THE HEAD DRIP
+	float $tailEnd = `floatSliderGrp -q -value tailEnd`;		//END OFFSET OF TAIL DRIP FROM THE START OF THE HEAD DRIP
+	float $speed = `floatSliderGrp -q -value speed`;		//SPEED OF DRIP
+
+	string $sel[] = `ls -sl`;
+	string $node = $sel[0];
+	string $shape[] = `listRelatives -s $node`;
+	float $rangeU[] = `getAttr ($shape[0]+".minMaxRangeU")`;
+	float $rangeV[] = `getAttr ($shape[0]+".minMaxRangeV")`;
+	for($i=0;$i<$numOfCurves;$i++)
+	{
+		int $j = $i+1;
+		//CREATE CURVE ON SURFACE
+		int $cvCount = 0;
+		float $randU = `rand $rangeU[0] ($rangeU[1]*$uVal)`;
+		float $randV = `rand $rangeV[0] ($rangeV[1]*$vVal)`;		//INPUT V RANGE
+		string $cmd = "curveOnSurface -d 3";
+		while($randV<$rangeV[1])
+		{
+			if($cvCount>1)
+			{
+				float $valU = `rand (-$uOffset) $uOffset`;		//INPUT U OFFSET
+				$randU = $randU+$valU;
+				if($randU>$rangeU[1])
+				{
+					$randU = $rangeU[1];
+				}
+				else
+				{
+					if($randU<$rangeU[0])
+					{
+						$randU = $rangeU[0];
+					}
+				}
+			}
+			float $valV = `rand 0 $vOffset`;				//INPUT V OFFSET
+			$randV = $valV+$randV;
+			if($randV>$rangeV[1])
+			{
+				$randV = 1;
+			}
+			$cmd = ($cmd+" -uv "+$randU+" "+$randV);
+			$cvCount++;
+		}
+
+		//MAKE SURE THERE ARE AT LEAST 4 CVS
+		if($cvCount>4)
+		{
+			$cmd = ($cmd+" "+$node) ;
+			string $curveOnSurface = `eval $cmd`;
+			//print ("CURVE ON SURFACE: "+$curveOnSurface+"\n");
+
+			//CREATE CIRCLE FOR DRIP HEAD AND TAIL
+			float $cScale = `rand $minScale $maxScale`;		//INPUT SCALE RANGE
+			string $circle[] = `circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 8 -ch 0`;
+			scale -a $cScale $cScale $cScale $circle;
+			string $c_parts[] = `detachCurve -ch 0 -cos on -rpo 1 ($circle[0]+".ep[2]") ($circle[0]+".ep[6]")`;
+			string $tail = `rename $c_parts[0] "dripTailCurve1"`;
+			string $head = `rename $c_parts[1] "dripHeadCurve1"`;
+			//print ("CREATED HEAD CURVE: "+$head+"\n");
+			//print ("CREATED TAIL CURVE: "+$tail+"\n");
+
+			//CREATE BIRAIL RAIL CURVES
+			string $rail1 = `curve -d 1 -p -1 0 0 -p 1 0 0 -k 0 -k 1`;
+			$rail1 = `rename $rail1 "dripRailA1"`;
+			string $dup[] = `duplicate -rr $rail1`;
+			string $rail2 = $dup[0];
+			$rail2 = `rename $rail2 "dripRailB1"`;
+			scale -a $cScale $cScale $cScale $rail1;
+			scale -a $cScale $cScale $cScale $rail2;
+
+			//LOFT DRIP HEAD AND TAIL
+			string $loft[] = `loft -ch 0 -u 1 -c 0 -ar 1 -d 3 -ss 1 -rn 0 -po 0 -rsn true $head $rail1`;
+			delete $head $rail1;
+			string $loft_head = `rename $loft[0] ("dripHead"+$j)`;
+			//print ("CREATED HEAD SURF: "+$loft_head+"\n");
+			reverseSurface -d 2 -ch 0 -rpo 1 $loft_head;
+			$loft = `loft -ch 0 -u 1 -c 0 -ar 1 -d 3 -ss 1 -rn 0 -po 0 -rsn true $tail $rail2`;
+			delete $tail $rail2;
+			string $loft_tail = `rename $loft[0] ("dripTail"+$j)`;
+			//print ("CREATED TAIL SURF: "+$loft_tail+"\n");
+
+			//PATH ANIMATE THE HEAD AND TAIL
+			//print "SETTING HEAD AND TAIL TO PATH\n";
+			string $mpA = `pathAnimation -fractionMode true -follow true -followAxis z -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU 0 -endTimeU 100 $loft_head $curveOnSurface`;
+			string $mpB = `pathAnimation -fractionMode true -follow true -followAxis z -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU 0 -endTimeU 100 $loft_tail $curveOnSurface`;			
+			refresh;
+			delete ($mpB+"_uValue");
+			delete ($mpA+"_uValue");
+			setAttr ($mpA+".uValue") 0.1;
+
+			//BIRAIL DRIP BODY
+			string $biSurf[] = `singleProfileBirailSurface -ch 1 -po 0 -tm 1 -tp1 0 $curveOnSurface ($loft_head+".v[0]") ($loft_tail+".v[1]")` ;
+			setAttr ($mpA+".uValue") 0.0;
+
+			string $group = `group -n ("DRIP"+$j) $loft_head $loft_tail $biSurf[0]`;
+			//print ("CREATED GROUP: "+$group+"\n");
+
+			//ANIMATE DRIP
+			int $startDrip = `rand $start $end`;
+			int $endDrip = `rand ($startDrip+1) ($startDrip+$tailStart)`;
+			setKeyframe -t ($startDrip-1) -v 0 -at "visibility" $group;
+			setKeyframe -t $startDrip -v 1 -at "visibility" $group;
+			setKeyframe -t $startDrip -v 0 -at "uValue" $mpA;
+			setKeyframe -t ($startDrip+$speed) -v 1 -at "uValue" $mpA;
+			setKeyframe -t $endDrip -v 0 -at "uValue" $mpB;
+			int $endOffset = `rand 2 $tailEnd`;
+			setKeyframe -t ($endDrip+$endOffset+$speed) -v 1 -at "uValue" $mpB;
+
+			//ANIMATE TAIL SCALING
+			setKeyframe -t $startDrip -v 1 -at "scaleX" $loft_tail;
+			setKeyframe -t $startDrip -v 1 -at "scaleY" $loft_tail;
+			setKeyframe -t $startDrip -v 1 -at "scaleZ" $loft_tail;
+			setKeyframe -t ($startDrip+10) -v .25 -at "scaleX" $loft_tail;
+			setKeyframe -t ($startDrip+10) -v .25 -at "scaleY" $loft_tail;
+			setKeyframe -t ($startDrip+10) -v .25 -at "scaleZ" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed) -v 1 -at "scaleX" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed) -v 1 -at "scaleY" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed) -v 1 -at "scaleZ" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed-10) -v .25 -at "scaleX" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed-10) -v .25 -at "scaleY" $loft_tail;
+			setKeyframe -t ($endDrip+$endOffset+$speed-10) -v .25 -at "scaleZ" $loft_tail;
+
+			//ASSIGN HEAD SHADER
+			string $shader = `shadingNode -asShader surfaceShader`;
+			string $sg = `sets -renderable true -noSurfaceShader true -empty -name ("DRIP_HEAD_SG"+$j)`;
+			connectAttr -f ($shader+".outColor") ($sg+".surfaceShader");
+			setAttr ($shader+".outColor") -type double3 1 1 1 ;
+			sets -e -forceElement $sg $loft_head;
+
+			//ASSIGN BODY SHADER
+			string $shader = `shadingNode -asShader surfaceShader`;
+			string $sg = `sets -renderable true -noSurfaceShader true -empty -name ("DRIP_BODY_SG"+$j)`;
+			connectAttr -f ($shader+".outColor") ($sg+".surfaceShader");
+
+			//CREATE FRACTAL RAMP
+			string $ramp = `shadingNode -asTexture ramp`;
+			$ramp = `rename $ramp ("DRIP_RAMP"+$j)`;
+			string $p2Tex = `shadingNode -asUtility place2dTexture`;
+			connectAttr ($p2Tex+".outUV") ($ramp+".uv");
+			connectAttr ($p2Tex+".outUvFilterSize") ($ramp+".uvFilterSize");
+			connectAttr -f ($ramp+".outColor") ($shader+".outColor");
+			removeMultiInstance -break true ($ramp+".colorEntryList[2]");
+			setAttr ($ramp+".colorEntryList[0].color") -type double3 1 1 1 ;
+			setAttr ($ramp+".colorEntryList[1].position") 1;
+			setAttr ($ramp+".interpolation") 4;
+			string $proj = `shadingNode -asTexture projection`;
+			string $fractal = `shadingNode -asTexture fractal`;
+			$fractal = `rename $fractal ("DRIP_FRACTAL"+$j)`;
+			string $p3Tex = `shadingNode -asUtility place3dTexture`;
+			connectAttr ($p3Tex+".wim[0]") ($proj+".pm");
+			connectAttr ($fractal+".outColor") ($proj+".image");
+			$p2Tex = `shadingNode -asUtility place2dTexture`;
+			connectAttr ($p2Tex+".outUV") ($fractal+".uv");
+			connectAttr ($p2Tex+".outUvFilterSize") ($fractal+".uvFilterSize");
+			connectAttr -f ($proj+".outColor") ($ramp+".colorEntryList[1].color");
+			setAttr ($p2Tex+".repeatU") 2;
+			setAttr ($p2Tex+".repeatV") 2;
+			setAttr ($p2Tex+".mirror") 1;
+			setAttr ($p2Tex+".stagger") 1;
+			setAttr ($fractal+".frequencyRatio") 1;
+			setAttr ($p3Tex+".rotateX") 90;
+			sets -e -forceElement $sg $biSurf[0];
+
+			//ANIMATE FRACTAL
+			setKeyframe -t $startDrip -v 0 -at "amplitude" $fractal;
+			setKeyframe -t $startDrip -v 1 -at "threshold" $fractal;
+			setKeyframe -t ($endDrip+$endOffset) -v 1 -at "amplitude" $fractal;
+			setKeyframe -t ($endDrip+$endOffset) -v 0 -at "threshold" $fractal;
+
+			//ASSIGN TAIL SHADER
+			string $shader = `shadingNode -asShader surfaceShader`;
+			string $sg = `sets -renderable true -noSurfaceShader true -empty -name ("DRIP_TAIL_SG"+$j)`;
+			connectAttr -f ($shader+".outColor") ($sg+".surfaceShader");
+			connectAttr -f ($fractal+".outColor") ($shader+".outColor");
+			sets -e -forceElement $sg $loft_tail;
+		}
+		else
+		{
+			$i=$i-1;
+		}
+	}
+	toggle -template $node;
+}

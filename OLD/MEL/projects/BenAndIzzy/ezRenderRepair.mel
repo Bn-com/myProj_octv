@@ -1,0 +1,224 @@
+global proc ezRenderRepair()
+{
+	if(`window -exists ez_render_repair`)
+		deleteUI ez_render_repair;
+	window -title "Repair Render                                                      WHO" -in "Rep Re" -mb true  -s true -resizeToFitChildren true ez_render_repair;
+		
+		menu -label "Help";
+			menuItem -label "Help on AutoLoadlips..." -command "";
+
+			columnLayout -adjustableColumn true -rs 10 rapairRender;
+				
+				frameLayout -label "Render File" -labelAlign "top" -cll false -borderStyle "etchedIn";
+					formLayout renderFile;
+						textScrollList -h 120 -selectCommand "ezUpdateRenderSetting"  -allowMultiSelection false fileList;
+						button -l "Select File" -w 80 -command "findRenderFile" selectFile;
+						button -l "Render" -w 80 -h 40 -command "ezRepairRender" renderFile;
+					setParent ..;
+				setParent rapairRender;
+				formLayout -edit 
+					-attachForm		fileList		"top"		10
+					-attachForm		fileList		"left"		20
+					-attachPosition		fileList		"right"		0	80
+
+					-attachForm		selectFile		"top"		10
+					-attachControl		selectFile		"left"		20	fileList
+
+					-attachForm		renderFile		"top"		90
+					-attachControl		renderFile		"left"		20	fileList
+				renderFile;
+
+	showWindow ez_render_repair;
+}
+
+global proc loadRenderFile(string $filename[])//,string $fileType)
+{
+	for ($file in $filename)
+	{
+		textScrollList -e -append $file fileList;
+	}
+}
+
+
+global proc string[] findRenderFile()
+{
+	//string $filePath = `fileBrowserDialog -mode 0  -fileCommand "loadRenderFile"  -actionName "select"`;
+	//return $filePath;
+	string $buf[] = `idmtFileDialog -multi`;loadRenderFile($buf);
+	return $buf;
+
+}
+
+
+global proc loadImagePath(string $filename,string $fileType)
+{
+	int $index[] =`textScrollList -q -sii fileList`;
+	textFieldButtonGrp -e -text $filename ("imageFolder_"+$index[0]);
+}
+
+
+global proc string findImagePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "loadImagePath"  -actionName "select"`;
+	return $filePath;
+}
+
+global proc ezUpdateRenderSetting()
+{
+	string $sel[] = `textScrollList -q -si fileList`;
+	string $buff[];
+	tokenize $sel[0] "\/\\" $buff;
+	string $imageout = ezRenderImageOutFolder($buff[size($buff)-1]);
+	
+	string $files[] = `textScrollList -q -ai fileList`;
+	int $index[] = `textScrollList -q -sii fileList`;
+	for ($i=1;$i<=size($files) ;$i++ )
+	{
+		if ($i == $index[0])
+		{
+			if (`frameLayout -q -ex ("renderSetting_"+$i)`)
+			{
+				frameLayout -e  -cl false ("renderSetting_"+$i);
+			}
+			else 
+			{	
+				frameLayout -label ("Render Setting for "+$buff[size($buff)-1]) -labelAlign "top" -cl false -cll true  -borderStyle "etchedIn" ("renderSetting_"+$i);
+					formLayout ("formSetting_"+$index[0]);
+						textScrollList -h 120 -selectCommand ""  -allowMultiSelection true ("layerList_"+$index[0]);
+						button -l "Add RenderLayer" -w 100 -command ("ezAddRenderLayer(1,"+$index[0]+")") ("addLayer_"+$index[0]);
+						textField  -text "" -w 180 ("layerName_"+$index[0]);
+						button -l "Rem RenderLayer" -w 100 -command ("ezAddRenderLayer(2,"+$index[0]+")") ("removeLayer_"+$index[0]);
+						textFieldButtonGrp -label "输出目录" -editable false -text $imageout -buttonLabel "Browse" -cw3 60 350 100 -buttonCommand "findImagePath" ("imageFolder_"+$index[0]);
+						checkBoxGrp -label "" -cw2 1 15 -enable  true -v1 true -onc ("textFieldButtonGrp -edit -text \""+$imageout+"\" imageFolder_"+$index[0]+";"+"textFieldGrp -edit -editable false imageFolder_"+$index[0]) 
+							-ofc ("textFieldGrp -edit -editable true imageFolder_"+$index[0]) ("editFolder_"+$index[0]);
+					setParent ..;
+				setParent rapairRender;
+				formLayout -edit 
+					-attachForm		("layerList_"+$index[0])	"top"		10
+					-attachForm		("layerList_"+$index[0])	"left"		20
+					-attachPosition		("layerList_"+$index[0])	"right"		0	50
+					
+					-attachForm		("layerName_"+$index[0])	"top"		10	
+					-attachControl		("layerName_"+$index[0])	"left"		10	("layerList_"+$index[0])
+					
+					
+					-attachControl		("addLayer_"+$index[0])		"top"		10	("layerName_"+$index[0])
+					-attachControl		("addLayer_"+$index[0])		"left"		10	("layerList_"+$index[0])
+
+					
+					-attachControl		("removeLayer_"+$index[0])	"top"		40	("addLayer_"+$index[0])
+					-attachControl		("removeLayer_"+$index[0])	"left"		10	("layerList_"+$index[0])
+
+					-attachControl		("editFolder_"+$index[0])	"top"		13	("layerList_"+$index[0])
+
+					-attachControl		("imageFolder_"+$index[0])	"top"		10	("layerList_"+$index[0])
+					-attachControl		("imageFolder_"+$index[0])	"left"		3	("editFolder_"+$index[0])
+				("formSetting_"+$index[0]);
+			}
+		}
+		else 
+		{
+			if (`frameLayout -q -ex ("renderSetting_"+$i)`)
+				frameLayout -e  -cl true ("renderSetting_"+$i);
+		}
+		
+	}
+
+}
+
+global proc string ezRenderImageOutFolder(string $file)
+{
+	string $buff[];
+	tokenize $file "_." $buff;
+	string $pr = $buff[0];
+	string $ep = $buff[1];
+	string $sc = $buff[2];
+	string $parity;
+	if ( (float)$ep%2 == 0)
+		$parity = "EVEN";
+	else
+		$parity = "ODD";
+
+	string $path;
+	if ($pr == "ez")
+		$path = `getenv "NETRENDER_PATH"` + "/Scenes/BenAndIzzy/ep"+$ep+"/"+$sc+"/lr";
+	if ($pr == "lt")
+		$path = `getenv "NETRENDER_PATH"` + "/Scenes/LittleTikes/ep"+$ep+"/"+$sc+"/lr";
+	//2009-8-21添加enyo路径
+	if ($pr == "ey")
+		$path = `getenv "NETRENDER_PATH"` + "/Scenes/Enyo/"+$parity+"/ep_"+$ep+"/sc_"+$sc;
+	return $path;
+}
+
+global proc ezAddRenderLayer(int $adj,int $index)
+{
+	if ($adj == 1)
+	{
+		string $layerName = `textField -q -text ("layerName_"+$index)`;
+		textScrollList -e -append $layerName ("layerList_"+$index);
+		textField -e -text "" ("layerName_"+$index);
+	}
+	if ($adj == 2)
+	{
+		string $layerName[] = `textScrollList -q -si ("layerList_"+$index)`;
+		for ($layer in $layerName)
+		{
+			textScrollList -e -ri $layer ("layerList_"+$index);
+		}
+	}
+}
+
+global proc ezRepairRender()
+{
+	string $files[] = `textScrollList -q -ai fileList`;
+	for ($i=1;$i<=size($files) ;$i++ )
+	{
+		string $attrs[] = `textScrollList -q -ai ("layerList_"+$i)`;
+		string $path = `textFieldButtonGrp -q -text ("imageFolder_"+$i)`;
+		for ($attr in $attrs)
+		{
+			string $rl="-rl \"";
+			int $sf[]={},$ef[]={};
+			string $cmd;
+
+			string $buff1[],$buff2[],$buff3[];
+			tokenize $attr ":" $buff1;
+			
+			//Get RenderLayer
+			if (size($buff1) == 2)
+			{
+				tokenize $buff1[0] "," $buff2;
+				for ($layer in $buff2)
+				{
+					$rl = $rl + " " + $layer;
+				}
+				$rl = $rl + "\"";
+			}
+			//Get RenderFrame
+			tokenize $buff1[size($buff1)-1] "," $buff2;
+			for ($frame in $buff2)
+			{
+				tokenize $frame "-" $buff3;
+				$sf[size($sf)] = (int)$buff3[0];
+				$ef[size($ef)] = (int)$buff3[size($buff3)-1];
+			}
+	
+			//Render
+			for ($j=0;$j<size($sf);$j++)
+			{
+				if (size($rl)>6)
+				{
+					$cmd = " -r file -s " + $sf[$j] + " -e "+ $ef[$j]+" -b 1 -rd " + $path + " " + $rl + " \"" + $files[$i-1] + "\"";
+					print ($cmd+"\n");
+					system("render.exe" + $cmd);
+				}
+				else 
+				{	
+					$cmd = " -r file -s " + $sf[$j] + " -e "+ $ef[$j]+" -b 1 -rd " + $path + " \"" + $files[$i-1] + "\"";
+					print ($cmd+"\n");
+					system("render.exe" + $cmd);
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,77 @@
+//Creates geometry to represent the clipping planes of the camera
+//Useful for displaying camera field of view when playblasting or rendering
+//Dan Ziegler 2003
+
+global proc string findCamera(){
+	$selected = `ls -sl`;
+	if(size($selected)<1){
+		error "please select a camera";
+	}
+	$camera = $selected[0];
+	$shapes = `listRelatives -s $selected`;
+	string $camShape="";
+	for($shape in $shapes){
+		if(`objectType $shape`=="camera"){
+			$camShape=$shape;
+		}
+   	}
+	if(size($camShape)<1){
+		error "please select a camera";
+	}
+	return $camera;
+}
+
+global proc modelClipPlanes()
+{
+	$camera = `findCamera`;
+	$shapes = `listRelatives -s $camera`;
+	string $camShape="";
+	for($shape in $shapes){
+		if(`objectType $shape`=="camera"){
+			$camShape=$shape;
+		}
+   	}
+	
+	float $far_clip_val = `getAttr ($camShape+".farClipPlane")`;
+	float $offset = `getAttr ($camShape+".horizontalFilmOffset")`;
+	float $fl = `getAttr ($camShape+".fl")` / 10;
+	float $ap = `getAttr ($camShape+".horizontalFilmAperture")` * 2.54;
+	float $zscale = $far_clip_val;
+	float $xyscale = .537*$zscale*$ap/$fl;
+
+	//Create nurbs squares to represent the near and far clip planes
+	string $nearClip = ($camera+"_nearClip");
+	string $farClip = ($camera+"_farClip");
+	string $clipSurf = ($camera+"_clipSurface");
+	string $objects[]={$nearClip,$farClip,$clipSurf};
+	for($object in $objects){
+		if(`objExists $object`){
+			delete $object;
+		}
+	}
+	circle -nr 0 0 1 -sw 360 -r .1 -d 1 -s 4 -ch 0 -n $nearClip;
+	setAttr ($nearClip+".rz") 45;
+	FreezeTransformations;
+	circle -nr 0 0 1 -sw 360 -r 1 -d 1 -s 4 -ch 0 -n $farClip;
+	setAttr ($farClip+".rz") 45;
+	FreezeTransformations;
+	parent -r $nearClip $camera;
+	parent -r $farClip $camera;
+
+	//Set the scale of the far clip object based on camera clip values
+	setAttr ($farClip+".tz") ($far_clip_val * -1);
+	setAttr ($farClip+".sx") ($xyscale * 1.316);
+	setAttr ($farClip+".sy") $xyscale;
+
+	//Offset far plane if necessary
+	setAttr ($farClip+".tx") ($offset * $xyscale * 2);
+
+	//Loft the surfaces
+	string $surface[] = `loft -ch 1 -u 1 -c 0 -d 1 -ss 1 -rn 0 -po 0 -rsn true $nearClip $farClip`;
+	rename $surface[0] $clipSurf;
+	toggle -state on -template;
+
+	//Make template color black
+	displayRGBColor "template" 0 0 0;
+	select -cl;
+}

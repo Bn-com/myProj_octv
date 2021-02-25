@@ -1,0 +1,161 @@
+global proc yuExportToRealflowWin()
+{
+	if(`window -exists yuExportToRealflowWin`)
+		deleteUI yuExportToRealflowWin;
+	window -t "Export Particle To Realflow"
+	            -mxb 0
+	            -wh 320 51
+	            yuExportToRealflowWin;
+	columnLayout -adj 1 mainCol;
+	formLayout mainForm;
+	text -l "请选择粒子输出路径" particleTex;
+	textField -text "" -width 190 pathTex;
+	symbolButton -image "navButtonBrowse.xpm" -c "fileBrowserCmd()" filebrowserBut;
+	formLayout -edit
+		   -af "particleTex" "left" 2
+		   -af "particleTex" "top" 3
+		   -ac "pathTex" "left" 3 "particleTex"
+		   -ac "filebrowserBut" "left" 3 "pathTex"
+		   mainForm;
+	setParent ..;
+	button -l "导出" -c "yuExpPcticleFuc()";
+	setParent ..;
+	showWindow yuExportToRealflowWin ;
+}
+
+global proc fileBrowserCmd()
+{
+    string $pathName=eval("idmtFolderDialog");
+    textField -e  -text $pathName pathTex;
+}
+
+
+proc string fixName(string $select){
+	string $tempGRP[];
+	string $tempREF[];
+	tokenize $select "|" $tempGRP;
+	$new = "";
+	for($i=0;$i<size($tempGRP);$i++){
+		if($i>0){
+			$new += "__";
+		}
+		$new += $tempGRP[$i];
+	}
+	tokenize $new ":" $tempREF;
+	$new = "";
+	for($i=0;$i<size($tempREF);$i++){
+		if($i>0){
+			$new += "__";
+		}
+		$new += $tempREF[$i];
+	}
+	return ($new);
+}
+
+global proc yuExpPcticleFuc(){
+	int $m = 0;
+	string $restorePart[];
+
+	// List all the particle system in the scene
+	string $allPart[] = `ls -typ particle`;
+	for ($dynPart in $allPart){
+
+		// Store which particle system is dynamic at the moment to be able to restore it at the end of the procedure
+		if (`getAttr ($dynPart+".isDynamic")`){
+			$restorePart[$m] = $dynPart;
+
+			// Turn off the dynamic attribute
+			setAttr ($dynPart+".isDynamic") 0;
+			$m++;
+		}
+	}
+
+	// Store the selected particle systems
+	string $selectedPart[] = `ls -sl -dag`;
+	$numPSystem = size($selectedPart);
+
+	// Store the range frame of the scene
+	$rangeMin = `playbackOptions -q -min`;
+	$rangeMax = `playbackOptions -q -max`;
+
+	// Set the right parameters for the playback options
+	playbackOptions -ps 0;
+	playbackOptions -by 1;
+	playbackOptions -mps 0;
+
+	// Hide all in the viewPanels
+	string $allModelPanel[] = `getPanel -type modelPanel`;
+	for ($i in $allModelPanel){
+		modelEditor -e -allObjects 0 $i;
+	}
+	for ($k=0;($k<$numPSystem);$k++){
+		$name = fixName($selectedPart[$k]);
+		$k++;
+
+		// Create an external file in project's particles directory
+		//string $projDir = `workspace -q -rd`;
+		//string $destDir[] = `workspace -q -rt`;
+		string $particlesDir;
+		$particlesDir=`textField -q  -text pathTex`;
+
+		// Find the particle's folder on project
+		//for($l=0;$l<(size($destDir));$l++){
+		//	if($destDir[$l]=="particles"){
+		//		$particlesDir = $destDir[($l+1)];
+		//		break;
+		//	}
+		//}
+		if($particlesDir==""){
+			error "The particle's folder doesn't exist in your project or you have not set the project yet";
+		}
+		$myCacheFileName = ($particlesDir + "/" + $name + ".dat" );
+		$fileId=`fopen $myCacheFileName "w"`;
+
+		// Turn on the dynamic attribute of the particle system that is storing at the moment
+		setAttr ($selectedPart[$k]+".isDynamic") 1;
+		int $jRF = 0;
+		if($rangeMin>0){
+			$jRF = $rangeMin;
+		}
+		for ($j=$rangeMin;$j<=$rangeMax;$j++){
+			currentTime $j;
+
+			// Write into external file which frame is calculating at the moment
+			fprint $fileId ("Frame: "+$jRF+"\n");
+			int $partTot = `getAttr ($selectedPart[$k]+".count")`;
+
+			// Read the attribute from the particle system
+			float $partArrPos[] = `getAttr ($selectedPart[$k]+".position")`;
+			float $partArrVel[] = `getAttr ($selectedPart[$k]+".velocity")`;
+			for ($n=1;$n<=($partTot*3);$n++){
+				if (!($n%3)){
+
+					// Write data to an external file
+					fprint $fileId ($partArrPos[$n-3]+","+$partArrPos[$n-2]+","+$partArrPos[$n-1]+","+$partArrVel[$n-3]+","+$partArrVel[$n-2]+","+$partArrVel[$n-1]+"\n");
+				}
+			}
+			$jRF++;
+		}
+
+		// At the end of external file write the final position of cursor that will assume in RealFlow
+		fprint $fileId ("Frame: " + $jRF + "\n");
+
+		// Close the connection to external file
+		fclose $fileId;
+
+		// Turn off the dynamic attribute
+		setAttr ($selectedPart[$k]+".isDynamic") 0;
+	}
+
+	// Restore the dynamic state to the modified particle systems
+	for ($restoredPart in $restorePart){
+			setAttr ($restoredPart+".isDynamic") 1;
+	}
+	currentTime ($rangeMin);
+
+	// Restore all in the viewPanels
+	for ($i in $allModelPanel){
+		modelEditor -e -allObjects 1 $i;
+	}
+}
+

@@ -1,0 +1,260 @@
+//This script creates heads up display elements useful for previs,
+//including scene name, camera name, pan, tilt, roll and camera height.
+//Dan Ziegler 2003
+
+//Update filename
+global proc string previsFilenameHUD(){
+	string $filename = `file -q -sn`;
+	string $buffer[];
+	tokenize($filename,"/.",$buffer);
+	if(size($buffer)>2){
+	$filename = $buffer[size($buffer)-2];
+    	return $filename;
+	}
+	else
+		return " ";
+}
+
+//Update frame
+global proc string previsFrameHUD(){
+	int $frame = `currentTime -q`;
+	return $frame;
+}
+
+//Update pan
+global proc string previsPanHUD(string $camera){
+	string $pan = `getAttr  ($camera+".ry")`;
+	$pan=shorterFloat($pan);
+	return $pan;
+}
+
+//Update tilt
+global proc string previsTiltHUD(string $camera){
+	string $tilt = `getAttr  ($camera+".rx")`;
+	$tilt=shorterFloat($tilt);
+	return $tilt;
+}
+
+//Update roll
+global proc string previsRollHUD(string $camera){
+	string $roll = `getAttr  ($camera+".rz")`;
+	$roll=shorterFloat($roll);
+	return $roll;
+}
+
+//Update Focal Length
+global proc string previsFlHUD(string $camera){
+	string $camShapes[]=`listRelatives -s $camera`;
+	string $fl = `getAttr ($camShapes[0]+".fl")`;
+	$fl = shorterFloat($fl);
+	return $fl;
+}
+
+//Find the current camera
+global proc string findCamera(){
+	$selected = `ls -sl`;
+	if(size($selected)<1){
+		error "please select a camera";
+	}
+	$camera = $selected[0];
+	$shapes = `listRelatives -s $selected`;
+	string $camShape="";
+	for($shape in $shapes){
+		if(`objectType $shape`=="camera"){
+			$camShape=$shape;
+		}
+   	}
+	if(size($camShape)<1){
+		error "please select a camera";
+	}
+	return $camera;
+}
+
+//Update Camera Height
+global proc string previsCamHeightHUD(string $camera){
+	float $xform[] = `xform -q -ws -t $camera`;
+	string $height = $xform[1];
+	$height = shorterFloat($height);
+	return $height;
+}
+
+//Return less digits after the decimal
+global proc string shorterFloat(float $input){
+	string $num = $input;
+	string $buffer[];
+	tokenize($num,".",$buffer);
+	string $int = $buffer[0];
+	string $dec = "0";
+	if(size($buffer)>1){
+		$dec = $buffer[1];
+	}
+	if(size($dec)>1){
+		int $divisor = `pow 10 (size($dec)-1)`;
+		float $decFloat = $buffer[1];
+		$decFloat = $decFloat / $divisor;
+		$dec = $decFloat;
+		clear $buffer;
+		tokenize($dec,".",$buffer);
+		$dec = $buffer[0];
+	}
+	return ($int+"."+$dec);
+}
+
+proc clearDefaultHUD(){
+	string $huds[] = `headsUpDisplay -lh`;
+	for($i=0;$i<size($huds);$i++){
+		headsUpDisplay -rem $huds[$i];
+		headsUpDisplay -s 1 -b $i $huds[$i];
+	}
+}
+
+proc clearPrevisHUD(){
+	//Delete Previs HUDS
+	string $huds[] = `headsUpDisplay -lh`;
+	string $hud;
+	for($hud in $huds){
+		if(`gmatch $hud "*Previs*"`){
+			headsUpDisplay -rem $hud;
+		}
+	}
+
+	//Delete update expression
+	if(`objExists refreshPrevisHUD`){
+		delete refreshPrevisHUD;
+	}
+}
+
+global proc previsHUD(){
+	//Clean up old HUD
+	clearPrevisHUD();
+
+	//Clear out default HUDS
+	clearDefaultHUD();
+
+	//Set Colors
+	displayColor -dormant headsUpDisplayLabels 14;
+
+	//Find camera
+	string $camera = `findCamera`;
+
+	//Get shot name from Maya file name
+	headsUpDisplay -section 0
+		-padding 25
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+               -event   "SceneOpened"
+               -command "previsFilenameHUD()"
+               HUDPrevisShot;
+
+	//Show camera name
+	headsUpDisplay -section 2
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -labelFontSize    "large"
+	       -label $camera
+               HUDPrevisCamera;
+
+	//Show frame number
+	headsUpDisplay -section 4
+		-padding 25
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label	"frame:"
+               -event   "timeChanged"
+               -command "previsFrameHUD()"
+               HUDPrevisFrame;
+
+	//Camera Pan
+	string $pancmd = ("previsPanHUD(\""+$camera+"\")");
+	headsUpDisplay -section 5
+		-padding 25
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label	"pan:"
+               -event   "timeChanged"
+               -command $pancmd
+               HUDPrevisPan;
+
+	//Tilt
+	string $tiltcmd = ("previsTiltHUD(\""+$camera+"\")");
+	headsUpDisplay -section 6
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label	"tilt:"
+               -event   "timeChanged"
+               -command $tiltcmd
+               HUDPrevisTilt;
+
+	//Roll               
+	string $rollcmd = ("previsRollHUD(\""+$camera+"\")");
+	headsUpDisplay -section 7
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label	"roll:"
+               -event   "timeChanged"
+               -command $rollcmd
+               HUDPrevisRoll;
+
+	//Focal Length          
+	string $flcmd = ("previsFlHUD(\""+$camera+"\")");     
+	headsUpDisplay -section 8
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label "fl:"
+               -event   "timeChanged"
+               -command $flcmd
+               HUDPrevisFl;
+
+	//Camera Height
+	string $heightcmd = ("previsCamHeightHUD(\""+$camera+"\")");               
+	headsUpDisplay -section 9
+	       -padding 25
+               -block   2
+               -blockSize   large
+               -blockAlignment "center"
+               -dataFontSize    "large"
+		-labelFontSize	"large"
+		-label	"height:"
+               -event   "timeChanged"
+               -command $heightcmd
+               HUDPrevisCamHeight;
+
+
+	//Create refresh expression
+	string $refreshHudXpr = "";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisFrame;\n";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisPan;\n";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisTilt;\n";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisRoll;\n";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisFl;\n";
+	$refreshHudXpr += "headsUpDisplay -r HUDPrevisCamHeight;\n";
+	expression -s $refreshHudXpr -n refreshPrevisHUD;
+}
+
+//Main Program
+if(`objExists refreshPrevisHUD`){
+	clearPrevisHUD();
+	print "previs hud deleted";
+}
+else{
+	previsHUD();
+	print "previs hud installed";
+}

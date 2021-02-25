@@ -1,0 +1,184 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-4-2
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-4-2
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc slRenderCamerTools()
+{
+	if (`window -ex slRenderCamerToolsWin`)
+	{
+		deleteUI slRenderCamerToolsWin;
+	}
+	
+	window -t "Camera Render " slRenderCamerToolsWin;
+		columnLayout -adj 1;
+			
+			separator -st "single" -h 10;
+
+			rowLayout -nc 2 -cw 1 500 -cw 2  50 -adj 1;
+				string $jpgfolder = `textFieldGrp -label "JPG" -editable false -columnWidth 1 50 -adjustableColumn 2 slRenderCamerToolsWin_JPG`;
+				string $jpgloader = `symbolButton -image "navButtonBrowse.xpm" -command ("slFileBrowse " + $jpgfolder)`;
+				setParent ..;
+
+			rowLayout -nc 2 -cw 1 500 -cw 2  50 -adj 1;
+				string $movfolder = `textFieldGrp -label "MOV" -editable false -columnWidth 1 50 -adjustableColumn 2 slRenderCamerToolsWin_MOV`;
+				string $movloader = `symbolButton -image "navButtonBrowse.xpm" -command ("slFileBrowse " + $movfolder)`;
+				setParent ..;
+			
+			separator -st "single" -h 10;
+			
+			rowLayout -nc 2 -cw 1 230 -cw 2  150;
+				string $episode = `textFieldGrp -l "Current Episode" -ed true -cw 1 100 -cw 2 50 slRenderCamerToolsWin_EPIS`;
+				string $allshot =  `textFieldGrp -l "Shot Total" -ed true -cw 1 100 -cw 2 50 slRenderCamerToolsWin_ASH`;
+				setParent ..;
+			
+			rowLayout -nc 3 -cw 1 150 -cw 2  80 -cw 3 150;
+				string $rendershot = `textFieldGrp -l "Render Shot" -ed true -cw 1 100 -cw 2 50 slRenderCamerToolsWin_RS`;
+				string $rendershot1 = `textFieldGrp -l "" -ed true -cw 1 1 -cw 2 50 slRenderCamerToolsWin_RS1`;
+				string $renameshot = `textFieldGrp -l "Rename Shot" -ed true -cw 1 100 -cw 2 50 slRenderCamerToolsWin_RNS`;
+				setParent ..;
+
+			separator -st "single" -h 10;
+
+			rowLayout -nc 2 -cw 1 500 -cw 2  50 -adj 1;
+				string $exportfolder = `textFieldGrp -label "Export" -editable true -columnWidth 1 50 -adjustableColumn 2 slRenderCamerToolsWin_EXP`;
+				string $exportloader = `symbolButton -image "navButtonBrowse.xpm" -command ("fileBrowserDialog -m 4 -fc \"slFolderBrowse "+$exportfolder+"\"  -an \"Export Folder\" -om \"Import\"")`; 
+				setParent ..;
+
+			separator -st "single" -h 10;
+
+			rowLayout -nc 3 -cw 1 150 -cw 2  150 -cw 3 150 -cal 1 "center" -cal 2 "center" -cal 3 "center";
+				string $getinf = `button -l "Get" -w 120 -h 30  -c "slRenderCamerToolsGetInf"`;
+				string $render = `button -l "Render" -w 120 -h 30 -c "slRenderCamerToolsRender"`;
+				string $close = `button -l "Close" -w 120 -h 30 -c "deleteUI slRenderCamerToolsWin"`;
+				setParent ..;
+
+			setParent ..;
+	showWindow slRenderCamerToolsWin;
+
+	slRenderCamerToolsGetInf;
+}
+
+global proc slFileBrowse(string $folder)
+{
+	string $file = `fileDialog -directoryMask "*.*"`;
+	if (`filetest -f $file`)
+	{
+		textFieldGrp -edit -fileName $file $folder;
+	}
+}
+
+global proc int  slFolderBrowse(string $folder,string $file,string $type)
+{
+	textFieldGrp -edit -text $file $folder;
+	return 1;
+}
+
+global proc slRenderCamerToolsGetInf()
+{
+	global string $slRenderTimes[];
+	
+	string $filename = `file -q -sn -shn`;
+	string $buff[];
+	int $num = `tokenize $filename "_" $buff`;
+	string $proj = $buff[0];
+	string $epis = $buff[1];
+	string $sequ = $buff[2];
+
+	if ($proj != "sl")
+		error "文件名项目缩写错误,请检查!";
+	
+	textFieldGrp -e -text $epis slRenderCamerToolsWin_EPIS;
+
+	string $cam = `lookThru -q`;
+	
+	float $keytimes[] = `keyframe -q -tc $cam`;
+	string $slRenderTimes[]={};
+	for ($k in $keytimes)
+	{
+		$slRenderTimes[size($slRenderTimes)] = $k;
+	}
+	$slRenderTimes = stringArrayRemoveDuplicates($slRenderTimes);
+
+	textFieldGrp -e -text (size($slRenderTimes))	slRenderCamerToolsWin_ASH;
+	textFieldGrp -e -text 1					slRenderCamerToolsWin_RS;
+	textFieldGrp -e -text (size($slRenderTimes))	slRenderCamerToolsWin_RS1;
+	textFieldGrp -e -text 1					slRenderCamerToolsWin_RNS;
+}
+
+global proc slRenderCamerToolsRender()
+{
+	global string $slRenderTimes[];
+	
+	
+	int $episode = `textFieldGrp -q -text slRenderCamerToolsWin_EPIS`;
+	int $rstart = `textFieldGrp -q -text slRenderCamerToolsWin_RS`;
+	int $rend = `textFieldGrp -q -text slRenderCamerToolsWin_RS1`;
+	int $rename = `textFieldGrp -q -text slRenderCamerToolsWin_RNS`;
+	string $exportpath = `textFieldGrp -q -text slRenderCamerToolsWin_EXP `;
+	
+	string $renderLayer[] = `ls -type renderLayer`;
+	string $render[];
+	for ($rl in $renderLayer)
+	{
+		if ( `getAttr ($rl+".renderable")` && (!gmatch("defaultRenderLayer",$rl)) )
+		{
+			$render[size($render)] = $rl;
+		}
+	}
+	
+	string $cam = `lookThru -q`;
+	//RenderViewWindow;
+	//renderWindowRenderCamera snapshot renderView $cam;
+	int $num = $rstart+$rename-1+1000;
+	string $camattrs[];
+	for ($i=$rstart;$i<=$rend;$i++)
+	{
+		int $time = $slRenderTimes[$i-1];
+		currentTime $time;
+		string $str = (string)$num;
+		string $folder = `substring $str 2 4`;
+		for ($rl in $render)
+		{
+			//editRenderLayerGlobals -currentRenderLayer $rl;
+			string $im = $exportpath+"/"+$folder+"/"+$rl+"/";
+			sysFile -md $im;
+		}
+		
+		
+		
+		//取相机参数 tx ty tz rx ry rz fl 
+		string $attrcom="";
+		string $attrs[] = {"tx","ty","tz","rx","ry","rz","fl"};
+		for ($j=0;$j<size($attrs);$j++ )
+		{
+			$attrcom += getAttr ($cam+"."+$attrs[$j]);
+		}
+
+		if (size($camattrs) == 0 || stringArrayCount($attrcom,$camattrs) ==0)
+		{
+			$camattrs[size($camattrs)] = $attrcom;
+			for ($rl in $render)
+			{
+				editRenderLayerGlobals -currentRenderLayer $rl;
+				string $im = $exportpath+"/"+$folder+"/"+$rl+"/";
+				$im = $im+$episode+"_"+$folder+"_"+$rl+".iff";
+
+				renderWindowRender redoPreviousRender renderView;
+				renderWindowSaveImageCallback "renderView"  $im "image";
+
+				print ($im+"\n");
+			}
+
+		}
+		$num +=1;
+	}
+}

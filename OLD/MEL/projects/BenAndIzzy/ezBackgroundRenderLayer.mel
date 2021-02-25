@@ -1,0 +1,162 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/02/26
+///
+/// Description: ben&izzy项目渲染环节自动分层工具之子程序
+///		主要功能：针对场景（包含相关道具）的分层及renderGlobal的设置
+///
+
+global proc ez_createBGRL()
+{
+	string $BGRL[] = {"background","backgroundAO","backgroundRGB"};
+
+	string $obj[] = `ls -sl`;
+	if (!`objExists $obj[0]`)
+		error "请选择需要创建渲染层的场景！";
+	for ($layer in $BGRL)
+	{
+		string $adj[] = `ls -type renderLayer $layer`;
+		if (!`objExists $adj[0]`)
+			createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+		layerEditorLayerButtonSelect 0 $layer;
+		updateHighlightSelectIcon;
+
+		if ($layer == "background")
+		{
+			ezMentalRayRG($layer);
+			string $lights[]=`ls -type light`;
+			editRenderLayerMembers  background $obj $lights;
+		}
+		else if ($layer == "backgroundAO")
+		{
+			ezMentalRayRG($layer);
+			editRenderLayerMembers  backgroundAO $obj;
+			hyperShade -assign ezAO_surfaceShader;
+		}
+		else if ($layer == "backgroundRGB")
+		{
+			ezMayaSoftwareRG;
+			editRenderLayerMembers  backgroundRGB $obj;
+			hyperShade -assign lambert1;
+		}
+
+	}
+	setAttr "defaultRenderLayer.renderable" 0;
+	layerEditorLayerButtonSelect 0 defaultRenderLayer;
+	updateHighlightSelectIcon;
+	select -cl;
+}
+
+global proc ez_createShadowRL()
+{
+	string $shadowRL = "shadow";
+
+	string $obj[] = `ls -sl`;
+
+	if (!`objExists $obj[0]`)
+		error "请选择接受阴影的地面及投射阴影的灯光！";
+
+	string $existsLayer[] = `ls -type renderLayer $shadowRL`;
+	if (`objExists $existsLayer[0]`)
+	{
+		editRenderLayerGlobals -currentRenderLayer defaultRenderLayer;
+		delete $existsLayer[0];
+	}
+	createRenderLayer -name $shadowRL -e -mc -number 1 -noRecurse;
+	ezMayaSoftwareRG;
+
+	string $polyObj[] = `ls -type mesh`;
+	string $nurbsObj[] = `ls -type nurbsSurface`;
+	string $subObj[] = `ls -type subdiv`;
+	editRenderLayerMembers  $shadowRL $obj $polyObj $nurbsObj $subObj;
+	select -r $polyObj;select -add $nurbsObj;select -add $subObj;
+	hyperShade -assign ezmatte_lambert;	
+	
+	for ($temp in $obj)
+	{
+		select -hi $temp;
+		string $shapes[]= `ls -sl -type shape`;
+		for ($tem in $shapes)
+		{
+			if (`nodeType $tem` == "mesh" || `nodeType $tem` == "nurbsSurface" || `nodeType $tem` == "subdiv")
+			{
+				select -r $tem;
+				hyperShade -assign ezShadow_useBackground;
+				setAttr ($tem + ".castsShadows") 0;
+
+			}
+		}
+	}
+	setAttr "defaultRenderLayer.renderable" 0;
+	layerEditorLayerButtonSelect 0 defaultRenderLayer;
+	updateHighlightSelectIcon;
+	select -cl;
+}
+
+global proc ez_createDepthRL()
+{
+	string $depthRL = "depth";
+	int $num=0;
+
+	string $obj[] = `ls -sl`;
+	
+	if (!`objExists $obj[0]`)
+		error "请选择需要创建Depth渲染层的物体！";
+	
+	createRenderLayer -name $depthRL -mc -number 1 -noRecurse;
+	ezMayaSoftwareRG;
+
+	for ($tem in $obj )
+	{
+		select -r $tem;
+		hyperShade -assign ezDepth_surfaceShader;
+		editRenderLayerAdjustment "ezDepth_surfaceShader.depth";
+		setAttr "ezDepth_surfaceShader.depth" 200;
+		editRenderLayerAdjustment "ezDepth_surfaceShader.near";
+	}
+	setAttr "defaultRenderLayer.renderable" 0;
+	select -cl;
+
+}
+
+global proc ez_createBlurRL()
+{
+	string $blurRL = "blur";
+	int $num =0;
+	int $sFrame = `playbackOptions -q -min`;
+	int $eFrame = `playbackOptions -q -max`;
+
+	string $obj[] = `ls -sl`;
+
+	if (!`objExists $obj[0]`)
+		error "请选择需要创建Blur渲染层的物体！";
+
+	createRenderLayer -name $blurRL -mc -number 1 -noRecurse;
+	ezMayaSoftwareRG;
+
+	editRenderLayerAdjustment "defaultRenderGlobals.startFrame";
+	setAttr "defaultRenderGlobals.startFrame" ($sFrame-2);
+	editRenderLayerAdjustment "defaultRenderGlobals.endFrame";
+	setAttr "defaultRenderGlobals.endFrame" ($eFrame+2);
+
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 3;
+	editRenderLayerAdjustment "defaultRenderGlobals.motionBlur";
+	setAttr "defaultRenderGlobals.motionBlur" 1;
+	editRenderLayerAdjustment "defaultRenderGlobals.motionBlurType";
+	setAttr defaultRenderGlobals.motionBlurType 0;
+	setAttr defaultRenderGlobals.smoothColor 1;
+	editRenderLayerAdjustment "defaultRenderGlobals.keepMotionVector";
+	setAttr "defaultRenderGlobals.keepMotionVector" 1;
+	editRenderLayerAdjustment "defaultRenderGlobals.useBlur2DMemoryCap";
+	setAttr "defaultRenderGlobals.useBlur2DMemoryCap" 0;
+
+	for ($tem in $obj)
+	{
+		select -r $tem;
+		hyperShade -assign lambert1;
+	}
+	setAttr "defaultRenderLayer.renderable" 0;
+	select -cl;
+}

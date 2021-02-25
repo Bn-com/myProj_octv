@@ -1,0 +1,557 @@
+global proc sk4_slAnimExportImportForSetMainLayout()
+{
+	if(`window -exists window_slAnimExportImport`)
+	{	
+		deleteUI window_slAnimExportImport;
+	}
+	window -title "Animation Export&Import Tools" -mb true -mxb false -s true  window_slAnimExportImport;
+	
+		menu -label "Help";
+			menuItem -label "Help ... " -command "";
+
+		 columnLayout -adj true -rs 10;
+			frameLayout -label "通过文件导动画" -labelAlign "top"  -borderStyle "etchedIn";
+				 columnLayout -adjustableColumn true -rs 10 ;
+					radioButtonGrp  -numberOfRadioButtons 3 	-columnWidth4 80 80 60 60  -labelArray4  "Selected" "Sets"  "Below"  ""
+					-select 2
+					-label ("Hierarchy   ") window_slAnimExportImport_hi;
+					button -label "Export Animation" -h 30 -c "slAnimExportForSetGetFile(\"ex\")" ;
+					button -label "Import Animation" -h 30 -c "slAnimExportForSetGetFile(\"im\")";
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	//setParent ..;
+			//frameLayout -label "Animation Import Options" -labelAlign "top"  -borderStyle "etchedIn";
+				//button -label "Import Animation" -h 30 -c "slAnimExportForSetGetFile(\"im\")";
+		//setParent ..;
+			frameLayout -label "场景内导动画" -labelAlign "top"  -borderStyle "etchedIn";
+				columnLayout -adjustableColumn true -rs 1 ;
+					radioButtonGrp  -numberOfRadioButtons 3 	-columnWidth4 80 80 60 60  -labelArray4  "all" "body"  "face" ""
+					-select 1
+					-label ("part   ") window_slAnimCopyAnimation_pt;
+					radioButtonGrp  -numberOfRadioButtons 3 	-columnWidth4 80 80 60 60  -labelArray4  "anim" "pose"  "control"  ""
+					-select 1
+					-label ("copyType   ") window_slAnimCopyAnimation_ct;
+					text -al "left" -l "     先选择导出动画的角色master控制器，再选择需要导入动画的角色的控制器";
+					text -al "left" -l "     1.anim方式是复制所有动画\n     2.pose方式是只复制当前帧的pose\n     3.control方式是只复制所选的两个控制器相同属性的动画";
+					button -label "Copy Animation" -h 30 -c "zorro_slAnimCopyAnimations";
+					separator -height 20 -style "out";
+					text -al "left" -l "     先选择所有需导出动画的角色控制器，再选择需要导入动画的角色的其中一个控制器";
+					button -label "Copy Animation By Selected Objs" -h 30 -c "python(\"execfile(r'//file-cluster/gdc/Resource/Support/Maya/projects/VickytheViking/vv_copyKeyBySelObj.py');vv_copyKeyBySelObj()\")";
+					separator -height 20 -style "out";
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	//setParent ..;
+	showWindow window_slAnimExportImport;
+	window -e -w 440 -h 350 window_slAnimExportImport;
+}
+
+global proc  slAnimExportForSetGetFile(string $type)
+{
+	if ($type == "ex")
+		fileBrowserDialog -m 1 -fc "slAnimExportForSet"  -an "export";	
+	else if ($type == "im")
+		fileBrowserDialog -m 0 -fc "slAnimImportForSet"  -an "import";	
+}
+
+global proc slAnimExportForSet(string $fileName,string $fileType)
+{
+	string $file;
+	if (endsWith($fileName,".sla"))
+		$file = $fileName;
+	else if (endsWith($fileName,".*"))
+		$file = `substituteAllString $fileName ".*" ".sla"`;
+	else 
+		$file = $fileName+".sla";
+	
+	string $select[] = `ls -sl`;
+	int $hi = `radioButtonGrp -q -select window_slAnimExportImport_hi`;
+	string $objs[];
+	if (`objExists $select[0]`)
+	{
+		if ($hi == 1)
+			$objs = $select;
+		else if ($hi == 2)
+		{
+			string $buff[];
+			int $num = `tokenize $select[0] ":" $buff`;
+			string $pre = `substring $select[0] 1 (size($select[0])-size($buff[$num-1]))`;
+			string $sets[] = `ls -type objectSet ($pre+"*")`;
+			for ($set in $sets)
+			{
+				$objs = stringArrayCatenate($objs, `sets -q $set`);
+			}
+		}
+		else if ($hi == 3)
+		{
+			string $useful[];
+			string $allchild[] = `listRelatives -f -ad -type transform $select[0]`;
+			for ($child in $allchild)
+			{
+				string $keys[] = `listAttr -k $child`;
+				string $nonKeys[] = `listAttr -cb $child`;
+				if ((size($keys) || size($nonKeys)) && !size(`ls -type constraint $child`))
+				{
+					 string $sn[] = `ls -sn $child`;
+					 $useful[size($useful)] = $sn[0];
+				}
+			}
+			
+			$objs = stringArrayCatenate($select,$useful);
+		}
+	}
+	
+	string $mayaVersion = `about -v`;
+	string $linearUnit = `currentUnit -q -f -l`;
+	string $angularUnit = `currentUnit -q -f -a`;
+	string $timeUnit = `currentUnit -q -f -t`;
+	
+
+	$fileId = `fopen $file "w"`;
+	fprint $fileId "ImportExportAnimationForSets v 1.0   (Author: wanshoulong)\n";
+	fprint $fileId ("mayaVersion  "+$mayaVersion+";\n");
+	fprint $fileId ("linearUnit  "+$linearUnit+";\n");
+	fprint $fileId ("angularUnit  "+$angularUnit+";\n");
+	fprint $fileId ("timeUnit  "+$timeUnit+";\n");
+
+	for ($obj in $objs)
+	{
+		if (`objectType -isType "transform" $obj` || `objectType -isType "joint" $obj`)
+		{
+			string $keys[] =`listAttr -k $obj`;
+			string $nonKeys[] = `listAttr -cb $obj`;
+			string $allAttr[] = stringArrayCatenate($keys,$nonKeys);
+
+			for ($key in $allAttr)
+			{
+				string $animCurv[] ;
+				if (`objExists ($obj+"."+$key)`)
+					$animCurv = `listConnections -s true -d false ($obj+"."+$key)`;
+				if (`objExists $animCurv[0]` && isAnimCurve($animCurv[0]))
+				{
+					fprint $fileId ("anim "+$obj+"."+$key+"\n{\n");
+
+					float $time[] = `keyframe -q -tc $animCurv[0]`;
+					float $value[] = `keyframe -q -vc $animCurv[0]`;
+					string $inputType[] = `keyTangent -q -itt $animCurv[0]`;
+					string $outputType[] = `keyTangent -q -ott $animCurv[0]`;
+					int $lock[] = `keyTangent -q -l $animCurv[0]`;
+					int $weightLock[] = `keyTangent -q -wl $animCurv[0]`;
+					float $inputAngle[] = `keyTangent -q -ia $animCurv[0]`;
+					float $inputWeight[] = `keyTangent -q -iw $animCurv[0]`;
+					float $outputAngle[] = `keyTangent -q -oa $animCurv[0]`;
+					float $outputWeight[] = `keyTangent -q -ow $animCurv[0]`;
+
+
+					for ($i=0;$i<size($time) ;$i++ )
+					{
+						fprint $fileId ("	"+$time[$i]+" "+$value[$i]+" "+$inputType[$i]+" "+$outputType[$i]+" "+$weightLock[$i]);
+						if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && $weightLock[$i])
+							fprint $fileId (" "+$inputAngle[$i]+" "+$outputAngle[$i]);
+						else if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && !$weightLock[$i])
+							fprint $fileId (" "+$inputAngle[$i]+" "+$inputWeight[$i]+" "+$outputAngle[$i]+" "+$outputWeight[$i]);
+						fprint $fileId ";\n";
+					}
+
+					fprint $fileId "}\n";
+				}
+				else if (`objExists ($obj+"."+$key)`)
+				{
+					//print ($obj+"."+$key+"\n");
+					if (`getAttr -type ($obj+"."+$key)` != "double3")
+					{
+						string $value = getAttr ($obj+"."+$key);
+						fprint $fileId ("non-anim "+$obj+"."+$key+"	"+$value+";\n");
+					}
+				}
+			}
+
+			string $expShapes[] = `listHistory $obj` ;
+			if (size($expShapes) && `objectType -isType "nurbsCurve" $expShapes[0]` && `getAttr ($expShapes[0]+".dispCV")` == 1)
+			{
+				float $pointNum = `getAttr ($expShapes[0]+".spans")`;
+				for ($j=0;$j<=($pointNum+1);$j++)
+				{
+					string $keys[] = `listAttr -k ($expShapes[0]+".cv["+$j+"]")`;
+					for ($key in $keys)
+					{
+						string $animCurv[] = `listConnections -type animCurve -s 1 -d 0 ($expShapes[0]+"."+$key)`;
+						if (`size $animCurv` && isAnimCurve($animCurv[0]))
+						{
+							fprint $fileId ("anim "+$expShapes[0]+"."+$key+"\n{\n");
+
+							float $time[] = `keyframe -q -tc $animCurv[0]`;
+							float $value[] = `keyframe -q -vc $animCurv[0]`;
+							string $inputType[] = `keyTangent -q -itt $animCurv[0]`;
+							string $outputType[] = `keyTangent -q -ott $animCurv[0]`;
+							int $lock[] = `keyTangent -q -l $animCurv[0]`;
+							int $weightLock[] = `keyTangent -q -wl $animCurv[0]`;
+							float $inputAngle[] = `keyTangent -q -ia $animCurv[0]`;
+							float $inputWeight[] = `keyTangent -q -iw $animCurv[0]`;
+							float $outputAngle[] = `keyTangent -q -oa $animCurv[0]`;
+							float $outputWeight[] = `keyTangent -q -ow $animCurv[0]`;
+
+
+							for ($i=0;$i<size($time) ;$i++ )
+							{
+								fprint $fileId ("	"+$time[$i]+" "+$value[$i]+" "+$inputType[$i]+" "+$outputType[$i]+" "+$weightLock[$i]);
+								if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && $weightLock[$i])
+									fprint $fileId (" "+$inputAngle[$i]+" "+$outputAngle[$i]);
+								else if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && !$weightLock[$i])
+									fprint $fileId (" "+$inputAngle[$i]+" "+$inputWeight[$i]+" "+$outputAngle[$i]+" "+$outputWeight[$i]);
+								fprint $fileId ";\n";
+							}
+
+							fprint $fileId "}\n";
+						}
+						else 
+						{
+							//print ($obj+"."+$key+"\n");
+							if (`getAttr -type ($expShapes[0]+"."+$key)` != "double3")
+							{
+								string $value = getAttr ($expShapes[0]+"."+$key);
+								fprint $fileId ("non-anim "+$expShapes[0]+"."+$key+"	"+$value+";\n");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	fclose $fileId;
+}
+
+global proc slAnimImportForSet(string $fileName ,string $fileType)
+{
+	string $buff[];
+	string $master[] = `ls -sl`;
+	if (!`objExists $master[0]`)
+		error "请选择需要导入动画的角色！";
+	int $num = `tokenize $master[0] ":" $buff`;
+	string $preRep = `substring $master[0] 1 (size($master[0])-size($buff[$num-1]))`;
+	
+	string $file = $fileName;
+	
+	string $mayaVersion = `about -v`;
+	string $linearUnit = `currentUnit -q -f -l`;
+	string $angularUnit = `currentUnit -q -f -a`;
+	string $timeUnit = `currentUnit -q -f -t`;
+	
+	
+	string $buff[];
+	$fileId = `fopen $file "r"`;
+	string $nextLine = `fgetline $fileId`;
+	
+	//mayaVersion
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $mayaVersion)
+		//warning ("Maya版本不同：maya"+$buff[1]+"=>maya"+$mayaVersion);
+	//linearUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $linearUnit)
+	//	error ("Maya长度单位设置不同(PreferencesSetting-Linear)："+$buff[1]+"=>"+$linearUnit);
+	//angularUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $angularUnit)
+	//	error ("Maya角度单位设置不同(PreferencesSetting-Angular)："+$buff[1]+"=>"+$angularUnit);
+	//timeUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $timeUnit)
+	//	error ("Maya帧数单位设置不同(PreferencesSetting-Time)："+$buff[1]+"=>"+$timeUnit);
+	
+	while(size($nextLine)>0)
+	{
+		$nextLine = `fgetline $fileId`;
+		
+		if (startsWith($nextLine,"anim"))
+		{
+			tokenize $nextLine " \t;\n" $buff;
+			string $buffer[];
+			tokenize $buff[1] "." $buffer;
+			string $attr = $buffer[size($buffer)-1];
+
+			int $num = `tokenize $buff[1] ":" $buffer`;
+			string $con = `substituteAllString $buffer[$num-1] ("."+$attr) ""`;
+
+			string $key = $preRep + $con + "." + $attr;
+			string $set[] = `ls $key`;
+			if (size($set) == 1 && `objExists $key` && !`getAttr -l $key` && `getAttr -k $key`)
+			{
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+
+				string $existAnim[] = `listConnections -s true -d false $key`;
+				if (`objExists $existAnim[0]` && isAnimCurve($existAnim[0]))
+					catchQuiet(`delete $existAnim`);
+				while(!startsWith($nextLine,"}"))
+				{
+					tokenize $nextLine " \t;\n" $buff;
+					float $time = (float)$buff[0];
+					float $value = (float)$buff[1];
+					string $inputType = $buff[2];
+					string $outputType = $buff[3];
+					int $weightLock = (int)$buff[4];
+
+					float $inputAngle;
+					float $inputWeight;
+					float $outputAngle;
+					float $outputWeight;
+
+					if (($inputType == "fixed" || $outputType == "fixed") && $weightLock)
+					{
+						$inputAngle = (float)$buff[5];
+						$outputAngle = (float)$buff[6];
+						setKeyframe -t $time -v $value  $key;
+						selectKey -r -k -t $time  $key;
+						keyTangent -e -ia $inputAngle -iw 1 -oa $outputAngle -ow 1;
+					}
+					else if (($inputType == "fixed" || $outputType == "fixed") && !$weightLock)
+					{
+						$inputAngle = (float)$buff[5];
+						$inputWeight = (float)$buff[6];
+						$outputAngle = (float)$buff[7];
+						$outputWeight = (float)$buff[8];
+						setKeyframe -t $time -v $value  $key;
+						selectKey -r -k -t $time  $key;
+						keyTangent -e -ia $inputAngle -iw $inputWeight -oa $outputAngle -ow $outputWeight;
+					}
+					else
+						setKeyframe -t $time -v $value -itt $inputType -ott $outputType $key;
+					//print $buff;
+					//print "\n";
+					$nextLine = `fgetline $fileId`;
+				}
+
+			}
+			
+			//print $key;
+			//print "\n";
+		}
+		
+		if (startsWith($nextLine,"non-anim"))
+		{
+			tokenize $nextLine " \t;\n" $buff;
+			string $buffer[];
+			float $value = (float)$buff[2];
+
+			tokenize $buff[1] "." $buffer;
+			string $attr = $buffer[size($buffer)-1];
+
+			int $num = `tokenize $buff[1] ":" $buffer`;
+			string $con = `substituteAllString $buffer[$num-1] ("."+$attr) ""`;
+
+			string $key = $preRep + $con + "." + $attr;
+			string $set[] = `ls $key`;
+			if (size($set) == 1 && `objExists $key` && !`getAttr -l $key` && `getAttr -se $key`)
+			{
+				string $existAnim[] = `listConnections -s true -d false $key`;
+				if (`objExists $existAnim[0]` && isAnimCurve($existAnim[0]))
+				{
+					delete $existAnim;	
+					setAttr $key $value;
+				}
+				if (!`objExists $existAnim[0]` && `getAttr -type $key` != "string")
+				{
+					catch (`setAttr $key $value`);
+				}
+			}
+		}
+	}
+	
+	
+	
+	
+	//print $nextLine;
+	fclose $fileId;
+}
+
+
+
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc zorro_slAnimCopyAnimations()
+{
+	string $master[] = `ls -sl`;
+
+	
+	int $ct=1;
+	if (`radioButtonGrp -q -ex window_slAnimCopyAnimation_ct`)
+	{
+		$ct= `radioButtonGrp	-q -select window_slAnimCopyAnimation_ct`;
+	}
+
+	int $pt=1;
+	if (`radioButtonGrp -q -ex window_slAnimCopyAnimation_pt`)
+	{
+		$pt= `radioButtonGrp	-q -select window_slAnimCopyAnimation_pt`;
+	}
+	
+	if (size($master) != 2)
+		error "请先选择导出动画的角色的character，再选择需要导入动画的角色的character !";
+
+	string $buff[];
+	int $num1 = `tokenize $master[0] ":" $buff`;
+	string $preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+	if ($num1==1)
+	{
+		$num1 = `tokenize $master[0] "_" $buff`;
+		$preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+		if ($num1==1)
+		{
+			$preCopy = "";
+		}
+	}
+
+	clear $buff;
+	int $num2 = `tokenize $master[1] ":" $buff`;
+	string $prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+	if ($num2==1)
+	{
+		$num1 = `tokenize $master[1] "_" $buff`;
+		$prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+		if ($num1==1)
+		{
+			$prePaste = "";
+		}
+	}
+	
+	/*
+	string $animSets[];
+	if ($pt ==1 )
+	{
+		$animSets = {"faceControls","TSM2Controls","FaceMachineControls","bodySet","CTRL_SET","face_controls_Sets","ALL_CONTROLS","keySet","ControlSet"};
+	}
+	else if ($pt ==2)
+	{
+		$animSets = {"TSM2Controls","bodySet","CTRL_SET"};
+	}
+	else if ($pt ==3)
+	{
+		$animSets = {"faceControls","FaceMachineControls","face_controls_Sets"};
+	}
+	*/
+	
+	string $copyObjs[];
+	if ($pt ==1 )
+	{
+		string $selAllObj[] = {"foreHairA_jt_1_ctrl","foreHairA_jt_1_fk_ctrl","foreHairA_jt_2_ctrl","foreHairA_jt_2_fk_ctrl","foreHairA_jt_3_ctrl","foreHairA_jt_3_fk_ctrl","foreHairA_jt_4_ctrl","foreHairA_jt_4_fk_ctrl","foreHairA_jt_5_ctrl","foreHairA_jt_5_fk_ctrl","foreHairA_jt_6_ctrl","foreHairA_jt_6_fk_ctrl","foreHairA_jt_7_ctrl","foreHairA_jt_7_fk_ctrl","foreHairA_main_ctrl","foreHairB_jt_1_ctrl","foreHairB_jt_1_fk_ctrl","foreHairB_jt_2_ctrl","foreHairB_jt_2_fk_ctrl","foreHairB_jt_3_ctrl","foreHairB_jt_3_fk_ctrl","foreHairB_jt_4_ctrl","foreHairB_jt_4_fk_ctrl","foreHairB_jt_5_ctrl","foreHairB_jt_5_fk_ctrl","foreHairB_jt_6_ctrl","foreHairB_jt_6_fk_ctrl","foreHairB_jt_7_ctrl","foreHairB_jt_7_fk_ctrl","foreHairB_main_ctrl","foreHairC_jt_1_ctrl","foreHairC_jt_1_fk_ctrl","foreHairC_jt_2_ctrl","foreHairC_jt_2_fk_ctrl","foreHairC_jt_3_ctrl","foreHairC_jt_3_fk_ctrl","foreHairC_jt_4_ctrl","foreHairC_jt_4_fk_ctrl","foreHairC_jt_5_ctrl","foreHairC_jt_5_fk_ctrl","foreHairC_jt_6_ctrl","foreHairC_jt_6_fk_ctrl","foreHairC_main_ctrl","foreHairD_jt_1_ctrl","foreHairD_jt_1_fk_ctrl","foreHairD_jt_2_ctrl","foreHairD_jt_2_fk_ctrl","foreHairD_jt_3_ctrl","foreHairD_jt_3_fk_ctrl","foreHairD_jt_4_ctrl","foreHairD_jt_4_fk_ctrl","foreHairD_jt_5_ctrl","foreHairD_jt_5_fk_ctrl","foreHairD_jt_6_ctrl","foreHairD_jt_6_fk_ctrl","foreHairD_main_ctrl","foreHairE_jt_1_ctrl","foreHairE_jt_1_fk_ctrl","foreHairE_jt_2_ctrl","foreHairE_jt_2_fk_ctrl","foreHairE_jt_3_ctrl","foreHairE_jt_3_fk_ctrl","foreHairE_jt_4_ctrl","foreHairE_jt_4_fk_ctrl","foreHairE_jt_5_ctrl","foreHairE_jt_5_fk_ctrl","foreHairE_jt_6_ctrl","foreHairE_jt_6_fk_ctrl","foreHairE_main_ctrl","foreHairF_jt_1_ctrl","foreHairF_jt_1_fk_ctrl","foreHairF_jt_2_ctrl","foreHairF_jt_2_fk_ctrl","foreHairF_jt_3_ctrl","foreHairF_jt_3_fk_ctrl","foreHairF_jt_4_ctrl","foreHairF_jt_4_fk_ctrl","foreHairF_jt_5_ctrl","foreHairF_jt_5_fk_ctrl","foreHairF_jt_6_ctrl","foreHairF_jt_6_fk_ctrl","foreHairF_main_ctrl","foreHairG_jt_1_ctrl","foreHairG_jt_1_fk_ctrl","foreHairG_jt_2_ctrl","foreHairG_jt_2_fk_ctrl","foreHairG_jt_3_ctrl","foreHairG_jt_3_fk_ctrl","foreHairG_jt_4_ctrl","foreHairG_jt_4_fk_ctrl","foreHairG_jt_5_ctrl","foreHairG_jt_5_fk_ctrl","foreHairG_jt_6_ctrl","foreHairG_jt_6_fk_ctrl","foreHairG_jt_7_ctrl","foreHairG_jt_7_fk_ctrl","foreHairG_main_ctrl","foreHairH_jt_1_ctrl","foreHairH_jt_1_fk_ctrl","foreHairH_jt_2_ctrl","foreHairH_jt_2_fk_ctrl","foreHairH_jt_3_ctrl","foreHairH_jt_3_fk_ctrl","foreHairH_jt_4_ctrl","foreHairH_jt_4_fk_ctrl","foreHairH_jt_5_ctrl","foreHairH_jt_5_fk_ctrl","foreHairH_jt_6_ctrl","foreHairH_jt_6_fk_ctrl","foreHairH_jt_7_ctrl","foreHairH_jt_7_fk_ctrl","foreHairH_main_ctrl","foreHairI_jt_1_ctrl","foreHairI_jt_1_fk_ctrl","foreHairI_jt_2_ctrl","foreHairI_jt_2_fk_ctrl","foreHairI_jt_3_ctrl","foreHairI_jt_3_fk_ctrl","foreHairI_jt_4_ctrl","foreHairI_jt_4_fk_ctrl","foreHairI_jt_5_ctrl","foreHairI_jt_5_fk_ctrl","foreHairI_jt_6_ctrl","foreHairI_jt_6_fk_ctrl","foreHairI_jt_7_ctrl","foreHairI_jt_7_fk_ctrl","foreHairI_main_ctrl","foreHairJ_jt_1_ctrl","foreHairJ_jt_1_fk_ctrl","foreHairJ_jt_2_ctrl","foreHairJ_jt_2_fk_ctrl","foreHairJ_jt_3_ctrl","foreHairJ_jt_3_fk_ctrl","foreHairJ_jt_4_ctrl","foreHairJ_jt_4_fk_ctrl","foreHairJ_jt_5_ctrl","foreHairJ_jt_5_fk_ctrl","foreHairJ_jt_6_ctrl","foreHairJ_jt_6_fk_ctrl","foreHairJ_jt_7_ctrl","foreHairJ_jt_7_fk_ctrl","foreHairJ_main_ctrl","hairA_jt_1_ctrl","hairA_jt_1_fk_ctrl","hairA_jt_2_ctrl","hairA_jt_2_fk_ctrl","hairA_jt_3_ctrl","hairA_jt_3_fk_ctrl","hairA_jt_4_ctrl","hairA_jt_4_fk_ctrl","hairA_jt_5_ctrl","hairA_jt_5_fk_ctrl","hairA_jt_6_ctrl","hairA_jt_6_fk_ctrl","hairA_jt_7_ctrl","hairA_jt_7_fk_ctrl","hairA_main_ctrl","hairB_jt_1_ctrl","hairB_jt_1_fk_ctrl","hairB_jt_2_ctrl","hairB_jt_2_fk_ctrl","hairB_jt_3_ctrl","hairB_jt_3_fk_ctrl","hairB_jt_4_ctrl","hairB_jt_4_fk_ctrl","hairB_jt_5_ctrl","hairB_jt_5_fk_ctrl","hairB_jt_6_ctrl","hairB_jt_6_fk_ctrl","hairB_jt_7_ctrl","hairB_jt_7_fk_ctrl","hairB_main_ctrl","hairC_jt_1_ctrl","hairC_jt_1_fk_ctrl","hairC_jt_2_ctrl","hairC_jt_2_fk_ctrl","hairC_jt_3_ctrl","hairC_jt_3_fk_ctrl","hairC_jt_4_ctrl","hairC_jt_4_fk_ctrl","hairC_jt_5_ctrl","hairC_jt_5_fk_ctrl","hairC_jt_6_ctrl","hairC_jt_6_fk_ctrl","hairC_jt_7_ctrl","hairC_jt_7_fk_ctrl","hairC_main_ctrl","hairD_jt_1_ctrl","hairD_jt_1_fk_ctrl","hairD_jt_2_ctrl","hairD_jt_2_fk_ctrl","hairD_jt_3_ctrl","hairD_jt_3_fk_ctrl","hairD_jt_4_ctrl","hairD_jt_4_fk_ctrl","hairD_jt_5_ctrl","hairD_jt_5_fk_ctrl","hairD_jt_6_ctrl","hairD_jt_6_fk_ctrl","hairD_jt_7_ctrl","hairD_jt_7_fk_ctrl","hairD_jt_8_ctrl","hairD_jt_8_fk_ctrl","hairD_main_ctrl","hairE_jt_1_ctrl","hairE_jt_1_fk_ctrl","hairE_jt_2_ctrl","hairE_jt_2_fk_ctrl","hairE_jt_3_ctrl","hairE_jt_3_fk_ctrl","hairE_jt_4_ctrl","hairE_jt_4_fk_ctrl","hairE_jt_5_ctrl","hairE_jt_5_fk_ctrl","hairE_jt_6_ctrl","hairE_jt_6_fk_ctrl","hairE_jt_7_ctrl","hairE_jt_7_fk_ctrl","hairE_jt_8_ctrl","hairE_jt_8_fk_ctrl","hairE_main_ctrl","hairF_jt_1_ctrl","hairF_jt_1_fk_ctrl","hairF_jt_2_ctrl","hairF_jt_2_fk_ctrl","hairF_jt_3_ctrl","hairF_jt_3_fk_ctrl","hairF_jt_4_ctrl","hairF_jt_4_fk_ctrl","hairF_jt_5_ctrl","hairF_jt_5_fk_ctrl","hairF_jt_6_ctrl","hairF_jt_6_fk_ctrl","hairF_jt_7_ctrl","hairF_jt_7_fk_ctrl","hairF_jt_8_ctrl","hairF_jt_8_fk_ctrl","hairF_main_ctrl","hairG_jt_1_ctrl","hairG_jt_1_fk_ctrl","hairG_jt_2_ctrl","hairG_jt_2_fk_ctrl","hairG_jt_3_ctrl","hairG_jt_3_fk_ctrl","hairG_jt_4_ctrl","hairG_jt_4_fk_ctrl","hairG_jt_5_ctrl","hairG_jt_5_fk_ctrl","hairG_jt_6_ctrl","hairG_jt_6_fk_ctrl","hairG_jt_7_ctrl","hairG_jt_7_fk_ctrl","hairG_jt_8_ctrl","hairG_jt_8_fk_ctrl","hairG_main_ctrl","hairH_jt_1_ctrl","hairH_jt_1_fk_ctrl","hairH_jt_2_ctrl","hairH_jt_2_fk_ctrl","hairH_jt_3_ctrl","hairH_jt_3_fk_ctrl","hairH_jt_4_ctrl","hairH_jt_4_fk_ctrl","hairH_jt_5_ctrl","hairH_jt_5_fk_ctrl","hairH_jt_6_ctrl","hairH_jt_6_fk_ctrl","hairH_jt_7_ctrl","hairH_jt_7_fk_ctrl","hairH_jt_8_ctrl","hairH_jt_8_fk_ctrl","hairH_main_ctrl","hairI_jt_1_ctrl","hairI_jt_1_fk_ctrl","hairI_jt_2_ctrl","hairI_jt_2_fk_ctrl","hairI_jt_3_ctrl","hairI_jt_3_fk_ctrl","hairI_jt_4_ctrl","hairI_jt_4_fk_ctrl","hairI_jt_5_ctrl","hairI_jt_5_fk_ctrl","hairI_jt_6_ctrl","hairI_jt_6_fk_ctrl","hairI_jt_7_ctrl","hairI_jt_7_fk_ctrl","hairI_jt_8_ctrl","hairI_jt_8_fk_ctrl","hairI_main_ctrl","hairJ_jt_1_ctrl","hairJ_jt_1_fk_ctrl","hairJ_jt_2_ctrl","hairJ_jt_2_fk_ctrl","hairJ_jt_3_ctrl","hairJ_jt_3_fk_ctrl","hairJ_jt_4_ctrl","hairJ_jt_4_fk_ctrl","hairJ_jt_5_ctrl","hairJ_jt_5_fk_ctrl","hairJ_jt_6_ctrl","hairJ_jt_6_fk_ctrl","hairJ_jt_7_ctrl","hairJ_jt_7_fk_ctrl","hairJ_main_ctrl","hairK_jt_1_ctrl","hairK_jt_1_fk_ctrl","hairK_jt_2_ctrl","hairK_jt_2_fk_ctrl","hairK_jt_3_ctrl","hairK_jt_3_fk_ctrl","hairK_jt_4_ctrl","hairK_jt_4_fk_ctrl","hairK_jt_5_ctrl","hairK_jt_5_fk_ctrl","hairK_jt_6_ctrl","hairK_jt_6_fk_ctrl","hairK_jt_7_ctrl","hairK_jt_7_fk_ctrl","hairK_main_ctrl","hairL_jt_1_ctrl","hairL_jt_1_fk_ctrl","hairL_jt_2_ctrl","hairL_jt_2_fk_ctrl","hairL_jt_3_ctrl","hairL_jt_3_fk_ctrl","hairL_jt_4_ctrl","hairL_jt_4_fk_ctrl","hairL_jt_5_ctrl","hairL_jt_5_fk_ctrl","hairL_jt_6_ctrl","hairL_jt_6_fk_ctrl","hairL_jt_7_ctrl","hairL_jt_7_fk_ctrl","hairL_main_ctrl","hairM_jt_1_ctrl","hairM_jt_1_fk_ctrl","hairM_jt_2_ctrl","hairM_jt_2_fk_ctrl","hairM_jt_3_ctrl","hairM_jt_3_fk_ctrl","hairM_jt_4_ctrl","hairM_jt_4_fk_ctrl","hairM_main_ctrl","hairN_jt_1_ctrl","hairN_jt_1_fk_ctrl","hairN_jt_2_ctrl","hairN_jt_2_fk_ctrl","hairN_jt_3_ctrl","hairN_jt_3_fk_ctrl","hairN_jt_4_ctrl","hairN_jt_4_fk_ctrl","hairN_main_ctrl","hairO_jt_1_ctrl","hairO_jt_1_fk_ctrl","hairO_jt_2_ctrl","hairO_jt_2_fk_ctrl","hairO_jt_3_ctrl","hairO_jt_3_fk_ctrl","hairO_jt_4_ctrl","hairO_jt_4_fk_ctrl","hairO_main_ctrl","hairP_jt_1_ctrl","hairP_jt_1_fk_ctrl","hairP_jt_2_ctrl","hairP_jt_2_fk_ctrl","hairP_jt_3_ctrl","hairP_jt_3_fk_ctrl","hairP_jt_4_ctrl","hairP_jt_4_fk_ctrl","hairP_main_ctrl","hairQ_jt_1_ctrl","hairQ_jt_1_fk_ctrl","hairQ_jt_2_ctrl","hairQ_jt_2_fk_ctrl","hairQ_jt_3_ctrl","hairQ_jt_3_fk_ctrl","hairQ_jt_4_ctrl","hairQ_jt_4_fk_ctrl","hairQ_main_ctrl","hairR_jt_1_ctrl","hairR_jt_1_fk_ctrl","hairR_jt_2_ctrl","hairR_jt_2_fk_ctrl","hairR_jt_3_ctrl","hairR_jt_3_fk_ctrl","hairR_jt_4_ctrl","hairR_jt_4_fk_ctrl","hairR_main_ctrl","hairS_jt_1_ctrl","hairS_jt_1_fk_ctrl","hairS_jt_2_ctrl","hairS_jt_2_fk_ctrl","hairS_jt_3_ctrl","hairS_jt_3_fk_ctrl","hairS_jt_4_ctrl","hairS_jt_4_fk_ctrl","hairS_main_ctrl","hairT_jt_1_ctrl","hairT_jt_1_fk_ctrl","hairT_jt_2_ctrl","hairT_jt_2_fk_ctrl","hairT_jt_3_ctrl","hairT_jt_3_fk_ctrl","hairT_jt_4_ctrl","hairT_jt_4_fk_ctrl","hairT_main_ctrl","hair_ex_ctrl","head_squash_ctrl","l_armA_elbow_FK_ctrl","l_armA_elbow_IK_ctrl","l_armA_elbow_ctrl","l_armA_elbow_localIK_ctrl","l_armA_hand_IK_ctrl","l_armA_hand_localIK_ctrl","l_armA_index_01_ctrl","l_armA_index_02_ctrl","l_armA_index_03_ctrl","l_armA_index_04_ctrl","l_armA_middle_01_ctrl","l_armA_middle_02_ctrl","l_armA_middle_03_ctrl","l_armA_middle_04_ctrl","l_armA_ring_01_ctrl","l_armA_ring_02_ctrl","l_armA_ring_03_ctrl","l_armA_ring_04_ctrl","l_armA_shoulder_ctrl","l_armA_thumb_01_ctrl","l_armA_thumb_02_ctrl","l_armA_thumb_03_ctrl","l_armA_uprarm_FK_ctrl","l_armA_uprarm_ctrl","l_armA_wrist_ctrl","l_bigEye_ctrl","l_eyeBrowRoot_ctrl","l_eyeLid_root_ctrl","l_eyePSD_ctrl","l_eye_ctrl","l_foreHair_ex_ctrl","l_hair_ex_ctrl","l_legA_ankle_ctrl","l_legA_ball_ctrl","l_legA_foot_IK_ctrl","l_legA_foot_localIK_ctrl","l_legA_heel_IK_ctrl","l_legA_knee_FK_ctrl","l_legA_knee_IK_ctrl","l_legA_knee_ctrl","l_legA_knee_localIK_ctrl","l_legA_pelvis_ctrl","l_legA_thigh_FK_ctrl","l_legA_thigh_ctrl","m_armA_shoulder_ctrl","m_bothEye_ctrl","m_hair_ex_ctrl","m_helmet_ctrl","m_legA_pelvis_ctrl","m_mouthSlide_ctrl","m_skirt_ctrl","m_spineA_body_ctrl","m_spineA_chest_ctrl","m_spineA_head_ctrl","m_spineA_hip_ctrl","m_spineA_neck_01_ctrl","m_spineA_neck_02_ctrl","m_spineA_neck_03_ctrl","m_spineA_spine_01_ctrl","m_spineA_spine_02_ctrl","m_spineA_spine_03_ctrl","m_spineA_spine_04_ctrl","m_spineA_spine_05_ctrl","m_spineA_spine_06_ctrl","m_spineA_torso_ctrl","m_spineA_waistFree_ctrl","m_spineA_waist_ctrl","mov_ctrl","r_armA_elbow_FK_ctrl","r_armA_elbow_IK_ctrl","r_armA_elbow_ctrl","r_armA_elbow_localIK_ctrl","r_armA_hand_IK_ctrl","r_armA_hand_localIK_ctrl","r_armA_index_01_ctrl","r_armA_index_02_ctrl","r_armA_index_03_ctrl","r_armA_index_04_ctrl","r_armA_middle_01_ctrl","r_armA_middle_02_ctrl","r_armA_middle_03_ctrl","r_armA_middle_04_ctrl","r_armA_ring_01_ctrl","r_armA_ring_02_ctrl","r_armA_ring_03_ctrl","r_armA_ring_04_ctrl","r_armA_shoulder_ctrl","r_armA_thumb_01_ctrl","r_armA_thumb_02_ctrl","r_armA_thumb_03_ctrl","r_armA_uprarm_FK_ctrl","r_armA_uprarm_ctrl","r_armA_wrist_ctrl","r_bigEye_ctrl","r_eyeBrowRoot_ctrl","r_eyeLid_root_ctrl","r_eyePSD_ctrl","r_eye_ctrl","r_foreHair_ex_ctrl","r_hair_ex_ctrl","r_legA_ankle_ctrl","r_legA_ball_ctrl","r_legA_foot_IK_ctrl","r_legA_foot_localIK_ctrl","r_legA_heel_IK_ctrl","r_legA_knee_FK_ctrl","r_legA_knee_IK_ctrl","r_legA_knee_ctrl","r_legA_knee_localIK_ctrl","r_legA_pelvis_ctrl","r_legA_thigh_FK_ctrl","r_legA_thigh_ctrl","skirtA_jt_1_ctrl","skirtA_jt_1_fk_ctrl","skirtA_jt_2_ctrl","skirtA_jt_2_fk_ctrl","skirtA_jt_3_ctrl","skirtA_jt_3_fk_ctrl","skirtA_jt_4_ctrl","skirtA_jt_4_fk_ctrl","skirtA_main_ctrl","skirtB_jt_1_ctrl","skirtB_jt_1_fk_ctrl","skirtB_jt_2_ctrl","skirtB_jt_2_fk_ctrl","skirtB_jt_3_ctrl","skirtB_jt_3_fk_ctrl","skirtB_jt_4_ctrl","skirtB_jt_4_fk_ctrl","skirtB_main_ctrl","skirtC_jt_1_ctrl","skirtC_jt_1_fk_ctrl","skirtC_jt_2_ctrl","skirtC_jt_2_fk_ctrl","skirtC_jt_3_ctrl","skirtC_jt_3_fk_ctrl","skirtC_jt_4_ctrl","skirtC_jt_4_fk_ctrl","skirtC_main_ctrl","skirtD_jt_1_ctrl","skirtD_jt_1_fk_ctrl","skirtD_jt_2_ctrl","skirtD_jt_2_fk_ctrl","skirtD_jt_3_ctrl","skirtD_jt_3_fk_ctrl","skirtD_jt_4_ctrl","skirtD_jt_4_fk_ctrl","skirtD_main_ctrl","skirtE_jt_1_ctrl","skirtE_jt_1_fk_ctrl","skirtE_jt_2_ctrl","skirtE_jt_2_fk_ctrl","skirtE_jt_3_ctrl","skirtE_jt_3_fk_ctrl","skirtE_jt_4_ctrl","skirtE_jt_4_fk_ctrl","skirtE_main_ctrl","skirtF_jt_1_ctrl","skirtF_jt_1_fk_ctrl","skirtF_jt_2_ctrl","skirtF_jt_2_fk_ctrl","skirtF_jt_3_ctrl","skirtF_jt_3_fk_ctrl","skirtF_jt_4_ctrl","skirtF_jt_4_fk_ctrl","skirtF_main_ctrl","skirtG_jt_1_ctrl","skirtG_jt_1_fk_ctrl","skirtG_jt_2_ctrl","skirtG_jt_2_fk_ctrl","skirtG_jt_3_ctrl","skirtG_jt_3_fk_ctrl","skirtG_jt_4_ctrl","skirtG_jt_4_fk_ctrl","skirtG_main_ctrl","skirtH_jt_1_ctrl","skirtH_jt_1_fk_ctrl","skirtH_jt_2_ctrl","skirtH_jt_2_fk_ctrl","skirtH_jt_3_ctrl","skirtH_jt_3_fk_ctrl","skirtH_jt_4_ctrl","skirtH_jt_4_fk_ctrl","skirtH_main_ctrl","sleeve_l_001_ctrl","sleeve_l_002_ctrl","sleeve_l_003_ctrl","sleeve_l_004_ctrl","sleeve_l_Elbow_ctrl","sleeve_r_001_ctrl","sleeve_r_002_ctrl","sleeve_r_003_ctrl","sleeve_r_004_ctrl","sleeve_r_Elbow_ctrl","top_ctrl"};
+		string $selFaceObj[] = {"m_jaw_ctrl","faceGui","RgtOuterBrow","RgtMidBrow","LftMidBrow","LftOuterBrow","rgtHappyBrow","rgtMadBrow","rgtSadBrow","rgtBoredBrow","lftHappyBrow","lftMadBrow","lftSadBrow","lftBoredBrow","RgtTopLid","LftTopLid","RgtBtmLid","LftBtmLid","eyeDarts","JawRock","MouthEmotion","MouthSlide","UprLip","LwrLip","rgtCheekInOut","lftCheekInOut","TongueB","TongueA","teethClench","teethUpSharp","teethDownSharp","mouthAa","mouthOo","mouthUu","mouthMm","mouthSurprised","scared","angry","bigMouth","nose","noseTip","nosetril","RgtbigEye","LftbigEye","RgteyeSquint","LfteyeSquint","RgtUpEyeLid","RgtDownEyeLid","LftUpEyeLid","LftDownEyeLid","mouthWideNarrow","openHappy","openSad","facialCtrlVis","rottenTeeth","tongoueA_Rot_Ctrl","tongoueB_Rot_Ctrl","tongoueC_Rot_Ctrl","tongueIn1_Ctrl","m_tongueTip_Ctrl","m_tongue_subC_Ctrl","m_tongue_subB_Ctrl","m_tongue_subA_Ctrl","tongueCon_ctrl","m_head_ctrl","l_mouth_ctrl","m_mouthTop_ctrl","m_mouthBtm_ctrl","r_mouth_ctrl","m_mouth_root_ctrl","l_teethBtmA_ctrl","r_teethBtmA_ctrl","m_teethBtmB_ctrl","m_teethBtmA_ctrl","l_teethTopA_ctrl","r_teethTopA_ctrl","m_teethTopB_ctrl","m_teethTopA_ctrl","l_eyeBrowA_ctrl","l_eyeBrowB_ctrl","l_eyeBrowC_ctrl","r_eyeBrowA_ctrl","r_eyeBrowB_ctrl","r_eyeBrowC_ctrl","r_upLidA_ctrl","r_upLidC_ctrl","r_upLidB_ctrl","r_dnLidA_ctrl","r_dnLidC_ctrl","r_dnLidB_ctrl","l_upLidA_ctrl","l_upLidC_ctrl","l_upLidB_ctrl","l_dnLidA_ctrl","l_dnLidC_ctrl","l_dnLidB_ctrl","m_nostril_ctrl","m_noseTip_ctrl","m_nose_ctrl"};
+		$copyObjs = stringArrayCatenate($selFaceObj, $selAllObj);
+	}
+	else if ($pt ==2)
+	{
+		//"l_hornLong_ctrl",
+		$copyObjs = {"foreHairA_jt_1_ctrl","foreHairA_jt_1_fk_ctrl","foreHairA_jt_2_ctrl","foreHairA_jt_2_fk_ctrl","foreHairA_jt_3_ctrl","foreHairA_jt_3_fk_ctrl","foreHairA_jt_4_ctrl","foreHairA_jt_4_fk_ctrl","foreHairA_jt_5_ctrl","foreHairA_jt_5_fk_ctrl","foreHairA_jt_6_ctrl","foreHairA_jt_6_fk_ctrl","foreHairA_jt_7_ctrl","foreHairA_jt_7_fk_ctrl","foreHairA_main_ctrl","foreHairB_jt_1_ctrl","foreHairB_jt_1_fk_ctrl","foreHairB_jt_2_ctrl","foreHairB_jt_2_fk_ctrl","foreHairB_jt_3_ctrl","foreHairB_jt_3_fk_ctrl","foreHairB_jt_4_ctrl","foreHairB_jt_4_fk_ctrl","foreHairB_jt_5_ctrl","foreHairB_jt_5_fk_ctrl","foreHairB_jt_6_ctrl","foreHairB_jt_6_fk_ctrl","foreHairB_jt_7_ctrl","foreHairB_jt_7_fk_ctrl","foreHairB_main_ctrl","foreHairC_jt_1_ctrl","foreHairC_jt_1_fk_ctrl","foreHairC_jt_2_ctrl","foreHairC_jt_2_fk_ctrl","foreHairC_jt_3_ctrl","foreHairC_jt_3_fk_ctrl","foreHairC_jt_4_ctrl","foreHairC_jt_4_fk_ctrl","foreHairC_jt_5_ctrl","foreHairC_jt_5_fk_ctrl","foreHairC_jt_6_ctrl","foreHairC_jt_6_fk_ctrl","foreHairC_main_ctrl","foreHairD_jt_1_ctrl","foreHairD_jt_1_fk_ctrl","foreHairD_jt_2_ctrl","foreHairD_jt_2_fk_ctrl","foreHairD_jt_3_ctrl","foreHairD_jt_3_fk_ctrl","foreHairD_jt_4_ctrl","foreHairD_jt_4_fk_ctrl","foreHairD_jt_5_ctrl","foreHairD_jt_5_fk_ctrl","foreHairD_jt_6_ctrl","foreHairD_jt_6_fk_ctrl","foreHairD_main_ctrl","foreHairE_jt_1_ctrl","foreHairE_jt_1_fk_ctrl","foreHairE_jt_2_ctrl","foreHairE_jt_2_fk_ctrl","foreHairE_jt_3_ctrl","foreHairE_jt_3_fk_ctrl","foreHairE_jt_4_ctrl","foreHairE_jt_4_fk_ctrl","foreHairE_jt_5_ctrl","foreHairE_jt_5_fk_ctrl","foreHairE_jt_6_ctrl","foreHairE_jt_6_fk_ctrl","foreHairE_main_ctrl","foreHairF_jt_1_ctrl","foreHairF_jt_1_fk_ctrl","foreHairF_jt_2_ctrl","foreHairF_jt_2_fk_ctrl","foreHairF_jt_3_ctrl","foreHairF_jt_3_fk_ctrl","foreHairF_jt_4_ctrl","foreHairF_jt_4_fk_ctrl","foreHairF_jt_5_ctrl","foreHairF_jt_5_fk_ctrl","foreHairF_jt_6_ctrl","foreHairF_jt_6_fk_ctrl","foreHairF_main_ctrl","foreHairG_jt_1_ctrl","foreHairG_jt_1_fk_ctrl","foreHairG_jt_2_ctrl","foreHairG_jt_2_fk_ctrl","foreHairG_jt_3_ctrl","foreHairG_jt_3_fk_ctrl","foreHairG_jt_4_ctrl","foreHairG_jt_4_fk_ctrl","foreHairG_jt_5_ctrl","foreHairG_jt_5_fk_ctrl","foreHairG_jt_6_ctrl","foreHairG_jt_6_fk_ctrl","foreHairG_jt_7_ctrl","foreHairG_jt_7_fk_ctrl","foreHairG_main_ctrl","foreHairH_jt_1_ctrl","foreHairH_jt_1_fk_ctrl","foreHairH_jt_2_ctrl","foreHairH_jt_2_fk_ctrl","foreHairH_jt_3_ctrl","foreHairH_jt_3_fk_ctrl","foreHairH_jt_4_ctrl","foreHairH_jt_4_fk_ctrl","foreHairH_jt_5_ctrl","foreHairH_jt_5_fk_ctrl","foreHairH_jt_6_ctrl","foreHairH_jt_6_fk_ctrl","foreHairH_jt_7_ctrl","foreHairH_jt_7_fk_ctrl","foreHairH_main_ctrl","foreHairI_jt_1_ctrl","foreHairI_jt_1_fk_ctrl","foreHairI_jt_2_ctrl","foreHairI_jt_2_fk_ctrl","foreHairI_jt_3_ctrl","foreHairI_jt_3_fk_ctrl","foreHairI_jt_4_ctrl","foreHairI_jt_4_fk_ctrl","foreHairI_jt_5_ctrl","foreHairI_jt_5_fk_ctrl","foreHairI_jt_6_ctrl","foreHairI_jt_6_fk_ctrl","foreHairI_jt_7_ctrl","foreHairI_jt_7_fk_ctrl","foreHairI_main_ctrl","foreHairJ_jt_1_ctrl","foreHairJ_jt_1_fk_ctrl","foreHairJ_jt_2_ctrl","foreHairJ_jt_2_fk_ctrl","foreHairJ_jt_3_ctrl","foreHairJ_jt_3_fk_ctrl","foreHairJ_jt_4_ctrl","foreHairJ_jt_4_fk_ctrl","foreHairJ_jt_5_ctrl","foreHairJ_jt_5_fk_ctrl","foreHairJ_jt_6_ctrl","foreHairJ_jt_6_fk_ctrl","foreHairJ_jt_7_ctrl","foreHairJ_jt_7_fk_ctrl","foreHairJ_main_ctrl","hairA_jt_1_ctrl","hairA_jt_1_fk_ctrl","hairA_jt_2_ctrl","hairA_jt_2_fk_ctrl","hairA_jt_3_ctrl","hairA_jt_3_fk_ctrl","hairA_jt_4_ctrl","hairA_jt_4_fk_ctrl","hairA_jt_5_ctrl","hairA_jt_5_fk_ctrl","hairA_jt_6_ctrl","hairA_jt_6_fk_ctrl","hairA_jt_7_ctrl","hairA_jt_7_fk_ctrl","hairA_main_ctrl","hairB_jt_1_ctrl","hairB_jt_1_fk_ctrl","hairB_jt_2_ctrl","hairB_jt_2_fk_ctrl","hairB_jt_3_ctrl","hairB_jt_3_fk_ctrl","hairB_jt_4_ctrl","hairB_jt_4_fk_ctrl","hairB_jt_5_ctrl","hairB_jt_5_fk_ctrl","hairB_jt_6_ctrl","hairB_jt_6_fk_ctrl","hairB_jt_7_ctrl","hairB_jt_7_fk_ctrl","hairB_main_ctrl","hairC_jt_1_ctrl","hairC_jt_1_fk_ctrl","hairC_jt_2_ctrl","hairC_jt_2_fk_ctrl","hairC_jt_3_ctrl","hairC_jt_3_fk_ctrl","hairC_jt_4_ctrl","hairC_jt_4_fk_ctrl","hairC_jt_5_ctrl","hairC_jt_5_fk_ctrl","hairC_jt_6_ctrl","hairC_jt_6_fk_ctrl","hairC_jt_7_ctrl","hairC_jt_7_fk_ctrl","hairC_main_ctrl","hairD_jt_1_ctrl","hairD_jt_1_fk_ctrl","hairD_jt_2_ctrl","hairD_jt_2_fk_ctrl","hairD_jt_3_ctrl","hairD_jt_3_fk_ctrl","hairD_jt_4_ctrl","hairD_jt_4_fk_ctrl","hairD_jt_5_ctrl","hairD_jt_5_fk_ctrl","hairD_jt_6_ctrl","hairD_jt_6_fk_ctrl","hairD_jt_7_ctrl","hairD_jt_7_fk_ctrl","hairD_jt_8_ctrl","hairD_jt_8_fk_ctrl","hairD_main_ctrl","hairE_jt_1_ctrl","hairE_jt_1_fk_ctrl","hairE_jt_2_ctrl","hairE_jt_2_fk_ctrl","hairE_jt_3_ctrl","hairE_jt_3_fk_ctrl","hairE_jt_4_ctrl","hairE_jt_4_fk_ctrl","hairE_jt_5_ctrl","hairE_jt_5_fk_ctrl","hairE_jt_6_ctrl","hairE_jt_6_fk_ctrl","hairE_jt_7_ctrl","hairE_jt_7_fk_ctrl","hairE_jt_8_ctrl","hairE_jt_8_fk_ctrl","hairE_main_ctrl","hairF_jt_1_ctrl","hairF_jt_1_fk_ctrl","hairF_jt_2_ctrl","hairF_jt_2_fk_ctrl","hairF_jt_3_ctrl","hairF_jt_3_fk_ctrl","hairF_jt_4_ctrl","hairF_jt_4_fk_ctrl","hairF_jt_5_ctrl","hairF_jt_5_fk_ctrl","hairF_jt_6_ctrl","hairF_jt_6_fk_ctrl","hairF_jt_7_ctrl","hairF_jt_7_fk_ctrl","hairF_jt_8_ctrl","hairF_jt_8_fk_ctrl","hairF_main_ctrl","hairG_jt_1_ctrl","hairG_jt_1_fk_ctrl","hairG_jt_2_ctrl","hairG_jt_2_fk_ctrl","hairG_jt_3_ctrl","hairG_jt_3_fk_ctrl","hairG_jt_4_ctrl","hairG_jt_4_fk_ctrl","hairG_jt_5_ctrl","hairG_jt_5_fk_ctrl","hairG_jt_6_ctrl","hairG_jt_6_fk_ctrl","hairG_jt_7_ctrl","hairG_jt_7_fk_ctrl","hairG_jt_8_ctrl","hairG_jt_8_fk_ctrl","hairG_main_ctrl","hairH_jt_1_ctrl","hairH_jt_1_fk_ctrl","hairH_jt_2_ctrl","hairH_jt_2_fk_ctrl","hairH_jt_3_ctrl","hairH_jt_3_fk_ctrl","hairH_jt_4_ctrl","hairH_jt_4_fk_ctrl","hairH_jt_5_ctrl","hairH_jt_5_fk_ctrl","hairH_jt_6_ctrl","hairH_jt_6_fk_ctrl","hairH_jt_7_ctrl","hairH_jt_7_fk_ctrl","hairH_jt_8_ctrl","hairH_jt_8_fk_ctrl","hairH_main_ctrl","hairI_jt_1_ctrl","hairI_jt_1_fk_ctrl","hairI_jt_2_ctrl","hairI_jt_2_fk_ctrl","hairI_jt_3_ctrl","hairI_jt_3_fk_ctrl","hairI_jt_4_ctrl","hairI_jt_4_fk_ctrl","hairI_jt_5_ctrl","hairI_jt_5_fk_ctrl","hairI_jt_6_ctrl","hairI_jt_6_fk_ctrl","hairI_jt_7_ctrl","hairI_jt_7_fk_ctrl","hairI_jt_8_ctrl","hairI_jt_8_fk_ctrl","hairI_main_ctrl","hairJ_jt_1_ctrl","hairJ_jt_1_fk_ctrl","hairJ_jt_2_ctrl","hairJ_jt_2_fk_ctrl","hairJ_jt_3_ctrl","hairJ_jt_3_fk_ctrl","hairJ_jt_4_ctrl","hairJ_jt_4_fk_ctrl","hairJ_jt_5_ctrl","hairJ_jt_5_fk_ctrl","hairJ_jt_6_ctrl","hairJ_jt_6_fk_ctrl","hairJ_jt_7_ctrl","hairJ_jt_7_fk_ctrl","hairJ_main_ctrl","hairK_jt_1_ctrl","hairK_jt_1_fk_ctrl","hairK_jt_2_ctrl","hairK_jt_2_fk_ctrl","hairK_jt_3_ctrl","hairK_jt_3_fk_ctrl","hairK_jt_4_ctrl","hairK_jt_4_fk_ctrl","hairK_jt_5_ctrl","hairK_jt_5_fk_ctrl","hairK_jt_6_ctrl","hairK_jt_6_fk_ctrl","hairK_jt_7_ctrl","hairK_jt_7_fk_ctrl","hairK_main_ctrl","hairL_jt_1_ctrl","hairL_jt_1_fk_ctrl","hairL_jt_2_ctrl","hairL_jt_2_fk_ctrl","hairL_jt_3_ctrl","hairL_jt_3_fk_ctrl","hairL_jt_4_ctrl","hairL_jt_4_fk_ctrl","hairL_jt_5_ctrl","hairL_jt_5_fk_ctrl","hairL_jt_6_ctrl","hairL_jt_6_fk_ctrl","hairL_jt_7_ctrl","hairL_jt_7_fk_ctrl","hairL_main_ctrl","hairM_jt_1_ctrl","hairM_jt_1_fk_ctrl","hairM_jt_2_ctrl","hairM_jt_2_fk_ctrl","hairM_jt_3_ctrl","hairM_jt_3_fk_ctrl","hairM_jt_4_ctrl","hairM_jt_4_fk_ctrl","hairM_main_ctrl","hairN_jt_1_ctrl","hairN_jt_1_fk_ctrl","hairN_jt_2_ctrl","hairN_jt_2_fk_ctrl","hairN_jt_3_ctrl","hairN_jt_3_fk_ctrl","hairN_jt_4_ctrl","hairN_jt_4_fk_ctrl","hairN_main_ctrl","hairO_jt_1_ctrl","hairO_jt_1_fk_ctrl","hairO_jt_2_ctrl","hairO_jt_2_fk_ctrl","hairO_jt_3_ctrl","hairO_jt_3_fk_ctrl","hairO_jt_4_ctrl","hairO_jt_4_fk_ctrl","hairO_main_ctrl","hairP_jt_1_ctrl","hairP_jt_1_fk_ctrl","hairP_jt_2_ctrl","hairP_jt_2_fk_ctrl","hairP_jt_3_ctrl","hairP_jt_3_fk_ctrl","hairP_jt_4_ctrl","hairP_jt_4_fk_ctrl","hairP_main_ctrl","hairQ_jt_1_ctrl","hairQ_jt_1_fk_ctrl","hairQ_jt_2_ctrl","hairQ_jt_2_fk_ctrl","hairQ_jt_3_ctrl","hairQ_jt_3_fk_ctrl","hairQ_jt_4_ctrl","hairQ_jt_4_fk_ctrl","hairQ_main_ctrl","hairR_jt_1_ctrl","hairR_jt_1_fk_ctrl","hairR_jt_2_ctrl","hairR_jt_2_fk_ctrl","hairR_jt_3_ctrl","hairR_jt_3_fk_ctrl","hairR_jt_4_ctrl","hairR_jt_4_fk_ctrl","hairR_main_ctrl","hairS_jt_1_ctrl","hairS_jt_1_fk_ctrl","hairS_jt_2_ctrl","hairS_jt_2_fk_ctrl","hairS_jt_3_ctrl","hairS_jt_3_fk_ctrl","hairS_jt_4_ctrl","hairS_jt_4_fk_ctrl","hairS_main_ctrl","hairT_jt_1_ctrl","hairT_jt_1_fk_ctrl","hairT_jt_2_ctrl","hairT_jt_2_fk_ctrl","hairT_jt_3_ctrl","hairT_jt_3_fk_ctrl","hairT_jt_4_ctrl","hairT_jt_4_fk_ctrl","hairT_main_ctrl","hair_ex_ctrl","head_squash_ctrl","l_armA_elbow_FK_ctrl","l_armA_elbow_IK_ctrl","l_armA_elbow_ctrl","l_armA_elbow_localIK_ctrl","l_armA_hand_IK_ctrl","l_armA_hand_localIK_ctrl","l_armA_index_01_ctrl","l_armA_index_02_ctrl","l_armA_index_03_ctrl","l_armA_index_04_ctrl","l_armA_middle_01_ctrl","l_armA_middle_02_ctrl","l_armA_middle_03_ctrl","l_armA_middle_04_ctrl","l_armA_ring_01_ctrl","l_armA_ring_02_ctrl","l_armA_ring_03_ctrl","l_armA_ring_04_ctrl","l_armA_shoulder_ctrl","l_armA_thumb_01_ctrl","l_armA_thumb_02_ctrl","l_armA_thumb_03_ctrl","l_armA_uprarm_FK_ctrl","l_armA_uprarm_ctrl","l_armA_wrist_ctrl","l_bigEye_ctrl","l_eyeBrowRoot_ctrl","l_eyeLid_root_ctrl","l_eyePSD_ctrl","l_eye_ctrl","l_foreHair_ex_ctrl","l_hair_ex_ctrl","l_legA_ankle_ctrl","l_legA_ball_ctrl","l_legA_foot_IK_ctrl","l_legA_foot_localIK_ctrl","l_legA_heel_IK_ctrl","l_legA_knee_FK_ctrl","l_legA_knee_IK_ctrl","l_legA_knee_ctrl","l_legA_knee_localIK_ctrl","l_legA_pelvis_ctrl","l_legA_thigh_FK_ctrl","l_legA_thigh_ctrl","m_armA_shoulder_ctrl","m_bothEye_ctrl","m_hair_ex_ctrl","m_helmet_ctrl","m_legA_pelvis_ctrl","m_mouthSlide_ctrl","m_skirt_ctrl","m_spineA_body_ctrl","m_spineA_chest_ctrl","m_spineA_head_ctrl","m_spineA_hip_ctrl","m_spineA_neck_01_ctrl","m_spineA_neck_02_ctrl","m_spineA_neck_03_ctrl","m_spineA_spine_01_ctrl","m_spineA_spine_02_ctrl","m_spineA_spine_03_ctrl","m_spineA_spine_04_ctrl","m_spineA_spine_05_ctrl","m_spineA_spine_06_ctrl","m_spineA_torso_ctrl","m_spineA_waistFree_ctrl","m_spineA_waist_ctrl","mov_ctrl","r_armA_elbow_FK_ctrl","r_armA_elbow_IK_ctrl","r_armA_elbow_ctrl","r_armA_elbow_localIK_ctrl","r_armA_hand_IK_ctrl","r_armA_hand_localIK_ctrl","r_armA_index_01_ctrl","r_armA_index_02_ctrl","r_armA_index_03_ctrl","r_armA_index_04_ctrl","r_armA_middle_01_ctrl","r_armA_middle_02_ctrl","r_armA_middle_03_ctrl","r_armA_middle_04_ctrl","r_armA_ring_01_ctrl","r_armA_ring_02_ctrl","r_armA_ring_03_ctrl","r_armA_ring_04_ctrl","r_armA_shoulder_ctrl","r_armA_thumb_01_ctrl","r_armA_thumb_02_ctrl","r_armA_thumb_03_ctrl","r_armA_uprarm_FK_ctrl","r_armA_uprarm_ctrl","r_armA_wrist_ctrl","r_bigEye_ctrl","r_eyeBrowRoot_ctrl","r_eyeLid_root_ctrl","r_eyePSD_ctrl","r_eye_ctrl","r_foreHair_ex_ctrl","r_hair_ex_ctrl","r_legA_ankle_ctrl","r_legA_ball_ctrl","r_legA_foot_IK_ctrl","r_legA_foot_localIK_ctrl","r_legA_heel_IK_ctrl","r_legA_knee_FK_ctrl","r_legA_knee_IK_ctrl","r_legA_knee_ctrl","r_legA_knee_localIK_ctrl","r_legA_pelvis_ctrl","r_legA_thigh_FK_ctrl","r_legA_thigh_ctrl","skirtA_jt_1_ctrl","skirtA_jt_1_fk_ctrl","skirtA_jt_2_ctrl","skirtA_jt_2_fk_ctrl","skirtA_jt_3_ctrl","skirtA_jt_3_fk_ctrl","skirtA_jt_4_ctrl","skirtA_jt_4_fk_ctrl","skirtA_main_ctrl","skirtB_jt_1_ctrl","skirtB_jt_1_fk_ctrl","skirtB_jt_2_ctrl","skirtB_jt_2_fk_ctrl","skirtB_jt_3_ctrl","skirtB_jt_3_fk_ctrl","skirtB_jt_4_ctrl","skirtB_jt_4_fk_ctrl","skirtB_main_ctrl","skirtC_jt_1_ctrl","skirtC_jt_1_fk_ctrl","skirtC_jt_2_ctrl","skirtC_jt_2_fk_ctrl","skirtC_jt_3_ctrl","skirtC_jt_3_fk_ctrl","skirtC_jt_4_ctrl","skirtC_jt_4_fk_ctrl","skirtC_main_ctrl","skirtD_jt_1_ctrl","skirtD_jt_1_fk_ctrl","skirtD_jt_2_ctrl","skirtD_jt_2_fk_ctrl","skirtD_jt_3_ctrl","skirtD_jt_3_fk_ctrl","skirtD_jt_4_ctrl","skirtD_jt_4_fk_ctrl","skirtD_main_ctrl","skirtE_jt_1_ctrl","skirtE_jt_1_fk_ctrl","skirtE_jt_2_ctrl","skirtE_jt_2_fk_ctrl","skirtE_jt_3_ctrl","skirtE_jt_3_fk_ctrl","skirtE_jt_4_ctrl","skirtE_jt_4_fk_ctrl","skirtE_main_ctrl","skirtF_jt_1_ctrl","skirtF_jt_1_fk_ctrl","skirtF_jt_2_ctrl","skirtF_jt_2_fk_ctrl","skirtF_jt_3_ctrl","skirtF_jt_3_fk_ctrl","skirtF_jt_4_ctrl","skirtF_jt_4_fk_ctrl","skirtF_main_ctrl","skirtG_jt_1_ctrl","skirtG_jt_1_fk_ctrl","skirtG_jt_2_ctrl","skirtG_jt_2_fk_ctrl","skirtG_jt_3_ctrl","skirtG_jt_3_fk_ctrl","skirtG_jt_4_ctrl","skirtG_jt_4_fk_ctrl","skirtG_main_ctrl","skirtH_jt_1_ctrl","skirtH_jt_1_fk_ctrl","skirtH_jt_2_ctrl","skirtH_jt_2_fk_ctrl","skirtH_jt_3_ctrl","skirtH_jt_3_fk_ctrl","skirtH_jt_4_ctrl","skirtH_jt_4_fk_ctrl","skirtH_main_ctrl","sleeve_l_001_ctrl","sleeve_l_002_ctrl","sleeve_l_003_ctrl","sleeve_l_004_ctrl","sleeve_l_Elbow_ctrl","sleeve_r_001_ctrl","sleeve_r_002_ctrl","sleeve_r_003_ctrl","sleeve_r_004_ctrl","sleeve_r_Elbow_ctrl","top_ctrl"};
+		
+	}
+	else if ($pt ==3)
+	{
+		$copyObjs = {"m_jaw_ctrl","faceGui","RgtOuterBrow","RgtMidBrow","LftMidBrow","LftOuterBrow","rgtHappyBrow","rgtMadBrow","rgtSadBrow","rgtBoredBrow","lftHappyBrow","lftMadBrow","lftSadBrow","lftBoredBrow","RgtTopLid","LftTopLid","RgtBtmLid","LftBtmLid","eyeDarts","JawRock","MouthEmotion","MouthSlide","UprLip","LwrLip","rgtCheekInOut","lftCheekInOut","TongueB","TongueA","teethClench","teethUpSharp","teethDownSharp","mouthAa","mouthOo","mouthUu","mouthMm","mouthSurprised","scared","angry","bigMouth","nose","noseTip","nosetril","RgtbigEye","LftbigEye","RgteyeSquint","LfteyeSquint","RgtUpEyeLid","RgtDownEyeLid","LftUpEyeLid","LftDownEyeLid","mouthWideNarrow","openHappy","openSad","facialCtrlVis","rottenTeeth","tongoueA_Rot_Ctrl","tongoueB_Rot_Ctrl","tongoueC_Rot_Ctrl","tongueIn1_Ctrl","m_tongueTip_Ctrl","m_tongue_subC_Ctrl","m_tongue_subB_Ctrl","m_tongue_subA_Ctrl","tongueCon_ctrl","m_head_ctrl","l_mouth_ctrl","m_mouthTop_ctrl","m_mouthBtm_ctrl","r_mouth_ctrl","m_mouth_root_ctrl","l_teethBtmA_ctrl","r_teethBtmA_ctrl","m_teethBtmB_ctrl","m_teethBtmA_ctrl","l_teethTopA_ctrl","r_teethTopA_ctrl","m_teethTopB_ctrl","m_teethTopA_ctrl","l_eyeBrowA_ctrl","l_eyeBrowB_ctrl","l_eyeBrowC_ctrl","r_eyeBrowA_ctrl","r_eyeBrowB_ctrl","r_eyeBrowC_ctrl","r_upLidA_ctrl","r_upLidC_ctrl","r_upLidB_ctrl","r_dnLidA_ctrl","r_dnLidC_ctrl","r_dnLidB_ctrl","l_upLidA_ctrl","l_upLidC_ctrl","l_upLidB_ctrl","l_dnLidA_ctrl","l_dnLidC_ctrl","l_dnLidB_ctrl","m_nostril_ctrl","m_noseTip_ctrl","m_nose_ctrl"};
+	}
+	
+	/*
+	for ($set in $animSets)
+	{
+		string $copySet = $preCopy + $set;
+		if (`objExists $copySet`)
+		{
+			select -r  $copySet;
+			string $setObjs[] = `ls -sl`;
+			$source = stringArrayCatenate($source,$setObjs);
+			print $source;
+		}
+	}
+	*/
+	string $source[];
+	int $num = 0;
+	for ($s in $copyObjs){
+		
+		string $objAddNameSpace = $preCopy + $s;
+		if (`objExists $objAddNameSpace`){
+			$source[$num] = $objAddNameSpace;
+			$num ++;
+		}
+		
+	}
+	print $source;
+	/*string $pasteSet = $prePaste + "set";
+	string $pasteFset = $prePaste + "facial_set";
+	string $pasteAset = $prePaste + "accessory_set";
+	string $dest[];
+	if (`objExists $pasteFset`)
+		$dest = `sets -query $pasteSet $pasteFset`;
+	if (`objExists $pasteAset`)
+		$dest = `sets -query $pasteSet $pasteFset $pasteAset`;*/
+
+	if ($ct == 1 || $ct ==2)
+	{
+		
+		for ($obj in $source)
+		{
+			string $paste = `substitute $preCopy $obj $prePaste`;
+			if ($preCopy == "")
+			{
+				$paste = $prePaste+$obj;
+			}
+			//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+			if (`objExists $paste`)  //if (`objExists $paste` && !endsWith((tolower($paste)),"master"))
+			{
+				//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+				print ($obj+"\n");
+				string $attrs[] = stringArrayCatenate(`listAttr -k -o $obj`,`listAttr -cb -u $obj`);
+				for ($attr in $attrs)
+				{
+					if (`getAttr -type ($obj+"."+$attr)` != "double3")
+					{
+						float $value = `getAttr ($obj+"."+$attr)`;
+						if (`objExists ($paste+"."+$attr)` && `getAttr -se ($paste+"."+$attr)`)
+						{
+							catchQuiet(`setAttr ($paste+"."+$attr) $value`);
+							if ($ct == 2)
+							{
+								setKeyframe ($paste+"."+$attr);
+							}
+						}
+					}
+				}
+				if (`copyKey $obj` && $ct == 1)
+				{
+					//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+					pasteKey -o "replaceCompletely" $paste;
+				}
+			}
+		}
+	}
+	else if ($ct == 3)
+	{
+		string $attrs[] = stringArrayCatenate(`listAttr -k -o $master[0]`,`listAttr -cb -u $master[0]`);
+		for ($attr in $attrs)
+		{
+			if (`objExists($master[1]+"."+$attr)` &&`getAttr -se ($master[1]+"."+$attr)` && `getAttr -type ($master[0]+"."+$attr)` != "double3")
+			{
+				float $value = `getAttr ($master[0]+"."+$attr)`;
+				setAttr ($master[1]+"."+$attr) $value;
+
+				if (`copyKey $master[0]`)
+				{
+					pasteKey -o "replaceCompletely" $master[1];
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,104 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc autoSave()
+{
+	global string $gMainWindow;
+	global float $autoBackupStartTime;
+	int $i;
+	int $autoBackupInterval = `optionVar -query "autoBackupInterval"`;
+	if (`timerX -startTime $autoBackupStartTime` > $autoBackupInterval * 60)
+	{
+		string $source = `file -query -sceneName`;
+		if ($source != "")
+		{
+			string $autoBackupPath, $buffer[], $str, $dest;
+			int $pipe, $index, $autoBackupFiles;
+			$autoBackupPath = `optionVar -query "autoBackupPath"`;
+			if(`optionVar -query "autoBackupCustomize"` || (!`filetest -d $autoBackupPath`))
+			{
+				$autoBackupPath = "";
+				tokenize $source "/" $buffer;
+				for ($i=0; $i<(size($buffer)-1); $i++)
+					$autoBackupPath += $buffer[$i] + "/";
+				$autoBackupPath += "autobackup";
+				if(!`filetest -d $autoBackupPath`)
+					sysFile -makeDir $autoBackupPath;
+			}
+			$autoBackupFiles = `optionVar -query "autoBackupFiles"`;
+
+			$source = `substituteAllString $source "/" "\\"`;
+			tokenize $source "\\" $buffer;
+
+			if(!`filetest -d $autoBackupPath`)
+				return;
+			$dest = $autoBackupPath + "/" + $buffer[size($buffer) - 1];
+			$dest = `substituteAllString $dest "/" "\\"`;
+
+			string $str1 = `substring $dest 1 (size($dest)-2)`;
+			string $str2 = `substring $dest (size($dest)-2) (size($dest))`;
+			$str = "\"" + $str1 + "???" + $str2 + "\"";
+			$pipe = popen(("DIR /B /O:-D " + $str), "r" );
+			$str = `fgetline $pipe`;
+			$str = $autoBackupPath + "\\" +`substring $str 1 (size($str) - 1)`;
+			pclose $pipe;
+			
+			if(! `filetest -f $str`)
+				$dest = $str1 + "001" + $str2;
+			else
+			{
+				$index = (int)`substring $str (size($str)-5) (size($str)-3)`;
+				if($index>=$autoBackupFiles)
+					$index = 0;
+				$index += 1;
+				if($index<10)
+					$dest = $str1 + "00" + $index + $str2;
+				else if($index<100)
+					$dest = $str1 + "0" + $index + $str2;
+				else
+					$dest = $str1 + $index + $str2;
+			}
+
+			$autoBackupStartTime = `timerX`;
+
+			$source = `substituteAllString $source "\\" "/"`;
+			$dest = `substituteAllString $dest "\\" "/"`;
+			string $title = `window -query -title $gMainWindow`;
+			file -rename $dest;
+			file -save;
+			file -rename $source;
+			window -edit -title $title $gMainWindow;
+
+			print ("AutoBackup: " + $dest + "\n");
+		}
+	}
+}
+
+global proc zwAutoBackupProc()
+{
+	global float $autoBackupStartTime;
+	global int $autoBackupJobNum;
+	int $autoBackupEnable = false, $autoBackupFiles, $autoBackupInterval;
+	string $autoBackupPath = "";
+	if (`optionVar -exists "autoBackupEnable"`)
+		$autoBackupEnable = `optionVar -query "autoBackupEnable"`;
+	if ($autoBackupJobNum != 0)
+	{
+		scriptJob -kill $autoBackupJobNum;
+		$autoBackupJobNum = 0;
+	}
+	if ($autoBackupEnable == true)
+	{
+		$autoBackupStartTime = `timerX`;
+		$autoBackupJobNum = `scriptJob -event "SelectionChanged" "autoSave"`;
+	}
+	global string $gMainWindow;
+	menuItem -edit -checkBox $autoBackupEnable autoBackupMenu;
+}

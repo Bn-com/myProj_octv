@@ -1,0 +1,288 @@
+global proc s100CKAUI()
+{
+
+	if(`window -ex 	s100CKAUI`)
+			deleteUI s100CKAUI;
+
+		window -title "Lightning and rendering Manager" s100CKAUI;
+		columnLayout -adjustableColumn true s100CKAUICLMain;
+
+
+	menuBarLayout s100CKAUIMLMain;
+
+
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100CKAUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+
+		setParent ..;
+
+
+	columnLayout -adjustableColumn 1 ;
+
+	text "Launch render To " ;
+	text "check Ao" ;
+	button -c s100CKAnimSceneWithOcclu -l "build and submit";
+
+window -e -resizeToFitChildren 1  s100CKAUI ;
+	showWindow ;
+
+
+}
+
+
+global proc s100CKAnimSceneWithOcclu()
+{
+global int $s100DeadlineIgnoreResult ;
+global string $s100JobDepandancie[];
+clear $s100JobDepandancie ;
+s100FMconformFolderForTypeSetProjet("shot");
+s100CKAdeleteCreatedAfterSubmitting ;
+s100CKABuildBefore;
+
+string $path = `s100PCgetFolderPath`;
+$path += "occluForCheck/scenebase_occlusion.ma" ;
+s100PCcreateFileWithFile($path) ;
+SubmitJobToDeadline ;
+
+
+string $item[] = `optionMenu -q -itemListLong s100PCDEADoptionMenuScene`;
+
+
+	for($tmp2 in $item)
+	{
+		deleteUI -menuItem  $tmp2 ;
+    }
+checkBox -e -v 1 frw_submitMayaScene;
+menuItem -p s100PCDEADoptionMenuScene -l "occlusion/template_compositing_shoot.nk" ;
+checkBox -e -v 0 s100DeadLinePrecomp;
+$s100DeadlineIgnoreResult = 1 ;
+DeadlineSubmitterOnOk ;
+$s100DeadlineIgnoreResult = 0 ;
+
+print ("ici " + $s100JobDepandancie[0] ) ;
+//precomp
+
+
+$opt = "s100PCDEADoptionMenuScene" ;
+$nForN = `s100CKAgetPathToSaveNukeComp`;
+string $path = `s100PCgetFolderPathComp`;
+string  $precomp  = `optionMenu -q -value $opt`;
+string $oFile = $path + $precomp ;
+$outPutPath = `s100PComGetOutputPath` ;
+
+s100modifyCompForQTForOcclu($oFile, $nForN  ) ;
+
+//submitting precomp
+print $nForN ;
+global string $JobNameGrp;
+
+$sF = `getAttr "defaultRenderGlobals.startFrame" `;
+$eF = `getAttr "defaultRenderGlobals.endFrame" `;
+string $filename   = `textFieldGrp -q -text  $JobNameGrp` ;
+//$nForN =s100PCgetFileWithExt("nk") ;
+
+
+
+checkBox -e -v 0 frw_submitMayaScene;
+string $tk = `s100ReturnTkName`;
+
+
+string $job = s100PCSubmitPreCompForNuke($s100JobDepandancie, ("Occlu Check:"+ $filename),("preCompositing"), $sF,$eF , 2000 , $nForN,"nukewithoutplug","");
+
+s100CKAdeleteCreatedAfterSubmitting ;
+
+
+print "\n\n\nok\n\n" ;
+print "\nscene submitted" ;
+
+headsUpMessage "scene submitted" ;
+}
+
+global proc s100CKABuildBefore()
+{
+	if( !`window -exists s100PCUI` )
+		s100PCUI;
+	if( !`window -exists s100CKAUI` )
+		s100CKAUI;
+
+}
+
+global proc s100CKAdeleteCreatedAfterSubmitting()
+{
+	// Delete any previous windows.
+	if( `window -exists DeadlineSubmitWindow` )
+		deleteUI -window DeadlineSubmitWindow;
+
+
+	if(`objExists "defaultRenderLayer"`)
+			editRenderLayerGlobals -currentRenderLayer "defaultRenderLayer" ;
+
+	if(`objExists "aoPass" `)
+		delete "aoPass";
+	if(`objExists "renderCam" `)
+		delete "renderCam";
+
+	$var = `ls "aoPass*"`;
+		for($i = 0 ; $i< size($var) ; $i++)
+		{
+		lockNode -l 0  $var[$i] ;
+		delete $var[$i] ;
+
+        }
+	if( `window -exists s100PCUI` )
+		deleteUI -window s100PCUI;
+	if( `window -exists s100CKAUI` )
+		deleteUI -window s100CKAUI;
+
+}
+
+
+global proc string s100CKAgetPathToSaveNukeComp()
+{
+string $file = `file -q -sn `	 ;
+string $path = dirname($file) +"/" ;
+
+$path += "_occlusionFile/";
+
+
+//create folder
+	if(! `filetest -d $path  `)
+		sysFile -md $path ;
+
+string $file = `file -q -sn -shortName  `	 ;
+string $subst = substituteAllString($file ,".ma" ,"_occlu.nk") ;
+
+
+
+$path += $subst ;
+return $path ;
+}
+
+
+global proc s100modifyCompForQTForOcclu(string $oldComp,string $comp)
+{
+//$oldComp = $oFile ;
+//$comp = $nForN
+
+///////////////////////
+// surement a supprimer .
+$tmp = s100PCgetFileWithExtWithOut("mov");
+$input =substituteAllString($tmp ,".mov" ,"") ;
+
+
+
+string $sFS = `getAttr "defaultRenderGlobals.startFrame" `;
+string $eFS = `getAttr "defaultRenderGlobals.endFrame" `;
+
+string $sound;
+
+ $sound = `s100PCgetSoundInScene` ;
+ 	if($sound =="")
+		$sound = "nosound";
+
+
+$output = `s100PComGetOutputPath` + "/aoPass/" ;
+
+sysFile -md $output ;
+$output = s100PCmodifyPathForQTRender($output) ;
+
+
+
+//sysFile -md $sub ;
+//$input
+$input ="input" ;
+
+//$pathroot
+$input = `file -q -sn -shortName ` ;
+
+
+
+
+$pathroot = substituteAllString($input ,".ma" ,"_aoPass");
+
+$input = `file -q -sn` ;
+$input = dirname($input ) ;
+
+$input = s100PCmodifyPathForQTRender($input) ;
+
+
+///////////////////////
+//c propre
+//$output = `s100PCGetPathConformForNetwork`;
+//$input = `s100PCgetOutputPath`;
+
+global string $JobNameGrp;
+string $filename   = `textFieldGrp -q -text  $JobNameGrp` ;
+string $get = `s100converFileToString($oldComp ) `;
+string $arr[]= stringToStringArray($get , "\n");
+string $toCheck[] = {"startframe",
+					"endframe",
+					"pathroot",
+					"filename",
+					"outputname",
+					"extension",
+					"extensionZ",
+					"audiopath"
+					} ;
+
+string $value[] = { $sFS,
+					$eFS,
+					$output,
+					$pathroot,
+					$input,
+					"png",
+					"tif",
+					$sound
+					} ;
+
+int $chA[] ;
+
+
+
+
+	for($i = 0 ; $i < size($arr) ; $i++)
+	{
+
+ 	//$i++ ;
+ 	//print $arr[$i] ;
+
+
+
+		for($j = 0 ; $j < size($toCheck) ; $j++)
+		{
+			if(`gmatch $arr[$i] ("*addUserKnob*" +$toCheck[$j] +"*")  `)
+			{
+				if(!`gmatch $arr[$i] ("* T *")  `)
+				{
+
+				print "vi" ;
+				$arr[$i + 1 ] = $toCheck[$j] +" " + $value[$j] ;
+				$chA[$j] = 1 ;
+
+                }
+			}
+
+        }
+
+		if(`gmatch $arr[$i] ("*first_frame*")  `)
+		{
+		$arr[$i] = "first_frame " + $sFS  ;
+
+        }
+		if(`gmatch $arr[$i] ("*last_frame*")  `)
+		{
+		$arr[$i] = "last_frame " + $eFS  ;
+        }
+
+    }
+
+
+//print $arr ;
+string $toPut = stringArrayToString($arr ,"\n") ;
+s100convertStringToFile( ($comp), $toPut) ;
+print $get ;
+
+
+}

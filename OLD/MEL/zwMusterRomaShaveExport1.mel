@@ -1,0 +1,103 @@
+global proc zwMusterRomaShaveExport1()
+{
+	if (`getenv "MUSTER_START"` == "" || `getenv "MUSTER_END"` == "")
+	{
+		print "can not get MUSTER_START, MUSTER_END";
+	//	quit -force -exitCode 99;
+		quit -force;
+	}
+
+	string $sceneName = `file -query -sceneName -shortName`;
+	$sceneName = tolower($sceneName);
+	if (`match "horse" $sceneName` != "" || `match "bear" $sceneName` != "" || `match "owl" $sceneName` != "" || `match "linx" $sceneName` != "" || `match "grubbo" $sceneName` != "" || `match "bird" $sceneName` != "")
+	{
+		eval "source \"zjRomaShaveExport.mel\"";
+		evalEcho "zjRomaExShaveExport";
+	}
+	else
+	{
+		evalEcho "zjRomaShaveExport";
+	}
+	string $PreFrameScript = `getAttr "MayaManNugget.PreFrameScript"`;
+	float $start = `getenv "MUSTER_START"`;
+	float $end = `getenv "MUSTER_END"`;
+	for ($i=$start; $i<=$end; $i++)
+	{
+	//	evalEcho ("currentTime -edit " + $i);
+	//	eval $PreFrameScript;
+		zwMusterRomaShaveExport2($i);
+	}
+
+//	zwMusterRomaShaveExportComplete;
+}
+
+global proc zwMusterRomaShaveExport2(float $t)
+{
+
+//for ($t=100; $t<156; $t++)
+//{
+currentTime -edit $t;
+string $proPath = "//file-cluster/GDC/Netrender/Scenes/ROMA/ShaveRib/partD/sq_124H/";
+string $sceneName = `file -q -sn -shn`;
+string $shn = `match "[^.]+" $sceneName`;
+string $sfolder = $proPath + $shn + "/" + `currentTime -q`;
+if (!`filetest -d $sfolder`) {
+	sysFile -makeDir $sfolder;
+}
+string $sd[] = `ls -tr -ni "*GRP_shaveDisplay" "*GRP_shavedisplay"`;
+string $shaveDisplayItem[] = `listRelatives -c -type transform -ni $sd[0]`;
+int $curFrame = `currentTime -q`;
+for ($i=0;$i<size($shaveDisplayItem);$i++)
+{
+	if (`filetest -f ($sfolder + "/" + $shaveDisplayItem[$i] + ".rib")`)
+	{
+		continue;
+	}
+	setAttr ($shaveDisplayItem[$i] + ".visibility") 1;
+	for ($j=0;$j<size($shaveDisplayItem);$j++)
+	{
+		if ($j != $i)
+			setAttr ($shaveDisplayItem[$j] + ".visibility") 0;
+	}
+	shaveWriteRib -b -gz -n -opa -rtc -wc -isg -fp -vox -so $curFrame -sc ($curFrame-1) -mb ($sfolder + "/" + $shaveDisplayItem[$i] + ".rib");
+}
+for ($i=0;$i<size($shaveDisplayItem);$i++)
+{
+	setAttr ($shaveDisplayItem[$i] + ".visibility") 1;
+}
+//}
+}
+
+global proc zwMusterRomaShaveExportComplete()
+{
+	string $name = `file -query -sceneName -shortName`;
+	$name = `match "[^.]+" $name`;
+
+	string $start = `getenv "MUSTER_START"`;
+	string $end = `getenv "MUSTER_END"`;
+
+	string $str = `system "\"\\\\file-cluster\\GDC\\Resource\\Support\\Virtual Vertex\\Muster5.54x32_185\\Mrtool.exe\" -s 192.168.3.185 -u admin -p 110 -q j -jf id,name"`;
+	string $jobs[], $chunks[];
+	tokenize $str "\n" $jobs;
+	for ($job in $jobs)
+	{
+		if (`match $name $job` != "")
+		{
+			string $jobid = `match "[0-9]+" $job`;
+			string $str = `system ("\"\\\\file-cluster\\GDC\\Resource\\Support\\Virtual Vertex\\Muster5.54x32_185\\Mrtool.exe\" -s 192.168.3.185 -u admin -p 110 -q h -job " + $jobid)`;
+			tokenize $str "\n" $chunks;
+			for ($chunk in $chunks)
+			{
+				if (`match ("| " + $start) $chunk` != "" && `match ("| " + $end) $chunk` != "")
+				{
+					string $chunkid = `match "[0-9]+" $chunk`;
+					string $str = "\"\\\\file-cluster\\GDC\\Resource\\Support\\Virtual Vertex\\Muster5.54x32_185\\Mrtool.exe\" -s 192.168.3.185 -u admin -p 110 -chunkdn " + $jobid + " " + $chunkid;
+					int $fileId = `fopen "\\\\file-cluster\\GDC\\Scratch\\TD\\debug.txt" "a"`;
+					fprint $fileId ($str + "\r\n");
+					fclose $fileId;
+				//	system $str;
+				}
+			}
+		}
+	}
+}

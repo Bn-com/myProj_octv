@@ -1,0 +1,182 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 
+// COPYRIGHT (c) 2003 IDMT CHINA
+// 
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// 
+// Date: 22.08.2003
+// Last modified: 22.08.2003
+//
+// Description:
+//
+// NOTE:
+//		- REMEMBER TO UN-DO THIS AVOIDANCE PROC FIRST BEFORE YOU 
+//	RE-APPLY IT AS THE PREVIOUS RESULTS MAY CAUSE THIS TO BEHAVE
+//	UNEXPECTEDLY!
+//
+// ChangeLog:
+//		- 24.08.2003: 
+//			+ external collision avoidance with crowdObstacles
+//			+ draw linear curves for inter-collision avoidance!
+//		
+global proc tnpCrowdCollisionAvoidance(string $locators[], // linear nurbsCurves
+									   string $particle)	// 
+{
+
+	int $maxSpans = 1000;
+	int $noOfSpans;
+	float $uParam1[];
+	float $uParam2[];
+	string $curveDetach[];
+	string $circleDetach[];
+
+	if(size($locators)==0) return;
+
+	// GET THE LIST OF CROWD OBSTACLES
+	// These obstacles are nurbsCurves or nurbsCircles and 
+	// they must be named "crowdObstacle*"
+	// IMPORTANT: -Only work correct with cubic curve (degree=3)
+	//			  -linear curve (degree = 1) used for inter-collision avoidance!
+	//			
+	string $obstacles[] = `ls -tr "crowdObstacle*"`;	
+	if(size($obstacles) == 0) return;
+	waitCursor -state on;
+	for($i=0; $i<size($locators); $i++){
+		if (!kcIsType($locators[$i], "nurbsCurve")) continue;
+	
+		for($item in $obstacles){
+			// check if this curve intersects with $item 
+			// if true -> create new curve to avoid collision
+			string $intersectNode = `curveIntersect -ch on ($locators[$i]) $item`;			
+			clear $uParam1;
+			clear $uParam2;
+			$uParam1 = `getAttr ($intersectNode + ".p1")`;
+			$uParam2 = `getAttr ($intersectNode + ".p2")`;
+			delete $intersectNode;
+				
+			if(size($uParam1)==0 || size($uParam1)==1 || equivalentTol($uParam1[0], $uParam1[1], 2.8423e-004)) continue;
+			
+			// check these intersection points
+			// and make new curve
+			// assume that the curve intersects with obstacle at even no of points
+			//for($k=0; $k<size($uParam1); $k+=2){
+			int $k=0;
+			
+			// HANDLE EXTERNAL COLLISION AVOIDANCE
+			if(`getAttr ($item + ".degree")` == 3){ // external obstacle!
+			
+				clear $curveDetach;
+				clear $circleDetach;
+				$curveDetach = `detachCurve -p $uParam1[$k] -p $uParam1[$k+1] -replaceOriginal yes $locators[$i]`;
+				$circleDetach = `detachCurve -p $uParam2[$k] -p $uParam2[$k+1] -replaceOriginal no $item`;
+
+				// WORK AROUND FOR LINEAR CURVE  (DEGREE = 1) CIRCLE
+				// attach piece 0 and piece 3 to get the second arc of the broken circle
+				// the result is $circleDetach[0]
+				// attachCurve -keepMultipleKnots no -method 0 -reverse1 true -reverse2 true $circleDetach[0] $circleDetach[2];
+
+				// compare length of $circleDetach[0] and $circleDetach[1]
+				float $l1 = `arclen $circleDetach[0]`;
+				float $l2 = `arclen $circleDetach[1]`;
+				
+				string $chosenPiece = ($l2>$l1)?$circleDetach[0]:$circleDetach[1];
+				
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[0]");
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[0]");
+				
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[" + $maxSpans+ "]");
+
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[" + $maxSpans+ "]");
+
+				if(`getAttr ($curveDetach[2] + ".spans")` > 4)
+					delete ($curveDetach[2] + ".cv[" + $maxSpans+ "]");
+				
+				attachCurve -keepMultipleKnots no -method 1 -bb 0.5 $curveDetach[2] $chosenPiece;
+				
+				if(`getAttr ($curveDetach[1] + ".spans")` > 4)
+					delete ($curveDetach[1] + ".cv[0]");
+				
+				attachCurve -keepMultipleKnots no -method 1 -bb 0.5 $curveDetach[2] $curveDetach[1];
+
+				// CLEAN UP
+				delete $curveDetach[0] $curveDetach[1] $circleDetach;
+			}
+			// HANDLE INTER-COLLISION AVOIDANCE
+			if(`getAttr ($item + ".degree")` == 1){ // internal!
+				// linear curve
+				// assume the directions of the crowdLocator and the curve are 
+				// the same!
+				clear $curveDetach;
+				clear $circleDetach;
+				string $chosenPiece;
+				string $tempDetach[];
+
+				$curveDetach = `detachCurve -p $uParam1[$k] -p $uParam1[$k+1] -replaceOriginal yes $locators[$i]`;
+				$circleDetach = `detachCurve -p $uParam2[$k] -replaceOriginal no $item`;
+
+				if(catch($tempDetach = `detachCurve -p $uParam2[$k+1] -replaceOriginal no $circleDetach[1]`)){
+				
+					warning ("Linear Curve \"" + $item + "\" is not correctly aligned! Reverse Curve Direction");
+					
+					$tempDetach = `detachCurve -p $uParam2[$k+1] -replaceOriginal no $circleDetach[0]`;
+					
+					string $temp[] = `reverseCurve -constructionHistory off -replaceOriginal no $tempDetach[1]`;
+					
+					$chosenPiece = $temp[0];
+					
+					delete $tempDetach;
+				
+				}else{
+					// $circleDetach[1] is now of interest
+					delete $tempDetach[1];
+					$chosenPiece = $tempDetach[0];
+				}
+
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[0]");
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[0]");
+				
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[" + $maxSpans+ "]");
+
+				if(`getAttr ($chosenPiece + ".spans")` > 4)
+					delete ($chosenPiece + ".cv[" + $maxSpans+ "]");
+
+				if(`getAttr ($curveDetach[2] + ".spans")` > 4)
+					delete ($curveDetach[2] + ".cv[" + $maxSpans+ "]");
+				
+				attachCurve -keepMultipleKnots no -method 1 -bb 0.5 $curveDetach[2] $chosenPiece;
+				
+				if(`getAttr ($curveDetach[1] + ".spans")` > 4)
+					delete ($curveDetach[1] + ".cv[0]");
+				
+				attachCurve -keepMultipleKnots no -method 1 -bb 0.5 $curveDetach[2] $curveDetach[1];
+
+				// CLEAN UP
+				delete $curveDetach[0] $curveDetach[1] $circleDetach;				
+				delete $chosenPiece;
+			}
+
+			// IF THERE'S ALREADY THE CROWD PARTICLE -> UPDATE noOfSpansPP
+			if(size($particle)!=0){
+				$noOfSpans = `getAttr ($locators[$i] + ".spans")`;
+				particle -e -attribute noOfSpansPP -order $i -floatValue $noOfSpans $particle;
+			}
+		}// end $item loop 
+	}// end $i loop	
+	waitCursor -state off;
+}

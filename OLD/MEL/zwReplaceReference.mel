@@ -1,0 +1,97 @@
+// 将本机的Reference替换成网上的文件
+global proc zwReplaceReference(int $type)
+{
+	int $dirty = false;
+
+	string $buf[] = `file -query -reference`;
+	for ($file in $buf)
+	{
+		string $buf1[];
+		tokenize $file "/" $buf1;
+		string $filename = $buf1[size($buf1)-1];
+		if (`gmatch $filename "br_*_ms_c000.*"`)
+		{
+			if ($type == 1)
+			{
+				int $size = `tokenize $filename "_" $buf1`;
+				string $dest = `getenv "IDMT_PROJECTS"` + "/BRATZ/Production/Asset/background/" + $buf1[1] + "/master/" + $filename;
+				if (!`filetest -f $dest` && $size > 3)
+				{
+					$dest = `getenv "IDMT_PROJECTS"` + "/BRATZ/Production/Asset/background/" + $buf1[1] + "_" + $buf1[2] + "/master/" + $filename;
+					if (!`filetest -f $dest` && $size > 4)
+					{
+						$dest = `getenv "IDMT_PROJECTS"` + "/BRATZ/Production/Asset/background/" + $buf1[1] + "_" + $buf1[2] + "_" + $buf1[3] + "/master/" + $filename;
+					}
+				}
+				string $fullSource = `idmtFile -fullPath $file`;
+				string $fullDest = `idmtFile -fullPath $dest`;
+				if (`filetest -f $dest` && tolower($fullSource) != tolower($fullDest))
+				{
+					string $node = `file -query -referenceNode $file`;
+					file -loadReference $node $dest;
+					$dirty = true;
+					confirmDialog -button "OK" -message ($filename + " 已经替换成网上文件");
+				}
+			}
+			else if ($type == 2)
+			{
+				if (!`gmatch $filename "*_l_*"`)
+				{
+					continue;
+				}
+				string $filespec = `substitute "_l_" $file "_*_h_"`;
+				string $buttons[] = `getFileList -filespec $filespec`;
+				if (!size($buttons))
+				{
+					continue;
+				}
+				$dirty = true;
+				string $destFilename = "";
+				if (size($buttons) > 1)
+				{
+					string $sceneName = `file -query -shortName -sceneName`;
+					int $size = `tokenize $sceneName "_" $buf1`;
+					if ($size > 3)
+					{
+						$sceneName = `idmtProject -background ($buf1[1] + "_" + $buf1[2])`;
+						for ($button in $buttons)
+						{
+							if (tolower($button) == tolower($sceneName))
+							{
+								$destFilename = $sceneName;
+								break;
+							}
+						}
+					}
+					if ($destFilename == "")
+					{
+						string $confirmDialog = "confirmDialog -message \"把" + $filename + " 替换成？\" -dismissString \"\"";
+						for ($button in $buttons)
+						{
+							$confirmDialog += " -button \"" + $button + "\"";
+						}
+						$destFilename = `eval $confirmDialog`;
+					}
+				}
+				else
+				{
+					$destFilename = $buttons[0];
+				}
+				if ($destFilename != "")
+				{
+					string $node = `file -query -referenceNode $file`;
+					string $dest = `substitute $filename $file $destFilename`;
+					file -loadReference $node $dest;
+					if (size($buttons) == 1)
+					{
+						confirmDialog -button "OK" -message ($filename + " 已经替换成" + $destFilename);
+					}
+				}
+			}
+		}
+	}
+	if (!$dirty)
+	{
+		confirmDialog -button "OK" -message "没有文件被替换";
+	}
+}

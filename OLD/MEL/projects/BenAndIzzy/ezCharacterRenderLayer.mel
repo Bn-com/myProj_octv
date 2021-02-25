@@ -1,0 +1,367 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/02/26
+///
+/// Description: ben&izzy项目渲染环节自动分层工具之子程序
+///		主要功能：针对角色（包含相关道具）的分层及renderGlobal的设置
+///
+
+
+
+global proc ez_createCharRL()
+{
+
+	string $charRL[] = {"character","characterAO","characterRGB","characterMouth","characterHair","characterBrow"};
+	
+	radioButtonGrp -e -select 2 LayerEditorTypeRadio;
+	tabLayout -edit -selectTab RenderLayerTab DisplayLayerUITabLayout;
+
+	string $adj[] = `ls -type renderLayer "character*"`;
+	if (`objExists $adj[0]`)
+	{
+		editRenderLayerGlobals -currentRenderLayer defaultRenderLayer;
+		delete $adj;
+	}
+	
+	for ($temp in $charRL )
+	{
+		createRenderLayer -name $temp -e -mc -number 1 -noRecurse;
+		if ($temp == "character" || $temp == "characterAO" || $temp == "characterHair" || $temp == "characterBrow") 
+			ezMentalRayRG($temp);
+		if ($temp == "characterRGB" || $temp == "characterMouth" ) 
+			ezMayaSoftwareRG;
+	}
+		
+	layerEditorLayerButtonSelect 0 defaultRenderLayer;
+	updateHighlightSelectIcon;
+	setAttr "defaultRenderLayer.renderable" 0;
+	select -cl;
+}
+
+global proc ez_addCharRL()
+{
+	string $charRL[] = {"character","characterAO","characterRGB","characterMouth","characterHair","characterBrow"};
+
+	string $obj[] = `ls -sl`;
+
+	for ($layer in $charRL)
+	{
+		if ($layer == "character")		ez_characterRL($obj);
+		if ($layer == "characterAO")		ez_characterAORL($obj);
+		if ($layer == "characterRGB")		ez_characterRGBRL($obj);
+		if ($layer == "characterMouth")		ez_characterMOUTHRL($obj);
+		if ($layer == "characterHair")		ez_characterHAIRRL($obj);
+		if ($layer == "characterBrow")		ez_characterBROWRL($obj);
+	}
+}
+
+global proc ez_characterRL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 character;
+	updateHighlightSelectIcon;
+
+	string $lights[] = `ls -type light`;
+	editRenderLayerMembers  character $objs $lights;
+
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl -type shape`;
+		for ($temp in $tempObj )
+		{
+			if (`gmatch $temp "*hair*"` || `gmatch $temp "*:*hair*"` || `gmatch $temp "*brow*"` || `gmatch $temp "*:*brow*"`
+				|| `gmatch $temp "*:*kindi*moustach*"` || `gmatch $temp "*:*kindi*beard*"` || `gmatch $temp "*:*haitham*bead*"`
+				||`gmatch $temp "*:*haitham*mustache*"` ||`gmatch $temp "*:*mustache*"` ||`gmatch $temp "*:*whiskers*"`)
+			{
+				if (`objExists ($temp+".receiveShadows")`)
+				{
+					editRenderLayerAdjustment ($temp+".receiveShadows");
+					setAttr ($temp+".receiveShadows") 0;
+				}
+				if (`objExists ($temp+".primaryVisibility")`)
+				{
+					editRenderLayerAdjustment ($temp+".primaryVisibility");
+					setAttr ($temp+".primaryVisibility") 0;
+				}
+			}
+		}
+	}
+
+	select -cl;
+}
+
+global proc ez_characterAORL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 characterAO;
+	updateHighlightSelectIcon;
+
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl -type shape`;
+		hyperShade -assign ezAO_surfaceShader;
+		for ($temp in $tempObj )
+		{
+			if (!(`gmatch $temp "*hair*"` || `gmatch $temp "*:*hair*"` || `gmatch $temp "*brow*"` || `gmatch $temp "*:*brow*"`
+				|| `gmatch $temp "*:*kindi*moustach*"` || `gmatch $temp "*:*kindi*beard*"` || `gmatch $temp "*:*haitham*bead*"`
+				||`gmatch $temp "*:*haitham*mustache*"` ||`gmatch $temp "*:*mustache*"` ||`gmatch $temp "*:*whiskers*"`))
+			{
+				editRenderLayerMembers  characterAO $temp;
+			}
+		}
+	}
+	select -cl;
+
+}
+
+global proc ez_characterRGBRL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 characterRGB;
+	updateHighlightSelectIcon;
+	editRenderLayerMembers  characterRGB $objs;
+
+	string $color[]= {"ezColorR_surfaceShader","ezColorG_surfaceShader","ezColorB_surfaceShader","ezColorA_surfaceShader"};
+	string $master[];
+	string $buffer[];
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl`;
+		for ($temp in $tempObj )
+		{
+			if (`gmatch $temp "*:*MASTER"` || `gmatch $temp "*MASTER"`)		$master[`size $master`] = $temp;
+		}
+
+	}
+	
+	for ($i=0;$i<`size $master` ;$i++ )
+	{
+		tokenize $master[$i] ":" $buffer;
+		string $pre = `substring $master[$i] 1 (size($master[$i])-6)`;
+		
+		for ($temp in $color)
+		{
+			if (`objExists ($temp+"SG")`)
+			{
+				string $renderLayer[]=`listConnections -type renderLayer ($temp+"SG")`;
+				int $used = 0;
+				for ($layer in $renderLayer)
+				{
+					if ($layer == "characterRGB")		$used = 1;
+				}
+				if ($used == 0)
+				{
+					select -r ($pre + "*");
+					hyperShade -assign $temp;
+					break;
+				}
+			}
+			else 
+			{
+				select -r ($pre + "*");
+				hyperShade -assign $temp;
+				break;
+			}
+		}
+	}
+	select -cl;
+}
+
+global proc ez_characterMOUTHRL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 characterMouth;
+	updateHighlightSelectIcon;
+	editRenderLayerMembers  characterMouth $objs;
+
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl -type shape`;
+		for ($temp in $tempObj )
+		{
+			if (`gmatch $temp "*:*tongue*"` || `gmatch $temp "*tongue*"`)
+			{
+				select -r $temp;
+				hyperShade -assign ezColorR_surfaceShader;
+			}
+			else if (`gmatch $temp "*:*upteeth*"` || `gmatch $temp "*:*lowteeth*"` || `gmatch $temp "*upteeth*"` || `gmatch $temp "*lowteeth*"`)
+			{
+				select -r $temp;
+				hyperShade -assign ezColorG_surfaceShader;
+			}
+			else if (`gmatch $temp "*:*upgum*"` || `gmatch $temp "*:*lowgum*"` || `gmatch $temp "*upgum*"` || `gmatch $temp "*lowgum*"`)
+			{
+				select -r $temp;
+				hyperShade -assign ezColorB_surfaceShader;
+			}
+			else 
+			{
+				select -r $temp;
+				hyperShade -assign ezmatte_lambert;
+			}
+		}
+	}
+	select -cl;
+
+}
+
+global proc ez_characterHAIRRL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 characterHair;
+	updateHighlightSelectIcon;
+
+	string $lights[]= `ls -type light`;
+	editRenderLayerMembers  characterHair $lights;
+
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl -type shape`;
+		editRenderLayerMembers  characterHair $tempObj;
+		for ($temp in $tempObj )
+		{
+			if (!(`gmatch $temp "*hair*"` || `gmatch $temp "*:*hair*"` || `gmatch $temp "*brow*"` || `gmatch $temp "*:*brow*"`
+				|| `gmatch $temp "*:*kindi*moustach*"` || `gmatch $temp "*:*kindi*beard*"`|| `gmatch $temp "*:*haitham*bead*"` 
+				|| `gmatch $temp "*:*haitham*mustache*"`||`gmatch $temp "*:*mustache*"` ||`gmatch $temp "*:*whiskers*"`) )
+			{
+				select -r $temp;
+				hyperShade -assign ezmatte_lambert;
+			}
+			/*else 
+			{
+				if (`objExists ($temp+".receiveShadows")`)
+				{
+					editRenderLayerAdjustment -remove ($temp+".receiveShadows");
+					setAttr ($temp+".receiveShadows") 0;
+					setAttr ($temp+".receiveShadows") 1;
+				}
+				if (`objExists ($temp+".primaryVisibility")`)
+				{
+					editRenderLayerAdjustment -remove ($temp+".primaryVisibility");
+					setAttr ($temp+".primaryVisibility") 0;
+					setAttr ($temp+".primaryVisibility") 1;
+				}
+			}*/
+		}
+	}
+	select -cl;
+}
+
+global proc ez_characterBROWRL(string $objs[])
+{
+	layerEditorLayerButtonSelect 0 characterBrow;
+	updateHighlightSelectIcon;
+
+	string $lights[]= `ls -type light`;
+	editRenderLayerMembers  characterBrow  $lights;
+
+	for ($obj in $objs)
+	{
+		select -hi $obj;
+		string $tempObj[] = `ls -sl -type shape`;
+		for ($temp in $tempObj )
+		{
+			if (`gmatch $temp "*brow*"` || `gmatch $temp "*:*brow*"`)
+			{	
+				editRenderLayerMembers characterBrow  $temp;
+				/*
+				if (`objExists ($temp+".receiveShadows")`)
+				{
+					editRenderLayerAdjustment ($temp+".receiveShadows");
+					setAttr ($temp+".receiveShadows") 1;
+				}
+				if (`objExists ($temp+".primaryVisibility")`)
+				{
+					editRenderLayerAdjustment ($temp+".primaryVisibility");
+					setAttr ($temp+".primaryVisibility") 1;
+				}
+				*/
+			}
+		}
+	}
+	select -cl;
+}
+
+global proc ez_addPropRL()
+{
+	string $charRL[] = {"character","characterAO","characterRGB","characterMouth","characterHair"};
+	string $color[]= {"ezColorR_surfaceShader","ezColorG_surfaceShader","ezColorB_surfaceShader","ezColorA_surfaceShader"};
+
+	string $obj[] = `ls -sl`;
+
+	for ($layer in $charRL)
+	{
+		switch ($layer)
+		{
+			case "character":
+				layerEditorLayerButtonSelect 0 character;
+				updateHighlightSelectIcon;
+				editRenderLayerMembers  character $obj;
+				break;
+			case "characterAO":
+				layerEditorLayerButtonSelect 0 characterAO;
+				updateHighlightSelectIcon;
+				editRenderLayerMembers  characterAO $obj;
+				hyperShade -assign ezAO_surfaceShader;
+				break;
+			case "characterRGB":
+				layerEditorLayerButtonSelect 0 characterRGB;
+				updateHighlightSelectIcon;
+				editRenderLayerMembers  characterRGB $obj;
+				for ($temp in $color)
+				{
+					if (`objExists ($temp+"SG")`)
+					{
+						string $renderLayer[]=`listConnections -type renderLayer ($temp+"SG")`;
+						int $used = 0;
+						for ($layer in $renderLayer)
+						{
+							if ($layer == "characterRGB")		$used = 1;
+						}
+						if ($used == 0)
+						{
+							select -r $obj;
+							hyperShade -assign $temp;
+							break;
+						}
+					}
+					else 
+					{
+						select -r $obj;
+						hyperShade -assign $temp;
+						break;
+					}
+				}
+				break;
+			case "characterMouth":
+				layerEditorLayerButtonSelect 0 characterMouth;
+				updateHighlightSelectIcon;
+				editRenderLayerMembers  characterMouth $obj;
+				hyperShade -assign ezmatte_lambert;
+				break;
+			case "characterHair":
+				layerEditorLayerButtonSelect 0 characterHair;
+				updateHighlightSelectIcon;
+				editRenderLayerMembers  characterHair $obj;
+				hyperShade -assign ezmatte_lambert;
+				break;
+		}
+	}
+}
+
+global proc ez_addMatteRL()
+{
+	string $charRL[] = {"character","characterAO","characterRGB","characterMouth","characterHair"};
+
+	string $obj[] = `ls -sl`;
+
+	for ($layer in $charRL)
+	{
+		layerEditorLayerButtonSelect 0 $layer;
+		updateHighlightSelectIcon;
+		editRenderLayerMembers  $layer $obj;
+		hyperShade -assign ezmatte_lambert;
+	}
+}

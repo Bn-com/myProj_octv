@@ -1,0 +1,1966 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// $type: 0 delete, 1 yellow, 2 saft gate
+global proc int zwHeadsUpDisplay(int $type)
+{
+	if (!`pluginInfo -q -loaded -name "stereoCamera"`)
+	{
+		loadPlugin -quiet "stereoCamera";
+	}
+
+	global string $zwHeadsUpDisplay;
+	string $buf[];
+
+	zwHeadsUpDisplayRemove;
+	if ($type == 0)
+	{
+		return true;
+	}
+	else if ($type == 1)
+	{
+		return true;
+	}
+
+// 求camera
+	string $modelPanel = `getPanel -withFocus`;
+	string $camera = zwHeadsUpDisplayGetCamera();
+	if ($camera == "")
+	{
+		error "Please select the view you want to playblast";
+	}
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = `zwHeadsUpDisplayGetProject $camera`;
+	if ($project == "")
+	{
+		if (`match "^SNJYW_" (toupper($sceneName))` != "")
+		{
+			$project = "SNJYW";
+		}
+	}
+	int $isNewProject = zwHeadsUpDisplayIsNewProject20140317($project);
+
+// 分辨率
+	int $resWidth = `getAttr "defaultResolution.width"`;
+	int $resHeight = `getAttr "defaultResolution.height"`;
+	if ($type == 8001 || $type == 8002 || $project != "")
+	{
+		zwImportModule("idmt.pipeline.project", true);
+		int $res[] = `python ("idmt.pipeline.project.project().GetPlayblastResolution('" + $project + "')")`;
+
+		int $width = $resWidth;
+		int $height = $resHeight;
+		if ($project == "ShenShou")
+		{
+			if ($type == 8002)
+			{
+				$width = 1024;
+				$height = 540;
+				$type = 8000;
+			}
+			else
+			{
+				$width = 720;
+				$height = 380;
+			}
+		}
+		else if ($project == "SNJYW")
+		{
+			$width = 1280;
+			$height = 720;
+		}
+		else if ($project == "ratchetandclank")
+		{
+			$width = 1280;
+			$height = 449;
+		}
+		else if ($project == "TerrorTower")
+		{
+			string $str = `idmtService "GetAnimByFilename2" $sceneName`;
+			if (`match "背投" $str` != "")
+			{
+				$width = 372;
+				$height = 600;
+			}
+			else if (`match "随行" $str` != "")
+			{
+				$width = 960;
+				$height = 600;
+			}
+			else if (`match "特效" $str` != "")
+			{
+				$width = 1000;
+				$height = 584;
+			}
+		}
+		else if ($project == "Calimero")
+		{
+			$width = 1138;
+			$height = 640;
+		}
+		else if (`match "^yd_.*_fs_.*" (tolower($sceneName))` != "")
+		{
+			$width = 1280;
+			$height = 720;
+		}
+		else if ($res[0] != 0)
+		{
+			$width = $res[0];
+			$height = $res[1];
+		}
+		else if ($width > 1024)
+		{
+			$width = 1024;
+			float $deviceAspectRatio = `getAttr "defaultResolution.deviceAspectRatio"`;
+			if ($deviceAspectRatio > 1.776 && $deviceAspectRatio < 1.779)
+			{
+				if ($isNewProject)
+				{
+					$width = 960;
+				}
+				else
+				{
+					$width = 720;
+				}
+			}
+			float $playblastScale = (float)$width / (float)$resWidth;
+			$height = $height * $playblastScale;
+		}
+		
+		if ($type == 8001 && !($project == "Enyo" || $project == "Woodlies" || $project == "Calimero" || $project == "ZoomWhiteDolphin" || $project == "VickyTheViking" || $project == "DiveollyDive3" || $project == "HeroFactory" || $project == "North" || $isNewProject))	// 有字幕（新）
+		{
+			if (($resWidth == 1024 && $resHeight == 436) || zwIsRainbowProject($project))	// WinxClubII
+			{
+				$height += 76;
+			}
+			else if (`match "_exposh_" $sceneName` != "")
+			{
+				$height += 64;
+			}
+			else if ($project == "GummiTarzan")
+			{
+				$height += 84;
+			}
+			else if ($project == "ratchetandclank")
+			{
+				$height += 271;
+			}
+			else if ($project == "MiniTiger")
+			{
+				$height += 83;
+			}
+			else
+			{
+				$height += 100;
+			}
+		}
+		if ($height % 2)
+		{
+			$height += 1;
+		}
+		
+		string $editor = "";
+		string $version = zwAboutVersion();
+		if ((float)$version >= 2009)
+		{
+			$editor = `getCustomViewEditorFromPanel $modelPanel`;
+		}
+		if ($editor == "")
+		{
+		//	string $panel = `panel -query -control $modelPanel`;
+			$editor = `editor -query -control $modelPanel`;
+		}
+		int $editorWidth = `control -query -width $editor`;
+		int $editorHeight = `control -query -height $editor`;
+		if ($editorWidth < $width || $editorHeight < $height)
+		{
+			//error ("视窗不够大，playblast尺寸:" + $width + "x" + $height + " 当前视窗只有:" + $editorWidth + "x" + $editorHeight);
+			$zwHeadsUpDisplay += "optionVar -intValue playblastOffscreen " + `optionVar -query playblastOffscreen` + ";\n";
+			optionVar -intValue playblastOffscreen 1;
+		}
+
+		$zwHeadsUpDisplay += "optionVar -intValue playblastDisplaySizeSource " + `optionVar -query playblastDisplaySizeSource` + ";\n";
+		optionVar -intValue playblastDisplaySizeSource 3;
+		$zwHeadsUpDisplay += "optionVar -floatValue playblastScale " + `optionVar -query playblastScale` + ";\n";
+		optionVar -floatValue playblastScale 1.0;
+		$zwHeadsUpDisplay += "optionVar -intValue playblastWidth " + `optionVar -query playblastWidth` + ";\n";
+		optionVar -intValue playblastWidth $width;
+		$zwHeadsUpDisplay += "optionVar -intValue playblastHeight " + `optionVar -query playblastHeight` + ";\n";
+		optionVar -intValue playblastHeight $height;
+	}
+
+	string $playblastFormat = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'playblast/format')")`;
+	if ($playblastFormat != "")
+	{
+		optionVar -stringValue playblastFormat $playblastFormat;
+	}
+	string $playblastCompression = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'playblast/compression')")`;
+	if ($playblastCompression != "")
+	{
+		optionVar -stringValue playblastCompression $playblastCompression;
+	}
+	string $playblastQuality = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'playblast/quality')")`;
+	if ($playblastQuality != "")
+	{
+		optionVar -intValue playblastQuality ((int)$playblastQuality);
+	}
+
+// 删除maya 本身的headsUpDisplay
+	$buf = `headsUpDisplay -listHeadsUpDisplays`;
+	for ($headsUpDisplay in $buf)
+		headsUpDisplay -remove $headsUpDisplay;
+
+	int $playBlasiColor = 17;
+	int $displayColor = `displayColor -query -dormant "headsUpDisplayLabels"`;
+
+	float $overscan = `getAttr ($camera + ".overscan")`;
+	float $os = 1.0;
+	if ($project == "Woodlies" || $project == "ZoomWhiteDolphin")
+	{
+		$os = 1.2;
+	}
+	else if ($project == "Calimero")
+	{
+		$os = 1.185;
+	}
+	else if ($project == "EarthQuake")
+	{
+	//	$os = 2.25;
+	}
+	else if ($project == "DiveollyDive3" || $project == "JourneyofLong")
+	{
+		$os = 1.3;
+	}
+//	else if ($project == "ChinaImage")
+//	{
+//		$os = 1.126;
+//	}
+	else if ($project == "SNJYW")
+	{
+		$os = 1.0;
+	}
+	else if ($isNewProject)
+	{
+		$os = 1.2;
+	}
+	if ($overscan != $os)
+	{
+		if (`zwSetAttrFloat ($camera + ".overscan") $os`)
+		{
+			$zwHeadsUpDisplay += "zwSetAttrFloat \"" + $camera + ".overscan\" " + $overscan + ";\n";
+		}
+	}
+
+// 设置颜色
+	global int $gPlayBlasiColor;
+	if ($gPlayBlasiColor != 0)
+	{
+		$playBlasiColor = $gPlayBlasiColor;
+		$gPlayBlasiColor = 0;
+	}
+	if ($project == "SNJYW")
+	{
+		$playBlasiColor = 16;
+	}
+
+	string $user = zwHeadsUpDisplayUser();
+	if ($displayColor != $playBlasiColor)
+	{
+		catch(`displayColor -dormant "headsUpDisplayLabels" $playBlasiColor`);
+		$zwHeadsUpDisplay += "catch(`displayColor -dormant headsUpDisplayLabels " + $displayColor + "`);\n";
+	}
+	$displayColor = `displayColor -q -dormant "headsUpDisplayValues"`;
+	if ($displayColor != $playBlasiColor)
+	{
+		catch(`displayColor -dormant "headsUpDisplayValues" $playBlasiColor`);
+		$zwHeadsUpDisplay += "catch(`displayColor -dormant headsUpDisplayValues " + $displayColor + "`);\n";
+	}
+
+//	global int $zwHeadsUpDisplayAudio;
+//	string $totalLabel = "total:";
+//	if ($zwHeadsUpDisplayAudio)
+//	{
+//		$totalLabel = "(audio#) " + $totalLabel;
+//	}
+
+	if ($type == 8000)	// 无字幕
+	{
+		if ($project == "BubbleGuppies")
+		{
+			if (`getAttr ($camera + ".displaySafeAction")`)
+			{
+				if (`zwSetAttrInt ($camera + ".displaySafeAction") off`)
+				{
+					$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeAction on;\n";
+				}
+			}
+			if (`getAttr ($camera + ".displaySafeTitle")`)
+			{
+				if (`zwSetAttrInt ($camera + ".displaySafeTitle") off`)
+				{
+					$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeTitle on;\n";
+				}
+			}
+		}
+	}
+	else			// 有字幕
+	{
+		string $headsUpDisplayType = $project;
+		if ((($resWidth == 1024 && $resHeight == 436) || zwIsRainbowProject($project)) && $type == 8001)	// WinxClubII
+		{
+			$headsUpDisplayType = "wn2";
+		}
+		zwHeadsUpDisplayCreate $headsUpDisplayType $camera;
+	}
+
+	if ($type == 8001)	// 有字幕（新）
+	{
+		if ($project == "BubbleGuppies" || $project == "Enyo")
+		{
+			if (!`getAttr ($camera + ".displaySafeAction")`)
+			{
+				if (`zwSetAttrInt ($camera + ".displaySafeAction") on`)
+				{
+					$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeAction off;\n";
+				}
+			}
+			if ($project == "Enyo")
+			{
+				if (`getAttr ($camera + ".displaySafeTitle")`)
+				{
+					if (`zwSetAttrInt ($camera + ".displaySafeTitle") off`)
+					{
+						$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeTitle on;\n";
+					}
+				}
+			}
+			else
+			{
+				if (!`getAttr ($camera + ".displaySafeTitle")`)
+				{
+					if (`zwSetAttrInt ($camera + ".displaySafeTitle") on`)
+					{
+						$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeTitle off;\n";
+					}
+				}
+			}
+		}
+
+		$zwHeadsUpDisplay += "zwCustomCamera " + `zwCustomCamera 3` + ";\n";
+		zwCustomCamera true;
+
+		global string $zwHeadsUpDisplayApproved;
+		$zwHeadsUpDisplayApproved = "";
+
+	//	if (!($project == "Calimero" || $project == "ZoomWhiteDolphin"))
+	//	{
+	//		int $filmFit = `getAttr ($camera + ".filmFit")`;
+	//		if ($filmFit != 1)
+	//		{
+	//			if (`zwSetAttrInt ($camera + ".filmFit") 1`)
+	//			{
+	//				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".filmFit " + $filmFit + ";\n";
+	//			}
+	//		}
+	//	}
+	}
+
+	if (`about -apiVersion` < 200900 || $type == 8000)
+	{
+		if (`getAttr ($camera + ".displayResolution")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displayResolution") off`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displayResolution on;\n";
+			}
+		}
+	}
+
+//// WinxClubII按6
+//	if (zwIsRainbowProject($project))
+//	{
+//		string $displayAppearance = `modelEditor -query -displayAppearance $modelPanel`;
+//		int $displayTextures = `modelEditor -query -displayTextures $modelPanel`;
+//		if ($displayAppearance != "smoothShaded" || !$displayTextures)
+//		{
+//			modelEditor -edit -displayAppearance "smoothShaded" -displayTextures on -displayLights "default" $modelPanel;
+//			if ($displayAppearance != "smoothShaded")
+//			{
+//				$zwHeadsUpDisplay += "modelEditor -edit -displayAppearance \"" + $displayAppearance + "\" \"" + $modelPanel + "\";\n";
+//			}
+//			if (!$displayTextures)
+//			{
+//				$zwHeadsUpDisplay += "modelEditor -edit -displayTextures " + $displayTextures + " \"" + $modelPanel + "\";\n";
+//			}
+//		}
+//	}
+
+	if ($project == "HeroFactory")
+	{
+	//	eval "ActivateViewport20";
+		if (`getAttr ($camera + ".displayResolution")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displayResolution") off`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displayResolution on;\n";
+			}
+		}
+		if (`getAttr ($camera + ".displaySafeAction")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displaySafeAction") off`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeAction on;\n";
+			}
+		}
+		if (`getAttr ($camera + ".displaySafeTitle")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displaySafeTitle") off`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displaySafeTitle on;\n";
+			}
+		}
+//		if (`objExists "hardwareRenderingGlobals.multiSampleEnable"`)
+//		{
+//			if (`getAttr "hardwareRenderingGlobals.multiSampleEnable"`)
+//			{
+//				setAttr "hardwareRenderingGlobals.multiSampleEnable" 0;
+//				$zwHeadsUpDisplay += "setAttr \"hardwareRenderingGlobals.multiSampleEnable\" 1;\n";
+//			}
+//		}
+		zwSetAttrInt "hardwareRenderingGlobals.ssaoEnable" 1;
+	//	zwSetAttrFloat "hardwareRenderingGlobals.ssaoAmount" 1.0;
+	//	zwSetAttrInt "hardwareRenderingGlobals.ssaoRadius" 16;
+	//	zwSetAttrInt "hardwareRenderingGlobals.ssaoFilterRadius" 16;
+	//	zwSetAttrInt "hardwareRenderingGlobals.ssaoSamples" 16;
+		zwSetAttrInt "hardwareRenderingGlobals.multiSampleEnable" 1;
+		zwSetAttrInt "hardwareRenderingGlobals.multiSampleCount" 16;
+	}
+
+	if ($project == "ZoomWhiteDolphin")
+	{
+		zwSetAttrInt ($camera + ".displayResolution") on;
+		zwSetAttrInt ($camera + ".displaySafeAction") on;
+		zwSetAttrInt ($camera + ".displaySafeTitle") off;
+	}
+
+	if ($project == "North")
+	{
+		$zwHeadsUpDisplay += "optionVar -stringValue playblastFormat \"" + `optionVar -query playblastFormat` + "\";\n";
+	//	optionVar -stringValue playblastFormat "qt";
+
+		$zwHeadsUpDisplay += "optionVar -stringValue playblastCompression \"" + `optionVar -query playblastCompression` + "\";\n";
+	//	optionVar -stringValue playblastCompression "Motion JPEG A";
+	}
+
+// 文件名
+	string $playblastFile = `file -query -shortName -sceneName`;
+	$playblastFile = `match "[^.]+" $playblastFile`;
+	if ($playblastFile == "")
+	{
+		$playblastFile = "playblast";
+	}
+	string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+	if (`match "animCheck" $currentRenderLayer` != "")
+	{
+		$playblastFile += ".pene";
+//	}
+	$zwHeadsUpDisplay += "optionVar -stringValue playblastFile " + `optionVar -query playblastFile` + ";\n";
+	optionVar -stringValue playblastFile $playblastFile;
+	}
+
+//	if (`about -apiVersion` >= 201100)
+//	{
+//		string $sequenceManager = `sequenceManager -query -node`;
+//		if (`getAttr ($sequenceManager + ".enabled")`)
+//		{
+//			setAttr ($sequenceManager + ".enabled") false;
+//			$zwHeadsUpDisplay += "setAttr \"" + $sequenceManager + ".enabled\" true;\n";
+//		}
+//	}
+
+	idmtService "StartTask" ($sceneName + "|" + `getenv "USERNAME"`);
+
+
+
+
+
+	int $resolutionW = 0;
+	if (`optionVar -exists playblastSequenceResW`)
+	{
+		$resolutionW = `optionVar -query playblastSequenceResW`;
+	}
+	int $width = `optionVar -query playblastWidth`;
+	if ($resolutionW != $width)
+	{
+		optionVar -intValue playblastSequenceResW $width;
+		$zwHeadsUpDisplay += "optionVar -intValue playblastSequenceResW " + $resolutionW + ";\n";
+	}
+	int $resolutionH = 0;
+	int $height = `optionVar -query playblastHeight`;
+	if (`optionVar -exists playblastSequenceResH`)
+	{
+		$resolutionH = `optionVar -query playblastSequenceResH`;
+		if ($resolutionH != $height)
+		{
+			optionVar -intValue playblastSequenceResH $resolutionH;
+			$zwHeadsUpDisplay += "optionVar -intValue playblastSequenceResH " + $resolutionH + ";\n";
+		}
+	}
+
+	string $cameras[] = `ls -cameras`;
+	for ($i = 0; $i < size($cameras); $i ++)
+	{
+		if (`camera -query -startupCamera $cameras[$i]`)
+		{
+			continue;
+		}
+		string $parent[] = `listRelatives -fullPath -parent $cameras[$i]`;
+		if ($camera == $parent[0])
+		{
+			continue;
+		}
+		$camera = $parent[0];
+
+		if (`getAttr ($camera + ".displayFilmGate")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displayFilmGate") 0`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displayFilmGate 1;\n";
+			}
+		}
+		if (!`getAttr ($camera + ".displayResolution")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displayResolution") 1`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displayResolution 0;\n";
+			}
+		}
+		if (!`getAttr ($camera + ".displayGateMask")`)
+		{
+			if (`zwSetAttrInt ($camera + ".displayGateMask") 1`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".displayGateMask 0;\n";
+			}
+		}
+		float $displayGateMaskOpacity = `getAttr ($camera + ".displayGateMaskOpacity")`;
+		if ($displayGateMaskOpacity != 1)
+		{
+			if (`zwSetAttrFloat ($camera + ".displayGateMaskOpacity") 1`)
+			{
+				$zwHeadsUpDisplay += "zwSetAttrFloat " + $camera + ".displayGateMaskOpacity " + $displayGateMaskOpacity + ";\n";
+			}
+		}
+		float $displayGateMaskColor[] = `getAttr ($camera + ".displayGateMaskColor")`;
+		if (!($displayGateMaskColor[0] == 0 && $displayGateMaskColor[1] == 0 && $displayGateMaskColor[2] == 0))
+		{
+			setAttr ($camera + ".displayGateMaskColor") -type double3 0 0 0;
+			$zwHeadsUpDisplay += "setAttr " + $camera + ".displayGateMaskColor -type double3 " + $displayGateMaskColor[0] + " " + $displayGateMaskColor[1] + " " + $displayGateMaskColor[2] + ";\n";
+		}
+	//	int $filmFit = `getAttr ($camera + ".filmFit")`;
+	//	if ($filmFit != 1)
+	//	{
+	//		if (`zwSetAttrInt ($camera + ".filmFit") 1`)
+	//		{
+	//			$zwHeadsUpDisplay += "zwSetAttrInt " + $camera + ".filmFit " + $filmFit + ";\n";
+	//		}
+	//	}
+	}
+
+
+
+
+
+	return true;
+}
+
+// 建立headsUpDisplay
+global proc zwHeadsUpDisplayCreate(string $type, string $camera)
+{
+	global string $zwHeadsUpDisplay;
+/*
+	// 设置颜色
+	int $playBlasiColor = 17;
+	global int $gPlayBlasiColor;
+	if ($gPlayBlasiColor != 0)
+	{
+		$playBlasiColor = $gPlayBlasiColor;
+		$gPlayBlasiColor = 0;
+	}
+
+	int $displayColor = `displayColor -query -dormant "headsUpDisplayLabels"`;
+	if ($displayColor != $playBlasiColor)
+	{
+		catch(`displayColor -dormant "headsUpDisplayLabels" $playBlasiColor`);
+		$zwHeadsUpDisplay += "catch(`displayColor -dormant headsUpDisplayLabels " + $displayColor + "`);\n";
+	}
+	$displayColor = `displayColor -q -dormant "headsUpDisplayValues"`;
+	if ($displayColor != $playBlasiColor)
+	{
+		catch(`displayColor -dormant "headsUpDisplayValues" $playBlasiColor`);
+		$zwHeadsUpDisplay += "catch(`displayColor -dormant headsUpDisplayValues " + $displayColor + "`);\n";
+	}
+*/
+// 删除maya 本身的headsUpDisplay
+	string $buf[] = `headsUpDisplay -listHeadsUpDisplays`;
+	for ($headsUpDisplay in $buf)
+	{
+		headsUpDisplay -remove $headsUpDisplay;
+	}
+
+	string $size = "large";
+
+	// 建立headsUpDisplay
+	if ($type == "wn2")
+	{
+		global int $zwHeadsUpDisplayFramePos;
+
+		headsUpDisplay -section 1 -block 0 -labelFontSize "large" -dataFontSize "large" -event "timeChanged" -command "zwHeadsUpDisplayWinxTitle" zwHeadsUpDisplayWinxTitle;
+		headsUpDisplay -section 2 -block 0 -labelFontSize "large" -dataFontSize "large" -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayUser" zwHeadsUpDisplayUser;
+		headsUpDisplay -section $zwHeadsUpDisplayFramePos -block 0 -labelFontSize "large" -dataFontSize "large" -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayWinxFrame" zwHeadsUpDisplaySequence;
+
+		headsUpDisplay -section 6 -block 0 -labelFontSize "large" -dataFontSize "large" -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayWinxDate" zwHeadsUpDisplayWinxDate;
+		headsUpDisplay -section 7 -block 0 -labelFontSize "large" -dataFontSize "large" -blockAlignment "right" -label "Focal Length:" -event "timeChanged" -command ("zwHeadsUpDisplayFocalLength \"" + $camera + "\"") zwHeadsUpDisplayFocalLength;
+		global string $zwHeadsUpDisplayApproved;
+		if ($zwHeadsUpDisplayApproved == "revision")
+		{
+			headsUpDisplay -section 8 -block 0 -labelFontSize "large" -dataFontSize "large" -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayWinxTK" zwHeadsUpDisplayWinxTK;
+		}
+	}
+	else if ($type == "HeroFactory")
+	{
+		headsUpDisplay -section 5 -block 0 -blockSize "small" -event "timeChanged" -command "czGetCamview" zwHeadsUpDisplayCameraNames;
+		headsUpDisplay -section 9 -block 0 -blockSize "small" -event "timeChanged" -command "zwHeadsUpDisplayFrame" zwHeadsUpDisplayFrame;
+	}
+	else
+	{
+		if (!($type == "JourneyofLong"))
+		{
+			headsUpDisplay -section 0 -block 0 -labelFontSize $size -dataFontSize $size -event "timeChanged" -command "zwHeadsUpDisplayTk" zwHeadsUpDisplayTk;
+		}
+		headsUpDisplay -section 0 -block 1 -labelFontSize $size -dataFontSize $size -event "timeChanged" -command "czGetCamview" zwHeadsUpDisplayCameraNames;
+		if (!($type == "VickyTheViking" || $type == "HeroFactory" || $type == "Ninjago" || $type == "Calimero" || $type == "North" || $type == "JourneyofLong"))    //add  by wanshoulong@idmt.com.cn    6/26/2013    不显示制作者名字.
+		{
+			headsUpDisplay -section 2 -block 1 -labelFontSize $size -dataFontSize $size -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayUser" zwHeadsUpDisplayUser;
+		}
+		if ($type == "Ninjago")
+		{
+			headsUpDisplay -section 2 -block 0 -labelFontSize $size -dataFontSize $size -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayUser" zwHeadsUpDisplayUser;
+			headsUpDisplay -section 2 -block 1 -labelFontSize $size -dataFontSize $size -labelWidth 80 -dataWidth 120 -label "position:" -decimalPrecision 3 -event "timeChanged" -command ("zwHeadsUpDisplayCamPos \"" + $camera + "\"") zwHeadsUpDisplayCamPos;
+		}
+	//	headsUpDisplay -section 2 -block 1 -labelFontSize $size -dataFontSize $size -blockAlignment "center" -event "timeChanged" -command "zwHeadsUpDisplayDayNight" zwHeadsUpDisplayDayNight;
+		headsUpDisplay -section 4 -block 0 -labelFontSize $size -dataFontSize $size -blockAlignment "right" -event "timeChanged" -command "zwHeadsUpDisplayUser1" zwHeadsUpDisplayUser1;
+		headsUpDisplay -section 4 -block 1 -labelFontSize $size -dataFontSize $size -blockAlignment "right" -label "Focal Length:" -event "timeChanged" -command ("zwHeadsUpDisplayFocalLength \"" + $camera + "\"") zwHeadsUpDisplayFocalLength;
+
+		headsUpDisplay -section 5 -block 1 -labelFontSize $size -dataFontSize $size -label "frame:" -event "timeChanged" -command "zwHeadsUpDisplayFrame" zwHeadsUpDisplayFrame;
+		headsUpDisplay -section 5 -block 0 -labelFontSize $size -dataFontSize $size -label "start:" -event "timeChanged" -command "zwHeadsUpDisplayStart" zwHeadsUpDisplayStart;
+		headsUpDisplay -section 7 -block 1 -labelFontSize $size -dataFontSize $size -label "sequence:" -event "timeChanged" -command "zwHeadsUpDisplaySequence" zwHeadsUpDisplaySequence;
+		headsUpDisplay -section 7 -block 0 -labelFontSize $size -dataFontSize $size -label "end:" -event "timeChanged" -command "zwHeadsUpDisplayEnd" zwHeadsUpDisplayEnd;
+		headsUpDisplay -section 9 -block 1 -labelFontSize $size -dataFontSize $size -label "Resolution:" -event "timeChanged" -command "zwHeadsUpDisplayGlobalResolution" zwHeadsUpDisplayGlobalResolution;
+		
+		global int $zwHeadsUpDisplayAudio;
+		string $totalLabel = "total:";
+		if ($zwHeadsUpDisplayAudio)
+		{
+			$totalLabel = "(audio#) " + $totalLabel;
+		}
+		headsUpDisplay -section 9 -block 0 -labelFontSize $size -dataFontSize $size -blockAlignment "right" -label $totalLabel -event "timeChanged" -command "zwHeadsUpDisplayTotal" zwHeadsUpDisplayTotal;
+
+		if ($type == "Woodlies")  //add by wanshoulong@idmt.com.cn 2011-2-9
+		{
+			headsUpDisplay -section 2 -block 1 -labelFontSize $size -dataFontSize $size -blockAlignment "center" -l "" -event "timeChanged" -command "slHeadsUpDisplayLyOrAN" zwHeadsUpDisplayLyOrAn;
+		}
+	}
+
+	// 建立表达式
+	string $script = "// Created by Playblast, HuangZhongwei R&D IDMT\n\n";
+	if (`headsUpDisplay -exists zwHeadsUpDisplayCameraNames`)
+	{
+		$script += "headsUpDisplay -refresh zwHeadsUpDisplayCameraNames;\n";
+	}
+	if (`headsUpDisplay -exists zwHeadsUpDisplayFrame`)
+	{
+		$script += "headsUpDisplay -refresh zwHeadsUpDisplayFrame;\n";
+	}
+	if (`headsUpDisplay -exists zwHeadsUpDisplaySequence`)
+	{
+		$script += "headsUpDisplay -refresh zwHeadsUpDisplaySequence;\n";
+	}
+	if (`headsUpDisplay -exists zwHeadsUpDisplayFocalLength`)
+	{
+		$script += "headsUpDisplay -refresh zwHeadsUpDisplayFocalLength;";
+	}
+	if (`headsUpDisplay -exists zwHeadsUpDisplayCamPos`)
+	{
+		$script += "headsUpDisplay -refresh zwHeadsUpDisplayCamPos;";
+	}
+	expression -string $script -name "zwHeadsUpDisplay";
+}
+
+// 设置摄像机属性
+global proc zwHeadsUpDisplaySetCamera(string $type, string $camera)
+{
+}
+
+// 设置playblast属性
+global proc zwHeadsUpDisplaySetPlayblast(string $type, string $camera)
+{
+}
+
+global proc int zwConfirmPlayblast()
+{
+	// 考试
+	python("import socket");
+	string $ip = python("socket.gethostbyname(socket.gethostname())");
+	if (`match "^192[.]168[.]79[.]" $ip` != "")
+	{
+		return 1;
+	}
+
+	int $color = 0;
+
+	global int $gPlayBlasiColor;
+	$gPlayBlasiColor = $color;
+
+	global string $zwHeadsUpDisplayTk;
+	$zwHeadsUpDisplayTk = "";
+
+	global int $zwHeadsUpDisplayAudio;
+	$zwHeadsUpDisplayAudio = false;
+
+// WinxClubII
+	global int $zwHeadsUpDisplayFramePos;
+	$zwHeadsUpDisplayFramePos = 3;
+
+	global string $zwHeadsUpDisplayApproved;
+	$zwHeadsUpDisplayApproved = "revision";
+
+	global string $zwHeadsUpDisplayMov;
+	$zwHeadsUpDisplayMov = "false";
+
+	int $rs = 1;
+
+	string $str = "";
+	string $buf[];
+
+	// 求camera
+//	string $modelPanel = `getPanel -withFocus`;
+//	string $camera = `modelEditor -query -camera $modelPanel`;
+//	if (`nodeType $camera` == "camera")
+//	{
+//		$buf = `listRelatives -fullPath -parent $camera`;
+//		$camera = $buf[0];
+//	}
+	string $camera = zwHeadsUpDisplayGetCamera();
+	string $project = zwHeadsUpDisplayGetProject($camera);
+	$camera = `match "[^|]+$" $camera`;
+
+// 摄像机名字
+	string $filename = `file -query -shortName -sceneName`;
+	tokenize $filename "_" $buf;
+	int $cameraName;
+	if ($project == "LORDoftheRINGS")
+	{
+		$cameraName = (`match ("^(cam[0-9]*[_:])*" + (tolower($buf[2])) + "_" + (tolower($buf[3])) + "_shotcam(_baked){0,1}$") (tolower($camera))` != "");
+	}
+	else if ($project == "Enyo" || zwHasSeq($project))
+	{
+		$cameraName = (`match ("^(cam[0-9]*[_:])*cam_" + (tolower($buf[1])) + "_" + (tolower($buf[2])) + "_" + (tolower($buf[3])) + "(_baked){0,1}$") (tolower($camera))` != "");
+	}
+	else if ($project == "LilLarikkins")
+	{
+		$cameraName = (`match ("^(cam[0-9]*[_:])*cam_" + (tolower($buf[1])) + "_" + (tolower($buf[3])) + "(_baked){0,1}$") (tolower($camera))` != "");
+	}
+	else
+	{
+		if (zwIsRainbowProject($project))
+		{
+			if (`match "^wn2_ly_" $filename` != "")
+			{
+				$cameraName = (`match ("^(cam[0-9]*[_:])*cam_" + (tolower($buf[3])) + "_" + (tolower($buf[4])) + "(_baked){0,1}$") (tolower($camera))` != "");
+			}
+			else
+			{
+				$cameraName = (`match ("^(cam[0-9]*[_:])*cam_" + (tolower($buf[1])) + "_" + (tolower($buf[2])) + "(_baked){0,1}$") (tolower($camera))` != "");
+			}
+		}
+		else
+		{
+			$cameraName = (`match ("^(cam[0-9]*[_:])*cam_" + (tolower($buf[1])) + "_" + (tolower($buf[2])) + "(_baked){0,1}$") (tolower($camera))` != "");
+		}
+	}
+
+// 时间滑条
+	float $start = zwHeadsUpDisplayStart();
+	float $end = zwHeadsUpDisplayEnd();
+	float $total = zwHeadsUpDisplayTotal();
+
+// Calimero 检测 ref缺失
+	if ($project == "Calimero" )
+	{
+		string $mode = zwGetMode("");
+		if ($mode == "layout" || $mode == "anim")
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck");
+			python("reload(sk_animFileCheck)");
+			python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck(\"an\",1)");
+		}
+	}
+// ZoomWhiteDolphin 检测 ref缺失
+	else if ($project == "ZoomWhiteDolphin")
+	{
+		string $mode = zwGetMode("");
+		if ($mode == "layout" || $mode == "anim")
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_animFileCheck");
+			python("reload(sk_animFileCheck)");
+			python("sk_animFileCheck.sk_animFileCheck().shotAssetRefCheck(\"an\",1)");
+		}
+	}
+	else if ($project == "LION")
+    {
+        python("from idmt.maya.Lion import Lion_camera");
+        python("reload(Lion_camera)");
+        python("Lion_camera.Lion_CamCheck()");
+    }
+
+
+
+// 声音文件
+	int $audioOffset = 0;
+	int $audioLength = 0;
+	global string $gPlayBackSlider;
+	string $sound = `timeControl -query -sound $gPlayBackSlider`;
+	if (`objExists $sound`)
+	{
+		$audioOffset = `getAttr ($sound + ".offset")`;
+
+		string $audio = `getAttr ($sound + ".filename")`;
+		$audioLength = `idmtAudio -frame -length $audio`;
+	}
+	else
+	{
+		if ($project == "Calimero" || $project == "ZoomWhiteDolphin")
+		{
+			string $mode = zwGetMode("");
+			if ($mode == "layout" || $mode == "anim")
+			{
+				error ($project + " 项目没有音频不准playblast");
+			}
+		}
+	}
+	// 除P2外动画文件参考检测
+    python("from idmt.maya.commonCore.core_mayaCommon import sk_infoConfig");
+    python("reload(sk_infoConfig)");
+    string $shotInfo[] = `python("sk_infoConfig.sk_infoConfig().checkShotInfo()")`;		
+    if ( $shotInfo[0] != "ice" )
+    {
+    	python("from idmt.maya.commonCore.core_mayaCommon import sk_checkTools");
+    	python("reload(sk_checkTools)");
+    	python("sk_checkTools.sk_checkTools().checkReferenceInfoCheck(0)");
+    }
+	if ($project == "MiniTiger")
+	{	string $mode = zwGetMode("");
+		if ($mode != "dy")
+		{
+		python("from idmt.maya.commonCore.core_mayaCommon import sk_checkTools");
+    	python("reload(sk_checkTools)");
+    	python("sk_checkTools.sk_checkTools().checkReferenceInfoCheck(0)");
+    	}
+	}
+		if ($project == "Calimero" || $project == "ZoomWhiteDolphin")
+	{
+		if ($project == "Calimero" )
+		{
+		python("from idmt.maya.Calimero import sk_calimeroProjectTools");
+		python("reload(sk_calimeroProjectTools)");
+		python("sk_calimeroProjectTools.sk_clProjectTools().sk_showAnimEyeBrow()");
+		}
+		// cameraNameCheck
+		string $mode = zwGetMode("");
+		if ($mode == "layout" || $mode == "anim")
+		{
+			python("from idmt.maya.commonCore.core_mayaCommon import sk_backCmd");
+			python("reload(sk_backCmd)");
+			python("sk_backCmd.sk_backCmd().checkShotCameraName()");
+		}
+	}
+	int $matchAudio = true;
+	if ($audioLength > 0)
+	{
+		$matchAudio = ($audioOffset == $start) && ($audioLength == $total);
+	}
+
+	if ($project == "Strawberry" || $project == "Enyo")
+	{
+		if (zwPlayblastMute($start, false))
+		{
+			$matchAudio = true;
+		}
+	}
+
+
+// 数据库
+	int $findDB = true;
+	int $timeLine[];
+	if (catch($timeLine = `idmtProject -timeLine`))
+	{
+		$findDB = false;
+	}
+	int $matchDB = true;
+	if ($findDB)
+	{
+		if ($start != $timeLine[0] || $end != $timeLine[1])
+		{
+			$matchDB = false;
+		}
+	}
+
+	if (!($cameraName && $findDB && $matchDB && $matchAudio))
+	{
+		$str += "<ul style=\"list-style-type: none; margin-left: 0px; text-align: left; line-height: 150%; color: #FF0000; font-size: 12px; font-weight: bold;\">\r\n";
+		if (!$cameraName)
+		{
+			$str += "	<li>·摄像机名字不规范</span>\r\n";
+			$color = 13;
+		}
+		if (!$findDB)
+		{
+			$str += "	<li>·数据库里面找不到起始结束帧信息</li>\r\n";
+			$color = 13;
+		}
+		if (!$matchDB)
+		{
+			$str += "	<li>·时间滑条跟数据库不一致</li>\r\n";
+			$color = 13;
+		}
+		if (!$matchAudio)
+		{
+			$str += "	<li>·声音文件跟时间滑条不一致</li>\r\n";
+			$zwHeadsUpDisplayAudio = true;
+		}
+		$str += "</ul>\r\n";
+	}
+
+	$zwHeadsUpDisplayTk = "TK1";
+	if ($project == "VickyTheViking")
+	{
+		string $myMode = "";
+		if (`match "_shot_setup" (tolower($filename))` != "")
+		{
+			$myMode = "SHOTSETUP";
+		}
+		else if (`match "_blocking" (tolower($filename))` != "")
+		{
+			$myMode = "ANIMBLK";
+		}
+		else if (`match "_anim" (tolower($filename))` != "")
+		{
+			$myMode = "ANIM";
+		}
+		if ($myMode != "")
+		{
+			string $myTk = `idmtService "GetTkVickyTheVikingAnim" ("VickyTheViking|" + $myMode + "|" + $filename)`;
+			if ($myTk == "")
+			{
+				$myTk = "1";
+			}
+			$zwHeadsUpDisplayTk = "TK" + $myTk;
+		}
+	}
+
+	if (zwIsRainbowProject($project))
+	{
+		$zwHeadsUpDisplayTk = "00";
+	}
+
+	if ($project == "Strawberry")
+	{
+		python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/projects/Strawberry2/HbQuestTheTk.py\")");
+		$zwHeadsUpDisplayTk =python("HbQuestTheTk()");
+	}
+
+	$str += "<input type=\"hidden\" id=\"HiddenFramePos\" value=\"" + $zwHeadsUpDisplayFramePos + "\">\r\n";
+	$str += "<input type=\"hidden\" id=\"HiddenApproved\" value=\"" + $zwHeadsUpDisplayApproved + "\">\r\n";
+	$str += "<input type=\"hidden\" id=\"HiddenMov\" value=\"" + $zwHeadsUpDisplayMov + "\">\r\n";
+
+	$str += "<input type=\"hidden\" id=\"HiddenLabelsColor\" value=\"" + "17" + "\">\r\n";
+
+	$str += "<p><table cellpadding=\"2\" width=\"100%\">\r\n";
+	$str += "	<tr>\r\n";
+	$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">Take:</td><td style=\"font-size: 12px\"><input type=\"text\" id=\"zwHeadsUpDisplayTk\" class=\"idmtText\" value=\"" + $zwHeadsUpDisplayTk + "\"></td>\r\n";
+	$str += "	</tr>\r\n";
+	
+	if (zwIsRainbowProject($project))// && `getenv "USERNAME"` == "huangzhongwei"
+	{
+		$str += "	<tr>\r\n";
+		$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">帧数位置:</td><td style=\"font-size: 12px\"><input type=\"radio\" name=\"RadioFramePos\" id=\"RadioFramePos1\" onclick=\"document.getElementById('HiddenFramePos').value = 3\" checked><label for=\"RadioFramePos1\">正常</label><input type=\"radio\" name=\"RadioFramePos\" id=\"RadioFramePos2\" onclick=\"document.getElementById('HiddenFramePos').value = 4\"><label for=\"RadioFramePos2\">偏右</label></td>\r\n";
+		$str += "	</tr>\r\n";
+		$str += "	<tr>\r\n";
+		$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">状态:</td><td style=\"font-size: 12px\"><input type=\"radio\" name=\"RadioApproved\" id=\"RadioApproved1\" onclick=\"document.getElementById('HiddenApproved').value = 'unfinished'\"><label for=\"RadioApproved1\" style=\"width: 72; height: 16; padding: 2; background-color: #FF0000; border: solid 1px #000000; color: #FFFFFF\">unfinished</label><input type=\"radio\" name=\"RadioApproved\" id=\"RadioApproved2\" onclick=\"document.getElementById('HiddenApproved').value = 'revision'\" checked><label for=\"RadioApproved2\" style=\"width: 72; height: 16; padding: 2; background-color: #999999; border: solid 1px #000000; color: #FFFFFF\">revision</label><input type=\"radio\" name=\"RadioApproved\" id=\"RadioApproved3\" onclick=\"document.getElementById('HiddenApproved').value = 'approved'\"><label for=\"RadioApproved3\" style=\"width: 72; height: 16; padding: 2; background-color: #0000FF; border: solid 1px #000000; color: #FFFFFF\">approved</label></td>\r\n";
+		$str += "	</tr>\r\n";
+		
+		string $disabled = "";
+		if (`optionVar -query playblastOutputFormat` != "iff" || zwHeadsUpDisplayWinxTitle() == "")
+		{
+			$disabled = " disabled";
+		}
+		$str += "	<tr>\r\n";
+		$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">转mov:</td><td style=\"font-size: 12px\"><input type=\"CheckBox\" id=\"CheckBoxMov\" onclick=\"document.getElementById('HiddenMov').value = this.checked\"" + $disabled + ">（使用条件为：序列帧 + 无字幕）</td>\r\n";
+		$str += "	</tr>\r\n";
+	}
+	else if ($project == "Zoomies")
+	{
+		string $disabled = "";
+		if (`optionVar -query playblastOutputFormat` != "iff")
+		{
+			$disabled = " disabled";
+		}
+		$str += "	<tr>\r\n";
+		$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">转mov:</td><td style=\"font-size: 12px\"><input type=\"CheckBox\" id=\"CheckBoxMov\" onclick=\"document.getElementById('HiddenMov').value = this.checked\"" + $disabled + "></td>\r\n";
+		$str += "	</tr>\r\n";
+	}
+	else if ($project == "VickyTheViking")
+	{
+		$str += "	<tr>\r\n";
+		$str += "		<td style=\"width: 64px; text-align: right; font-size: 12px\">字幕颜色:</td><td style=\"font-size: 12px\"><input type=\"radio\" name=\"RadioLabelColor\" id=\"RadioLabelColor1\" onclick=\"document.getElementById('HiddenLabelsColor').value = '17'\" checked><label for=\"RadioLabelColor1\" style=\"width: 48; height: 16; padding: 2; background-color: #FFFF00; border: solid 1px #000000; color: #FFFFFF\"></label>&nbsp;&nbsp;&nbsp;&nbsp;<input type=\"radio\" name=\"RadioLabelColor\" id=\"RadioLabelColor2\" onclick=\"document.getElementById('HiddenLabelsColor').value = '1'\"><label for=\"RadioLabelColor2\" style=\"width: 48; height: 16; padding: 2; background-color: #000000; border: solid 1px #000000; color: #FFFFFF\"></label></td>\r\n";
+		$str += "	</tr>\r\n";
+	}
+	$str += "</table></p>\r\n";
+
+	if ($findDB || !$matchAudio)
+	{
+		$str += "<table cellpadding=\"3\" cellspacing=\"1\" width=\"100%\" bgcolor=\"#C0C0C0\" style=\"font-size: 12px\">\r\n";
+		$str += "	<tr height=\"28\">\r\n";
+		$str += "		<td bgcolor=\"#FFFFFF\">&nbsp;</td><td bgcolor=\"#FFFFFF\" align=\"center\">起始帧</td><td bgcolor=\"#FFFFFF\" align=\"center\">结束帧</td><td bgcolor=\"#FFFFFF\" align=\"center\">总帧数</td>\r\n";
+		$str += "	</tr>\r\n";
+
+	// 数据库
+		if ($findDB)
+		{
+			$str += "	<tr height=\"28\">\r\n";
+			$str += "		<td bgcolor=\"#FFFFFF\" align=\"right\">数据库</td><td bgcolor=\"#FFFFFF\" align=\"center\">" + $timeLine[0] + "</td><td bgcolor=\"#FFFFFF\" align=\"center\">" + $timeLine[1] + "</td><td bgcolor=\"#FFFFFF\" align=\"center\">" + $timeLine[2] + "</td>\r\n";
+			$str += "	</tr>\r\n";
+		}
+
+	// 时间滑条
+		$str += "	<tr height=\"28\">\r\n";
+		$str += "		<td bgcolor=\"#FFFFFF\" align=\"right\">时间滑条</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+		if ($start != $timeLine[0])
+		{
+			$str += " style=\"color: #FF0000; font-weight: bold;\"";
+		}
+		$str += ">" + $start + "</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+		if ($end != $timeLine[1])
+		{
+			$str += " style=\"color: #FF0000; font-weight: bold;\"";
+		}
+		$str += ">" + $end + "</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+		if ($total != $timeLine[2])
+		{
+			$str += " style=\"color: #FF0000; font-weight: bold;\"";
+		}
+		$str += ">" + $total + "</td>\r\n";
+		$str += "	</tr>\r\n";
+
+	// 声音文件
+		if (!$matchAudio)
+		{
+			$str += "	<tr height=\"28\">\r\n";
+			$str += "		<td bgcolor=\"#FFFFFF\" align=\"right\">声音文件</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+			if ($start != $audioOffset)
+			{
+				$str += " style=\"color: #FF0000; font-weight: bold;\"";
+			}
+			$str += ">" + $audioOffset + "</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+			int $audioEnd = $audioOffset + $audioLength - 1;
+			if ($end != $audioEnd)
+			{
+				$str += " style=\"color: #FF0000; font-weight: bold;\"";
+			}
+			$str += ">" + $audioEnd + "</td><td bgcolor=\"#FFFFFF\" align=\"center\"";
+			if ($total != $audioLength)
+			{
+				$str += " style=\"color: #FF0000; font-weight: bold;\"";
+			}
+			$str += ">" + $audioLength + "</td>\r\n";
+			$str += "	</tr>\r\n";
+		}
+
+		$str += "</table>\r\n";
+	}
+
+	if ($str != "")
+	{
+		$str += "<p align=\"center\"><span style=\"padding-top: 6\">\r\n";
+		if ($project == "Enyo")
+		{
+			$str += "<span id=\"ButtonOK\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\">maya默认</span>\r\n";
+			$str += "<span EndDialog=\"8001\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 50; font-size: 10pt; background-image: url('http://info-srv/TD/images/Enyo_title.jpg'); background-repeat: no-repeat\">有字幕</span>\r\n";
+			$str += "<span EndDialog=\"8000\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 50; font-size: 10pt; background-image: url('http://info-srv/TD/images/Enyo_no_title.jpg'); background-repeat: no-repeat\">无字幕</span>\r\n";
+		}
+		else
+		{
+			string $jpgColor = "yellow";
+			if ($color != 0)
+			{
+				$jpgColor = "red";
+			}
+			if (zwIsRainbowProject($project))
+			{
+				$str += "<span EndDialog=\"8001\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 60; font-size: 10pt; background-image: url('http://info-srv/TD/images/title_new_" + $jpgColor + ".jpg'); background-repeat: no-repeat\">有字幕</span>\r\n";
+				$str += "<span EndDialog=\"8000\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\"><b>无字幕</b></span>\r\n";
+				$str += "<span id=\"ButtonOK\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\">maya默认</span>\r\n";
+			}
+			else if($project == "ShenShou")
+			{
+				$str += "<span EndDialog=\"8000\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 8 8 8 8; border: 1px solid #D2B47A; width: 80; height: 40; text-align: center; padding-top: 6; font-size: 10pt\">无字幕<br>720x380</span>\r\n";
+				$str += "<span EndDialog=\"8001\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 8 8 8 8; border: 1px solid #D2B47A; width: 80; height: 40; text-align: center; padding-top: 6; font-size: 10pt; font-weight: bold\">有字幕<br>720x380</span>\r\n";
+				$str += "<span EndDialog=\"8002\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 8 8 8 8; border: 1px solid #D2B47A; width: 80; height: 40; text-align: center; padding-top: 6; font-size: 10pt\">无字幕<br>1024x540</span>\r\n";
+				$str += "<span id=\"ButtonOK\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 8 8 8 8; border: 1px solid #D2B47A; width: 80; height: 40; text-align: center; padding-top: 14; font-size: 10pt\">maya默认</span>\r\n";
+			}
+			else if($project == "TerrorTower")
+			{
+				$str += "<span EndDialog=\"8000\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\"><b>无字幕</b></span>\r\n";
+				$str += "<span EndDialog=\"8001\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 60; font-size: 10pt; background-image: url('http://info-srv/TD/images/title_new_" + $jpgColor + ".jpg'); background-repeat: no-repeat\">有字幕</span>\r\n";
+				$str += "<span id=\"ButtonOK\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\">maya默认</span>\r\n";
+			}
+			else
+			{
+				$str += "<span EndDialog=\"8000\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\">无字幕</span>\r\n";
+				$str += "<span EndDialog=\"8001\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 60; font-size: 10pt; background-image: url('http://info-srv/TD/images/title_new_" + $jpgColor + ".jpg'); background-repeat: no-repeat\"><b>有字幕</b></span>\r\n";
+				$str += "<span id=\"ButtonOK\" mel=\"zwHeadsUpDisplayUpdateData this\" style=\"margin: 10 20 10 20; width: 80; height: 45; text-align: center; padding-top: 55; font-size: 10pt; background-image: url('http://info-srv/TD/images/no_title.jpg'); background-repeat: no-repeat\">maya默认</span>\r\n";
+			}
+		}
+		$str += "</span></p>";
+
+	//	global int $IDMT_PERFORMPLAYBLAST;
+	//	if ($IDMT_PERFORMPLAYBLAST != 0)
+	//	{
+	//		$rs = $IDMT_PERFORMPLAYBLAST;
+	//		$IDMT_PERFORMPLAYBLAST = 0;
+	//	}
+	//	else
+	//	{
+			$rs = `idmtDHtmlDlg -modal -width 480 -height 440 -scrollBar false -title "Playblast" -body $str`;
+	//	}
+	}
+
+	if (`gmatch $zwHeadsUpDisplayTk "TK[2-9]"`)
+	{
+
+		if (!($project == "Strawberry" || $project == "VickyTheViking"))
+			{
+				int $tk = (int)`match "[2-9]" $zwHeadsUpDisplayTk`;
+				int $i;
+				for ($i=1; $i<$tk; $i++)
+				{
+					$zwHeadsUpDisplayTk += " :(";
+				}
+			}
+	}
+
+	if ($rs == 1 || $rs == 8001)
+	{
+		int $resWidth = `getAttr "defaultResolution.width"`;
+		int $resHeight = `getAttr "defaultResolution.height"`;
+		if ((($resWidth == 1024 && $resHeight == 436) || zwIsRainbowProject($project)) && $rs == 8001)	// WinxClubII
+		{
+			$gPlayBlasiColor = 16;
+		}
+		else if ($project == "HeroFactory")
+		{
+			$gPlayBlasiColor = 16;
+		}
+		else
+		{
+			$gPlayBlasiColor = $color;
+		}
+		if ($project == "VickyTheViking" && $gPlayBlasiColor == 0)
+		{
+			global int $zwHeadsUpDisplayLabelsColor;
+			$gPlayBlasiColor = $zwHeadsUpDisplayLabelsColor;
+		}
+	}
+
+	if (($project == "Strawberry" || $project == "Enyo") && $rs == 8001)
+	{
+		zwPlayblastMute($start, true);
+	}
+
+	if (!($rs == 1 || $rs >= 8000))
+	{
+		$zwHeadsUpDisplayApproved = "";
+	}
+
+// 20101209
+// zhaozhijie(赵志杰Tazz) 15:11:48
+// 角色Visibility控制器的resolution属性打开及设置相邻部件的smooth级别了吗？
+// 是  否
+	if ($project == "ROMA" && $rs == 8000)
+	{
+		string $button = `confirmDialog -message "角色Visibility控制器的resolution属性打开及设置相邻部件的smooth级别了吗？" -button "是" -button "否" -defaultButton "是" -cancelButton "否" -dismissString "否"`;
+		if ($button == "否")
+		{
+			$rs = -1;
+		}
+	}
+
+	return $rs;
+}
+
+global proc int zwPlayblastMute(float $start, int $force)
+{
+	string $path = "//file-cluster/GDC/Resource/Support/Maya/Import/Mute.wav";
+
+	string $mute = "";
+
+	global string $gPlayBackSlider;
+	string $sound = `timeControl -query -sound $gPlayBackSlider`;
+	if (`objExists $sound`)
+	{
+		if (`getAttr ($sound + ".filename")` == $path)
+		{
+			$mute = $sound;
+		}
+		else
+		{
+			return false;
+		}
+	}
+
+	if ($mute == "")
+	{
+		string $sounds[] = `ls -type "audio"`;
+		for ($sound in $sounds)
+		{
+			if (`getAttr ($sound + ".filename")` == $path)
+			{
+				$mute = $sound;
+				break;
+			}
+		}
+	}
+	else
+	{
+		sound -edit -offset $start $mute;
+		if (!$force)
+		{
+			return true;
+		}
+	}
+
+	if ($mute == "")
+	{
+		$mute = `sound -offset $start -file $path`;
+	}
+	else
+	{
+		sound -edit -offset $start $mute;
+	}
+
+	timeControl -edit -displaySound true -sound $mute $gPlayBackSlider;
+
+	return true;
+}
+
+global proc string zwHeadsUpDisplayTk()
+{
+	string $filename = `file -query -sceneName -shortName`;
+	string $project = zwGetProject($filename);
+	if ($project == "Enyo")
+	{
+	//	string $str = `match "[^._]+_[^._]+_[^._]+_[^._]+" $filename`;
+	//	if ($str != "")
+	//	{
+	//		return $str;
+	//	}
+		return `match "[^.]+" $filename`;
+	}
+
+	global string $zwHeadsUpDisplayTk;
+
+	if ($project == "VickyTheViking")
+	{
+		string $myMode = "";
+		if (`match "_shot_setup" (tolower($filename))` != "")
+		{
+			$myMode = "shotsetup";
+		}
+		else if (`match "_blocking" (tolower($filename))` != "")
+		{
+			$myMode = "blocking";
+		}
+		else if (`match "_anim" (tolower($filename))` != "")
+		{
+			$myMode = "animation final";
+		}
+		if ($myMode != "")
+		{
+			return ($zwHeadsUpDisplayTk + "   " + $myMode);
+		}
+	}
+
+	return $zwHeadsUpDisplayTk;
+}
+
+global proc string zwHeadsUpDisplayLyOrFn()
+{
+	string $str = "";
+
+	string $filename = `file -query -sceneName -shortName`;
+	if (`match "_ly[_.]" $filename` != "" || `match "_rg_an[_.]" $filename` != "")
+	{
+		$str = "rough";
+	}
+	else if (`match "_fn_an[_.]" $filename` != "")
+	{
+		$str = "final";
+	}
+
+	return $str;
+}
+
+//fm
+global proc string zwHeadsUpDisplayGlobalResolution()
+{
+	int $resolutionWidth = `getAttr defaultResolution.width`;
+	int $resolutionHeight = `getAttr defaultResolution.height`;
+	string $str = $resolutionWidth + "*" + $resolutionHeight;
+
+	return $str;
+}
+
+//fm
+
+global proc string zwHeadsUpDisplayUser()
+{
+//	string $user = `idmtUser -englishName`;
+//	if (tolower($user) != tolower(`getenv "USERNAME"`))
+//	{
+//		$user += "(" + `getenv "USERNAME"` + ")";
+//	}
+
+	string $user = `getenv "USERNAME"`;
+
+	return $user;
+}
+
+global proc string zwHeadsUpDisplayUser1()
+{
+	string $time = `idmtTime -format "%Y-%m-%d %H:%M"`;
+
+	return $time;
+}
+
+global proc string zwHeadsUpDisplayDayNight()
+{
+	string $buf[] = `file -query -reference`;
+	for ($file in $buf)
+	{
+		$file = `referenceQuery -filename -withoutCopyNumber -shortName $file`;
+		if (`match "day[0-9]*_" $file` != "")
+		{
+			return "day";
+		}
+		else if (`match "night[0-9]*_" $file` != "")
+		{
+			return "night";
+		}
+		else if (`match "morning[0-9]*_" $file` != "")
+		{
+			return "morning";
+		}
+		else if (`match "dusk[0-9]*_" $file` != "")
+		{
+			return "dusk";
+		}
+	}
+
+	return "";
+}
+
+global proc float zwHeadsUpDisplayStart()
+{
+	float $start;
+
+	if (`optionVar -query playblastUseStartEnd`)
+		$start = `optionVar -q playblastStartTime`;
+	else
+		$start = `playbackOptions -q -minTime`;
+
+	return $start;
+}
+
+global proc float zwHeadsUpDisplayEnd()
+{
+	float $end;
+
+	if (`optionVar -query playblastUseStartEnd`)
+		$end = `optionVar -q playblastEndTime`;
+	else
+		$end = `playbackOptions -q -maxTime`;
+
+	return $end;
+}
+
+global proc int zwHeadsUpDisplayTotal()
+{
+	float $start = `zwHeadsUpDisplayStart`;
+	float $end = `zwHeadsUpDisplayEnd`;
+	int $total = $end - $start + 1;
+
+	return $total;
+}
+
+global proc string zwHeadsUpDisplayFrame()
+{
+	int $currentTime = `currentTime -query`;
+
+	return $currentTime;
+}
+
+global proc string zwHeadsUpDisplaySequence()
+{
+	float $currentTime = `currentTime -query`;
+	float $start = `zwHeadsUpDisplayStart`;
+	int $total = `zwHeadsUpDisplayTotal`;
+	int $sequence = $currentTime -  $start + 1;//) + "/" + $total;
+	string $str = $sequence + "/" + $total;
+	int $size = size("" + $total) - size("" + $sequence);
+	for ($i=0; $i<$size; $i++)
+		$str = "0" + $str;
+
+	return $str;
+}
+
+global proc float zwHeadsUpDisplayFocalLength(string $camera)
+{
+	$camera = zwHeadsUpDisplayGetCamera();
+	float $focalLength;
+	if (`objExists $camera`)
+		$focalLength = `getAttr ($camera + ".focalLength")`;
+
+	return $focalLength;
+}
+
+global proc float zwHeadsUpDisplayCamPos(string $camera)
+{
+	$camera = zwHeadsUpDisplayGetCamera();
+	float $pos[] = `xform -query -worldSpace -translation $camera`;
+
+//	return ("[" + int($pos[0]) + ", " + int($pos[1]) + ", " + int($pos[2]) + "]");
+	return sqrt($pos[0]*$pos[0] + $pos[1]*$pos[1] + $pos[2]*$pos[2]);
+}
+
+global proc zwHeadsUpDisplayRemove()
+{
+	global string $zwHeadsUpDisplay;
+
+	string $buf[] = `headsUpDisplay -listHeadsUpDisplays`;
+	for ($headsUpDisplay in $buf)
+		headsUpDisplay -remove $headsUpDisplay;
+	$buf = `ls -type "expression" "zwHeadsUpDisplay*"`;
+	if (size($buf))
+		delete $buf;
+
+	eval "source initAfter.mel";
+	catch (`eval $zwHeadsUpDisplay`);
+	$zwHeadsUpDisplay = "";
+}
+
+// get the camera of current viewPanel
+global proc string czGetCamview()
+{
+	// get the active viewport
+//	string $pane = `getPanel -withFocus`;
+//	string $camView;
+//	if (`getPanel -typeOf $pane` == "modelPanel")
+//	{		
+//		//figure out the camera in the current view
+//		$camView = `modelPanel -q -camera $pane`;
+//		if (`nodeType $camView` == "camera")
+//		{
+//			string $temp[] = `listRelatives -parent $camView`;
+//			$camView = $temp[0];
+//		}
+//		string $buf[];
+//		tokenize $camView "|" $buf;
+//		$camView = $buf[size($buf)-1];
+//	}
+	string $camView = zwHeadsUpDisplayGetCamera();
+	string $buf[];
+	tokenize $camView "|" $buf;
+	$camView = $buf[size($buf)-1];
+	$camView = `substitute "(CAM[0-9]*[_:])*" $camView ""`;	// by huangzhongwei
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject("");
+	if ($project == "JourneyofLong")
+	{
+		$camView = `file -query -sceneName -shortName`;
+		$camView = `match "^[^_]+_[^_]+" $camView`;
+		return $camView;
+	}
+	if (`zwHeadsUpDisplayIsNewProjectCameraName $project`)
+	{
+		if (`match "_ly[_.]" $sceneName` != "")
+		{
+			$camView += "_ly";
+		}
+		else if (`match "_an[_.]" $sceneName` != "")
+		{
+			$camView += "_an";
+		}
+	}
+
+	string $version = zwAboutVersion();
+	if ((float)$version >= 2009)
+	{
+		string $currentEditor = eval("playblast -ae");
+		if (size($currentEditor))
+		{
+			string $setupStrings[] = eval( ("modelEditor -q -cs " + $currentEditor) );
+			int $numStrings = size($setupStrings) / 2;
+			if ($numStrings > 0)
+			{
+				if (($numStrings %2) != 0)
+				{
+				//	warning((uiRes("m_performPlayblast.kBadCameraSetup")));
+				}
+				else
+				{
+					// Cache display mode. Not nice for now as it knows about a specific view.
+					string $cachedDisplayMode = `stereoCameraView -q -displayMode $currentEditor`;
+					$camView += "(" + `substitute "Eye" $cachedDisplayMode ""` + ")";
+				}
+			}
+                }
+	}
+
+	return $camView;
+}
+
+global proc string zwHeadsUpDisplayWinxTitle()
+{
+	string $title = "";
+
+	string $str = `file -query -sceneName`;
+	$str = `match "[^/\\@]+$" $str`;
+	$str = `match "[^.]+" $str`;
+	string $buf[];
+	tokenize $str "_" $buf;
+	if (`match "^animation(_[^_]+){2,3}_ANI" $str` != "")
+	{
+		$title = "rm1_ani_" + $buf[1] + "_" + $buf[2];
+	}
+	else if (`match "^animation(_[^_]+){2,3}_DYN" $str` != "")
+	{
+		$title = "rm1_dyn_" + $buf[1] + "_" + $buf[2];
+	}
+	else if (`match "^vfx(_[^_]+){2}" $str` != "")
+	{
+		$title = "rm1_vfx_" + $buf[1] + "_" + $buf[2];
+	}
+	else if (`match "^wn2_ly_(_[^_]+){3}" $str` != "")
+	{
+		$title = "wn2_ly_" + $buf[2] + "_" + $buf[3] + "_" + $buf[4];
+	}
+
+	return $title;
+}
+
+global proc string zwHeadsUpDisplayWinxFrame()
+{
+	string $str = (`currentTime -query` - zwHeadsUpDisplayStart() + 1);
+	$str = `match "[^.]+" $str`;
+	int $size = size($str);
+	for ($i=4; $i>$size; $i--)
+	{
+		$str = "0" + $str;
+	}
+
+	return $str;
+}
+
+global proc string zwHeadsUpDisplayWinxDate()
+{
+	string $str = `about -currentDate`;
+	string $buf[];
+	tokenize $str "/" $buf;
+	$str = $buf[1] + "_" + $buf[2] + "_" + `match "[0-9]{2}$" $buf[0]`;
+
+	return $str;
+}
+
+global proc string zwHeadsUpDisplayWinxTK()
+{
+	global string $zwHeadsUpDisplayTk;
+	string $str = `match "[0-9]{1,2}" $zwHeadsUpDisplayTk`;
+	int $size = size($str);
+	for ($i=2; $i>$size; $i--)
+	{
+		$str = "0" + $str;
+	}
+	$str = "v" + $str;
+
+	return $str;
+}
+
+global proc zwHeadsUpDisplayUpdateData(int $dlg)
+{
+	global string $zwHeadsUpDisplayTk;
+	global int $zwHeadsUpDisplayFramePos;
+	global string $zwHeadsUpDisplayApproved;
+	global string $zwHeadsUpDisplayMov;
+
+	$zwHeadsUpDisplayTk = `idmtDHtmlDlg -text "zwHeadsUpDisplayTk" $dlg -query`;
+	$zwHeadsUpDisplayFramePos = `idmtDHtmlDlg -text "HiddenFramePos" $dlg -query`;
+	$zwHeadsUpDisplayApproved = `idmtDHtmlDlg -text "HiddenApproved" $dlg -query`;
+	$zwHeadsUpDisplayMov = `idmtDHtmlDlg -text "HiddenMov" $dlg -query`;
+
+	global int $zwHeadsUpDisplayLabelsColor;
+	$zwHeadsUpDisplayLabelsColor = `idmtDHtmlDlg -text "HiddenLabelsColor" $dlg -query`;
+}
+
+global proc zwHeadsUpDisplayMov(string $source)
+{
+	string $buf[];
+
+	global string $zwHeadsUpDisplayMov;
+	if ($zwHeadsUpDisplayMov != "true")
+	{
+		return;
+	}
+
+	if ($source == "")
+	{
+		return;
+	}
+
+	string $mcProject = zwGetProject("");
+	putenv "mcProject" $mcProject;
+
+	string $mcSource = `substitute "####" $source "%04d"`;
+	putenv "mcSource" $mcSource;
+	$mcSource = `substituteAllString $mcSource "/" "\\"`;
+	putenv "mcInputNuke" $mcSource;
+
+	string $mcTitle = zwHeadsUpDisplayWinxTitle();
+	putenv "mcTitle" $mcTitle;
+
+	string $mcDate = zwHeadsUpDisplayWinxDate();
+	putenv "mcDate" $mcDate;
+
+	string $mcDest = "";
+	if (`optionVar -query playblastSaveToFile`)
+	{
+		$mcDest = `optionVar -query playblastFile`;
+	}
+	$mcDest = `substitute "[^/\\]+$" $mcDest ""`;
+	if (!`filetest -d $mcDest`)
+	{
+		$mcDest = `workspace -query -rootDirectory` + "images/";
+		if (!`filetest -d $mcDest`)
+		{
+			$mcDest = `workspace -query -rootDirectory`;
+		}
+	}
+	if (zwIsRainbowProject($mcProject))
+	{
+	//	$mcDest += zwHeadsUpDisplayMovFilename() + "_" + $mcDate + ".mov";
+		string $mcDates[];
+		tokenize $mcDate "_" $mcDates;
+		$mcDest += zwHeadsUpDisplayMovFilename() + "_" + $mcDates[2] + $mcDates[0] + $mcDates[1] + ".mov";
+	}
+	else
+	{
+		string $filename = "";
+		if (!`optionVar -query playblastSaveToFile`)
+		{
+			$filename = `file -query -shortName -sceneName`;
+		}
+		if ($filename == "")
+		{
+			$filename = `match "[^/\\]+$" $mcSource`;
+		}
+		$mcDest += `match "[^.]+" $filename` + ".mov";
+	}
+	$mcDest = `substituteAllString $mcDest "\\" "/"`;
+	putenv "mcDest" $mcDest;
+	$mcDest = `substituteAllString $mcDest "/" "\\"`;
+	putenv "mcOutputNuke" $mcDest;
+	
+	tokenize $mcTitle "_" $buf;
+	string $mcPipiline = $buf[1];
+	putenv "mcPipiline" $mcPipiline;
+	
+//	string $mcStart = `playbackOptions -q -min`;
+//	putenv "mcStart" $mcStart;
+	
+//	string $mcEnd = `playbackOptions -q -max`;
+//	putenv "mcEnd" $mcEnd;
+
+	zwHeadsUpDisplayGetStarEnd($source);
+	
+	string $mcRGB = "1 1 1";
+	global string $zwHeadsUpDisplayApproved;
+	if ($zwHeadsUpDisplayApproved == "unfinished")
+	{
+		$mcRGB = "1 0 0";
+	}
+	else if ($zwHeadsUpDisplayApproved == "revision")
+	{
+		$mcRGB = "1 1 1";
+	}
+	else if ($zwHeadsUpDisplayApproved == "approved")
+	{
+		$mcRGB = "0 0 1";
+	}
+	putenv "mcRGB" $mcRGB;
+	
+	string $mcVerWinxClub = "";
+	if ($mcRGB == "1 1 1")
+	{
+		$mcVerWinxClub = zwHeadsUpDisplayWinxTK();
+	}
+	putenv "mcVerWinxClub" $mcVerWinxClub;
+	
+	string $mcUser = `getenv "USERNAME"`;
+	putenv "mcUser" $mcUser;
+	
+	string $mcFocalLength = zwHeadsUpDisplayGetFocalLength();
+	putenv "mcFocalLength" $mcFocalLength;
+	
+	string $mcOffset = "0";
+	global int $zwHeadsUpDisplayFramePos;
+	if ($zwHeadsUpDisplayFramePos == 3)
+	{
+		$mcOffset = "0";
+	}
+	else if ($zwHeadsUpDisplayFramePos == 4)
+	{
+		$mcOffset = "100";
+	}
+	putenv "mcOffset" $mcOffset;
+
+	putenv "mcOutputExt" "mov";
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (`match "_exposh_" $sceneName` != "")
+	{
+		putenv "mcEpisode" "exposh";
+	}
+
+	system "shell MovConverter.bat";
+}
+
+global proc string zwHeadsUpDisplayGetFocalLength()
+{
+//	string $modelPanel = `getPanel -withFocus`;
+//	string $camera = `modelEditor -query -camera $modelPanel`;
+	string $camera = zwHeadsUpDisplayGetCamera();
+	string $attr = $camera + ".focalLength";
+
+	float $previousTime = `findKeyframe -timeSlider -which "first" $attr`;
+	float $previousValue = `getAttr -time $previousTime $attr`;
+	string $focalLength = $previousValue;
+	float $lastTime = `findKeyframe -timeSlider -which "last" $attr`;
+	while (true)
+	{
+		float $currentTime = `findKeyframe -time ($previousTime + ":" + $lastTime) -which "next" $attr`;
+		if ($currentTime == $previousTime)
+		{
+			break;
+		}
+		$previousTime = $currentTime;
+
+		float $currentValue = `getAttr -time $currentTime $attr`;
+		if ($currentValue == $previousValue)
+		{
+			continue;
+		}
+		$focalLength += "/" + $currentValue;
+	}
+
+	return $focalLength;
+}
+
+global proc zwHeadsUpDisplayGetStarEnd(string $source)
+{
+	int $mcStart = -1;
+	int $mcEnd = 0;
+
+	$source = `substitute "#+" $source "*"`;
+	string $buf[] = `getFileList -filespec $source`;
+	for ($file in $buf)
+	{
+		string $str = `match "[.][0-9]+[.]" $file`;
+		if ($str != "")
+		{
+			int $frame = int(`match "[0-9]+" $str`);
+			if ($frame < $mcStart || $mcStart == -1)
+			{
+				$mcStart = $frame;
+			}
+			else if ($frame > $mcEnd)
+			{
+				$mcEnd = $frame;
+			}
+		}
+	}
+
+	putenv "mcStart" ("" + $mcStart);
+	putenv "mcEnd" ("" + $mcEnd);
+}
+
+global proc string zwHeadsUpDisplayMovFilename()
+{
+	string $title = "";
+
+	string $str = `file -query -sceneName`;
+	$str = `match "[^/\\@]+$" $str`;
+	$str = `match "[^.]+" $str`;
+	string $buf[];
+	tokenize $str "_" $buf;
+	if (`match "^animation(_[^_]+){2,3}_ANI" $str` != "")
+	{
+		$title = "rm1_an_" + $buf[1] + "_" + $buf[2];
+		if (`match "^animation(_[^_]+){3}_ANI" $str` != "")
+		{
+			$title += "_" + $buf[3];
+		}
+	}
+	else if (`match "^animation(_[^_]+){2,3}_DYN" $str` != "")
+	{
+		$title = "rm1_dn_" + $buf[1] + "_" + $buf[2];
+		if (`match "^animation(_[^_]+){3}_DYN" $str` != "")
+		{
+			$title += "_" + $buf[3];
+		}
+	}
+	else if (`match "^vfx(_[^_]+){2}" $str` != "")
+	{
+		$title = "rm1_vfx_" + $buf[1] + "_" + $buf[2];
+		if (`match "^vfx(_[^_]+){5}" $str` != "")
+		{
+		//	$title += "_" + $buf[5];
+		}
+	}
+	else if (`match "^wn2_ly_(_[^_]+){3}" $str` != "")
+	{
+		$title = "wn2_ly_" + $buf[2] + "_" + $buf[3] + "_" + $buf[4];
+		if (`match "^wn2_ly_(_[^_]+){5}$" $str` != "")
+		{
+			$title += "_" + $buf[5];
+		}
+	}
+
+	return $title;
+}
+
+global proc string zwHeadsUpDisplayGetCamera()
+{
+	string $camera = "";
+
+	string $pane = `getPanel -withFocus`;
+	if (`getPanel -typeOf $pane` == "modelPanel")
+	{
+		$camera = `modelEditor -query -camera $pane`;
+	}
+	else
+	{
+		string $version = zwAboutVersion();
+		if ((float)$version >= 2009)
+		{
+			string $view = `getCustomViewEditorFromPanel $pane`;
+			if (`stereoCameraView -exists $view`)
+			{
+				$camera = `stereoCameraView -query -camera $view`;
+			}
+		}
+	}
+	if ($camera != "")
+	{
+		if (`nodeType $camera` == "camera" || `nodeType $camera` == "stereoRigCamera")
+		{
+			string $parent[] = `listRelatives -fullPath -parent $camera`;
+			$camera = $parent[0];
+		}
+	}
+
+	return $camera;
+}
+
+global proc string zwHeadsUpDisplayGetProject(string $camera)
+{
+	string $project = zwGetProject("");
+//	if ($project == "")
+//	{
+//		if (`getAttr ($camera + ".overscan")` == 1.3)
+//		{
+//			$project = "Enyo";
+//		}
+//	}
+	return $project;
+}
+
+global proc string slHeadsUpDisplayLyOrAN()   //add by  wanshoulong@idmt.com.cn 2011-2-9
+{
+	string $str = "";
+
+	string $filename = `file -query -sceneName -shortName`;
+	if (`match "_bl[_.]" $filename` != "")
+	{
+		$str = "BL";
+	}
+	else if (`match "_an[_.]" $filename` != "")
+	{
+		$str = "AN";
+	}
+
+	return $str;
+}
+
+global proc int zwHeadsUpDisplayIsNewProject20140317(string $project)
+{
+	if ($project == "Strawberry")
+	{
+		string $sceneName = `file -query -shortName -sceneName`;
+		$sceneName = tolower($sceneName);
+		return (`match "^sk" $sceneName` != "" && `match "^sk_401_" $sceneName` == "" && `match "^sk_402_" $sceneName` == "" && `match "^sk_403_" $sceneName` == "" && `match "^sk_404_" $sceneName` == "" && `match "^sk_405_" $sceneName` == "" && `match "^sk_406_" $sceneName` == "");
+	}
+
+	string $projects[] = {"AsiaHeart", "Calimero", "Calimero_TEST", "ChangBaiShan", "ChinaImage", "DiveOllyDive2", "DiveollyDive3", "DiveollyDive4", "EarthQuake", "Enyo", "HeartBroken", "HeiDi", "HeroFactory", "Kobi", "MayaTheBee", "MechaPunks", "Ninjago", "OTTO", "PigPig", "QSanguo", "ROMA", "Sabrina", "SanJiang", "ShaoLin", "ShenShou", "ShiXun", "Strawberry", "StuffedWarriors", "TerrorTower", "Tofuboy", "TomAndJerry_TEST1", "TomAndJerry_TEST2", "training", "VickyTheViking", "WAWA", "WuXing", "YODA", "ZoomWhiteDolphin", "MiniTiger", "LeHua", "North"};
+	for ($i=0; $i<size($projects); $i++)
+	{
+		if ($projects[$i] == $project)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+// 摄像机名字显示 _ly、_an，LION、YAK及新项目显示
+global proc int zwHeadsUpDisplayIsNewProjectCameraName(string $project)
+{
+	string $projects[] = {"AsiaHeart", "AutoTest", "Bailuyuan", "Calimero", "Calimero_TEST", "ChinaImage", "Chunwan2015", "DH", "Dinosaur", "DiveollyDive4", "DiveOllyDive5", "DiveOllyDive6", "HeartBroken", "HeiDi", "HuanLeYou", "Kobi", "LeHua", "MagicForest", "ManTou", "MayaTheBee", "MechaPunks", "MiniTiger", "MiniTiger_P3", "MiniTiger_P4", "MiniTiger2", "Ninjago", "Ninjago20150814BAK", "North", "OTTO", "PatchPillows", "PearlSisters", "PigPig", "QSanguo", "ROMA", "Sabrina", "ShaoLin", "ShunLiu", "SK4DVDcover", "SK4DVDcover4", "SK4Pose", "Strawberry", "Strawberry3", "StuffedWarriors", "TerrorTower", "TomAndJerry_TEST1", "TomAndJerry_TEST2", "ToothFairies", "training", "TTMS", "TwoDragon", "TYS", "WinxClub", "WinxClubII", "WinxTV", "XingYungu", "XR", "YODA", "YongTai", "ZoomWhiteDolphin"};
+	for ($i=0; $i<size($projects); $i++)
+	{
+		if ($projects[$i] == $project)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}

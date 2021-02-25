@@ -1,0 +1,93 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slRebuildReference()
+{
+	string $referenceFiles[]={};//  = `file -q -r`;
+	
+	string $sel[]  =  `ls -sl`;
+	if (size($sel))
+	{
+		for ($sl in $sel)
+		{
+			if (`referenceQuery -inr $sl`)
+			{
+				string $rff = `referenceQuery -f $sl`;
+				$referenceFiles[size($referenceFiles)] = $rff;
+			}
+		}
+		$referenceFiles = stringArrayRemoveDuplicates($referenceFiles);
+	}
+	else
+	{
+		$referenceFiles  = `file -q -r`;
+	}
+	
+	
+	
+	for ($rf in $referenceFiles)
+	{
+		string $rfn  = `referenceQuery -rfn $rf`;
+		int $isLoad = `referenceQuery -il $rfn`;
+
+
+		//remove non-ud   referenceEdits to setAttr
+		string $REConnects[] = `referenceQuery -es -ec "setAttr" -scs 1 -sns 1 -sdp 1 $rfn`;
+		for ($rec in $REConnects)
+		{
+			string $buff[]  = stringToStringArray($rec," ");
+			string $tag = $buff[1];
+			string $uds[] = `listAttr -ud $tag`;
+			if (!size($uds))
+			{
+				referenceEdit -failedEdits true -successfulEdits true -editCommand setAttr -removeEdits $tag;
+			}
+		}
+
+		//unload refernce
+		if ($isLoad)
+			file -ur $rfn;
+
+		//cleanup referenceEdits to setAttr ,disconnectAttr
+		//file -cr $rfn -ec "setAttr";
+		file -cr $rfn -ec "disconnectAttr";
+
+		//remove non-anim  referenceEdits to connectAttr
+		string $REConnects[] = `referenceQuery -es -ec "connectAttr" -scs 1 -sns 1 -sdp 1 $rfn`;
+		for ($rec in $REConnects)
+		{
+			string $buff[]  = stringToStringArray($rec," \"");
+			string $tag = $buff[1];
+			if (match("ShapeDeformed",$tag)!="")
+			{
+				referenceEdit -failedEdits true -successfulEdits true -editCommand connectAttr -removeEdits $tag;
+			}
+		}
+
+		if ($isLoad)
+			file -lr $rfn;
+	}
+
+	//Hide Deformed Shapes
+	string $mesh[] = `ls -type mesh`;
+	for($m in $mesh)
+	{
+	    if(!`referenceQuery -inr $m`)
+	    {
+		string $p[] = `listRelatives -f -p $m`;
+		if(`referenceQuery -inr $p[0]` && size(`listRelatives -c $p[0]`)>1)
+		{
+		    setAttr ($m+".intermediateObject") 1; 
+		}
+	    }
+	}
+}

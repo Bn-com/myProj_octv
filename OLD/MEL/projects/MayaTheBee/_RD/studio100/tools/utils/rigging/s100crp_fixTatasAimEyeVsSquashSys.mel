@@ -1,0 +1,349 @@
+
+//###############################################################################################################################
+//
+//											AimEye rig fixing procs
+//
+//###############################################################################################################################
+//
+
+
+global proc int s100crp_fixTatasAimEyeVsSquashSys()
+{
+	int $ok = 0;
+
+	print ("\n//* S100MTB patches : s100crp_fixTatasAimEyeVsSquashSys ():\n" );
+
+	global int $gS100maxIttFixAimEyePointConsSearch ;
+	$gS100maxIttFixAimEyePointConsSearch = -1;
+
+
+
+	string $sides[] = {"L", "R"};
+	for ($side in $sides)
+	{
+		print ("//\n//\t o Working with eye '"+$side+"' : \n");
+		int $aimEyerigType = 1;
+
+		// Assuming names for rig type 01 :
+		string $eyeJoint = ("Eye_"+$side);
+		string $FKcrtl = ("FKEye_"+$side);
+		string $dummyJoint = ("Dummy_Eye_"+$side+"_offset");
+
+		// for v02:
+		string $expectedAim = ("AimEyeLocatorChild_"+$side);
+
+
+
+		// First checking names expected for type of rig 01:
+		for ($obj in {$eyeJoint,$FKcrtl,$dummyJoint} )
+			if (!s100crp_checkExistenceOfObject($obj))
+			{
+				warning ("s100crp_fixTatasAimEyeVsSquashSys(): can't find Aimeye Rig Type 01 objs => Type 02 ?");
+				$aimEyerigType = 2;
+				break;
+            }
+
+		if ($aimEyerigType == 2 )
+		{
+			$eyeJoint = ("Eye_"+$side);
+			$FKcrtl = ("FKEye_"+$side);
+			$dummyJoint = ("FKOffsetEye_"+$side);
+
+			// Checking names expected for type of rig 02:
+			for ($obj in {$eyeJoint,$FKcrtl,$dummyJoint,$expectedAim} )
+				if (!s100crp_checkExistenceOfObject($obj))
+					error ("s100crp_fixTatasAimEyeVsSquashSys(): can't find Aimeye Rig Type 02 objs. Stopped.");
+
+			print ("//\t -> s100crp_fixTatasAimEyeVsSquashSys(): considering current Aimeye Rig Type is Type 02 :\n");
+
+        }
+
+		string $patchTag = ("s100_AimEyeQApatch0"+$aimEyerigType) ;
+
+		// Checking if patched or not :
+		int $okLocal = false;
+		if (`attributeExists $patchTag $FKcrtl`)
+		{
+			print ("//\t \""+$FKcrtl+"\" ALREADY tagged as '"+$patchTag+"'! Skipped.\n");
+			$ok += 1;
+			continue;
+		}
+
+		// --------------------------------------------------------------------------------
+		//
+		if ($aimEyerigType == 1 )
+		{
+			// 1. Deleting orient constraints of Eye joints
+			string $con = `orientConstraint -q $eyeJoint`;
+			if (size($con))
+			{
+				print ("//\t - Deleting orientConstraint \""+$con+"\" on joint '"+$eyeJoint+"' \n");
+				delete $con;
+			}
+
+			// 2. Connecting FK ctrls to jointOrient of Dummy joints:
+			string $srcAttr = ($FKcrtl+".rotate") ;
+			string $destAttr = ($dummyJoint+".jointOrient") ;
+			string $mdName = ("mdRev_eyeOffset_"+$side);
+			s100crp_connectAttrDouble3( $srcAttr, $destAttr, 1, $mdName) ;
+
+			// 3. Replacing dummy joints 'pointConstraint' by parent one (if any)
+			int $maxItt = 5;
+			string $parentConstraint = s100crp_replacePointByParentConstraintOnObjOrParents( $dummyJoint,  $maxItt );
+        }
+
+		else if ($aimEyerigType == 2 )
+		{
+			// 1. Deleting orient constraints of Eye joints
+			string $con = `orientConstraint -q $eyeJoint`;
+			if (size($con))
+			{
+				print ("//\t - Deleting orientConstraint \""+$con+"\" on joint '"+$eyeJoint+"' \n");
+				delete $con;
+			}
+
+			// 2. duplicating dummy joint on top of himself to zero it out (keeping Aim on him)
+			string $dulpDummy[] = `duplicate -po -rr -n ($dummyJoint+"_patchAim02") $dummyJoint`;
+			parent $dulpDummy[0] $dummyJoint  ;
+			makeIdentity -apply true -t 0 -r 1 -s 0 -n 0 -jointOrient $dulpDummy[0] ;
+
+
+			// 3. delete pointConst on dummy and replace it by parent const:
+			string $parentCons = "";
+			$gS100maxIttFixAimEyePointConsSearch = -1;
+
+			string $pCons[] = s100crp_findPointConstraintOnObjOrParents( $dummyJoint, 1);
+			if (size($pCons)==2)
+			{
+				string $tgts[] = `pointConstraint -q -tl $pCons[0] `;
+				if (size($tgts))
+				{
+					print ("//\t - Deleting pointConstraint \""+$pCons[0]+"\" \n");
+					delete $pCons[0];
+
+					print ("//\t\t -> Creating parentConstraint of \""+$tgts[0]+"\" onto \""+$dummyJoint+"\" \n");
+					string $parentConsts[] = `parentConstraint -mo -weight 1  $tgts[0] $dummyJoint `;
+					$parentCons = $parentConsts[0];
+				}
+				else
+					error (" No (more?) target found for \""+$pCons[0]+"\". ");
+			}
+			else
+				error (" No (more?) pointConstraint found on \""+$dummyJoint+"\" to be replaced by parentConstraint. ");
+
+			// 3. delete aimConst on dummy and recreate it on dupl:
+			string $aimCons = "";
+			string $aCons[] = s100crp_findAimConstraintOnObj( $dummyJoint);
+			if (size($aCons)==2)
+			{
+				print ("//\t - Deleting aimConstraint \""+$aCons[0]+"\" \n");
+				delete $aCons[0];
+
+				string $target = $aCons[1];
+				if ($aCons[1]!=$expectedAim)
+				{
+					warning ("Aim constraint is supposed to be done towards \""+$aCons[1]+"\" and not \""+$expectedAim+"\" - forcing it...");
+					$target = $expectedAim;
+                }
+
+				print ("//\t\t -> Creating aimConstraint of \""+$target+"\" onto \""+$dulpDummy[0]+"\" \n");
+				string $aimConsts[] = `aimConstraint -o 0 0 0 -w 1 -aim 1 0 0 -u 0 1 0 -wut "objectrotation" -wu 0 1 0 -wuo ("AimEyeLocatorChild_"+$side) $target $dulpDummy[0] `;
+				$aimCons = $aimConsts[0];
+            }
+
+			// 4. listing children of dummy and parenting them to its dupl (unless they are new constraints:
+			string $kids[] = `listRelatives -c $dummyJoint`;
+			for ($kid in $kids)
+			{
+				if ($kid!=$dulpDummy[0] && $kid!=$parentCons)
+					parent $kid $dulpDummy[0];
+            }
+
+			// 5. Connecting FK ctrls to Offset of new Aimconstraint (on dummyJoint duplicate):
+			string $srcAttr = ($FKcrtl+".rotate") ;
+			//string $destAttr = ($dummyJoint+".jointOrient") ;
+			string $destAttr = ($aimCons+".offset") ;
+			//string $mdName = ("mdRev_eyeOffset_"+$side);
+			s100crp_connectAttrDouble3( $srcAttr, $destAttr, 0, "") ;
+
+			// 5. Connecting DuplDummy joints.rotate into Eye skin joints.rotate:
+			string $srcAttr = ($dulpDummy[0]+".rotate") ;
+			string $destAttr = ($eyeJoint+".rotate") ;
+			s100crp_connectAttrDouble3( $srcAttr, $destAttr, 0, "") ;
+        }
+
+		// Finally tagging as patched ::
+			int $okLocal = false;
+			$okLocal = !catch(`addAttr -k 0 -dv 1 -at bool -ln $patchTag $FKcrtl`);
+			if ($okLocal)
+				$okLocal = !catch(`setAttr -l 1 ($FKcrtl+"."+$patchTag)`);
+			if ($okLocal)
+				print ("//\t \""+$FKcrtl+"\" successfully tagged as '"+$patchTag+"'.\n");
+			else
+				warning ("  \""+$FKcrtl+"\" NOT successfully tagged as '"+$patchTag+"'!");
+			$ok += $okLocal;
+    }
+
+	return $ok;
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+//
+// 		Utils
+//
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+
+global proc s100crp_connectAttrDouble3(string $srcAttr, string $destAttr, int $multMinus1, string $mdName)
+{
+	if (`objExists $srcAttr` && `objExists $destAttr`)
+	{
+		print ("//\t - Connecting '"+$srcAttr+"' -("+$mdName+")-> '"+$destAttr+"' \n");
+		if ($multMinus1)
+		{
+			string $md = `createNode multiplyDivide -n $mdName`;
+				setAttr ($md+".input1X") -l 1 -1;
+				setAttr ($md+".input1Y") -l 1 -1;
+				setAttr ($md+".input1Z") -l 1 -1;
+
+			connectAttr -f ($srcAttr+"X") ($md+".input2X");
+			connectAttr -f ($srcAttr+"Y") ($md+".input2Y");
+			connectAttr -f ($srcAttr+"Z") ($md+".input2Z");
+
+			connectAttr -f ($md+".outputX") ($destAttr+"X");
+			connectAttr -f ($md+".outputY") ($destAttr+"Y");
+			connectAttr -f ($md+".outputZ") ($destAttr+"Z");
+        }
+		else
+		{
+			connectAttr -f ($srcAttr+"X") ($destAttr+"X");
+			connectAttr -f ($srcAttr+"Y") ($destAttr+"Y");
+			connectAttr -f ($srcAttr+"Z") ($destAttr+"Z");
+        }
+    }
+	else
+		error ("Either '"+$srcAttr+"' or '"+$destAttr+"' does NOT exist! Stopped");
+}
+
+global proc string[] s100crp_findPointConstraintOnObjOrParents(string $obj, int $maxItt)
+{
+	// In case previous search alreday gave a right parent to delete pointConstraint from (and did it)
+	// using it (parent level then stored in following global var):
+	global int $gS100maxIttFixAimEyePointConsSearch ;
+	if ($gS100maxIttFixAimEyePointConsSearch != -1)
+		$maxItt = $gS100maxIttFixAimEyePointConsSearch;
+	else
+		$maxItt = min($maxItt,20);
+
+	string $pCons[] = {};
+	if (`objExists $obj` && $maxItt>0 )
+	{
+		int $itt = 0;
+		while ($itt<=$maxItt)
+		{
+			print ("//\t - Searching pointConstraint on '"+$obj+"' or above (iteration: "+$itt+"/"+$maxItt+")\n");
+			string $con = `pointConstraint -q $obj`;
+			if (size($con))
+			{
+				print ("//\t\t -> found pointConstraint \""+$con+"\" on object \""+$obj+"\" !\n");
+				$pCons[0] = $con;
+				$pCons[1] = $obj;
+				print ("//\t\t -> also setting further max iteration to \""+$itt+"\" for same batch of search!\n");
+				$gS100maxIttFixAimEyePointConsSearch = $itt;
+				break;
+            }
+			else
+			{
+				string $prts[] = `listRelatives -p $obj`;
+				if (size($prts))
+				{
+					$obj = $prts[0];
+					$itt += 1;
+                }
+				else
+				{
+					print ("//\t\t - No more parent for \""+$obj+"\". Stopped.\n");
+					break;
+                }
+            }
+        }
+		if ($itt>$maxItt)
+			print ("//\t\t - Max iteration ("+$maxItt+") reached for \""+$obj+"\". Stopped.\n");
+    }
+	else
+		print ("//\t Max iteration ("+$maxItt+") negative of object \""+$obj+"\" does NOT exist. Skipped.\n");
+
+	return $pCons;
+}
+
+// return AimConstraint + target
+//
+global proc string[] s100crp_findAimConstraintOnObj(string $obj )
+{
+	string $pCons[] = {};
+	if (`objExists $obj` )
+	{
+			print ("//\t - Searching aimConstraint on '"+$obj+"' :\n");
+			string $con = `aimConstraint -q $obj`;
+			if (size($con))
+			{
+				print ("//\t\t -> found aimConstraint \""+$con+"\" on object \""+$obj+"\" !\n");
+				$pCons[0] = $con;
+
+				string $tgts[] = `aimConstraint -q -tl $pCons[0] `;
+				if (size($tgts)==1)
+				{
+					print ("//\t\t\t -> found 1 aimConstraint target \""+ $tgts[0]+"\" for it.\n");
+					$pCons[1] = $tgts[0];
+				}
+            }
+			else
+				print ("//\t\t - No aimConstraint for \""+$obj+"\".\n");
+    }
+	else
+		print ("//\t object \""+$obj+"\" does NOT exist. Skipped.\n");
+
+	return $pCons;
+}
+
+
+// Replacing dummy joints 'pointConstraint' by parent one (if any)
+//
+global proc string s100crp_replacePointByParentConstraintOnObjOrParents(string $dummyJoint, int $maxItt)
+{
+	string $parentCons = "";
+	string $pCons[] = s100crp_findPointConstraintOnObjOrParents( $dummyJoint, $maxItt);
+	if (size($pCons)==2)
+	{
+		string $tgts[] = `pointConstraint -q -tl $pCons[0] `;
+		if (size($tgts))
+		{
+			print ("//\t - Deleting pointConstraint \""+$pCons[0]+"\" \n");
+			delete $pCons[0];
+
+			print ("//\t\t -> Creating parentConstraint of \""+$tgts[0]+"\" onto \""+$pCons[1]+"\" \n");
+			string $parentConsts[] = `parentConstraint -mo -weight 1  $tgts[0] $pCons[1] `;
+			$parentCons = $parentConsts[0];
+		}
+		else
+			print ("//\t - No (more?) target found for \""+$pCons[0]+"\". \n");
+	}
+	else
+		print ("//\t - No (more?) pointConstraint found on \""+$dummyJoint+"\" or above to be replaced by parentConstraint. \n");
+
+	return $parentCons;
+}
+
+
+global proc int s100crp_checkExistenceOfObject(string $obj)
+{
+	if (`objExists $obj`)
+		return 1;
+	else
+	{
+		warning ("Can NOT find object '"+$obj+"'!");
+		return 0;
+    }
+}
+

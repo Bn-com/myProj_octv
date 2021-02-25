@@ -1,0 +1,175 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: hb
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+
+
+proc string mySubstitute(string $source, string $old, string $new)
+{
+	string $buf[];
+	
+	if (`tokenize $source "|" $buf`)
+		return ` substitute $old $buf[size($buf)-1]  ""`;
+	return "";
+}
+
+proc cleanNamespace (string $nsName)
+{
+	string $namesp[] = `ls ($nsName + "*:*")`;
+	for ($j=0;$j<size($namesp);$j++)
+	{
+		string $buff[];
+		tokenize $namesp[$j] "|" $buff;
+		string $obj = $buff[size($buff) - 1];
+
+		string $buf[];
+		tokenize $obj ":" $buf;
+		string $sp = $buf[0]+":";
+
+		string $new = mySubstitute($obj,$sp,"");
+		if (`objExists($namesp[$j])` && $new!=$namesp[$j] && size($new)>0)
+			rename $namesp[$j] $new;
+	}
+}
+
+proc copySkinWeight (string $skin_sc, string $skin_dest)
+{
+	string $skins[2] = {$skin_sc, $skin_dest};
+	string $skinCluster[];
+	for ($i = 0; $i < 2 ; $i++ )
+	{
+		string $history[] = `listHistory $skins[$i]`;
+	        for ($item in $history)
+		{
+			if (`nodeType $item` == "skinCluster")
+			{
+				$skinCluster[$i] = $item; 
+				break;
+			}
+		}
+	}
+	copySkinWeights -ss $skinCluster[0] -ds $skinCluster[1] -noMirror -smooth;
+}
+
+proc ew_copySkinDestObject (string $selected_0, string $selected_1)  //created by Eddy, modified by zhenghaibin
+{
+	string $destSkinObj = "";
+	string $sourceSkinCluster = "";
+	string $destSkinCluster = ""; 
+		
+		string $sourceSkinCluster; 		
+		string $destSkinObj = $selected_0; 		
+		string $history[] = `listHistory $selected_1`; 		
+		for ($item in $history) 			
+	if (`nodeType $item` == "skinCluster") 				
+		$sourceSkinCluster = $item; 	
+
+
+
+	string $jion[]=`skinCluster -q -inf $sourceSkinCluster`; 
+	string $item;
+        string $joint,$joints[];
+	int $k=0;
+        string $influnence,$inf[];
+	int $v=0;
+	for ($item in $jion)
+		{
+		if (`nodeType $item`=="joint")
+			{
+			$joints[$k]=$item;
+			$joint+=$joints[$k]+" ";
+			$k++;
+			}
+        	else
+			{
+			$inf[$v]=$item;
+			$influnence+=$inf[$v]+" ";
+			$v++;
+			}
+		}
+	
+	 string $cmd = ("skinCluster -ibp -tsb "+$joint + $destSkinObj + "\n");
+	print $cmd;
+	string $skin[] = `eval $cmd`;
+	string $destSkinCluster = $skin[0];
+	
+	if ($influnence!="")
+        	{
+		for ($v=0;$v<`size $inf`;$v++)
+			{
+			string $add=("skinCluster -e -ibp -ai "+$inf[$v]+" "+$destSkinCluster);
+			eval $add;
+			}
+		}
+
+}
+
+global proc hbFaceImport ()
+{
+	string $select[] = `ls -sl`;
+	if ((`size $select` == 0) ||(`nodeType $select[size($select)-1]` != "blendShape") )
+		error ("Please select the SKIN first, and a BlendShape Node last.");
+	string $fileName = `fileDialog -dm "*.mb"`;
+	string $nameSpace = "facialProxy";
+	file -import -type "mayaBinary" -namespace $nameSpace -options "v=0;p=17"  -pr $fileName;
+
+	string $BSnode = $select[size($select)-1];
+	string $name = $select[0];
+	string $tem[];
+	string $ln[] = `ls -l $name`;
+	tokenize $ln[0] "|" $tem;
+	string $groupName = $tem[0];
+	//string $list[] = `ls -type geometryShape  "facialProxy:*"`;
+	//string $tempname[] = `listRelatives -p $list[0]`;
+	//string $buff[];
+	//tokenize $tempname[0] ":" $buff;
+	//string $pxName = $buff[1];
+	$pxName = $name + "_PX";
+	cleanNamespace $nameSpace;
+	parent $pxName $groupName;
+
+
+	int $BScount = 50 ;//`blendShape -q -weightCount $BSnode`;
+	string $nodes[]= `listHistory $pxName`;
+	string $node;
+	for ($node in $nodes)
+	{ 
+		string $type[] = `ls -st $node`;
+			if ($type[1] =="blendShape") 
+				break;
+	}
+	string $pxBlendShape = $node;
+
+
+	for ($i = 0; $i < $BScount; $i++ )
+	{
+		string $bsAttr = ($BSnode + ".weight[" + $i + "]");
+		if (`getAttr -l $bsAttr`)        
+			setAttr -lock 0 $bsAttr; 
+		string $pxAttr = ($pxBlendShape + ".weight[" + $i + "]");
+		connectAttr $bsAttr $pxAttr;
+		//setAttr -lock 1 $bsAttr;
+	}
+
+	string $layers[] = `ls -type displayLayer`;
+	string $layer;
+	for ($layer in $layers )
+	{
+		if (`gmatch $layer "*[Ss]kin[Pp]roxy"`)
+			break;
+	}
+	string $pxLayer = $layer;
+	editDisplayLayerMembers $pxLayer $pxName;
+
+	ew_copySkinDestObject $pxName $name;
+	copySkinWeight $name $pxName;
+
+	select -cl;
+	print ($pxName + " is created");
+}

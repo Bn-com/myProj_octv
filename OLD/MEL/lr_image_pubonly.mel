@@ -1,0 +1,820 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 李锐
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:  lr_image_pubonly.mel
+//       Version:  1.3
+//   Description:  Publish rendered images, add database record
+//                
+//    Created By:  Larry  2002.11.28
+// 
+//    History:
+//             2003.1.21   Update for supporting mutil project. 
+//             2003.5.16   Delete file after publish
+//             2003.8.18   Improve the delete file function
+//             2003.8.26   Cancel database record
+//
+///////////////////////////////////////////////////////////////////////
+
+
+global proc lr_image_pubonly()
+{
+    // Create UI
+    
+    if(`window -ex Image_PubUI`) deleteUI Image_PubUI;
+    
+    window -title "Render Image Publish Tool V 1.4   <2002.09.21>" -sizeable 1 -widthHeight 600 210 Image_PubUI;
+       menuBarLayout;
+            menu -label "Help";
+            menuItem -label "Help on Images Publish Tool..." -command "zjHelpCallback lr_image_pub";
+       setParent ..;
+        
+        
+        columnLayout -adjustableColumn 0;
+       //    separator -style "in" -w 600 -h 20;
+           textFieldButtonGrp -label "Project:"
+                              -text "Thru_The_Moebius_Strip"
+                              -editable 0
+                              -buttonLabel "Select .."
+                              -cw3 100 300 60
+                              SelectProjectCTL;
+                      
+           separator -style "in" -w 600 -h 20; 
+           checkBox -label "Publish 时自动删除原始文件" -v 1 DeleteCTL;  
+           rowLayout -numberOfColumns 4 -cw4 480 20 40 60;
+    	       textFieldButtonGrp -label "Image0:"
+    	       		          -text "" 
+                                  -buttonLabel "Browse.."
+                                  -editable 0
+                                  -cw3 100 300 60
+                                  -buttonCommand ("onBrowseImage 0")
+                                  imgBrowseCTL0;
+               checkBox  -w 20 -label "" -value 1 -cc "img_oncheckendframe 0" -ann "Enable End Frame Control" imgCheckCTL0;
+               intField -w 40 -en 0 -ann "Set End Frame" -cc "onSetEndframe 0" imgIntFieldCTL0;
+               text -w 60 -label "" imgTextCTL0;
+           setParent ..;
+           
+           
+           columnLayout -adjustableColumn 1 sourceimageCL;
+           setParent ..;
+           
+           separator -style "none";
+           button -label "Add More .." -w 100 -c AddsourceimageControl AddMoreBT;
+           separator -style "in" -h 20 -w 600;
+           
+           progressBar -h 10 -w 590 imgprogressCTL;
+           
+           separator -style "none" -h 10 -w 600;
+           
+           rowLayout -numberOfColumns 4  -cw4 80 140 100 150
+                     -columnAlign4 "center" "center" "center" "center" -ct4 "right" "right" "right" "right";
+                                
+                     text -label "";
+                     button -w 125 -label "Move Resource" -c onimg_MoveResource;
+                     text -label "" imgstateCTL;
+                     button -w 125 -label "Close" -c "deleteUI Image_PubUI";
+                       
+           setParent ..;
+           
+           button -w 100 -label "Show Layer List" -c lr_layerlist ShowLayerListBT;
+                     
+        setParent ..;
+           
+       
+   showWindow;    
+   window -e -h 230 Image_PubUI;
+   CreateProjectPopMenu;
+}
+global proc img_oncheckendframe(string $ID)
+{
+   int $val = `checkBox -q -value ("imgCheckCTL" + $ID)`;
+   intField -e -en (1-$val) ("imgIntFieldCTL" + $ID);	
+}
+
+global proc onBrowseImage(string $ctl)
+{
+   string $filename = `fileDialog -directoryMask "*.iff;*.tga;*.jpg"`;
+
+   if($filename != "")  
+   {
+        string $buf[];
+        int $num = `tokenize $filename "/" $buf`;       
+        textFieldButtonGrp -e -text $buf[$num-1] -ann $filename ("imgBrowseCTL" + $ctl);  
+    
+
+       if(`textFieldButtonGrp -q -text SelectProjectCTL` != "Thru_The_Moebius_Strip")
+       {
+          // For Other projects  
+   	  img_checkimage_otherpj($filename,0);
+       }else{
+          // For TTMS 
+          int $state = img_checkimage($filename,$ctl,0);
+       }           
+   }
+}
+
+
+global proc int img_checkimage_otherpj(string $fn,int $ISset)
+{
+    text -e -label "" imgTextCTL0;
+    if($ISset==0) intField -e -v 0 imgIntFieldCTL0;
+   // tokenize filename;
+     
+     string $pathbuf[];
+     int $pathbufnum = `tokenize $fn "/" $pathbuf`;
+     
+     string $imgnamebuf[];
+     int $namenum = `tokenize $pathbuf[$pathbufnum - 1] "." $imgnamebuf`;
+     
+     string $partbuf[];
+     int $partnum = `tokenize $imgnamebuf[0] "_" $partbuf`;
+     
+     // image name: 004_001_l0boat_lr_c001_boat.####.iff
+     
+     if(($partnum != 6)||($namenum !=3 ) || (size($imgnamebuf[1]) != 4))
+     {
+         WarningMsg("Error", "Can not get enough info from filename(eg: 004_001_l0boat_lr_c001_boat.####.iff)");
+         return 0;
+     }
+     
+     string $ext = $imgnamebuf[2];
+     int $sf  = $imgnamebuf[1];
+     string $scene    = $partbuf[0];
+     string $shot     = $partbuf[1];
+     string $des      = $partbuf[2];
+     string $grp      = $partbuf[3];
+     string $version  = $partbuf[4];
+     string $layer    = $partbuf[5];    	
+     
+     if($ISset == 0)
+    {
+     textFieldGrp -e -text $scene   CustomSceneCTL;
+     textFieldGrp -e -text $shot    CustomShotCTL;
+     textFieldGrp -e -text $layer   CustomLayerCTL;
+    }else{
+        if(`textFieldGrp -q -text CustomVersionCTL` != "")
+        $version = `textFieldGrp -q -text CustomVersionCTL`;
+    }     	
+//  version Check
+   
+   global string $CurrentProject;
+   string $targetfolder = $CurrentProject + "Images/Scene_" + $scene + "/Shot_" + $shot + "/" + $layer + "/" + $version;
+   if(`filetest -d $targetfolder`)
+   {
+       WarningMsg("Error","The image of same version already exist! please check your image version!");
+       return 0;
+   }else{        
+     textFieldGrp -e -text $version CustomVersionCTL;	
+   }
+   
+// Missed frame check
+
+    if($ISset !=0)
+    {
+        int $sf  = $imgnamebuf[1];
+        int $ef  = `intField -q -v imgIntFieldCTL0`;
+        if($ef == 0) return 0;
+        if(img_missframecheck($sf,$ef,$fn))
+        {
+            WarningMsg("Error", "Some frames missed, Please check Script Editor!");
+            return 0;
+        }
+        
+        // set source images ready!
+        text -e -label "READY" imgTextCTL0; 
+        return 1;	
+    }
+     return 1;
+}
+
+global proc int img_checkimage(string $fn,string $ID,int $ISset)
+{
+   // reset controls
+      text -e -label "" ("imgTextCTL" + $ID);
+      if($ISset ==0) intField -e -v 0 ("imgIntFieldCTL" + $ID);
+   
+   // tokenize filename;
+     
+     string $pathbuf[];
+     int $pathbufnum = `tokenize $fn "/" $pathbuf`;
+     
+     string $imgnamebuf[];
+     int $namenum = `tokenize $pathbuf[$pathbufnum - 1] "." $imgnamebuf`;
+     
+     string $partbuf[];
+     int $partnum = `tokenize $imgnamebuf[0] "_" $partbuf`;
+     
+     // image name: 004_001_l0boat_lr_c001_boat.####.iff
+     
+     if(($partnum != 6)||($namenum !=3 ) || (size($imgnamebuf[1]) != 4))
+     {
+         WarningMsg("Error", "Wrong image name (eg: 004_001_l0boat_lr_c001_boat.####.iff)");
+         return 0;
+     }
+     
+     string $ext = $imgnamebuf[2];
+     int $sf  = $imgnamebuf[1];
+     string $scene    = $partbuf[0];
+     string $shot     = $partbuf[1];
+     string $des      = $partbuf[2];
+     string $grp      = $partbuf[3];
+     string $version  = $partbuf[4];
+     string $layer    = $partbuf[5];
+     
+     
+// Get Default shot frames         
+     if($ISset == 0)
+     {    
+         int $shotframe = img_getShotFrames($scene,$shot);
+         if($shotframe != 0)
+         {
+            intField -e -v ($sf+$shotframe -1) ("imgIntFieldCTL" + $ID);	
+         }else 
+         {
+     	    WarningMsg("Error","Error read shot frames file, Please check frames.ini!");
+            return 0;
+         }
+     }
+     
+    int $ef  = `intField -q -v ("imgIntFieldCTL" + $ID)`;
+     
+//  check if some frame missed
+    
+    if(img_missframecheck($sf,$ef,$fn))
+    {
+        WarningMsg("Error", "Some frames missed, Please check Script Editor!");
+        return 0;
+    }         
+
+//  check images layername;
+
+    if(!img_imagelayercheck($scene,$shot,$layer))
+    {
+        WarningMsg("Error", "Can not find layer name in Layer list, Please check Layer list file!");
+        return 0;    	
+    }
+
+    
+// check version 
+  
+   string $targetfolder =  "//idmt-filea/images/sc" + $scene + "/" + $shot + "/" + $grp + "/" + $layer + "/" + $version;
+
+   if(`filetest -d $targetfolder`)
+   {
+   	WarningMsg("Error","The image of same version already exist! please check your image version!");
+   	return 0;
+   }     
+
+// check duplicate selection
+  
+   if(img_checkdup($ID))
+   {
+   	WarningMsg("Error","You already select a same images sequence!");
+   	return 0;   	
+   }
+   
+// set source images ready!
+    text -e -label "READY" ("imgTextCTL" + $ID);
+ return 1;	
+}
+
+
+global proc int img_checkdup(string $ID)
+{
+   int $i = 0;
+   string $IDcon = `textFieldButtonGrp -q -text ("imgBrowseCTL" + $ID)`;
+   $IDcon = `substring $IDcon 1 (size($IDcon) -9)`;
+    
+   for($i; ; $i ++)
+   {
+       if($i == $ID) continue;
+       string $ctlName = "imgBrowseCTL" + $i;
+       if(!`textFieldButtonGrp -ex $ctlName`) break;
+       string $tmpstr = `textFieldButtonGrp -q -text $ctlName`;
+       print $tmpstr;
+       print "\n";
+       if($tmpstr == "") continue;
+       $tmpstr = `substring $tmpstr 1 (size($tmpstr) -9)`;
+       if($IDcon == $tmpstr) return 1;
+   	
+   }
+   
+   return 0;
+}
+
+global proc int img_imagelayercheck(string $scene, string $shot, string $ly)
+{
+  string $shotlayer[] = imgget_gLayerList($scene,$shot);
+  if(size($shotlayer) == 0) return 0;
+  $ly = toupper($ly);
+  for($tmp in $shotlayer)
+  {
+     $tmp = toupper($tmp);
+     if($ly == $tmp) return 1;
+  }	
+	
+  return 0;
+}
+
+
+global proc int img_missframecheck(int $sf,int $ef,string $fn)
+{
+    int $i = $sf;
+    int $missed = 0;
+    
+    for($i; $i <= $ef; $i ++)
+    {
+        string $tname = img_getSeqImagename($i,$fn);
+        if(!`filetest -f $tname`)
+        {
+            if($missed == 0) print ("------------------------------------------------\n");
+            warning ("Missed Frame: " + $tname );
+            $missed = 1;             
+        }    
+    } 	
+    
+   return $missed;
+}
+
+
+global proc string img_getSeqImagename(int $i,string $filename)
+{
+        
+        string $longbuf[];
+        int $pathnum = `tokenize $filename "/" $longbuf`;
+        string $shortbuf[];
+        int $namenum = `tokenize $longbuf[size($longbuf)-1] "." $shortbuf`;
+
+        
+ //  check if some frame missed.       
+        
+        int $startframe = $shortbuf[1];
+        string $prefix = $shortbuf[0];
+        string $ext = $shortbuf[2];
+        string $path = `substring $filename 1 (size($filename) - size($longbuf[$pathnum -1]))`;  
+
+           string $tname;
+           
+           if($i < 10)
+           {           
+              $tname =  $path + $prefix + ".000" + $i + "." + $ext;
+           }else if($i < 100){
+              $tname =  $path + $prefix + ".00" + $i + "." + $ext;
+           }else if($i < 1000){
+              $tname =  $path + $prefix + ".0" + $i + "." + $ext;
+           }else{
+              $tname =  $path + $prefix + "." + $i + "." + $ext;
+           }       	
+           
+           return $tname;
+}
+
+
+global proc int img_getShotFrames(string $scene,string $shot)
+{
+    string $lfile = "//file-cluster/GDC/netrender/TTMS/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Frames.ini";
+    int $reval = 0;
+    int $index = 0;
+     if(`filetest -f $lfile`)
+    {
+    	$fileID = `fopen $lfile "r"`;
+    	string $nextline = `fgetline $fileID`;
+    	string $buf[];
+    	while(!`feof $fileID`)
+    	{
+    	    if(!`gmatch $nextline "Shot Frames=*"`)  
+    	    {
+    	        $nextline = `fgetline $fileID`;
+    	        continue;
+    	    }else{
+    	    
+    	        if(`tokenize $nextline "=" $buf` > 1)
+    	        {
+    	            fclose $fileID;
+    	            return $reval = $buf[1];    	      
+    	        }
+    	        $nextline = `fgetline $fileID`;
+    	    }
+    	}
+    	
+    	fclose $fileID;
+    	clear $buf;
+    }else{
+       confirmDialog -title "Error" -message ("Can not find Shot Frames file of  " + $scene + "_" + $shot) -button "OK";       
+    }
+    
+    return $reval;
+}
+
+
+global proc AddsourceimageControl()
+{
+    int $i = 1;
+    while(`textFieldButtonGrp -ex ("imgBrowseCTL" + $i)`)
+    {
+    	$i ++;
+    }
+    
+    string $ctrlName = "imgBrowseCTL" + $i;
+                     
+           rowLayout -numberOfColumns 4 -cw4 480 20 40 60 -p sourceimageCL;
+    	       textFieldButtonGrp -label ("Image" + $i + ":")
+    	       		          -text "" 
+                                  -buttonLabel "Browse.."
+                                  -editable 0
+                                  -cw3 100 300 60
+                                  -buttonCommand ("onBrowseImage " + $i)
+                                  $ctrlName;
+               checkBox  -w 20 -label "" -value 1 -cc ("img_oncheckendframe " + $i) -ann "Enable End Frame Control" ("imgCheckCTL" + $i);
+               intField -w 40 -en 0 -ann "Set End Frame" -cc ("onSetEndframe " + $i) ("imgIntFieldCTL" + $i);
+               text -w 60 -label "" ("imgTextCTL" + $i);
+           setParent ..;                       
+                       
+                       
+                       
+   int $high = `window -q -h Image_PubUI` + 30;
+   window -e -h $high Image_PubUI;                  
+
+}
+
+
+global proc string [] imgget_gLayerList(string $scene,string $shot)
+{
+    string $gLayer_list[];
+    string $lfile = "//file-cluster/GDC/netrender/scenes/TTMS/sc" + $scene + "/" + $shot + "/Scene_Info/Layer_List.ini";
+    int $index = 0;
+    if(`filetest -f $lfile`)
+    {
+    	$fileID = `fopen $lfile "r"`;
+    	string $nextline = `fgetline $fileID`;
+    	string $buf[];
+    	while(!`feof $fileID`)
+    	{
+    	    if(`gmatch $nextline "*//*"`)  
+    	    {
+    	        $nextline = `fgetline $fileID`;
+    	        continue;
+    	    }
+    	    if(`tokenize $nextline "#" $buf` > 1)
+    	    {
+    	        $gLayer_list[$index++] = $buf[0];
+    	    }
+    	    $nextline = `fgetline $fileID`;
+    	}
+    	
+    	fclose $fileID;
+    	clear $buf;
+    }else{
+       confirmDialog -title "Error" -message ("Can not find layer list file!" + $scene + "_" + $shot) -button "OK";
+       clear $gLayer_list;
+    }
+    return $gLayer_list;  
+}
+
+
+global proc WarningMsg(string $title,string $msg)
+{
+   confirmDialog -title $title -message $msg -button "OK";
+}
+
+global proc onSetEndframe(int $ID)
+{
+   string $fn = `textFieldButtonGrp -q -ann ("imgBrowseCTL" + $ID)`;
+  if(`textFieldButtonGrp -q -text  SelectProjectCTL` != "Thru_The_Moebius_Strip")
+  {
+    img_checkimage_otherpj($fn,1);	
+  }else{
+   img_checkimage($fn,$ID,1);  
+  }
+}
+
+
+global proc onimg_MoveResource()
+{
+   // check Ready state
+   int $ID = 0;
+   for($ID;;$ID++)
+   {
+
+     if(!`text -ex ("imgTextCTL" + $ID)`) break;	
+     string $text = `text -q -label ("imgTextCTL" + $ID)`;
+     string $content = `textFieldButtonGrp -q -text  ("imgBrowseCTL" + $ID)`; 
+     if(($text != "READY") && ($content !="" ))
+     {
+     	WarningMsg("Error",("Image" + $ID + "  Not Ready, Please Check!"));
+        return;
+     }
+   }
+  
+   int $i = 0;
+   chdir "c:\winnt";
+   for($i; $i<$ID;$i ++)
+   {
+       
+       string $content = `textFieldButtonGrp -q -text  ("imgBrowseCTL" + $i)`; 
+       if($content !="")
+       {
+       	      if(img_moveimage($i)==0) 
+       	      {
+       	            WarningMsg("Error",("Can not copy Image" + $ID + "  Please Check!"));
+       	            return; 	
+       	      }
+       	      
+       	 //     img_addrecord($i);       	  
+       	 
+       }
+       
+       text -e -label ("Done") ("imgTextCTL" + $i);	 
+   }
+  
+   
+}
+
+
+global proc int img_moveimage(string $ID)
+{
+   string $fn = `textFieldButtonGrp -q -ann  ("imgBrowseCTL" + $ID)`;
+   
+   string $scene,$shot,$des,$grp,$version,$layer,$targetfolder,$shotfn;
+   
+   
+   chdir "c:/";
+   
+   // tokenize filename;
+   
+     string $pathbuf[];
+     int $pathbufnum = `tokenize $fn "/" $pathbuf`;
+     
+     string $imgnamebuf[];
+     int $namenum = `tokenize $pathbuf[$pathbufnum - 1] "." $imgnamebuf`;
+     
+     string $partbuf[];
+     int $partnum = `tokenize $imgnamebuf[0] "_" $partbuf`;    
+     
+     
+     string $ext = $imgnamebuf[2];
+     int $sf  = $imgnamebuf[1];
+     int $ef  = `intField -q -v ("imgIntFieldCTL" + $ID)`;     
+
+ if(`textFieldButtonGrp -q -text  SelectProjectCTL` == "Thru_The_Moebius_Strip")
+ {
+     
+     $scene    = $partbuf[0];
+     $shot     = $partbuf[1];
+     $des      = $partbuf[2];
+     $grp      = $partbuf[3];
+     $version  = $partbuf[4];
+     $layer    = $partbuf[5];
+     $targetfolder =  "//idmt-filea/images/sc" + $scene + "/" + $shot + "/" + $grp + "/" + $layer + "/" + $version + "/";
+ 
+ }else{
+     // For Other Projects     
+     $scene   = `textFieldGrp -q -text CustomSceneCTL`;
+     $shot    = `textFieldGrp -q -text CustomShotCTL`;
+     $layer   = `textFieldGrp -q -text CustomLayerCTL`;
+     $version = `textFieldGrp -q -text CustomVersionCTL`;
+   	 
+     global string $CurrentProject;
+     $targetfolder = $CurrentProject + "Images/Scene_" + $scene + "/Shot_" + $shot + "/" + $layer + "/" + $version;
+}
+     //  
+     string $mdir = substituteAllString($targetfolder,"/","\\");
+     system("mkdir " + $mdir);
+
+     text -e -label ("Move Image" + $ID) imgstateCTL;     
+     int $index = 1;
+     for($i=$sf; $i<=$ef;$i++)
+     {
+        string $img = img_getSeqImagename($i,$fn);
+        string $cmd = "copy \"" + $img + "\" \"" + $targetfolder + "\"";
+        
+        $cmd = substituteAllString($cmd,"/","\\");
+        string $result = `system($cmd)`;
+        
+        print("CopyFile: "  +  $img + "  Result:" + $result);
+        if(`gmatch $result "*not*"` || `gmatch $result "*不*"`)
+        {
+            error $result;
+            return 0;
+        }
+        if(`checkBox -q -v DeleteCTL`)
+        {     
+            string $targfulbuf[];
+            int $fullb = `tokenize $img "/" $targfulbuf`;
+            string $shotname = $targfulbuf[$fullb-1];
+            $shotname = $targetfolder + "/" + $shotname;
+             
+            $img = substituteAllString($img,"/","\\");        
+            string $delcmd = "del /Q /F \"" + $img  + "\"";
+            
+            if(`filetest -f $shotname`)
+            { 
+             $result = `system($delcmd)`;
+             if(size($result) <= 3) $result = "1 file(s) deleted. \n";
+             print("Delete:   " + $img + "  Result:        " +  $result + "\n");
+            }
+         }        
+        
+        // Progress bar control;
+        int $percent = 100*(float)$index/(float)(1+$ef - $sf);
+        progressBar -e -pr $percent imgprogressCTL;
+        $index ++;
+     }
+    text -e -label ("Done!") imgstateCTL; 
+    return 1;
+}
+
+
+global proc int img_addrecord(string $ID)
+{
+ 
+   string $fn = `textFieldButtonGrp -q -ann  ("imgBrowseCTL" + $ID)`;   
+   string $scene,$shot,$des,$grp,$version,$layer;
+   string $target_file_name;
+   // tokenize filename;
+   
+     string $pathbuf[];
+     int $pathbufnum = `tokenize $fn "/" $pathbuf`;
+     
+     string $imgnamebuf[];
+     int $namenum = `tokenize $pathbuf[$pathbufnum - 1] "." $imgnamebuf`;
+     
+     string $partbuf[];
+     int $partnum = `tokenize $imgnamebuf[0] "_" $partbuf`;    
+     
+     string $ext = $imgnamebuf[2];
+     int $sf  = $imgnamebuf[1];
+     int $ef  = `intField -q -v ("imgIntFieldCTL" + $ID)`;     
+
+ if(`textFieldButtonGrp -q -text  SelectProjectCTL` == "Thru_The_Moebius_Strip")
+ {    
+     $scene    = $partbuf[0];
+     $shot     = $partbuf[1];
+     $des      = $partbuf[2];
+     $grp      = $partbuf[3];
+     $version  = $partbuf[4];
+     $layer    = $partbuf[5];
+ 
+ }else{
+     // For Other Projects     
+     $scene   = `textFieldGrp -q -text CustomSceneCTL`;
+     $shot    = `textFieldGrp -q -text CustomShotCTL`;
+     $layer   = `textFieldGrp -q -text CustomLayerCTL`;
+     $version = `textFieldGrp -q -text CustomVersionCTL`;	 
+}     
+     $target_file_name = substring($imgnamebuf[0],1,(size($imgnamebuf[0]) - size($partbuf[$partnum -1] + 1))) + ".mb";                   
+       string $mpath = ""; 
+       string $scene_description = "System Generated Image Record";       
+       $file = `internalVar -userTmpDir` + "shotpub.txt";
+       $fileId=`fopen $file "w"`;    
+       fprint $fileId ("Scene@" +   $scene + "#\n");
+       fprint $fileId ("Shot@" +    $shot + "#\n");
+       fprint $fileId ("Layer@" +   $layer + "#\n");
+       fprint $fileId ("Group@" +   $grp + "#\n");
+       fprint $fileId ("Version@" + substring($version,2,size($version)) + "#\n");
+       fprint $fileId ("File@" + $target_file_name + "#\n");
+       fprint $fileId ("Member@" + `getenv USERNAME` + "#\n");
+       fprint $fileId ("Machine@" + `getenv COMPUTERNAME` + "#\n");
+       fprint $fileId ("Date@^#\n");
+       fprint $fileId ("State@finished#\n");
+       fprint $fileId ("sframe@" + $sf + "#\n");
+       fprint $fileId ("eframe@" + $ef + "#\n");
+       fprint $fileId ("comment@"+ $scene_description + "#\n");
+       fprint $fileId ("Backup@" + $mpath + "#\n");
+       fprint $fileId ("Rendertime@#\n");
+       //  Set projects flag.
+       if(`textFieldButtonGrp -q -text  SelectProjectCTL` != "Thru_The_Moebius_Strip")
+       {
+       	   global string $CurrentProject;   
+           fprint $fileId ("bk1@"  + `textFieldButtonGrp -q -text  SelectProjectCTL` + "##\n");
+           fprint $fileId ("bk2@"  + $CurrentProject + "#\n");
+       }else{
+           fprint $fileId ("bk1@#\n");
+           fprint $fileId ("bk2@moebius##\n");
+       }
+         
+       fclose $fileId;      
+   
+   
+      string $cmd = "ShotRecord.exe \"" + $file + "\"";
+      string $result = system($cmd);
+      if(!`gmatch $result "*Success*"`)
+      {
+        confirmDialog -title "Error" -message ("Can not Add Record to Database!") -button "OK";
+        sysFile -delete $file;
+        return 0;
+       
+      }else{      
+        sysFile -delete $file;
+      }
+     
+      return 1;
+
+}
+
+
+// Support for Other project
+
+global proc CreateProjectPopMenu()
+{
+   string $lys[] = getProjectList("All Project");
+   popupMenu -p SelectProjectCTL -b 1 ProjectMenu;
+   for($tmp in $lys)
+   {
+      menuItem -label $tmp -c ("OnSelectProjects(\"" + $tmp + "\")");
+   }
+      
+}
+
+global proc OnSelectProjects(string $pj)
+{
+   textFieldButtonGrp -e -text $pj SelectProjectCTL;
+   global string $CurrentProject;
+   string $buf[]= getProjectList($pj);
+   $CurrentProject = substituteAllString($buf[0],"\\","/");
+   
+   // UI Control
+   string $buf[] =`columnLayout -q -childArray sourceimageCL`; 
+   for($tmp in $buf)
+   {
+      deleteUI $tmp;
+   }   
+   
+   if($pj != "Thru_The_Moebius_Strip")
+   {
+      button -e -en 0 ShowLayerListBT;
+      button -e -vis 0 AddMoreBT; 
+      checkBox  -e -en 0 -v 1 imgCheckCTL0;
+      intField  -e -en 1 -v 0  imgIntFieldCTL0; 
+      window -e -h 250 Image_PubUI;
+      separator -style "none" -p sourceimageCL;
+      rowLayout -numberOfColumns 4 -cw4 160 120 120 120 -p sourceimageCL;
+    	 textFieldGrp -label "Scene:"	 -text "" -cw2 100 60 CustomSceneCTL;
+    	 textFieldGrp -label "Shot:"	 -text "" -cw2 50 60  CustomShotCTL;
+    	 textFieldGrp -label "Layer:"	 -text "" -cw2 40 60  CustomLayerCTL;
+    	 textFieldGrp -label "Version:"	 -text "" -cw2 50 60  -cc "onSetEndframe 0" CustomVersionCTL;
+      setParent ..;    
+   }else{
+      button -e -en 1 ShowLayerListBT;
+      button -e -vis 1 AddMoreBT;
+      window -e -h 230 Image_PubUI;
+      checkBox  -e -en 1 -v 0 imgCheckCTL0;
+      intField  -e -en 0 -v 0 -cc "onSetEndframe 0" imgIntFieldCTL0; 
+   }
+}
+
+global proc string [] getProjectList(string $item)
+{
+ 
+  string $ls[];
+  string $fn = "//file-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/Scripts/Maya/Projects_Configure/Projects_list.ini"; 
+  if(!`filetest -f $fn`)
+  {
+     warning "Cannot find Projects_list.ini";
+      
+  }else{     
+    int $index = 0;
+    $fileID = `fopen $fn "r"`;
+    string $nextline = `fgetline $fileID`;
+    string $buf[];
+    while(!`feof $fileID`)
+    {
+        if(`gmatch $nextline "*//*"`)  
+        {
+            $nextline = `fgetline $fileID`;
+            continue;
+        }
+        if(`tokenize $nextline ";" $buf` > 1)
+        {
+            $ls[$index++] = $buf[0];
+        }
+        $nextline = `fgetline $fileID`;
+    }  	
+    fclose $fileID;
+    clear $buf;    
+   }   
+   
+   string $name[],$path[];
+   $index = 0;
+   for($tmp in $ls)
+   {
+      string $buf[];
+      if(`tokenize $tmp "=" $buf`==2)
+      {
+      	 $name[$index ++] = $buf[0];
+      	 if($item == $buf[0])  
+      	 {
+      	    $path[0] = $buf[1];
+      	    return $path;
+      	 }
+      }
+   }
+   return $name;
+}

@@ -1,0 +1,252 @@
+global proc zzjFixBeforeRendering()
+{
+//	1.导入渲染用摄像机，修改摄像机可渲染属性。
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/LORDoftheRINGS/zzjImportRenderCam.mel";zzjImportRenderCam();	
+	
+//	2.设置 raytrace 精度
+	miLoadMayatomr();
+	miCreateDefaultNodes();
+	
+	setAttr "defaultRenderGlobals.currentRenderer" -type "string" "mentalRay";	
+	zzjSetMentalrayQuality("production"); 
+	setAttr 	"miDefaultOptions.maxReflectionRays" 1; 
+	setAttr 	"miDefaultOptions.maxRefractionRays" 1; 
+	setAttr "miDefaultOptions.maxRayDepth" 2;	
+
+//	2.5 某些角色修改材质属性
+//	第四集，c005001FrodoJacket的披风改色
+	string $fileName =`file -q -sn -shn`;
+	if (`gmatch  $fileName "lr_E0040*"`)
+	{
+			string $pifeng[]=`ls -type ramp "changeColorForEpisode4th" "*:changeColorForEpisode4th" "*:*:changeColorForEpisode4th"`;
+			for ($p in $pifeng)
+			{
+				setAttr ($p+".colorEntryList[0].color") -type double3 0.392157 0.392157 0.392157 ;		
+			}
+	}
+	
+
+
+//	3.关闭面片的眼睛和眉毛
+	nj_fixBeforeRendering_hideProx();
+
+//	4.将默认的输出图片格式改成iff
+	setAttr defaultRenderGlobals.imageFormat 7;	
+	
+//	5.修改mentalray的bsp，改善occ渲染速度	
+	setAttr mentalrayGlobals.accelerationMethod 0;
+	setAttr "mentalrayGlobals.bspSize" 20;
+	setAttr "mentalrayGlobals.bspDepth" 60;
+	
+//	6.删除QSK_panel.ma
+	string $rfn[]=`file -q -r`;
+	for ($r in $rfn)
+	{
+		if (`gmatch $r "*_panel.ma*"`)
+		{
+			file -removeReference $r;
+		}
+	}
+
+//	7.设置渲染帧数，动画起始帧
+	zwQueryCameraTime "defaultRenderGlobals";
+	int $startFrame=`getAttr "defaultRenderGlobals.startFrame"`;
+	int $endFrame=`getAttr "defaultRenderGlobals.endFrame"`;
+	playbackOptions -min $startFrame;
+    playbackOptions -max $endFrame;
+	
+//	8替换参考
+//	E0100: p214003FangbladeTypeGreen替换成p214004FangbladeTypeRed
+//	E0110-Q0140: p214002FangbladeTypeBlue替换成p214003FangbladeTypeGreen	
+	zzjNinjagoReplaceReference();
+	
+//	9删除FX的组
+	string $fxGroup[]=`ls "*:FX*" "*:fx*"`;
+	if (`size $fxGroup`)	delete $fxGroup;
+	
+
+}
+
+
+
+global proc nj_fixBeforeRendering_hideProx()
+{
+	
+	source "channelBoxCommand.mel";
+
+////	all mesh
+//	string $allMesh[]=`ls  -type mesh "*prox*" "*:*prox*" "*:*:*prox*" `;
+//	for ($all in $allMesh)
+//	{
+//		if (!`getAttr ($all+".primaryVisibility")`)		setAttr  ($all +".v") 0;
+//	}
+	
+//	all prox
+//	string $allProx[]=`ls  -type transform "*prox*" "*:*prox*" "*:*:*prox*" `;
+	string $allProx[]=`ls  -type transform `;
+
+	for ($p in $allProx)
+	{
+		if (`gmatch  $p "nj_c020003LordGarmadon4Arms*:*"`) continue;
+		
+		if (`gmatch  $p "*prox*"`)
+		{
+			CBdeleteConnection  ($p +".v");	
+			setAttr  ($p +".v") 0;
+		}
+
+		if (`gmatch  $p "*:frame"`)
+		{
+			CBdeleteConnection  ($p +".prox_vis");	
+			setAttr  ($p +".prox_vis") 0;
+		}
+
+		if (`gmatch  $p "*GRP_facialProx*"`)
+		{
+			CBdeleteConnection  ($p +".v");	
+			setAttr  ($p +".v") 0;
+		}
+
+
+	}
+
+
+
+////	eyebrow
+//	string $eyebrows[]=`ls "brow_" "*:brow_" "*:*:brow_"`;
+//	for ($eyeb in $eyebrows)
+//	{
+//		CBdeleteConnection  ($eyeb +".v");	
+//		setAttr ($eyeb+".visibility") 0;		
+//	}	
+
+//	foot		专门针对c020003这个角色不跳过
+	string $feet[]=`ls  -type transform "prox_foot_plane_r*" "*:prox_foot_plane_r*" "*:*:prox_foot_plane_r*" "prox_foot_plane_l*" "*:prox_foot_plane_l*" "*:*:prox_foot_plane_l*"`;
+	for ($foot in $feet)
+	{
+			CBdeleteConnection  ($foot +".v");	
+			setAttr  ($foot +".v") 0;
+	}
+//	hand	专门针对c020003这个角色不跳过
+	string $hand[]=`ls -type transform "Hand_L_prox" "*:Hand_L_prox*" "*:*:Hand_L_prox*" "Hand_R_prox*" "*:Hand_R_prox*" "*:*:Hand_R_prox*"`;
+	for ($ha in $hand)
+	{
+		CBdeleteConnection  ($ha +".v");	
+		setAttr  ($ha +".v") 0;
+	}		
+	
+}
+
+
+global proc zzjNinjagoReplaceReference()
+{
+	string $fileName =`file -q -sn`;
+	
+//	替换角色：
+	if (`gmatch $fileName "*E0080*"`==1  &&  `gmatch $fileName "*E0090*"`==1  &&  `gmatch $fileName "*E0010*"`==1 ) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*c002008ColeCostumeBattleUniform*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c002012ColeCostumeBattleUniformB/master/nj_c002012ColeCostumeBattleUniformB_h_ms_anim.ma";
+			}
+			else if (`gmatch $r "*c003008JayCostumeBattleUniform*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c003019JayCostumeBattleUniformB/master/nj_c003019JayCostumeBattleUniformB_h_ms_anim.ma";			
+			}
+			else if (`gmatch $r "*c004007KaiCostumeBattleUniform*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c004013KaiCostumeBattleUniformB/master/nj_c004013KaiCostumeBattleUniformB_h_ms_anim.ma";			
+			}		
+			else if (`gmatch $r "*c007010ZaneCostumeBattleUniform*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c007017ZaneCostumeBattleUniformB/master/nj_c007017ZaneCostumeBattleUniformB_h_ms_anim.ma";			
+			}		
+
+		}
+	}
+	
+//	替换道具：
+	if (`gmatch $fileName "*E0100*"`==1 ) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*p214003FangbladeTypeGreen*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/props/Weapon/p214004FangbladeTypeRed/master/nj_p214004FangbladeTypeRed_h_ms_anim.ma";
+			}	
+		}
+	}	
+	
+	if (`gmatch $fileName "*E0110_Q0140*"`==1  ) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*p214002FangbladeTypeBlue*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/props/Weapon/p214003FangbladeTypeGreen/master/nj_p214003FangbladeTypeGreen_h_ms_anim.ma";
+			}
+		}
+	}	
+	
+//	角色替换****************************************************************************************************
+//	nya腮红版的替换
+	if (`gmatch $fileName "*E0080_Q0010*"`==1 || `gmatch $fileName "*E0080_Q0010*"`==1 ) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*c005001Nya*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c005005NyaBlush/master/nj_c005005NyaBlush_h_ms_anim.ma";
+			}
+		}
+	}	
+	
+//	LG改颜色内容:c020003LordGarmadon4Arms替换成c020007LordGarmadon4ArmsB
+	if (`gmatch $fileName "*E0100_Q0280_S0140*"`==1 || `gmatch $fileName "*E0100_Q0420_S0300*"`==1|| `gmatch $fileName "*E0100_Q0420_S0340*"`==1|| `gmatch $fileName "*E0110*"`==1 || `gmatch $fileName "*E0130*"`==1) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*c020003LordGarmadon4Arms*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/characters/Main/c020007LordGarmadon4ArmsB/master/nj_c020007LordGarmadon4ArmsB_h_ms_anim.ma";
+			}
+		}
+	}	
+
+//	E0140,E0150场景s023001MissionControlInt渲染的时候需要换成s023003MissionControlIntBlack
+	if (`gmatch $fileName "*E0150_Q0030*"`==1)
+	{
+		print "";	
+	}
+
+	else if (`gmatch $fileName "*E0140_Q*"`==1 || `gmatch $fileName "*E0150_Q*"`==1) 	
+	{
+		string $references[] = `file -q -r`;
+		for ($r in $references)
+		{
+			if (`gmatch $r "*s023001MissionControlInt*"`)
+			{
+				string $rfn = `file -q -rfn $r`;
+				file -loadReference $rfn -type "mayaAscii" -options "v=0" "//file-cluster/GDC/Projects/Ninjago/Project/scenes/sets/Boat/s023003MissionControlIntBlack/master/nj_s023003MissionControlIntBlack_h_ms_tex.ma";
+			}
+		}
+	}	
+	
+	
+	
+}

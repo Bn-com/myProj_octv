@@ -1,0 +1,360 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc maCGBakeAnimation()
+{
+	string $allSelected[] = `ls -sl`;
+
+	string $cameras[] = `ls "*:camera_cam"`;
+	if (!size($cameras))
+		error "文件相机名错误，不能获取!";
+	string $pre = substring($cameras[0],1,(size($cameras[0])-11));
+	string $tempFolder = "D:/MayaTheBee/BakeAnimation/";//`internalVar -utd`;
+	if (!`filetest -r $tempFolder`)
+		sysFile -md $tempFolder;
+	string $bakeFile = $tempFolder+$pre+".sla";
+	
+	string $st = `playbackOptions -q -min`;
+	string $et = `playbackOptions -q -max`;
+	bakeResults -simulation true -t ($st+":"+$et) -smart 1  10 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -bakeOnOverrideLayer false -controlPoints false -shape true $allSelected;
+
+	maCGBakeAnimationExportSelected($bakeFile,$allSelected);
+	select -cl;
+	print "bake完成!";
+}
+
+global proc maCGBakeAnimationExportSelected(string $file,string $objs[])
+{
+	
+	string $mayaVersion = `about -v`;
+	string $linearUnit = `currentUnit -q -f -l`;
+	string $angularUnit = `currentUnit -q -f -a`;
+	string $timeUnit = `currentUnit -q -f -t`;
+	
+
+	$fileId = `fopen $file "w"`;
+	fprint $fileId "ImportExportAnimationForSets v 1.0   (Author: wanshoulong)\n";
+	fprint $fileId ("mayaVersion  "+$mayaVersion+";\n");
+	fprint $fileId ("linearUnit  "+$linearUnit+";\n");
+	fprint $fileId ("angularUnit  "+$angularUnit+";\n");
+	fprint $fileId ("timeUnit  "+$timeUnit+";\n");
+
+	for ($obj in $objs)
+	{
+		string $writeName ="";
+		string $wnBuff[] = stringToStringArray($obj,":");
+		if (size($wnBuff)>2)
+		{
+			$writeName = $wnBuff[size($wnBuff)-2]+":"+$wnBuff[size($wnBuff)-1];
+		}
+		else 
+			$writeName = $obj;
+		
+		if (`objectType -isType "transform" $obj` || `objectType -isType "joint" $obj`)
+		{
+			string $keys[] =`listAttr -k $obj`;
+			string $nonKeys[] = `listAttr -cb $obj`;
+			string $allAttr[] = stringArrayCatenate($keys,$nonKeys);
+
+			for ($key in $allAttr)
+			{
+				string $animCurv[] ;
+				if (`objExists ($obj+"."+$key)`)
+					$animCurv = `listConnections -s true -d false ($obj+"."+$key)`;
+				if (`objExists $animCurv[0]` && isAnimCurve($animCurv[0]))
+				{
+					fprint $fileId ("anim "+$writeName+"."+$key+"\n{\n");
+
+					float $time[] = `keyframe -q -tc $animCurv[0]`;
+					float $value[] = `keyframe -q -vc $animCurv[0]`;
+					string $inputType[] = `keyTangent -q -itt $animCurv[0]`;
+					string $outputType[] = `keyTangent -q -ott $animCurv[0]`;
+					int $lock[] = `keyTangent -q -l $animCurv[0]`;
+					int $weightLock[] = `keyTangent -q -wl $animCurv[0]`;
+					float $inputAngle[] = `keyTangent -q -ia $animCurv[0]`;
+					float $inputWeight[] = `keyTangent -q -iw $animCurv[0]`;
+					float $outputAngle[] = `keyTangent -q -oa $animCurv[0]`;
+					float $outputWeight[] = `keyTangent -q -ow $animCurv[0]`;
+
+
+					for ($i=0;$i<size($time) ;$i++ )
+					{
+						fprint $fileId ("	"+$time[$i]+" "+$value[$i]+" "+$inputType[$i]+" "+$outputType[$i]+" "+$weightLock[$i]);
+						if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && $weightLock[$i])
+							fprint $fileId (" "+$inputAngle[$i]+" "+$outputAngle[$i]);
+						else if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && !$weightLock[$i])
+							fprint $fileId (" "+$inputAngle[$i]+" "+$inputWeight[$i]+" "+$outputAngle[$i]+" "+$outputWeight[$i]);
+						fprint $fileId ";\n";
+					}
+
+					fprint $fileId "}\n";
+				}
+				else if (`objExists ($obj+"."+$key)`)
+				{
+					//print ($obj+"."+$key+"\n");
+					if (`getAttr -type ($obj+"."+$key)` != "double3")
+					{
+						string $value = getAttr ($obj+"."+$key);
+						fprint $fileId ("non-anim "+$writeName+"."+$key+"	"+$value+";\n");
+					}
+				}
+			}
+
+			string $expShapes[] = `listHistory $obj` ;
+			if (size($expShapes) && `objectType -isType "nurbsCurve" $expShapes[0]` && `getAttr ($expShapes[0]+".dispCV")` == 1)
+			{
+				float $pointNum = `getAttr ($expShapes[0]+".spans")`;
+				for ($j=0;$j<=($pointNum+1);$j++)
+				{
+					string $keys[] = `listAttr -k ($expShapes[0]+".cv["+$j+"]")`;
+					for ($key in $keys)
+					{
+						string $animCurv[] = `listConnections -type animCurve -s 1 -d 0 ($expShapes[0]+"."+$key)`;
+						if (`size $animCurv` && isAnimCurve($animCurv[0]))
+						{
+							fprint $fileId ("anim "+$expShapes[0]+"."+$key+"\n{\n");
+
+							float $time[] = `keyframe -q -tc $animCurv[0]`;
+							float $value[] = `keyframe -q -vc $animCurv[0]`;
+							string $inputType[] = `keyTangent -q -itt $animCurv[0]`;
+							string $outputType[] = `keyTangent -q -ott $animCurv[0]`;
+							int $lock[] = `keyTangent -q -l $animCurv[0]`;
+							int $weightLock[] = `keyTangent -q -wl $animCurv[0]`;
+							float $inputAngle[] = `keyTangent -q -ia $animCurv[0]`;
+							float $inputWeight[] = `keyTangent -q -iw $animCurv[0]`;
+							float $outputAngle[] = `keyTangent -q -oa $animCurv[0]`;
+							float $outputWeight[] = `keyTangent -q -ow $animCurv[0]`;
+
+
+							for ($i=0;$i<size($time) ;$i++ )
+							{
+								fprint $fileId ("	"+$time[$i]+" "+$value[$i]+" "+$inputType[$i]+" "+$outputType[$i]+" "+$weightLock[$i]);
+								if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && $weightLock[$i])
+									fprint $fileId (" "+$inputAngle[$i]+" "+$outputAngle[$i]);
+								else if (($inputType[$i] == "fixed" || $outputType[$i] == "fixed") && !$weightLock[$i])
+									fprint $fileId (" "+$inputAngle[$i]+" "+$inputWeight[$i]+" "+$outputAngle[$i]+" "+$outputWeight[$i]);
+								fprint $fileId ";\n";
+							}
+
+							fprint $fileId "}\n";
+						}
+						else 
+						{
+							//print ($obj+"."+$key+"\n");
+							if (`getAttr -type ($expShapes[0]+"."+$key)` != "double3")
+							{
+								string $value = getAttr ($expShapes[0]+"."+$key);
+								fprint $fileId ("non-anim "+$expShapes[0]+"."+$key+"	"+$value+";\n");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	fclose $fileId;
+}
+
+global proc maCGImportAnimation()
+{
+	string $allSelected[] = `ls -sl`;
+	if (!size($allSelected))
+		error "请有问题的植物或者它们的控制器!";
+	string $allPre[]={};
+	for ($obj in $allSelected)
+	{
+		string $buff[] = stringToStringArray($obj,":");
+		$allPre[size($allPre)]=$buff[0];
+	}
+	$allPre = stringArrayRemoveDuplicates($allPre);
+
+
+	string $cameras[] = `ls "*:camera_cam"`;
+	if (!size($cameras))
+		error "文件相机名错误，不能获取!";
+	string $pre = substring($cameras[0],1,(size($cameras[0])-11));
+	string $tempFolder = "D:/MayaTheBee/BakeAnimation/";//`internalVar -utd`;
+	string $bakeFile = $tempFolder+$pre+".sla";
+	if (!`filetest -r $bakeFile`)
+		error "此文件没有bake过动画，不能恢复!";
+	
+	maCGImportAnimationImportSelected($bakeFile,$allPre);
+	print "恢复完成!";
+}
+
+global proc maCGImportAnimationImportSelected(string $fileName,string $allPre[])
+{
+	string $buff[];
+	string $master[] = `ls -sl`;
+	if (!`objExists $master[0]`)
+		error "请选择需要导入动画的角色！";
+	int $num = `tokenize $master[0] ":" $buff`;
+	string $preRep = `substring $master[0] 1 (size($master[0])-size($buff[$num-1]))`;
+	
+	string $file = $fileName;
+	
+	string $mayaVersion = `about -v`;
+	string $linearUnit = `currentUnit -q -f -l`;
+	string $angularUnit = `currentUnit -q -f -a`;
+	string $timeUnit = `currentUnit -q -f -t`;
+	
+	
+	string $buff[];
+	$fileId = `fopen $file "r"`;
+	string $nextLine = `fgetline $fileId`;
+	
+	//mayaVersion
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $mayaVersion)
+		//warning ("Maya版本不同：maya"+$buff[1]+"=>maya"+$mayaVersion);
+	//linearUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $linearUnit)
+	//	error ("Maya长度单位设置不同(PreferencesSetting-Linear)："+$buff[1]+"=>"+$linearUnit);
+	//angularUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $angularUnit)
+	//	error ("Maya角度单位设置不同(PreferencesSetting-Angular)："+$buff[1]+"=>"+$angularUnit);
+	//timeUnit
+	$nextLine = `fgetline $fileId`;
+	tokenize $nextLine " ;\n" $buff;
+	//if ($buff[1] != $timeUnit)
+	//	error ("Maya帧数单位设置不同(PreferencesSetting-Time)："+$buff[1]+"=>"+$timeUnit);
+	
+	while(size($nextLine)>0)
+	{
+		$nextLine = `fgetline $fileId`;
+		
+		if (startsWith($nextLine,"anim"))
+		{
+			clear $buff;
+			$buff = stringToStringArray($nextLine," \t;\n");
+			string $buff1[]=stringToStringArray($buff[1],":");
+			if (stringArrayCount($buff1[0],$allPre))
+			{
+				/*tokenize $nextLine " \t;\n" $buff;
+				string $buffer[];
+				tokenize $buff[1] "." $buffer;
+				string $attr = $buffer[size($buffer)-1];
+
+				int $num = `tokenize $buff[1] ":" $buffer`;*/
+				//string $con = `substituteAllString $buffer[$num-1] ("."+$attr) ""`;
+
+				string $key = $buff[1];//$preRep + $con + "." + $attr;
+				string $set[] = `ls $key`;
+				if (size($set) == 1 && `objExists $key` && !`getAttr -l $key` && `getAttr -k $key`)
+				{
+					$nextLine = `fgetline $fileId`;
+					$nextLine = `fgetline $fileId`;
+
+					string $existAnim[] = `listConnections -s true -d false $key`;
+					if (`objExists $existAnim[0]` && isAnimCurve($existAnim[0]))
+					{
+						catchQuiet(`delete $existAnim`);
+						if (`objExists $existAnim[0]`)
+						{
+							disconnectAttr ($existAnim[0]+".output") $key;
+						}
+					}
+					while(!startsWith($nextLine,"}"))
+					{
+						tokenize $nextLine " \t;\n" $buff;
+						float $time = (float)$buff[0];
+						float $value = (float)$buff[1];
+						string $inputType = $buff[2];
+						string $outputType = $buff[3];
+						int $weightLock = (int)$buff[4];
+
+						float $inputAngle;
+						float $inputWeight;
+						float $outputAngle;
+						float $outputWeight;
+
+						if (($inputType == "fixed" || $outputType == "fixed") && $weightLock)
+						{
+							$inputAngle = (float)$buff[5];
+							$outputAngle = (float)$buff[6];
+							setKeyframe -t $time -v $value  $key;
+							selectKey -r -k -t $time  $key;
+							keyTangent -e -ia $inputAngle -iw 1 -oa $outputAngle -ow 1;
+						}
+						else if (($inputType == "fixed" || $outputType == "fixed") && !$weightLock)
+						{
+							$inputAngle = (float)$buff[5];
+							$inputWeight = (float)$buff[6];
+							$outputAngle = (float)$buff[7];
+							$outputWeight = (float)$buff[8];
+							setKeyframe -t $time -v $value  $key;
+							selectKey -r -k -t $time  $key;
+							keyTangent -e -ia $inputAngle -iw $inputWeight -oa $outputAngle -ow $outputWeight;
+						}
+						else
+							setKeyframe -t $time -v $value -itt $inputType -ott $outputType $key;
+						//print $buff;
+						//print $key;
+						//print "\n";
+						$nextLine = `fgetline $fileId`;
+					}
+				}
+			}
+			
+			//print $key;
+			//print "\n";
+		}
+		
+		if (startsWith($nextLine,"non-anim"))
+		{
+			clear $buff;
+			$buff = stringToStringArray($nextLine," \t;\n");
+			string $buff1[]=stringToStringArray($buff[1],":");
+			if (stringArrayCount($buff1[0],$allPre))
+			{
+			
+				tokenize $nextLine " \t;\n" $buff;
+				string $buffer[];
+				float $value = (float)$buff[2];
+
+				tokenize $buff[1] "." $buffer;
+				string $attr = $buffer[size($buffer)-1];
+
+				int $num = `tokenize $buff[1] ":" $buffer`;
+				//string $con = `substituteAllString $buffer[$num-1] ("."+$attr) ""`;
+
+				string $key = $buff[1];//$preRep + $con + "." + $attr;
+				string $set[] = `ls $key`;
+				if (size($set) == 1 && `objExists $key` && !`getAttr -l $key` && `getAttr -se $key`)
+				{
+					string $existAnim[] = `listConnections -s true -d false $key`;
+					if (`objExists $existAnim[0]` && isAnimCurve($existAnim[0]))
+					{
+						delete $existAnim;	
+						setAttr $key $value;
+					}
+					if (!`objExists $existAnim[0]` && `getAttr -type $key` != "string")
+					{
+						catch (`setAttr $key $value`);
+					}
+				}
+			}
+		}
+	}
+	
+	
+	
+	
+	//print $nextLine;
+	fclose $fileId;
+}

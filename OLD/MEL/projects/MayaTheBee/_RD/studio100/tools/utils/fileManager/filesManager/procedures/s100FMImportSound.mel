@@ -1,0 +1,422 @@
+
+
+global proc s100FMImportSound()
+{
+$file = `file -q -sn `;
+
+	if(`s100FMPLCheckSceneISINPIPE`)
+	{
+		if(`s100FMCurrentsceneIsAPreviez`)
+		{
+			s100FMImportSoundForPreviez;
+        }else{
+		string $path = `s100FMGetSoundPath($file)`;
+			if(`filetest -e $path`)
+			{
+				if(`s100FMCheckIfSoundInSceneAlreadyExists($path)`)
+				{
+				warning "sound already present in scene" ;
+				}else{
+				$rpr = (`s100rebuildNameByPath($file)`) + "_sound";
+				$pref = `file -import -type "audio" -renamingPrefix $rpr -options "o=0"  -pr -loadReferenceDepth "all" $path`;
+				//setAttr ($rpr + ".offset") 105 ;/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////:
+				setAttr ($rpr + ".offset") 100 ;/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////:
+				source "updateSoundMenu.mel";
+
+				setSoundDisplay $rpr  1;
+
+				print "\n sound imported !" ;
+				}
+			}else{
+			warning ("audio sound " + $path + " doesn't exist!") ;
+			}
+
+        }
+
+
+    }else{
+	warning "file is not in pipeline" ;
+    }
+}
+
+
+global proc int s100FMCheckIfSoundExistsForRefresh(string $file )
+{
+string $path = `s100FMGetSoundPath($file) `;
+
+$ch = 0 ;
+
+	if($path != "")
+	$ch = `filetest -e $path `;
+return $ch;
+
+
+}
+
+global proc int s100FMCheckIfSoundInSceneAlreadyExists(string $path)
+{
+string $sound[] = `ls -type audio `;
+$ch = 0 ;
+	for($i = 0 ; $i < size($sound ) ; $i++)
+	{
+	string $pathT = `getAttr ($sound[$i] +".filename")`;
+		if($pathT == $path )
+		{
+		$ch = 1 ;
+		break ;
+        }
+    }
+
+return $ch ;
+
+
+}
+
+global proc string s100FMGetFolderSoundPath(string $file )
+{
+
+string $path ;
+	if($file !="")
+	{
+		if(`s100FMPLCheckSceneISINPIPE`)
+		{
+		$arr =stringToStringArray($file, "/") ;
+
+		$path ="";
+
+			for($i = 0 ; $i < 5 ; $i++)
+			{
+			$path += $arr[$i] +"/" ;
+			}
+
+
+        }
+
+    }
+
+return $path ;
+}
+
+
+
+global proc string s100FMGetSoundPath(string $file)
+{
+
+string $path = `s100FMGetFolderSoundPath($file)`;
+string $name = `s100rebuildNameByPath($file)` ;
+string $return ;
+	if(`s100FMPLCheckSceneISINPIPE`)
+	{
+	$path += "_Sound/";
+	$return = ( $path + $name +"_sound.wav" );
+    }
+
+return $return ;
+}
+
+global proc string s100rebuildNameByPath(string $file)
+{
+string $name  ;
+	if(`s100FMPLCheckSceneISINPIPE`)
+	{
+	string $prod  = `optionMenu -q -v s100FileManagerUIOMProd`;
+	//  	$getEpPAth = `s100assetManagerGetEpPath("Maya") `;
+	$getEpPAth = `s100assetManagerGetEpPath($prod) `;
+	$path = `s100FMGetFolderSoundPath($file)`;
+	$sub = substituteAllString ($path ,$getEpPAth ,"") ;
+	$epi  = stringToStringArray($sub,"_") ;
+	$arr = stringToStringArray($sub,"/") ;
+	$start = startString ($prod,2) ;
+	$s1 =  startString ($start,1) ;
+	$c1 = capitalizeString($s1 ) ;
+	$end1 = endString( $start,1) ;
+	$c2 = capitalizeString($end1) ;
+	$Pref = $c1 + $c2 ;
+
+	$name = $Pref +"_" + $epi[0]  +"_"+ $arr[1] +"_" + $arr[2] ;
+
+
+
+
+	}else{
+	warning "scene is not in pipeline" ;
+    }
+
+
+
+
+
+
+return $name ;
+
+
+}
+
+
+global proc s100FMImportSoundForPreviez()
+{
+
+	if( `s100FMExportPrevizToLayoutCheck` )
+	{
+		$var = `ls -type "time" "shotsNode*" ` ;
+		if(size($var) == 1)
+		{
+		$node = $var[0] ;
+
+		//get Files and Folders infos
+		$fileN = ` file -q -sn `;
+		$fileS = ` file -q -shortName  -sn `;
+		$fold  = `s100returnSequenceFolder($fileN ) `;
+		$folderInside = `s1KeepOnlyFolder($fold) `;
+		$listFolderClean = sort(s100removeStringFromArrayByGmatch("_PREVIZ" ,$folderInside));
+
+		//get Camera
+		$var = `ls -type "time" "shotsNode*" ` ;
+		string $listC[] = `listConnections  ($var[0] ) `;
+		string $listC2[] = `listConnections  ($var[0] +".masterCamera") `;
+		$listClean = s100removeStringFromArrayByGmatch($listC2[0] ,$listC) ;
+
+		//get Camera info
+		string $attr[] = `listAttr -ud $var[0]  ` ;
+			for($i = 0 ; $i < 4 ; $i++)
+				stringArrayRemoveAtIndex(0 , $attr);
+
+		string $attrCam[] ;
+		string $attrInfo[] ;
+		$j = 0 ;
+
+			for($i = 0 ; $i < size( $attr ) ; $i+= 2)
+			{
+			$attrCam[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		$j = 0 ;
+			for($i = 1 ; $i < size( $attr ); $i+= 2)
+			{
+			$attrInfo[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		string $soundPath[] ;
+		string $var2[]  = `ls -type "audio"`;
+			if( size($var2) > 0 )
+			{
+				delete $var2;
+            }
+
+			if(size($listFolderClean) == size($listClean))
+			{
+			//print $listClean ;
+				for($i = 0 ; $i < size($listClean) ; $i++)
+				{
+				$soundPath[$i]  =   $listFolderClean[$i]  +"/_Sound/" ;
+				string $get[] = `getFileList -folder $soundPath[$i] -filespec "*.wav" `;
+				$soundPath[$i] = $soundPath[$i] + $get[0] ;
+				}
+
+
+				for($i = 0 ; $i < size($listClean) ; $i++)
+				{
+					if(`filetest -f  $soundPath[$i]` )
+					{
+						if(`s100FMCheckIfSoundInSceneAlreadyExists($soundPath[$i])`)
+						{
+
+						}else{
+						$rpr = (`s100rebuildNameByPath($soundPath[$i])`) + "_sound";
+
+						$pref = `file -import -type "audio" -renamingPrefix $rpr -options "o=0"  -pr -loadReferenceDepth "all" $soundPath[$i]`;
+						string  $val = `getAttr ($node +"." + $attrInfo[$i] ) ` ;
+
+						string $array[] = stringToStringArray($val," " ) ;
+						int $toPut = $array[2] ;
+
+						setAttr ($rpr + ".offset") ($toPut  +5) ;//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+						print ("sound imported : " + 	$soundPath[$i] +" \n");
+
+                        }
+                    }
+
+
+
+
+
+                }
+
+			setSoundDisplay "" 1;
+
+			print ("sound  imported, check the script editor for futher information");
+			headsUpMessage  ("Sounds  imported, check the script editor for futher information");
+
+            }else{
+			warning "number of scene folder and camera in scene don't match ! check it, import aborded " ;
+            }
+
+        }else if(size($var) == 0)
+		{
+		warning "no ShotNode, did you use zoo Shoots to create and manage your camera? " ;
+		}else{
+		warning "to many shotNodes, use zoo Shoot to merge them!  " ;
+
+		}
+    }else{
+	warning "scene is not a Previz scene ! " ;
+    }
+
+}
+
+
+
+
+
+
+global proc s100FMImportSoundWithOffset(){
+$file = `file -q -sn `;
+$offset = `intField -q -v s100FileManagerUIBTShotOffsetImpSnd`;
+	if(`s100FMPLCheckSceneISINPIPE`)
+	{
+		if(`s100FMCurrentsceneIsAPreviez`)
+		{
+			s100FMImportSoundForPreviezWithOffset($offset);
+        }else{
+		string $path = `s100FMGetSoundPath($file)`;
+			if(`filetest -e $path`)
+			{
+				if(`s100FMCheckIfSoundInSceneAlreadyExists($path)`)
+				{
+				warning "sound already present in scene" ;
+				}else{
+				$rpr = (`s100rebuildNameByPath($file)`) + "_sound";
+				$pref = `file -import -type "audio" -renamingPrefix $rpr -options "o=0"  -pr -loadReferenceDepth "all" $path`;
+				setAttr ($rpr + ".offset") (100+$offset) ;/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////:
+				source "updateSoundMenu.mel";
+
+				setSoundDisplay $rpr  1;
+
+				print "\n sound imported !" ;
+				}
+			}else{
+			warning ("audio sound " + $path + " doesn't exist!") ;
+			}
+
+        }
+
+
+    }else{
+	warning "file is not in pipeline" ;
+    }
+}
+
+global proc s100FMImportSoundForPreviezWithOffset(int $offset)
+{
+
+	if( `s100FMExportPrevizToLayoutCheck` )
+	{
+		$var = `ls -type "time" "shotsNode*" ` ;
+		if(size($var) == 1)
+		{
+		$node = $var[0] ;
+
+		//get Files and Folders infos
+		$fileN = ` file -q -sn `;
+		$fileS = ` file -q -shortName  -sn `;
+		$fold  = `s100returnSequenceFolder($fileN ) `;
+		$folderInside = `s1KeepOnlyFolder($fold) `;
+		$listFolderClean = sort(s100removeStringFromArrayByGmatch("_PREVIZ" ,$folderInside));
+
+		//get Camera
+		$var = `ls -type "time" "shotsNode*" ` ;
+		string $listC[] = `listConnections  ($var[0] ) `;
+		string $listC2[] = `listConnections  ($var[0] +".masterCamera") `;
+		$listClean = s100removeStringFromArrayByGmatch($listC2[0] ,$listC) ;
+
+		//get Camera info
+		string $attr[] = `listAttr -ud $var[0]  ` ;
+			for($i = 0 ; $i < 4 ; $i++)
+				stringArrayRemoveAtIndex(0 , $attr);
+
+		string $attrCam[] ;
+		string $attrInfo[] ;
+		$j = 0 ;
+
+			for($i = 0 ; $i < size( $attr ) ; $i+= 2)
+			{
+			$attrCam[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		$j = 0 ;
+			for($i = 1 ; $i < size( $attr ); $i+= 2)
+			{
+			$attrInfo[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		string $soundPath[] ;
+		string $var2[]  = `ls -type "audio"`;
+			if( size($var2) > 0 )
+			{
+				delete $var2;
+            }
+
+			if(size($listFolderClean) == size($listClean))
+			{
+			//print $listClean ;
+				for($i = 0 ; $i < size($listClean) ; $i++)
+				{
+				$soundPath[$i]  =   $listFolderClean[$i]  +"/_Sound/" ;
+				string $get[] = `getFileList -folder $soundPath[$i] -filespec "*.wav" `;
+				$soundPath[$i] = $soundPath[$i] + $get[0] ;
+				}
+
+
+				for($i = 0 ; $i < size($listClean) ; $i++)
+				{
+					if(`filetest -f  $soundPath[$i]` )
+					{
+						if(`s100FMCheckIfSoundInSceneAlreadyExists($soundPath[$i])`)
+						{
+
+						}else{
+						$rpr = (`s100rebuildNameByPath($soundPath[$i])`) + "_sound";
+
+						$pref = `file -import -type "audio" -renamingPrefix $rpr -options "o=0"  -pr -loadReferenceDepth "all" $soundPath[$i]`;
+						string  $val = `getAttr ($node +"." + $attrInfo[$i] ) ` ;
+
+						string $array[] = stringToStringArray($val," " ) ;
+						int $toPut = $array[2] ;
+
+						setAttr ($rpr + ".offset") ($toPut  +$offset) ;//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+						print ("sound imported : " + 	$soundPath[$i] +" \n");
+
+                        }
+                    }
+
+
+
+
+
+                }
+
+			setSoundDisplay "" 1;
+
+			print ("sound  imported, check the script editor for futher information");
+			headsUpMessage  ("Sounds  imported, check the script editor for futher information");
+
+            }else{
+			warning "number of scene folder and camera in scene don't match ! check it, import aborded " ;
+            }
+
+        }else if(size($var) == 0)
+		{
+		warning "no ShotNode, did you use zoo Shoots to create and manage your camera? " ;
+		}else{
+		warning "to many shotNodes, use zoo Shoot to merge them!  " ;
+
+		}
+    }else{
+	warning "scene is not a Previz scene ! " ;
+    }
+
+}

@@ -1,0 +1,251 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ¿Ó»Ò
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:  lr_layerlist.mel
+//       Version:  1.1
+//   Description:  Show Layer list of each selected shot;
+//    Created By:  Larry  2002.9.22
+// 
+//
+///////////////////////////////////////////////////////////////////////
+
+//   Update:
+//        2002.12.2    add shot frames display and edit.
+//
+//
+//
+
+
+
+global proc lr_layerlist()
+{
+    if(`window -ex LayerListUI`) deleteUI LayerListUI;
+    
+    window -title "Layer List Tool V 1.0" -sizeable 0 -widthHeight 350 450 LayerListUI;
+        menuBarLayout;
+            menu -label "Help";
+            menuItem -label "Help on Layer List Tool..." -command "zjHelpCallback lr_layerlist";
+        setParent ..;
+       
+        columnLayout;
+             text -label "                  ";
+                 popupMenu;
+                    menuItem -label "Enable Edit Button.." -c ("button -e -vis 1 EditBT; textFieldButtonGrp -e -eb 1 shotframeCTL;");
+             rowLayout -numberOfColumns 2 -cw2 150 150;
+                 textFieldGrp -cw2 80 60 -label "Scene:" -text  "000"  -cc ListLayers scenenameCTL;
+                 textFieldGrp -cw2 80 60 -label "Shot:" -text  "001"  -cc ListLayers shotnameCTL;
+             setParent ..;
+             
+             rowLayout -numberOfColumns 6 -cw6 80 40 30 80 40 40;
+                 text -label "" ;
+                 button -w 15 -h 15 -label "+" -c "onValueChange(\"SC\",\"Add\");ListLayers;";
+                 button -w 15 -h 15 -label "-" -c "onValueChange(\"SC\",\"Reduce\");ListLayers;";
+                 text -label "";
+                 button -w 15 -h 15 -label "+" -c "onValueChange(\"ST\",\"Add\");ListLayers;";
+                 button -w 15 -h 15 -label "-" -c "onValueChange(\"ST\",\"Reduce\");ListLayers;";
+             setParent ..;             
+             
+             separator -style "none" -w 350; 
+             
+             rowLayout -numberOfColumns 2 -cw2 100 250;
+                 text -align "left" -label "    Info:" stateCTL;
+                 textFieldButtonGrp -ed 0 -label "Shot Frames:" -buttonLabel "Edit" -eb 0 -bc onEditFrames -cw3 150 40 40 shotframeCTL;
+ 
+             setParent ..;
+             
+             separator -style "in" -w 350; 
+             
+             textScrollList -w 340 -numberOfRows 15 -allowMultiSelection 0 layerCTL;
+             separator -style "in" -h 20 -w 350; 
+
+             rowLayout -numberOfColumns 3 -cw3 60 140 100 ;
+                  button -w 40 -label "  Edit" -vis 0 -c onEditButton  EditBT;
+                  button -w 80 -label "  Refresh"  -c ListLayers;
+                  button -w 80 -label "    Close" -c "deleteUI LayerListUI";
+             setParent ..;             
+           
+        setParent ..;
+    showWindow;	
+    ListLayers();
+}
+
+global proc onValueChange(string $type,string $way)
+{
+   string $CTL;
+   if($type == "SC")
+   {
+   	$CTL = "scenenameCTL";
+   }else if($type == "ST")
+   {
+       $CTL = "shotnameCTL";	
+   }
+   
+   int $value = `textFieldGrp -q -text $CTL`;
+   
+   if($way == "Add")
+   {
+      $value = $value + 1;
+   }else if($way == "Reduce")
+   {
+      $value = $value - 1;	
+   }
+   
+   string $str;
+   if($value < 0) return;
+   
+   if($value < 10) 
+   {
+     $str = "00" + $value;
+   }else if($value >= 10)
+   {
+     $str = "0" + $value;
+   }
+   
+   textFieldGrp -e -text $str $CTL;
+   	
+}
+
+global proc onEditButton()
+{
+   string $scene = `textFieldGrp -q -text scenenameCTL`;
+   string $shot  = `textFieldGrp -q -text shotnameCTL`;
+ 
+   string $fn = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Layer_List.ini";
+   
+   if(`filetest -f $fn`)
+   {
+      system("Shell " + $fn);
+   }else{    
+      error ("Layer list file not found! " + $fn );
+   }	
+	
+}
+
+global proc onEditFrames()
+{
+   string $scene = `textFieldGrp -q -text scenenameCTL`;
+   string $shot  = `textFieldGrp -q -text shotnameCTL`;
+ 
+   string $fn = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Frames.ini";
+   
+   if(`filetest -f $fn`)
+   {
+      system("Shell " + $fn);
+   }else{    
+      error ("Shot Frmames file not Found! " + $fn );
+   }	
+		
+}
+
+// set the scene name and shot name from outside.
+
+global proc setSceneShot(string $scene,string $shot)
+{
+    textFieldGrp -e -text $scene scenenameCTL;
+    textFieldGrp -e -text $shot shotnameCTL;    
+    ListLayers();
+}
+
+
+global proc string [] GetLayers(string $scene,string $shot)
+{
+    string $ls[];
+      
+    string $lfile = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Layer_List.ini";
+    int $index = 0;
+    $fileID = `fopen $lfile "r"`;
+    string $nextline = `fgetline $fileID`;
+    string $buf[];
+    while(!`feof $fileID`)
+    {
+        if(`gmatch $nextline "*//*"`)  
+        {
+            $nextline = `fgetline $fileID`;
+            continue;
+        }
+        if(`tokenize $nextline "#" $buf` > 1)
+        {
+            $ls[$index++] = $buf[0];
+        }
+        $nextline = `fgetline $fileID`;
+    }
+    	
+    fclose $fileID;
+    clear $buf;
+    
+   return $ls;
+}
+
+global proc ListLayers()
+{
+   string $scene = `textFieldGrp -q -text scenenameCTL`;
+   string $shot  = `textFieldGrp -q -text shotnameCTL`;
+   textScrollList -e -ra layerCTL;
+   
+   if(($scene == "") || ($shot == "")) return;
+   
+   string $fn = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Layer_List.ini";
+   
+   if(!`filetest -f $fn`)
+   {
+      text -e -label ("    Info: Can not find Layer List " + $scene + "_" + $shot ) stateCTL;
+      
+   }else{
+   
+     string $lys[] = GetLayers($scene,$shot);
+     text -e -label ("    Info:  " +  $scene + "_" + $shot ) stateCTL;
+     
+     for($tmp in $lys)
+     {
+         textScrollList -e -append $tmp layerCTL;
+     }
+     
+   }  
+   
+   setShotFrames($scene,$shot);
+
+}
+
+global proc setShotFrames(string $scene,string $shot)
+{
+   
+   // get Shot Frames;
+   
+   int $reval = 0;   
+   string $lfile = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Frames.ini";
+
+     if(`filetest -f $lfile`)
+     {
+    	$fileID = `fopen $lfile "r"`;
+        string $nextline = `fgetline $fileID`;
+    	string $buf[];
+    	while(!`feof $fileID`)
+    	{
+    	    if(!`gmatch $nextline "Shot Frames=*"`)  
+    	    {
+    	        $nextline = `fgetline $fileID`;
+    	        continue;
+    	    }else{
+    	    
+    	        if(`tokenize $nextline "=" $buf` > 1)
+    	        {
+                    $reval = $buf[1]; 
+    	            break;   	      
+    	        }
+    	        $nextline = `fgetline $fileID`;
+    	    }
+    	}   	
+        fclose $fileID;
+    	clear $buf;
+     }
+
+textFieldButtonGrp -e -text $reval shotframeCTL;
+}

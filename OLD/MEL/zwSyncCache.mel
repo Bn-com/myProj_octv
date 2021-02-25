@@ -1,0 +1,120 @@
+global proc zwSyncCache(string $project, string $episode, string $scene)
+{
+	if (`getenv "OFFICE_LOCATION"` == "chongqing")
+	{
+		if (!($episode == "115" || $episode == "120"))
+		{
+			return;
+		}
+	}
+
+	string $buf[];
+
+	string $folder = "//file-cluster/GDC/Resource/Support/Virtual Vertex/TD/SyncCache/" + $project + "/episode_" + $episode;
+	if (!`filetest -d $folder`)
+	{
+		sysFile -md $folder;
+	}
+
+	// 读上一次信息
+	string $oldCache[];
+	clear $oldCache;
+	string $oldModified[];
+	clear $oldModified;
+	string $log = $folder + "/" + $episode + "_" + $scene + ".txt";
+	if (`filetest -f $log`)
+	{
+		int $fileId = `fopen $log "r"`;
+		if ($fileId != 0)
+		{
+			while (!`feof $fileId`)
+			{
+				string $str = `fgetline $fileId`;
+				if (`tokenize $str "\t" $buf` == 2)
+				{
+					$oldModified[size($oldModified)] = $buf[0];
+					$oldCache[size($oldCache)] = strip($buf[1]);
+				}
+			}
+		}
+		fclose $fileId;
+	}
+
+	// 列出所有文件
+	string $data = "//file-cluster/GDC/Projects/" + $project + "/Project/data/episode_" + $episode + "/scene_" + $scene;
+	string $caches[];
+	clear $caches;
+	zwSyncCacheRecursiveFile $data $caches;
+
+	string $target;
+	string $url;
+	string $ftp;
+	if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+	{
+		$target = "cq";
+		$url = "58.251.166.126";
+		$ftp = "//192.168.2.10/ftp$/" + $project + "_cache.txt";
+	}
+	else if (`getenv "OFFICE_LOCATION"` == "chongqing")
+	{
+		$target = "sz";
+		$url = "123.147.194.68";
+		$ftp = "//192.168.21.2/ftp$/" + $project + "_cache.txt";
+	}
+
+ 	int $ftpId = `fopen $ftp "a"`;
+
+	int $fileId = `fopen $log "w"`;
+	for ($cache in $caches)
+	{
+		string $modified = `idmtFile -modified $cache`;
+	 	$cache = `substitute ($data + "/") $cache ""`;
+		fprint $fileId ($modified + "\t" + $cache + "\r\n");
+
+		int $sync = true;
+		for ($i=0; $i<size($oldCache); $i++)
+		{
+			if ($oldCache[$i] == $cache)
+			{
+				if (`strcmp $modified $oldModified[$i]` != 1)
+				{
+					$sync = false;
+				}
+				break;
+			}
+		}
+
+		if ($sync)
+		{
+			string $source = "Project/data/episode_" + $episode + "/scene_" + $scene + "/" + $cache;
+			string $dest = `substitute "/[^/]+$" $source ""`;
+			$str = "wget -P \"/home/" + $target + "/" + $project + "/" + $dest + "\" -nv -N -t 30 -a /home/" + $target + "/log/log.txt \"http://" + $url + "/sk/" + $source + "\"\n";
+
+			fprint $ftpId ($str + "\r\n");
+		}
+	}
+ 	fclose $fileId;
+
+	fclose $ftpId;
+}
+
+global proc zwSyncCacheRecursiveFile(string $folder, string $caches[])
+{
+	string $buf[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($filename in $buf)
+	{
+		string $source = $folder + "/" + $filename;
+		if (`filetest -f $source`)
+		{
+			$caches[size($caches)] = $source;
+		}
+		else if (`filetest -d $source`)
+		{
+			if (`match "history" $filename` != "" || `match "old" $filename` != "")
+			{
+				continue;
+			}
+			zwSyncCacheRecursiveFile($source, $caches);
+		}
+	}
+}

@@ -1,0 +1,99 @@
+global proc string s100PCSubmitPythonToDeadlineNeedUI(string $jobD[], string $Name, string $comment , string $pool,string $command )
+{
+	//$Name = "test"
+	$commandClean = substituteAllString($command ,"\"" , "\\\\\"");
+	$fileName = ( `internalVar -userTmpDir` + $Name + "pyToDead.py" );
+
+
+	string $python ="";
+
+	$python+="def buildTBDL(arg):\n";
+	$python+="\timport os\n";
+	$python+="\tos.environ[\"PATH\"] = \"C:\\\\Program Files\\\\Autodesk\\\\Maya2010\\\\bin;\" + os.environ[\"PATH\"]\n";
+	$python+="\ttest = '\"maya.exe -command {0}\"'.format(arg)\n";
+	$python+="\tos.system(test);\n";
+	$python+= "buildTBDL('\""+$commandClean +"\"')";
+	print $python ;
+
+	$fileId=`fopen $fileName "w"`;
+	fwrite $fileId $python;
+	fclose $fileId;
+
+
+	string $returnJOB= s100PCSubmitPythonToDeadline($jobD,$Name,$comment , $fileName ,$pool, " "   );
+
+	return $returnJOB;
+}
+
+
+global proc string s100PCSubmitPythonToDeadline(string $jobD[], string $Name, string $comment, string $scene, string $pool, string $arg)
+{
+	/*
+		$jobDepen = "004_050_999_20d284e0" ;
+		$Name =  ("PreComp:"+ $filename);
+		$comment = ("preCompositing") ;
+
+		$chunkS = 15 ;
+		$scene= $nForN;
+		$pool= "nukewithplug";
+		global string $s100JobDepandancie[];
+		$jobD = $s100JobDepandancie ;
+		print $jobD ;
+	*/
+
+	$jobDepen = stringArrayToString($jobD,",");
+
+	string $tempDir = SafeDeadlineCommand( "-GetCurrentUserHomeDirectory" ) + "/temp";
+
+	string $submitFilename = CheckSlashes( $tempDir + "/python_job_info.job" );
+
+	int $fileId = `fopen $submitFilename "w"`;
+
+	fprint $fileId ( "Plugin=Python\n" ) ;
+	fprint $fileId ( "Name=" + $Name +"\n"  ) ;
+	fprint $fileId ( "Comment=" +  $comment+"\n" );
+	fprint $fileId ( "Department=\n" );
+	fprint $fileId ( "Pool=" +$pool+"\n" );
+	fprint $fileId ( "Group=\n" );
+	fprint $fileId ( "Priority=\n" );
+	fprint $fileId ( "TaskTimeoutMinutes=60\n" );
+	fprint $fileId ( "EnableAutoTimeout=\n" );
+	fprint $fileId ( "ConcurrentTasks=\n" );
+	fprint $fileId ( "LimitConcurrentTasksToNumberOfCpus=\n" );
+	fprint $fileId ( "LimitGroups=\n"  );
+	fprint $fileId ( "PostJobScript=\n"  );
+	fprint $fileId ( "JobDependencies=" +$jobDepen +"\n");
+	fprint $fileId ( "OnJobComplete=\n" );
+	fprint $fileId ( "Frames=0\n" );
+	fprint $fileId ( "ChunkSize=1\n" );
+	fclose $fileId ;
+	//system("load "+$tempDir)
+	//print "ici";
+
+	string $jobFilename = CheckSlashes( $tempDir + "/python_plugin_info.job" );
+	$fileId = `fopen $jobFilename "w"`;
+	fprint $fileId ( "SceneFile=" +$scene+"\n" );
+	fprint $fileId ( "Arguments=" + $arg +"\n"  );
+	fprint $fileId ( "Version=2.6\n"  );
+	fclose $fileId ;
+
+	// Submit the job to Deadline
+	string $submissionCommand = "\"" + $submitFilename + "\" \"" + $jobFilename + "\"";
+
+	string $submitResults = SafeDeadlineCommand( $submissionCommand + " " + $scene );
+
+
+	string $jobId = "";
+	string $jobIdRegEx = "[a-z,A-Z,0-9]+_[0-9]+_[a-z,A-Z,0-9]+_[0-9,a-f,A-F]+";
+	$matches = `match $jobIdRegEx $submitResults`;
+	if( size( $matches ) > 0 )
+		$jobId = $matches;
+
+	return $jobId;
+}
+
+
+/*
+	s100PCSubmitPythonToDeadlineNeedUI({""},"test","ceci est un test" , "j:/test.py" ,"");
+	s100PCSubmitPythonToDeadlineNeedUI({""},"test","ceci est un test" ," ", $command );
+*/

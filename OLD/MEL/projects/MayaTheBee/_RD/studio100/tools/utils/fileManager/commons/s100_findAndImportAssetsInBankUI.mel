@@ -1,0 +1,888 @@
+///////////////////////////////////////////////////////////////////////////////////////////
+//
+//		s100_findAndImportAssetsInBankUI()
+//
+///////////////////////////////////////////////////////////////////////////////////////////
+
+
+// Checking lock state of list of files (the ones treated by action synthese) by finding them acc. to their names
+// and importing them in reference.
+
+//string $file = "C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/assetsActionSynthese_070612.txt";
+//string $file = "C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/assetsActionSynthese_simple.txt";
+
+global proc s100_findAndImportAssetsInBankUI()
+{
+	string $win = "s100_findAndImportAssetsInBankUI";
+	if (`window -ex  $win`)
+    	deleteUI $win;
+	int $resetUI = 1; // debug
+	if (`windowPref -exists $win` && ( $resetUI == true) )
+    	windowPref -r $win;
+
+
+    string $version = `about -v`;
+    string $bufs[] = stringToStringArray($version," ");
+    float $mayaVersion = $bufs[0];
+	int $width = 650;
+
+	window -s 0 -ip -in $win -w $width -h 250 -title "s100_findAndImportAssetsInBankUI" $win;
+
+	menuBarLayout ;
+		menu -tearOff 1 -label "help" ;
+			menuItem -label "refresh" -c s100_findAndImportAssetsInBankUI ;
+
+			menuItem -d true  ; // divider
+
+			menuItem -l ("List every asset of the BANK") //-bgc 1.0 1.0 0.4
+			 -ann "Parses the whole 3D BANK and print every found asset in the Script Editor..."
+			 -c ("s100fai_listAllAssetsInMTBbdd(1);");
+
+			menuItem -d true  ; // divider
+
+			menuItem -l ("Analyse Current Scene UI...") //-bgc 1.0 1.0 0.4
+			 -ann "Analyses content of the scene and prompt it in a window to be edited/saved"
+			 -c ("s100FMsceneAnalyser(1);");
+
+			menuItem -l ("Show Analyse of current scene from FILE (if any)...") //-bgc 1.0 1.0 0.4
+				 -ann "Searches for file containing the last Analyse of the current scene and prompt it in a window to be edited/saved/compared"
+				 -c ("s100FMac_promptSceneAnalyseFromFile();");
+
+			menuItem -l ("Analyses Current Scene And Save it ") //-bgc 1.0 1.0 0.4
+				 -ann "Analyse content of the scene and save it in a file without any prompt (apart from ScriptEditor)"
+				 -c ("s100FMsceneAnalyser(0);");
+
+	columnLayout ;
+	    if ($mayaVersion>=2011)
+	        frameLayout -borderVisible true -labelVisible true -label "Import Refs from file :" -marginWidth 5 -marginHeight 5 ;
+	    else
+	        frameLayout -borderVisible true -labelVisible true -labelAlign "center" -label "Find file path(s) from reference(s)..." -marginWidth 5 -marginHeight 5 ;
+				columnLayout -rs 5;
+
+					//text -align "left" -fn "boldLabelFont" -l "Use names from :     ";
+					string $colec = radioCollection();
+
+					// sources of names :
+					//
+					// from UI :
+					rowColumnLayout -nc 3 -cw 1 110 -cw 2 ($width-150) -cw 3 10  ;
+						radioButton -sl -cl $colec -label "...whose name is : "
+						-cc ("int $vl=`radioButton -q -sl s100_ImpRefPathTextrb1`; \n"
+							+"textField -e -en (1-$vl) s100_ImpRefPathText; \n"
+							+"button -e -en (1-$vl) s100_ImpRefPathBtn;\n"
+							+"textField -e -en ($vl) s100_ImpRefNameText;\n")
+						s100_ImpRefPathTextrb1 ;
+
+						string $default = "MA_P_assetName_01";
+						textField -text $default -en 1 -ed 1 s100_ImpRefNameText;
+						text -l "";
+					setParent ..;
+
+
+					// from file :
+					radioButton -cl $colec -label "...whose names are listed in file : "
+						-cc ("int $vl=`radioButton -q -sl s100_ImpRefPathTextrb1`; \n"
+							+"textField -e -en (1-$vl) s100_ImpRefPathText; \n"
+							+"button -e -en (1-$vl) s100_ImpRefPathBtn;\n"
+							+"textField -e -en ($vl) s100_ImpRefNameText;\n")
+						s100_ImpRefPathTextrb2 ;
+					rowColumnLayout -nc 3 -cw 1($width-80) -cw 2 50 -cs 3 5 ;
+						string $default = "Y:/000_3D_BANK/toto.txt";
+						textField -text $default -en 0 -ed 1 s100_ImpRefPathText;
+						button -label "Browse" -en 0 -c "s100fai_ParseFile_browseSpecificPath;" s100_ImpRefPathBtn;
+						text -l "";
+					setParent ..;
+
+					separator -w $width  ;
+
+					// Options :
+					//
+					rowColumnLayout -nc 2 -cw 1 ($width/2) -cw 2 ($width/2) ;
+						checkBox -v 0 -l "Try slow deep search if needed (not recommended)"
+							-ann "For files that cannot be found (see list in ScriptEditor) will try to parse EVERY subFolders of 3D BANK..."
+							s100_ImpRefCbxSlow;
+						checkBox -v 0 -l "Verbose search Time in ScriptEditor"
+							-ann "Will prompt time it took for each search in ScriptEditor returns"
+							s100_ImpRefCbxTime;
+					setParent ..;
+
+
+					checkBox -v 0 -l "Also try to Create Ref from found Files ! (you'll be able to do it later anyway)"
+						-ann "Create Reference onto found files in current scene" s100_ImpRefCbxRef;
+
+					button -bgc 0.9 0.6 0.3 -w ($width-30) -label "Try find real Asset Path from names from the file (see scriptEditor)"
+						-c ( "s100fai_refImportListOfAssetsFromFileFromUI;") ;
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	setParent ..;
+
+	showWindow $win;
+}
+
+
+// Launching main commands from UI :
+//
+global proc s100fai_refImportListOfAssetsFromFileFromUI()
+{
+	int $fromFile = `radioButton -q -sl s100_ImpRefPathTextrb2`;
+	int $slowSearchIfNeeded = `checkBox -q -v s100_ImpRefCbxSlow`;
+	int $createRef = `checkBox -q -v s100_ImpRefCbxRef`;
+	int $verboseTime = `checkBox -q -v s100_ImpRefCbxTime`;
+	string $foundPaths[] = {};
+	string $notFound[] = {};
+	string $foundAssets[] ={};
+
+	if ($fromFile )
+	{
+		string $file = `textField -q -text s100_ImpRefPathText`;
+		$foundPaths = s100fai_refImportListOfAssetsFromFile($file, $notFound, $foundAssets, $slowSearchIfNeeded, $createRef, $verboseTime);
+    }
+	else
+	{
+		string $file = strip(`textField -q -text s100_ImpRefNameText`);
+		$foundPaths = s100fai_refImportListOfAssets( { $file } , $notFound, $foundAssets, $slowSearchIfNeeded, $createRef, $verboseTime);
+    }
+
+	//if (size($foundPaths)) {
+		s100fai_promptResultsInUI($foundPaths, $foundAssets, $notFound);
+	// } else		print ("// No actual paths found.. See Script Editor for more details...\n");
+}
+
+
+// printing result in textScroll list UI :
+// ex:
+// 	string $foundPaths[] = {"Y://000_3D_BANK/03_Props/Paper/MA_P_Pen_01/", "Y://000_3D_BANK/03_Props/Paper/MA_P_Pen_02/"};
+//	string $foundAssets[] = {"MA_P_Pen_01", "MA_P_Pen_02"};
+//
+//  string $notFound[] = {"toto", "titi"};
+//	s100fai_promptResultsInUI($foundPaths, $foundAssets, $notFound)
+//
+global proc s100fai_promptResultsInUI(string $foundPaths[], string $foundAssets[] , string $notFound[])
+{
+	if (size($foundPaths)==0)
+		return;
+
+	string $win = "s100_findAssetsInBankResultsUI";
+	if (`window -ex  $win`)
+    	deleteUI $win;
+	int $resetUI = 1; // debug
+	if (`windowPref -exists $win` && ( $resetUI == true) )
+    	windowPref -r $win;
+
+	window -s 0 -ip -in $win -rtf 1 -title "s100_findAssetsInBankUI : Results..." $win;
+
+	columnLayout -w 200 ;
+		text  -align "left" -w 400 -fn "boldLabelFont" -l " Found : Select + R-Click to import or use FileManager  " ;
+		string $tslf = `textScrollList -en 1 -fn "plainLabelFont" -numberOfRows (size($foundPaths)+1)
+						-allowMultiSelection 0 s100faiResScrollListF`;
+
+		// adding every FOUND item in list:
+		// also printing final results in Script Editor, just in case :
+		int $total = size($foundPaths) + size($notFound);
+
+		print ("\n// FOUND assets paths ("+size($foundPaths)+"/"+$total+"):\n\n");
+		for ($i=0; $i<size($foundPaths); $i++)
+		{
+			print ("\t "+ $foundPaths[$i]+"\n");
+			textScrollList -e -append $foundPaths[$i] $tslf;
+				popupMenu;
+				menuItem -l ("Create Reference with Asset")
+					-c ("s100fai_CreateRefImportFroms100faiResScrollListFindex();");
+				menuItem -l ("Update FileManagerUI [Assets] tab with Asset")
+					-c ("s100fai_refreshAssetTabOptionsFroms100faiResScrollListFindex();");
+        }
+
+		text  -align "left" -w 300 -fn "boldLabelFont" -l " Asset(s) NOT found  :" ;
+		string $tslnf = `textScrollList -en 0 -fn "plainLabelFont" -numberOfRows (size($notFound)+1)
+						-allowMultiSelection 0 s100faiResScrollListNF`;
+
+		// adding every NOT FOUND item in list:
+		print ("\n// NOT FOUND assets ("+size($notFound)+"/"+$total+"):\n\n");
+		for ($it in $notFound)
+		{
+			print ("\t "+ $it +"\n");
+			textScrollList -e  -append $it $tslnf;
+        }
+
+	setParent ..;
+
+	showWindow $win;
+}
+
+global proc s100fai_CreateRefImportFroms100faiResScrollListFindex()
+{
+	string $itms[] = `textScrollList -q -selectItem s100faiResScrollListF`;
+	if (size($itms))
+	{
+		for ($itm in $itms)
+		{
+			string $nmsp = s100FM_returnAssetBaseNameFromFile($itm);
+			s100FMIACreateRefImport($itm, $nmsp );
+        }
+    }
+}
+
+global proc s100fai_refreshAssetTabOptionsFroms100faiResScrollListFindex()
+{
+	string $itms[] = `textScrollList -q -selectItem s100faiResScrollListF`;
+	if (size($itms))
+	{
+		for ($itm in $itms) // $itm=$itms[0]
+		{
+			//refreshing fileManager UI ([Asset] tab)
+			s100FMASsetFileIdOnOptionMenuFromPath( $itm );
+        }
+    }
+}
+
+
+global proc s100fai_ParseFile_browseSpecificPath()
+{
+	// checking Maya version:
+	int $up2011version = true;
+
+	string $ver = `about -v `;
+	string $vers[] = stringToStringArray($ver," ");
+	string $verMaya = $vers[0];
+	string $matchingPart = `match "^[+\-]{0,1}[0-9]+$" $verMaya ` ;
+	int $goodMatch = ! `strcmp $matchingPart $verMaya  ` ; // if 2 strings are the same strcmp return 0
+	if ($goodMatch)
+	{
+		int $verMayaInt = $vers[0];
+		if ($verMayaInt<=2010)
+		{
+			print "// Current Maya version is <= 2010...\n";
+			$up2011version = false;
+        }
+	}
+
+	if ($up2011version)
+	{
+		string $result[] = `fileDialog2 -fileMode 1 -okCaption "Pick text file" -dialogStyle 2`;
+		if (size($result))
+			s100fai_ParseFile_refreshMenuFromSpecificPath( $result[0], "");
+		else
+			print "\n// No new file has been choosen... No Action.\n";
+    }
+	else
+	{
+		fileBrowserDialog -ds 0 -m 0 -fc ("s100fai_ParseFile_refreshMenuFromSpecificPath ") -ft "text"
+		-an ("Please select a readable text file to get Asset list from...")  ;
+    }
+
+}
+
+
+
+global proc s100fai_ParseFile_refreshMenuFromSpecificPath(string $path, string $type)
+{
+	if (size($path))
+	{
+		print ("\n// s100fai_ParseFile_refreshMenuFromSpecificPath >> passed path : \""+$path+"/\"...\n");
+		textField -e -text  ($path) s100_ImpRefPathText;
+	}
+	else
+		print "\n// No new file has been choosen... No Action.\n";
+}
+
+
+
+// Trying to find assets listed in a file :
+// Returns founds paths (string[]) but also update passed $notFound with assets that were vainly searched.
+// as well as string $foundAssets[] with simple names (namespaces when imported) of found assets at same index.
+//
+global proc string[] s100fai_refImportListOfAssetsFromFile(	string $file, string $notFound[], string $foundAssets[],
+															int $slowSearchIfNeeded, int $createRef, int $verboseTime)
+{
+	if (!`filetest -e $file`)
+		error ("No file here : \""+$file+"\"");
+
+	//string $file = "C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/assetsActionSynthese_070612.txt";
+	//string $file = "C:/Users/Quentin Auger/Documents/MAYA_THE_BEE/assetsActionSynthese_simple.txt";
+
+	string $assetList[] = s100fai_refImportListOfAssetsLoadFile($file); // size($list)
+	string $foundPaths[] = s100fai_refImportListOfAssets( $assetList, $notFound, $foundAssets, $slowSearchIfNeeded, $createRef, $verboseTime);
+	return $foundPaths;
+}
+
+
+// Trying to find passed assets.
+// Returns founds paths (string[]) but also update passed $notFound with assets that were vainly searched.
+// as well as string $foundAssets[] with simple names (namespaces when imported) of found assets at same index.
+//
+// ex:
+// 		string $assetList[] = {"MA_P_Pen_01"};
+//
+global proc string[] s100fai_refImportListOfAssets(string $assetList[], string $notFound[], string $foundAssets[], int $slowSearchIfNeeded, int $createRef, int $verboseTime)
+{
+	string $assetFiles[] = {};
+	string $foundPaths[] = {};
+
+	print ("// verboseTime: "+$verboseTime+"\n");
+
+
+	$assetList = stringArrayRemoveDuplicates($assetList);
+	string $assetPaths[] = s100fai_refImportFindPathsOfAssets( $assetList );
+	print $assetPaths;
+	waitCursor -st 1;
+
+	$startTime = `timerX`;
+
+	// FAST SEARCH :
+	//
+	int $found = 0;
+	for ($i=0;$i<size($assetList);$i++)
+	{
+		print ("\n// Looking for asset \""+$assetList[$i]+"\" in path \""+$assetPaths[$i]+"\" : \n");
+		$assetFiles[$i] = s100fai_fastTryFindAssetToRefImportFromBasePath( $assetList[$i], $assetPaths[$i] );
+		if (size($assetFiles[$i]))
+		{
+			$foundPaths[size($foundPaths)] = $assetFiles[$i];
+			$foundAssets[size($foundAssets)] = $assetList[$i];
+
+			$foundStr = "(found)";
+			$found += 1;
+			$elaspedTime = `timerX -startTime $startTime`;
+			if ($verboseTime)
+				print ("Elapsed FAST Search Time for asset \""+$assetList[$i]+"\" (found): "+$elaspedTime+" (see scriptEditor for details)\n");
+			continue;
+		}
+		$elaspedTime = `timerX -startTime $startTime`;
+		if ($verboseTime)
+			print ("Elapsed FAST Search Time for asset \""+$assetList[$i]+"\" (not found): "+$elaspedTime+" (see scriptEditor for details)\n");
+	}
+	$fastSearchTime = `timerX -startTime $startTime`;
+	if ($verboseTime)
+		print ("Elapsed FAST Search Time for all assets (found "+$found+"/"+size($assetList)+"): "+$fastSearchTime+" (see scriptEditor for details)\n");
+
+	if ($found!=size($assetList) )
+	{
+		print ("\n// !! NOT FOUND :\n");
+		for ($i=0;$i<size($assetList);$i++)
+		{
+			if (size($assetFiles[$i])==0)
+			{
+				print ("// - \""+$assetList[$i]+"\" \n");
+				if ($slowSearchIfNeeded==false)
+					$notFound[size($notFound)] = $assetList[$i];
+            }
+        }
+		print ("// \n");
+	}
+
+	// SLOW SEARCH :
+	//
+	if ($slowSearchIfNeeded)
+	{
+		if ($found!=size($assetList) )
+		{
+			print ("\n// Unfortunately not all the files were found.. Searching the slow way : \n\n");
+
+			for ($i=0;$i<size($assetList);$i++)
+			{
+				if (size($assetFiles[$i]))
+					continue;
+
+				print ("\n// Looking for asset \""+$assetList[$i]+"\" in path \""+$assetPaths[$i]+"\" : \n");
+				$assetFiles[$i] = s100fai_tryFindAssetToRefImportFromBasePath($assetList[$i],$assetPaths[$i], 0);
+				string $foundStr = "(not found)";
+				if ($assetFiles[$i]!="")
+				{
+					$foundPaths[size($foundPaths)] = $assetFiles[$i];
+					$foundAssets[size($foundAssets)] = $assetList[$i];
+
+					$found += 1;
+					$foundStr = "(found)";
+				}
+				else
+					$notFound[size($notFound)] = $assetList[$i];
+
+				$elaspedTime = `timerX -startTime $startTime`;
+				if ($verboseTime)
+					print ("Elapsed Search Time for asset \""+$assetList[$i]+"\" "+$foundStr+": "+$elaspedTime+" see scriptEditor for details)\n");
+			}
+			//waitCursor -st 0;
+			$searchTime = `timerX -startTime $startTime`;
+			if ($verboseTime)
+				print ("\n// Elapsed Search Time for all assets (found "+$found+"/"+size($assetList)+"): "+$searchTime+" see scriptEditor for details)\n");
+		}
+		$searchTime = `timerX -startTime $startTime`;
+		if ($verboseTime)
+			print ("\n// Elapsed Search Time for all assets (found "+$found+"/"+size($assetList)+"): "+$searchTime+". (see scriptEditor for details)\n");
+	}
+
+	// REF :
+	//
+	if ($createRef)
+	{
+		if ($found )
+		{
+			print    "// Now let's create refs with these files :\n";
+			for ($i=0;$i<size($assetFiles);$i++)
+			{
+				if ($assetFiles[$i]!="")
+				{
+					print ("\n// > REFERENCE IMPORTING \""+$assetFiles[$i]+"\"\n");
+					//file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace $assetList[$i] -options "v=0" $assetFiles[$i];
+
+					// reference import the official way in MayaTheBee production :
+					s100FMIACreateRefImport($assetFiles[$i], $assetList[$i])	;
+					$elaspedTime = `timerX -startTime $startTime`;
+					if ($verboseTime)
+						print ("Elapsed Import Ref Time for asset \""+$assetList[$i]+"\" : "+$elaspedTime+"\n");
+				}
+			}
+		}
+		$impRefTime = `timerX -startTime $startTime`;
+		if ($verboseTime)
+			print ("\n// Elapsed Import Ref. Time for all "+$found+" assets : "+$impRefTime+" (see scriptEditor for details)\n");
+    }
+
+	waitCursor -st 0;
+	return $foundPaths;
+}
+
+
+// Returns { "found"/"notFound", "/path/where/file/is/found - or its 'Hi/Lo' version"}
+// 2 string array
+//
+global proc string[] s100fai_findAssetFileInPath( string $asset, string $basePath, int $verbose)
+{
+	string $testFile = $basePath+$asset+".ma";
+	string $found = "notFound";
+	if (`filetest -e $testFile `)
+		$found = "found";
+	else if (!endsWith($asset,"_Hi"))
+	{
+		$testFile = $basePath+$asset+"_Hi.ma";
+		if ($verbose)
+			print ("//\t o Trying with 'Hi' ending (\""+$testFile+"\")...\n");
+		if (`filetest -e $testFile `)
+			$found = "found";
+		else if (!endsWith($asset,"_Lo"))
+		{
+			$testFile = $basePath+$asset+"_Lo.ma";
+			if ($verbose)
+				print ("//\t o Trying with 'Lo' ending (\""+$testFile+"\")...\n");
+			if (`filetest -e $testFile `)
+				$found = "found";
+		}
+    }
+	return { $found, $testFile };
+}
+
+
+
+// NON-Recursive proc to find a ".ma" file into a hierarchy starting at a $basePath :
+// by searching at first level of dirs/assetName/asset.ma if there's a matching file..
+// (skips sub directories starting with "." or "_" )
+//
+// string $basePath =  $assetPaths[0]
+//
+// $asset = "MA_P_Scraps_01";
+// string $basePath =  "Y://000_3D_BANK/03_Props/";
+// 	s100fai_fastTryFindAssetToRefImportFromBasePath($asset, $basePath) ;
+//
+global proc string s100fai_fastTryFindAssetToRefImportFromBasePath(string $asset, string $basePath )
+{
+	string $found[] = s100fai_findAssetFileInPath( $asset, $basePath, 0 ) ;
+	if ($found[0]=="found")
+	{
+		string $noPath = `match "[^/\\]*$"  $found[1]`;
+		print ("// >>> Found \""+$noPath+"\" in \""+$basePath+"\"!\n");
+		return $found[1];
+    }
+	else
+	{
+		//print ("// "+$tabs+"\""+$testFile+"\" not found...\n");
+		string $dirs[] = `getFileList -folder $basePath `;
+		for ($dir in $dirs) // $dir = $dirs[35] ; $dir = $dirs[0]
+		{
+			string $path = ($basePath+$dir+"/");
+			if (`filetest -d $path` && !startsWith($dir,".") && !startsWith($dir,"_") )
+			{
+				string $supposedDir = $asset; // $asset = "toto_Lo"
+				if ( endsWith($asset,"_Hi") || endsWith($asset,"_Lo") )
+					  $supposedDir = substring($asset,1,size($asset)-3);
+
+				string $fullPath = $path+$supposedDir+"/";
+				print ("// - checking directory \""+$path+"\"...\n");
+				string $found[] = s100fai_findAssetFileInPath( $asset, $fullPath, 0 ) ;
+				if ($found[0]=="found")
+				{
+					string $noPath = `match "[^/\\]*$"  $found[1]`;
+					print ("// >>> Found \""+$noPath+"\" in \""+$fullPath+"\"!\n");
+					return $found[1];
+				}
+				else
+					continue;
+            }
+			else
+			{
+				//print ("// \""+$path+"\" is not a proper directory - skipped\n");
+				continue;
+            }
+		}
+		return "";
+	}
+}
+
+
+// Recursive proc to find a ".ma" file into a hierarchy starting at a $basePath :
+// (skips sub directories starting with "." or "_" and NOT starting with "MA_")
+//
+// string $basePath =  $assetPaths[0]
+// $asset = "MA_P_Scraps_01";
+// string $basePath =  "Y://000_3D_BANK/03_Props/Nature/MA_P_Scraps_01/";
+// string $basePath =  "Y://000_3D_BANK/03_Props/Nature/";
+// 	s100fai_tryFindAssetToRefImportFromBasePath($asset, $basePath, 0) ;
+// int $depth = 0
+//
+global proc string s100fai_tryFindAssetToRefImportFromBasePath(string $asset, string $basePath, int $depth)
+{
+	string $found[] = s100fai_findAssetFileInPath( $asset, $basePath, 0 ) ;
+	if ($found[0]=="found")
+	{
+		string $noPath = `match "[^/\\]*$"  $found[1]`;
+		print ("// >>> Found \""+$noPath+"\" in \""+$basePath+"\"!\n");
+		return $found[1];
+    }
+	else
+	{
+		// tabulating depending on how deep in the hierarchy we are now :
+		string $tabs = "";
+		for ($i=0;$i<$depth;$i++)
+			$tabs = $tabs+"\t";
+
+		//print ("// "+$tabs+"\""+$testFile+"\" not found...\n");
+
+		string $dirs[] = `getFileList -folder $basePath `;
+		for ($dir in $dirs) // $dir = $dirs[35] ; $dir = $dirs[0]
+		{
+			string $path = ($basePath+$dir+"/");
+			if (`filetest -d $path` && !startsWith($dir,".") && !startsWith($dir,"_") )
+			{
+				print ("// "+$tabs+" checking directory \""+$path+"\"...\n");
+				string $res = s100fai_tryFindAssetToRefImportFromBasePath( $asset, $path, ($depth+1) );
+				if ($res=="") //print "ooo";
+					continue;
+				else
+					return $res;
+            }
+			else
+			{
+				//print ("// \""+$path+"\" is not a proper directory - skipped\n");
+				continue;
+            }
+		}
+		return "";
+	}
+}
+
+
+global proc string[] s100fai_refImportFindPathsOfAssets(string $assetList[])
+{
+	//string $basePath = "Y://000_3D_BANK/";
+
+	$pathBase = `s100FMGLgetProdInfo`;
+	string	$basePath = ($pathBase[0]+ "/"+$pathBase[1]+ "/");
+
+	string $assetPaths[] = {};
+	for ($asset in $assetList) // $asset = $assetList[0]
+	{
+		string $type = s100fai_returnAssetTypeByStringArray( $asset, 0);
+		$assetPaths[size($assetPaths)] = ($basePath+$type+"/");
+    }
+	return $assetPaths;
+}
+
+global proc int s100fai_refImportCompareTwoStringArrays( string $array01[], string $array02[] )
+{
+	if (size($array01)!=size($array02))
+		return 0;
+	int $ok=0;
+	for ($i=0; $i<size($array01); $i++)
+	{
+		if ($array01[$i]==$array02[$i])
+			$ok += 1;
+    }
+	if($ok==size($array01))
+		return 1;
+	else
+		return 0;
+}
+
+global proc string s100fai_returnAssetTypeByStringArray(string $asset, int $verbose)
+{
+	string $buf[]={};
+	int $num = `tokenize $asset "_" $buf`;
+
+ 	// getting type of asset from its name (apart from cameras), filling :
+	switch ($buf[1])
+	{
+		case "C":
+			if ($verbose)
+				print ("// \""+$asset+"\" is a CHARACTER\n");
+			return "01_Characters";
+		break;
+		case "L":
+			if ($verbose)
+				print ("// \""+$asset+"\" is a LOCATION\n");
+			return "02_Locations";
+		break;
+		case "LM":
+			if ($verbose)
+				print ("// \""+$asset+"\" is a LOCATION MODULE\n");
+			return "02_Locations";
+		break;
+		case "P":
+			if ($num==5)
+			{
+				//warning ("Reference node \""+$asset+"\" is made of 5 parts. Is it a Location or LocationModule ?");
+				if ($buf[2]=="LM")
+				{
+					if ($verbose)
+						print ("// \""+$asset+"\" is a LOCATION MODULE PACK\n");
+					return "03_Props";
+				}
+				else if ($buf[2]=="L")
+				{
+					if ($verbose)
+						print ("// \""+$asset+"\" is a LOCATION PACK\n");;
+					return "03_Props";
+				}
+				else
+				{
+					if ($verbose)
+						warning (" Couldn't find what kind of asset \""+$asset+"\" is ! (not a LOCATION/MODULE PACK it seems)");
+					return "";
+				}
+			}
+			else
+			{
+				if ($verbose)
+					print ("// \""+$asset+"\" is a PROPS\n");
+				return "03_Props";
+			}
+		break;
+		case "V":
+			if ($verbose)
+				print ("// \""+$asset+"\" is a VEGETATION\n");
+			return "04_Vegetations";
+		break;
+		case "MV":
+			if ($verbose)
+				print ("// \""+$asset+"\" is a MICRO-VEGETATION \n");
+			return "05_MicroVegetations";
+		break;
+		default:
+			return "";
+		break;
+	}
+	return "";
+}
+
+global proc string[] s100fai_refImportListOfAssetsLoadFile(string $file)
+{
+	string $textArray[]={};
+	if(`filetest -e $file`)
+	{
+		int $fileId=`fopen $file "r"`;
+		while ( !`feof $fileId` )
+		{
+			string $curLine = `fgetline $fileId`;
+			if (!startsWith($curLine,"//") && size(strip($curLine)) )
+				$textArray[size($textArray)] = strip($curLine); // size($textArray)
+		}
+		fclose $fileId; // fclose 3
+		print ("// s100fai_refImportListOfAssetsLoadFile >> read text from \"" + $file +"\" \n") ;
+	}
+	else
+		print ("// s100fai_refImportListOfAssetsLoadFile >> Cannot find text file \""+$file+"\" \n");
+	return $textArray;
+}
+
+
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+//		s100fai_listAllAssetsInMTBbdd(1)
+//
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// More global listing of assets in the BANK, by type :
+//
+global proc s100fai_listAllAssetsInMTBbdd(int $verbose )
+{
+	waitCursor -state 1;
+	print ("// CHARACTERS :\n");
+	print ("// ---------- \n");
+	string $chars[] = s100fai_listAllCharsInMTBbdd( $verbose );
+	print ("// LOCATIONS :\n");
+	print ("// --------- \n");
+	string $locs[] = s100fai_listAllLocsInMTBbdd( $verbose );
+	print ("// PROPS :\n");
+	print ("// ----- :\n");
+	string $props[] = s100fai_listAllPropsInMTBbdd( $verbose );
+	print ("// VEGETATIONS :\n");
+	print ("// ----------- \n");
+	string $veges[] = s100fai_listAllVegesInMTBbdd( $verbose );
+	print ("// MICRO-VEGETATIONS :\n");
+	print ("// ----------------- \n");
+	string $micros[] = s100fai_listAllMicroVegesInMTBbdd( $verbose );
+	waitCursor -state 0;
+	int $total = size($chars)+size($locs)+size($props)+size($veges)+size($micros);
+	print ("\n// RESUME : ("+$total+ " assets)\n");
+	print ("// "+size($chars)+ " CHARS / "+size($locs)+ " LOCATIONS / "+size($props)+ " PROPS / "+size($veges)+ " VEGETATIONS / "+size($micros)+ " MICROVEGES.\n");
+}
+
+global proc string[] s100fai_listAllCharsInMTBbdd( int $verbose )
+{
+	string $assets[] = s100fai_listMAsFromBasePath( {"01_Characters"}, $verbose );
+	if ($verbose>1)
+	{
+		print ("\n// "+size($assets)+ " CHARACTERS : \n");
+		print $assets;
+    }
+	print ("//\n// => "+size($assets)+ " CHARACTERS. \n\n");
+	return $assets;
+}
+
+global proc string[] s100fai_listAllLocsInMTBbdd( int $verbose )
+{
+	string $assets[] = s100fai_listMAsFromBasePath( {"02_Locations"}, $verbose );
+	if ($verbose>1)
+	{
+		print ("\n// "+size($assets)+ " LOCATIONS : \n");
+		print $assets;
+    }
+	print ("//\n// => "+size($assets)+ " LOCATIONS. \n\n");
+
+	return $assets;
+}
+
+
+global proc string[] s100fai_listAllPropsInMTBbdd( int $verbose )
+{
+	string $assets[] = s100fai_listMAsFromBasePath( {"03_Props"}, $verbose );
+	if ($verbose>1)
+	{
+		print ("\n// "+size($assets)+ " PROPS : \n");
+		print $assets;
+    }
+	print ("//\n// => "+size($assets)+ " PROPS. \n\n");
+
+	return $assets;
+}
+
+global proc string[] s100fai_listAllVegesInMTBbdd( int $verbose )
+{
+	string $assets[] = s100fai_listMAsFromBasePath( {"04_Vegetations"}, $verbose );
+	if ($verbose>1)
+	{
+		print ("\n// "+size($assets)+ " VEGETATIONS : \n");
+		print $assets;
+    }
+	print ("//\n// => "+size($assets)+ " VEGETATIONS. \n\n");
+
+	return $assets;
+}
+
+global proc string[] s100fai_listAllMicroVegesInMTBbdd( int $verbose )
+{
+	string $assets[] = s100fai_listMAsFromBasePath( {"05_MicroVegetations"}, $verbose );
+	if ($verbose>1)
+	{
+		print ("\n// "+size($assets)+ " MICROVEGETATIONS : \n");
+		print $assets;
+    }
+	print ("//\n// => "+size($assets)+ " MICROVEGETATIONS. \n\n");
+
+	return $assets;
+}
+
+
+
+// string $askedTypes[] = {"01_Characters"}
+//
+global proc string[] s100fai_listMAsFromBasePath( string $askedTypes[] , int $verbose )
+{
+	string $assets[] = {};
+	string $endTypes[] = {};
+	string $types[] = {"01_Characters","02_Locations","03_Props","04_Vegetations","05_MicroVegetations"};
+	for ($ask in $askedTypes)
+		if (stringArrayContains($ask,$types))
+			$endTypes[size($endTypes)] = $ask;
+
+	string $rootPath = "Y://000_3D_BANK/";
+	string $assetPaths[] = {};
+	for ($type in $endTypes) // $asset = $assetList[0]
+		$assetPaths[size($assetPaths)] = ($rootPath+$type+"/");
+
+	for ($basePath in $assetPaths)
+	{
+		//print ("// "+$tabs+"\""+$testFile+"\" not found...\n");
+		string $dirs[] = `getFileList -folder $basePath `;
+		for ($dir in $dirs) // $dir = $dirs[35] ; $dir = $dirs[0]
+		{
+			string $path = ($basePath+$dir+"/");
+			if (`filetest -d $path` && !startsWith($dir,".") && !startsWith($dir,"_") )
+			{
+				string $mas[] = s100fai_findingMAS($path,$verbose);
+				if (size($mas))
+					$assets = stringArrayCatenate($assets,$mas);
+				else
+				{
+					string $scndDirs[] = `getFileList -folder $path`;
+					for ($sec in $scndDirs)
+					{
+						string $secP = ($path+"/"+$sec);
+						if (`filetest -d $secP` && !startsWith($sec,".") && !startsWith($sec,"_") )
+							$assets = stringArrayCatenate($assets, s100fai_findingMAS($secP,$verbose) );
+					}
+                }
+			}
+		}
+    }
+	$assets = stringArrayRemoveDuplicates($assets);
+	return $assets;
+}
+
+// filtering out ".ma" files that don't start with "MA_", or end with "_render" (and simplifies "Hi/Lo" ones)
+//
+global proc string [] s100fai_findingMAS( string $path, int $verbose )
+{
+	string $mas[] = `getFileList -fs ($path+"/*.ma") `;
+	$mas = s100fai_filterOutMAs( $mas );
+	for ($ma in $mas )
+		if ($verbose)
+			print ("// Found proper \"*.ma\" file here: \""+$path+"/"+$ma+"\"\n");
+	return (stringArrayRemoveDuplicates($mas));
+}
+
+
+// filtering out ".ma" files that don't start with "MA_", or end with "_render" (and simplifies "Hi/Lo" ones)
+//
+global proc string [] s100fai_filterOutMAs(string $mas[])
+{
+	string $keep[] = {};
+	for ($ma in $mas)
+	{
+		if ( startsWith($ma,"MA_") && !endsWith($ma,"_render.ma" ) && !endsWith($ma,"_Lo.ma" ))
+		{
+			if (endsWith($ma,"_Hi.ma"))
+				$ma = substitute("_Hi",$ma, "_[Hi/Lo]");
+			$keep[size($keep)] = $ma;
+        }
+    }
+	return $keep;
+}

@@ -1,0 +1,364 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc kcReadVtxIDMapping(string $filename)
+{
+	global int $vtxIDMapping[];
+	global string $vtxIDOffset[];
+
+	clear $vtxIDMapping;
+	clear $vtxIDOffset;
+
+	int $count = -1;
+
+	int $fileID = `fopen $filename "r"`;
+
+	if ($fileID == 0)
+		warning("Cannot open " + $filename);
+	else
+	{
+		string $buffer = `fgetline $fileID`;
+
+		while (size($buffer) > 0) 
+		{
+			$buffer = substituteAllString($buffer, "\n", "");
+
+			string $tokens[];
+			tokenize $buffer " " $tokens;
+			
+			if ($tokens[0] == "//")
+			{
+				$vtxIDOffset[size($vtxIDOffset)] = $tokens[1];
+				$vtxIDOffset[size($vtxIDOffset)] = $count + 1;
+			}
+			else
+			{
+				$vtxIDMapping[size($vtxIDMapping)] = $tokens[1];
+				$count++;
+			}
+
+			$buffer = `fgetline $fileID`;
+		}
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc kcCreateCluster(string $vtx[], string $clusterHandle, string $cluster, string $parent, string $grandparent, float $pivot[])
+{
+	// keep old selection
+
+	string $old[] = `ls -selection`;
+
+	// select vertices
+
+	select -clear;
+
+	for ($component in $vtx)
+		select -add $component;
+
+	// create cluster
+
+	string $nodes[] = `cluster -frontOfChain -relative -name $cluster`;		// return cluster, clusterHandle
+
+	// rename clusterHandle if necessary
+
+	if ($clusterHandle != $nodes[1])
+		rename $nodes[1] $clusterHandle;
+
+	// set pivot
+	
+	xform -worldSpace -scalePivot $pivot[0] $pivot[1] $pivot[2] -rotatePivot $pivot[0] $pivot[1] $pivot[2] $clusterHandle;
+
+	// create parent group node
+
+	$parent = `group -name $parent $clusterHandle`;
+
+	// parent group node under grandparent
+	
+	if (`objExists $grandparent`)
+		parent $parent $grandparent;
+
+	// restore old selection
+
+	select $old;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc kcAssignClusterWeight(string $vtx[], float $weights[], string $cluster)
+{
+	for ($i = 0; $i < size($vtx); $i++)
+		percent -value $weights[$i] $cluster $vtx[$i];
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc int kcBSisScaleAttr(string $nodeAttr)
+{
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+		if ((`gmatch $buf[size($buf) - 1] "scale*"`) || 
+		    (`gmatch $buf[size($buf) - 1] "sx"`)     ||
+		    (`gmatch $buf[size($buf) - 1] "sy"`)     ||
+		    (`gmatch $buf[size($buf) - 1] "sz"`))
+			return true;
+
+	return false;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+// Eg:
+//         driver                        driven              # key
+//
+// kingtor_chestA.rotateX kingtor_cluster71Handle.translateX   2     0 0 spline spline 8 0 spline spline
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+proc kcApplyDrivenKey(string $keyInfo)
+{
+	string $tokens[];
+	tokenize $keyInfo " " $tokens;
+
+	string $driverNodeAttr = $tokens[0];
+	string $drivenNodeAttr = $tokens[1];
+
+	int $numKey = $tokens[2];
+
+	int $count = 3;
+
+	for ($i = 0; $i < $numKey; $i++)
+	{
+		float $time = $tokens[$count++];
+		float $key = $tokens[$count++];
+		string $inTangent = $tokens[$count++];
+		string $outTangent = $tokens[$count++];
+
+		if (kcBSisScaleAttr($drivenNodeAttr))
+		{
+			// scale attribute
+
+			float $old = `getAttr $drivenNodeAttr`;
+
+			setAttr $drivenNodeAttr $key;
+				
+			setDrivenKeyframe -currentDriver $driverNodeAttr -driverValue $time -inTangentType $inTangent -outTangentType $outTangent $drivenNodeAttr;
+						
+			// restore old value
+
+			setAttr $drivenNodeAttr $old;
+		}
+		else
+			setDrivenKeyframe -currentDriver $driverNodeAttr -driverValue $time -value $key -inTangentType $inTangent -outTangentType $outTangent $drivenNodeAttr;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc string[] kcGetClusterFiles()
+{
+	string $result[];
+
+	string $root = `workspace -q -rootDirectory`;
+	string $clusterFolder = $root + "kcCluster/";
+
+	string $filenames[] = `getFileList -folder $clusterFolder -filespec "*.clu"`;
+
+	for ($filename in $filenames)
+		$result[size($result)] = $clusterFolder + $filename;
+
+	return $result;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc string kcGetVtxIDMappingFile()
+{
+	string $root = `workspace -q -rootDirectory`;
+	return ($root + "vtxID.map");
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc int kcGetMapping(string $obj, int $vtxID, int $vtxIDMapping[], string $vtxIDOffset[])
+{
+	int $offset = 0;
+
+	int $found = false;
+
+	for ($i = 0; $i < size($vtxIDOffset); $i += 2)
+	{
+		if ($vtxIDOffset[$i] == $obj)
+		{
+			$offset = $vtxIDOffset[$i + 1];
+			$found = true;
+
+			break;
+		}
+	}
+
+	if ($found)
+		return $vtxIDMapping[$offset + $vtxID];
+	else
+	{
+		warning("VtxIDMapping file: cannot find mapping vertex ID for " + $obj + ".vtx[" + $vtxID + "]");
+		return -1;
+	}
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+proc int kcCheckUnique(string $obj)
+{
+	// check there is only one object named $obj
+
+	string $temp[] = `ls $obj`;
+
+	if (size($temp) != 1)
+		return false;
+
+	return true;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////
+global proc kcImportCluster(string $filename, string $mapFile)
+{
+	// read $vtxIDMapping and $vtxIDOffset
+
+	global int $vtxIDMapping[];
+	global string $vtxIDOffset[];
+
+	kcReadVtxIDMapping($mapFile);
+
+	int $fileID = `fopen $filename "r"`;
+
+	if ($fileID == 0)
+		error("Cannot open " + $filename);
+
+    string $buffer = `fgetline $fileID`;
+
+    while (size($buffer) > 0) 
+	{
+		string $tokens[];
+
+		$buffer = `fgetline $fileID`;					// first line: clusterHandle, cluster, clusterSet
+		$buffer = substituteAllString($buffer, "\n", "");
+		
+		tokenize $buffer " " $tokens;
+		string $clusterHandle = $tokens[0];
+		string $cluster = $tokens[1];
+		string $clusterSet = $tokens[2];
+
+		if (`objExists $clusterHandle`)
+		{
+			fclose($fileID);
+			error($clusterHandle + " already exists. Please rename it to something else.");
+		}
+
+		if (`objExists $cluster`)
+		{
+			fclose($fileID);
+			error($cluster + " already exists. Please rename it to something else.");
+		}
+
+		$buffer = `fgetline $fileID`;					// second line: parent, grandparent
+		$buffer = substituteAllString($buffer, "\n", "");
+
+		tokenize $buffer " " $tokens;
+		string $parent = $tokens[0];
+		string $grandparent = $tokens[1];
+
+		$buffer = `fgetline $fileID`;					// third line: pivot
+		$buffer = substituteAllString($buffer, "\n", "");
+
+		tokenize $buffer " " $tokens;
+		float $pivot[3];
+		$pivot[0] = $tokens[0];
+		$pivot[1] = $tokens[1];
+		$pivot[2] = $tokens[2];
+
+		$buffer = `fgetline $fileID`;					// fourth line: size of drivenKeyInfo
+		$buffer = substituteAllString($buffer, "\n", "");
+
+		int $size = $buffer;
+
+		string $drivenKeyInfo[];
+
+		for ($i = 0; $i < $size; $i++)
+		{
+			string $buffer = `fgetline $fileID`;				// drivenKeyInfo
+			$buffer = substituteAllString($buffer, "\n", "");
+				
+			$drivenKeyInfo[$i] = $buffer;
+		}
+
+
+		$buffer = `fgetline $fileID`;					// size of weight
+		$buffer = substituteAllString($buffer, "\n", "");
+
+		int $size = $buffer;
+
+		if ($size > 0)
+		{
+			string $vtx[];
+			float $weights[];
+
+			clear $vtx;
+			clear $weights;
+
+			int $count = 0;
+
+			for ($i = 0; $i < $size; $i++)
+			{
+				$buffer = `fgetline $fileID`;				// weight info
+				$buffer = substituteAllString($buffer, "\n", "");
+				
+				tokenize $buffer " " $tokens;
+				string $obj = $tokens[0];
+				int $vtxID = $tokens[1];
+				float $weight = $tokens[2]; 
+
+				if (!kcCheckUnique($obj))
+				{
+					fclose($fileID);
+					error($obj + " is not unique. Please make sure there is only one such object in the scene.");
+				}
+
+				int $id = kcGetMapping($obj, $vtxID, $vtxIDMapping, $vtxIDOffset);
+
+				if ($id != -1)
+				{
+					$vtx[$count] = $obj + ".vtx[" + $id + "]";
+					$weights[$count] = $weight;
+
+					$count++;
+				}
+			}
+
+			// select vertices and create cluster
+
+			print("1) Create clusters: " + $clusterHandle + " " + $cluster + " " + $parent + " " + $grandparent + "\n");
+			kcCreateCluster($vtx, $clusterHandle, $cluster, $parent, $grandparent, $pivot);
+
+			// apply set driven key
+			
+			for ($i = 0; $i < size($drivenKeyInfo); $i++)
+			{
+				print("2) Apply driven key: " + $drivenKeyInfo[$i] + "\n");
+				kcApplyDrivenKey($drivenKeyInfo[$i]);
+			}
+
+			// apply weights
+
+			print("3) Assign cluster weights: " + $cluster + "\n");
+			kcAssignClusterWeight($vtx, $weights, $cluster);
+		}
+		
+		$buffer = `fgetline $fileID`;	// get next line
+	}
+
+	fclose $fileID;
+}

@@ -1,0 +1,214 @@
+global proc s100MAcleanAssets()
+{
+reconnectTextures("Y://000_BANK/BananaWork/01_IN/MA0000D_Vrac_Plans_Pilote/textures maya/") ;
+s100MAcreateAssetsTree ;
+s100copyMeshtoMeshGrp ;
+
+cleanNameShape;
+s100MArenameShader ;
+
+s100MAcleanFileTextures ;
+s100MAcleanFilePlace2DTextures ;
+cleanSE ;
+cleanGrpID;
+s100MAcleanSE ;
+
+
+s100moveAndReconnectTexturesFiles;
+
+}
+
+global proc s100copyMeshtoMeshGrp()
+{
+$var = `ls -type mesh`;
+$list = `listRelatives -p $var `;
+	for($listT2 in $list)
+	{
+		if(`attributeExists MaxHandle $listT2`)
+			deleteAttr -at MaxHandle $listT2;
+    }
+
+parent $list "parented_grp" ;
+makeIdentity -apply true -t 1 -r 1 -s 1 -n 0;
+DeleteHistory ;
+
+
+}
+
+
+global proc s100moveAndReconnectTexturesFiles()
+{
+$var = `ls -type file` ;
+$fName = `file -q -sceneName  `;
+$path = stringToStringArray($fName , "/") ;
+$last =  size($path) - 1 ;
+$beforeLast = size($path) - 2 ;
+$nameOfThisFile = $path[$last] ;
+$extTF = fileExtension( $nameOfThisFile )  ;
+$nameOfThisFileNoExt = substituteAllString($nameOfThisFile , ("." +$extTF) , "") ;
+
+	if( $path[$beforeLast ] == "01_Mod" || $path[$beforeLast ] == "02_Setup" || $path[$beforeLast ] == "01_Local" )
+	{
+	string $rebuildPathJpg = "" ;
+	string $rebuildPathPSD = "";
+
+		for($i = 0 ; $i < $beforeLast ; $i++)
+		{
+
+		$rebuildPathJpg += ($path[$i] + "/" ) ;
+
+        }
+	$tmpPath = $rebuildPathJpg ;
+	$rebuildPathJpg += "03_Maps/" ;
+	$rebuildPathPSD = ($rebuildPathJpg + "sources/" )  ;
+	$destFold = $rebuildPathJpg;
+	//createFolder in case
+	$folder = s1KeepOnlyFolderReturnLocalPath( $tmpPath ) ;
+ 	$check = stringArrayContains("03_Maps",$folder) ;
+		if($check == 0 )
+			sysFile -makeDir $rebuildPathJpg ;
+
+	$folder = s1KeepOnlyFolderReturnLocalPath( $rebuildPathJpg ) ;
+		 	$check = stringArrayContains("sources",$folder) ;
+				sysFile -makeDir $rebuildPathPSD ;
+
+	//
+
+		for ($vart in $var)
+			{
+			$textFullPath = `getAttr ($vart +".fileTextureName")`;
+			$pathT = stringToStringArray($textFullPath , "/") ;
+			$lastT = size($pathT) -1   ;
+			$textName = $pathT[$lastT] ;
+			$ext = fileExtension($textName ) ;
+
+				if	($ext == "psd")
+					$destFold = $rebuildPathPSD;
+
+			//print $vart ;
+			$nameToCopy = substituteAllString($vart , "_Textures", "") ;
+			$nameToCopy = s100capitalizeFirstLetter($nameToCopy ) ;
+			$fPathToCopy =  ($destFold + $nameOfThisFileNoExt + "_" + $nameToCopy + "." + $ext ) ;
+			$checkExist = s100checkIfFileExist($fPathToCopy ) ;
+				if($checkExist == 0 )
+				{
+				/*
+				print $textFullPath ;
+				s100sep;
+				print $fPathToCopy ;
+				s100sep;
+				*/
+
+				$checkCopy = `sysFile -copy  $fPathToCopy $textFullPath`;
+				setAttr -type "string" ($vart +".fileTextureName") $fPathToCopy;
+
+					if($checkCopy == 1 )
+					{
+					s100sep;
+					print ($fPathToCopy +"\nhave been created")  ;
+					s100sep ;
+                    }
+
+                }else{
+				print ("\n----------------------------\n" + $fPathToCopy + " \nalready exist ! \n--------------------------\n" ) ;
+                }
+
+			}
+
+	}else{
+
+	warning "Files is not in a right place";
+
+    }
+
+}
+
+
+
+
+global proc s100MArenameShader()
+{
+string $type[6] = {"phong","lambert","blinn","surfaceShader","rampShader","layeredShader","useBackground"} ;
+//$tmp = "phong" ;
+
+	for ($tmp in $type)
+	{
+	$var = `ls -type $tmp ` ;
+		for($vart in $var)
+		{
+		$list = `listConnections -d on -s off ($vart +".outColor") `;
+		$list2 = `listConnections -d off -s on ($list[0] +".dagSetMembers[0]") `;
+			if (`objExists $list2[0]`)
+			{
+			$tyName = s100capitalizeFirstLetter($tmp) ;
+
+			$name = (substituteAllString($list2[0], "_msh" , "") + "_" + $tyName  );
+			rename $vart $name ;
+            }
+
+        }
+
+    }
+
+
+}
+
+global proc s100MAcleanFileTextures()
+{
+
+$curves = `ls -type file`;
+
+
+	for ($curv in $curves)
+	{
+	$list = `listConnections -d on -s off ($curv +".outColor") `;
+	$listT = `listConnections -plugs 1 -d on -s off ($curv +".outColor") `;
+	$tmpName = stringToStringArray($listT[0] , "." ) ;
+	$name = $tmpName[1] ;
+		if($name == "color")
+			$name = "diffuse" ;
+
+	$name = s100capitalizeFirstLetter($name ) ;
+	$list2 = stringToStringArray($list[0] ,"_") ;
+	rename $curv ($list2[0] + $name + "_Textures") ;
+    }
+
+}
+
+global proc s100MAcleanFilePlace2DTextures()
+{
+string $curves[] = `ls -type place2dTexture`;
+
+
+	for ($curv in $curves)
+	{
+	$list = `listConnections -d on -s off ($curv +".outUV") `;
+	$list2 = stringToStringArray($list[0] ,"_") ;
+	rename $curv ($list2[0] + "_Place2dTexture") ;
+    }
+
+}
+
+global proc s100MAcleanSE()
+{
+string $type[6] = {"phong","lambert","blinn","surfaceShader","rampShader","layeredShader","useBackground"} ;
+//$tmp = "phong" ;
+
+	for ($tmp in $type)
+	{
+
+	$var = `ls -type $type`;
+
+		for ($vart in $var)
+		{
+			if($vart != "lambert1")
+			{
+			$list = `listConnections -d on -s off ($vart +".outColor") `;
+			$list2 = stringToStringArray($vart ,"_") ;
+			rename $list[0] ($list2[0] + "_SE") ;
+			}
+
+		}
+
+    }
+}

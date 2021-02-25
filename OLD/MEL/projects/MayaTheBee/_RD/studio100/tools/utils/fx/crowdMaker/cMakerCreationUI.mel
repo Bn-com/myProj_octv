@@ -1,0 +1,338 @@
+// VERSIONE MODIFICATA PER 0.6
+
+
+/*
+*****  CROWD MAKER v0.6 beta 3 *****
+
+(c) 02.2005, Adriano Rinaldi  
+
+rinaldi.adriano@gmail.com
+
+
+
+You are free to use this software!
+you can simulate maximum 1000 particles.
+
+*****  ----------------- *****
+*/
+
+
+
+// Restituisce l'ordine degli operatori per il calcolo del GoalU, GoalV. 
+proc string[] getUVOperator(string $nurbsShape) {
+  int $UMaxValue= `getAttr ($nurbsShape+".maxValueU")`;
+  int $VMaxValue= `getAttr ($nurbsShape+".maxValueV")`;
+
+  float $position00[3]= `pointOnSurface -u 0 -v 0 -position $nurbsShape`;
+  float $position11[3]= `pointOnSurface -u ($UMaxValue) -v ($VMaxValue) -position $nurbsShape`;
+
+  int $cond1= $position00[0]<= $position11[0];   // X0 <= X1
+  int $cond2= $position00[2]>= $position11[2];   // Z0 >= Z1
+
+  //int $UMaxValue= `getAttr ($nurbsShape+".maxValueU")`;
+  //int $VMaxValue= `getAttr ($nurbsShape+".maxValueV")`;
+  if ( ($UMaxValue< 2) || ($VMaxValue< 2) ) warning "U, V range too low!!!";
+
+  if ($cond1) {
+    if ($cond2) return {"+", "-", "x", "z"};
+      else return {"+", "+", "z", "x"};
+  } else if ($cond2) return {"-", "-", "z", "x"};
+           else return {"-", "+", "x", "z"}; 
+
+  return {"+", "-", "x", "z"};
+}
+
+
+
+// Crea gli attributi e gli oggetti necessari per il Surface Follow
+proc string addGoalUV(string $partShape, string $nurbsShape) {
+  goal -w 1.0 -utr 0 -g $nurbsShape $partShape;
+
+  addAttr -ln goalU -dt doubleArray $partShape;
+  addAttr -ln goalU0 -dt doubleArray $partShape;
+  addAttr -ln goalV -dt doubleArray $partShape;
+  addAttr -ln goalV0 -dt doubleArray $partShape;
+
+  string $nodeName= `createNode closestPointOnSurface`;    // Creo il nodo closestPointOnSurface
+  connectAttr -f ($nurbsShape+".worldSpace[0]") ($nodeName+".inputSurface");   // Lo connetto con la geometria NURBS 
+
+  return $nodeName;
+}
+
+
+
+// Inserisce l'espressione di controllo ed i relativi attributi.
+proc addExpression(string $partShape, string $nurbsShape, string $partObj, string $targetName, int $sFollow) {
+  string $expString;
+  string $nodeName;     // Conterrà il nome del nodo da interrogare per le UV
+  string $UVOrder[4]= {"+", "-", "x", "z"};    // Ordine degli operatori per il calcolo del GoalU, GoalV 
+
+// *****  Inserimento degli attributi per il controllo dell'espressione. *****
+  addAttr -ln cylinderLength0 -dt doubleArray  ($partShape);
+  addAttr -ln cylinderLength -dt doubleArray -k true ($partShape);
+  addAttr -ln cylinderRadius0 -dt doubleArray  ($partShape);
+  addAttr -ln cylinderRadius -dt doubleArray -k true ($partShape);
+  addAttr -ln rotationAngle0 -dt doubleArray  ($partShape);
+  addAttr -ln rotationAngle -dt doubleArray -k true ($partShape);  
+  addAttr -ln sepVisRadius0 -dt doubleArray  ($partShape);
+  addAttr -ln sepVisRadius -dt doubleArray -k true ($partShape);
+  addAttr -ln alVisRadius0 -dt doubleArray  ($partShape);
+  addAttr -ln alVisRadius -dt doubleArray -k true ($partShape);
+  addAttr -ln seekFactor0 -dt doubleArray  ($partShape);
+  addAttr -ln seekFactor -dt doubleArray -k true ($partShape);
+  addAttr -ln alignmentFactor0 -dt doubleArray  ($partShape);
+  addAttr -ln alignmentFactor -dt doubleArray -k true ($partShape);
+  addAttr -ln separationFactor0 -dt doubleArray  ($partShape);
+  addAttr -ln separationFactor -dt doubleArray -k true ($partShape);
+  addAttr -ln scaleValue0 -dt doubleArray  ($partShape);
+  addAttr -ln scaleValue -dt doubleArray -k true ($partShape);     
+  
+  addAttr -ln cylinderLengthMin -at double -dv 2.8 -min 0 -k true ($partShape);
+  addAttr -ln cylinderLengthMax -at double -dv 3.2 -min 0 -k true ($partShape);
+  addAttr -ln cylinderRadiusMin -at double -dv 0.28 -min 0 -k true ($partShape);
+  addAttr -ln cylinderRadiusMax -at double -dv 0.32 -min 0 -k true ($partShape);
+  addAttr -ln rotationAngleMin -at double -dv 0.016 -min 0 -k true ($partShape);
+  addAttr -ln rotationAngleMax -at double -dv 0.018 -min 0 -k true ($partShape);
+  addAttr -ln sepVisRadiusMin -at double -dv 1 -min 0 -k true ($partShape);
+  addAttr -ln sepVisRadiusMax -at double -dv 1.3 -min 0 -k true ($partShape);
+  addAttr -ln alVisRadiusMin -at double -dv 4 -min 0 -k true ($partShape);
+  addAttr -ln alVisRadiusMax -at double -dv 4.4 -min 0 -k true ($partShape);
+  addAttr -ln seekFactorMin -at double -dv 0.18 -min 0 -k true ($partShape);
+  addAttr -ln seekFactorMax -at double -dv 0.22 -min 0 -k true ($partShape);
+  addAttr -ln alignmentFactorMin -at double -dv 0.08 -min 0 -k true ($partShape);
+  addAttr -ln alignmentFactorMax -at double -dv 0.12 -min 0 -k true ($partShape);
+  addAttr -ln separationFactorMin -at double -dv 0.28 -min 0 -k true ($partShape);
+  addAttr -ln separationFactorMax -at double -dv 0.32 -min 0 -k true ($partShape);
+  //addAttr -ln scaleValueMin -at double -dv 1.78 -min 0 -k true ($partShape);
+  //addAttr -ln scaleValueMax -at double -dv 1.82 -min 0 -k true ($partShape);
+  if ($sFollow == 0) {
+    addAttr -ln scaleValueMin -at double -dv 1.78 -min 0 -k true ($partShape);
+    addAttr -ln scaleValueMax -at double -dv 1.82 -min 0 -k true ($partShape);
+  } else {
+      addAttr -ln scaleValueMin -at double -dv 0.01 -min 0 -k true ($partShape);
+      addAttr -ln scaleValueMax -at double -dv 0.01 -min 0 -k true ($partShape);
+      $nodeName= addGoalUV($partShape, $nurbsShape);
+      $UVOrder= getUVOperator($nurbsShape);   // Memorizzo gli operatori per il calcolo del GoalU, GoalV
+    }
+
+  //if ($sFollow == 1) $nodeName= addGoalUV($partShape, $nurbsShape); 
+  // *****  Fine inserimento.  *****
+
+  
+  $expString+= "// ***** Start CrowdMaker expression ***** \n \n";
+  $expString+= "vector $seek, $separation, $alignment, $findAllIntersection; \n";
+  $expString+= "vector $target= <<"+$targetName+".translateX, "+$targetName+".translateY, "+$targetName+".translateZ>>; \n";
+  $expString+= "vector $newVelocity= <<0, 0, 0>>; \n \n";
+  $expString+= "if ("+$partShape+".particleId==0) cMakerLoadParticleValue(\""+$partObj+"\", "+$partShape+".count); \n \n";
+  $expString+= "$findAllIntersection= cMakerFindAllIntersection("+$partShape+".worldPosition, "+$partShape+".velocity, ";
+  $expString+= $partShape+".cylinderLength, "+$partShape+".cylinderRadius, "+$partShape+".rotationAngle); \n \n";
+  $expString+= "if ($findAllIntersection != <<0, 0, 0>>) \n" ;
+
+  if ($sFollow == 0) $expString+= "  $newVelocity= $findAllIntersection; \n" ;
+    else $expString+= "  $newVelocity= unit($findAllIntersection)* "+$partShape+".scaleValue; \n";
+
+  $expString+= "  else { \n";
+  $expString+= "    $seek= cMakerSeek ("+$partShape+".worldPosition, "+$partShape+".velocity, $target); \n";
+  $expString+= "    $separation= cMakerSeparation("+$partShape+".count, "+$partShape+".particleId, "+$partShape+".sepVisRadius); \n";
+  $expString+= "    $alignment= cMakerAlignment ("+$partShape+".count, "+$partShape+".particleId, "+$partShape+".alVisRadius); \n \n";
+  $expString+= "    $newVelocity= unit ( "+$partShape+".velocity+($seek*"+$partShape+".seekFactor)+($alignment*"+$partShape;
+  $expString+= ".alignmentFactor)+($separation*"+$partShape+".separationFactor) ) * "+$partShape+".scaleValue; \n";
+  $expString+= "  } \n \n";
+
+  if ($sFollow == 0) $expString+= $partShape+".velocity= $newVelocity; \n \n";
+    else {
+      $expString+= $partShape+".goalU"+$UVOrder[0]+"= $newVelocity."+$UVOrder[2]+"; \n";
+      $expString+= $partShape+".goalV"+$UVOrder[1]+"= $newVelocity."+$UVOrder[3]+"; \n \n";
+    }
+  $expString+= "// *****   -----------------------   *****";
+
+
+  dynExpression -s $expString -rbd $partShape;    // Inserisce l'espressione per il controllo delle particelle.
+
+
+  $expString= "cMakerLoadObstacleValue();\n";
+  $expString+= "\n"+$partShape+".cylinderLength= rand("+$partShape+".cylinderLengthMin, "+$partShape+".cylinderLengthMax);";
+  $expString+= "\n"+$partShape+".cylinderRadius= rand("+$partShape+".cylinderRadiusMin, "+$partShape+".cylinderRadiusMax);";
+  $expString+= "\n"+$partShape+".rotationAngle= rand("+$partShape+".rotationAngleMin, "+$partShape+".rotationAngleMax);";
+  $expString+= "\n"+$partShape+".sepVisRadius= rand("+$partShape+".sepVisRadiusMin, "+$partShape+".sepVisRadiusMax);";
+  $expString+= "\n"+$partShape+".alVisRadius= rand("+$partShape+".alVisRadiusMin, "+$partShape+".alVisRadiusMax);";
+  $expString+= "\n"+$partShape+".seekFactor= rand("+$partShape+".seekFactorMin, "+$partShape+".seekFactorMax);";
+  $expString+= "\n"+$partShape+".alignmentFactor= rand("+$partShape+".alignmentFactorMin, "+$partShape+".alignmentFactorMax);";
+  $expString+= "\n"+$partShape+".separationFactor= rand("+$partShape+".separationFactorMin, "+$partShape+".separationFactorMax);";
+  $expString+= "\n"+$partShape+".scaleValue= rand("+$partShape+".scaleValueMin, "+$partShape+".scaleValueMax);";
+
+  if ($sFollow == 1) {
+    $expString+= "\n \nfloat $newUV[]= cMakerPosToUV ("+$partShape+".worldPosition, \""+$nodeName+"\");";
+    $expString+= "\n"+$partShape+".goalU= $newUV[0];";
+    $expString+= "\n"+$partShape+".goalV= $newUV[1];";
+  }
+
+  dynExpression -s $expString -c $partShape;
+}
+
+
+
+global proc cMakerCreation(int $sFollow) {
+  string $objList[]= `ls -sl`;             // Lista di oggetti selezionati. Il primo devono essere le particelle.
+  string $partShape[]= `ls -sl -type particle -dag ($objList[0])`;
+  string $nurbsShape[]= `ls -sl -type nurbsSurface -dag ($objList[2])`;
+
+  if ($sFollow == 0) {
+    if (size($objList) != 2) 
+      error "Select the PARTICLE and the TARGET";
+  } 
+  else 
+    if (size($objList) != 3)
+      error "Select the PARTICLE, the TARGET and the NURBS surface";
+
+  if (size($partShape) == 0)
+    error "The first object must be particle";
+
+  if ($sFollow == 1)
+    if (size($nurbsShape) == 0)         // Verifico che sia NURBS
+      error "The third object must be NURBS";
+
+  if (`getAttr ($partShape[0]+".count")`> 1000)
+    error "You can simulate maximum 1000 particles";
+ 
+  if (`attributeQuery -node ($partShape) -exists sepVisRadius` == 1)
+    error "Already running!";
+
+  addExpression ($partShape[0], $nurbsShape[0], $objList[0], $objList[1], $sFollow);
+}
+
+
+
+global proc cMakerCreationUI() {
+
+  // Create the window.
+  if (`window -exists cMakerCreateWindow`) 
+    deleteUI cMakerCreateWindow;
+
+  window 
+    -widthHeight 300 300 
+    -title "CrowdMaker 0.6 beta 3" 
+    cMakerCreateWindow;
+
+  string $form= `formLayout`;
+
+  string $txtObstacle= `text -label "Obstacle Avoidance"`;
+  string $collection1= `radioCollection`;
+  string $radiob1, $radiob2;
+  $radiob1= `radioButton -label "On"`;
+  $radiob2= `radioButton -label "Off" -en 0`;
+  setParent ..; setParent ..;
+
+  string $txtSep= `text -label "Separation"`;
+  string $collection2= `radioCollection`;
+  string $radiob3, $radiob4;
+  $radiob3= `radioButton -label "On"`;
+  $radiob4= `radioButton -label "Off" -en 0`;
+  setParent ..; setParent ..;
+
+  string $txtAl= `text -label "Alignment"`;
+  string $collection3= `radioCollection`;
+  string $radiob5, $radiob6;
+  $radiob5= `radioButton -label "On"`;
+  $radiob6= `radioButton -label "Off" -en 0`;
+  setParent ..; setParent ..;
+
+  string $txtSeek= `text -label "Seek"`;
+  string $collection4= `radioCollection`;
+  string $radiob7, $radiob8;
+  $radiob7= `radioButton -label "On"`;
+  $radiob8= `radioButton -label "Off" -en 0`;
+  setParent ..; setParent ..;
+
+  string $txtSFollow= `text -label "Surface Follow"`;
+  string $collection5= `radioCollection`;
+  string $radiob9, $radiob10;
+  int $sFollow= 1;      // Default la funzione è abilitata.
+  $radiob9= `radioButton -label "On" -onCommand "$sFollow= 1"`;
+  $radiob10= `radioButton -label "Off" -onCommand "$sFollow= 0"`;
+  setParent ..; setParent ..;
+
+  radioCollection -edit -select $radiob1 $collection1;
+  radioCollection -edit -select $radiob3 $collection2;
+  radioCollection -edit -select $radiob5 $collection3;
+  radioCollection -edit -select $radiob7 $collection4;
+  radioCollection -edit -select $radiob9 $collection5;
+
+  string $button1= `button -label "Create"`;
+  string $button2= `button -label "Cancel" `;
+
+  formLayout -edit
+    -attachForm $txtObstacle "top" 10
+    -attachForm $txtObstacle "left" 10
+  $form;
+
+  formLayout -edit
+    -attachForm $radiob1 "top" 10
+    -attachForm $radiob1 "left" 180
+    -attachForm $radiob2 "top" 10
+    -attachForm $radiob2 "left" 230
+  $form;
+
+  formLayout -edit
+    -attachForm $txtSep "top" 35
+    -attachForm $txtSep "left" 10
+  $form;
+
+  formLayout -edit
+    -attachForm $radiob3 "top" 35
+    -attachForm $radiob3 "left" 180
+    -attachForm $radiob4 "top" 35
+    -attachForm $radiob4 "left" 230
+  $form;
+
+  formLayout -edit
+    -attachForm $txtAl "top" 60
+    -attachForm $txtAl "left" 10
+  $form;
+
+  formLayout -edit
+    -attachForm $radiob5 "top" 60
+    -attachForm $radiob5 "left" 180
+    -attachForm $radiob6 "top" 60
+    -attachForm $radiob6 "left" 230
+  $form;
+
+  formLayout -edit
+    -attachForm $txtSeek "top" 85
+    -attachForm $txtSeek "left" 10
+  $form;
+
+  formLayout -edit
+    -attachForm $radiob7 "top" 85
+    -attachForm $radiob7 "left" 180
+    -attachForm $radiob8 "top" 85
+    -attachForm $radiob8 "left" 230
+  $form;
+
+  formLayout -edit
+    -attachForm $txtSFollow "top" 110
+    -attachForm $txtSFollow "left" 10
+  $form;
+
+  formLayout -edit
+    -attachForm $radiob9 "top" 110
+    -attachForm $radiob9 "left" 180
+    -attachForm $radiob10 "top" 110
+    -attachForm $radiob10 "left" 230
+  $form;
+
+  formLayout -edit
+    -attachForm $button1 "bottom" 10
+    -attachForm $button1 "left" 175 
+  $form;
+
+  formLayout -edit
+    -attachForm $button2 "bottom" 10
+    -attachForm $button2 "right" 10 
+  $form;
+
+  button -edit -command ("cMakerCreation($sFollow); deleteUI cMakerCreateWindow;") $button1;
+  button -edit -command ("deleteUI cMakerCreateWindow;") $button2;
+
+  showWindow cMakerCreateWindow; 
+}

@@ -1,0 +1,139 @@
+///////////////////////////////////////////////////////////////////////////////////
+//												 //
+//   File Name:    Mapgather.mel.								 //
+//   Description:  This tool is used to collect maps in the 			 //
+//                 scene. 									 //
+//   Usage:        Copy mapgater.mel to maya script folder (eg. my 		 //
+//                 document/maya/4.0/script) .Type "mapgather"		        //
+//                 from script editor.      						 //
+//   Created by:   Larry									 //
+//   Last Update:  2001.12.28								 //
+//    												 //
+///////////////////////////////////////////////////////////////////////////////////
+
+global proc Mapgather() 
+{
+
+global string $pathctr;
+global string $collectBT;
+global string $browseBT;
+global string $progressControl;
+global string $infoctr;
+
+
+if((`window -ex mapgatherUI`)) deleteUI  mapgatherUI;
+$themapgatherUI = `window -title "Maps collect tool  "
+						  -widthHeight 300 170
+						  -sizeable 0
+						  mapgatherUI`;
+	columnLayout;
+	     rowLayout -numberOfColumns 2 -cw2 160 80;
+			text -label "Targe Path:";
+			checkBox -label "Current Project" -onCommand "OnCheckProject" -offCommand "OffCheckProject";
+		 setParent ..;
+	     
+		 rowLayout -numberOfColumns 2 -cw2 220 70;
+			$pathctr = `textField -width 210`;
+			$browseBT =`button -label "Browse.." -c pathbrowse`;
+		 setParent ..;
+		 text -label "Progress..";
+	     $progressControl = `progressBar -maxValue 10 -width 290 -height 10`;
+		 $infoctr = `text -label ""`;
+		 rowLayout -numberOfColumns 3 -cw3 40 120 120 -cl2 "center" "center";
+			text -label "";
+			$collectBT = `button -label "    Collect" 
+			                     -width 80 
+								 -ann "Collect the map files used in the scene" 
+								 -enable 0 
+								 -c doCollect
+								 `;
+			button -label "    Cancel" -width 80 -c ("deleteUI -window " + $themapgatherUI);
+		 setParent ..;
+showWindow;
+}
+
+global proc pathbrowse()
+{
+   string $temp = `fileBrowserDialog -fc "setTargetpath" -mode 4 -actionName "Select Project Path"`;
+}
+
+global proc setTargetpath(string $pathname,string $type)
+{
+   global string $pathctr;
+   global string $collectBT;
+   textField -e -text $pathname $pathctr;
+   button -e -enable 1 $collectBT;
+}
+
+global proc doCollect()
+{
+     global string $pathctr;
+     global string $progressControl;
+     global string $infoctr;
+	 
+	 string $filelist[] = `ls -type "file"`;
+	 int $fileNum = size($filelist);
+	 if($fileNum==0)
+	 {
+	     text -e -label "No map files find in the scene! Abort!" $infoctr;
+	     return ;
+	 }
+	 progressBar -e -maxValue $fileNum -progress 0 $progressControl;
+	 
+	 string $path = `textField -q -text $pathctr`;
+	 $path = substituteAllString($path,"/","\\");
+	// print $path;
+     string $filenode;
+	 int $i = 1;
+	 int $onerror = 0;
+	 for($filenode in $filelist)
+	 {
+          
+	   // Copy map files
+	   //
+		 string $mapname = `getAttr ($filenode + ".fileTextureName")`;
+		 if($mapname =="") continue;
+		 $mapname = substituteAllString($mapname,"/","\\");
+		// print ($mapname + "\n");
+         
+         string $cmd = "shell copy " + $mapname + " " + $path;
+		 chdir "c:\\";
+		 string $result = system("copy " + $mapname + " " + $path);
+         if((`gmatch $result "*cannot*"`) ||(`gmatch $result "*’“≤ªµΩ*"`)) 
+		 {
+			warning ("Cannot copy " + $mapname + "  Please check this map file!");
+			$onerror = 1;
+		 }else{
+		 		 text -e -label ("There are "+$fileNum+" maps in the scene." + "    " + $i + " copied.") $infoctr;
+				 $i ++;
+			   }
+	//	 print ($result +"\n");
+		 progressBar -e -step 1 $progressControl;
+	 }
+	  
+	  if($onerror) 
+	  {
+	     confirmDialog -title "Error" -message "Please Script Editor for error info" -button "OK";
+	  }
+}
+
+global proc OnCheckProject()
+{
+   global string $browseBT;
+   global string $collectBT;
+   global string $pathctr;
+   button -e -enable 0 $browseBT;
+   button -e -enable 1 $collectBT;
+   string $projSourcePath = `workspace -q -rd` + "sourceimages";
+   textField -e -text $projSourcePath $pathctr;
+}
+
+global proc OffCheckProject()
+{
+   global string $browseBT;
+   global string $pathctr;
+   global string $collectBT;
+   button -e -enable 1 $browseBT;
+   button -e -enable 0 $collectBT;
+   textField -e -text "" $pathctr;
+}

@@ -1,0 +1,140 @@
+//
+// MODIFY THIS AT YOUR OWN RISK
+//
+// Creation Date:  8 Mar. 1997
+// Author:         rob tesdahl
+//
+//
+//  Procedure Name:
+//
+//      attributeGoal 
+//
+//  Description:
+//
+//		Simulates the particle goal command between attributes. 
+//
+//		usage:
+//			attributeGoal "targetObj.targetAttr" "goalObj.goalAttr"
+//
+//  Input Arguments:
+//    	
+//		string $obj1 			-- object.attribute
+//		string $goals			-- goal object.attributes.
+//  Return Value:
+//      
+global proc attributeGoal( string $obj1, string $goals )
+{
+
+	string $mainFullName[]; clear( $mainFullName );
+	tokenize( $obj1, ".", $mainFullName );
+	if( size( $mainFullName ) < 2 )
+	{
+		print("Invalid name for affected attribute.\n");
+		return;
+	}
+	string $mainObj = $mainFullName[0];
+	string $mainAttr = $mainFullName[size( $mainFullName ) - 1];
+	string $velName = ($mainAttr+"_Velocity");
+
+	string $aSymbol = ",";
+	string $wSymbol = "-w";
+	string $oSymbol = "-o";
+
+	string $goalSets[]; clear( $goalSets );
+	tokenize( $goals, $aSymbol, $goalSets );
+
+	string $initGoalStr = "";
+	string $goalStr = "";
+	
+	for( $i = 0; $i < size( $goalSets ); $i ++ )
+	{
+		string $goalArg[]; clear( $goalArg );
+		tokenize( $goalSets[$i], " ", $goalArg );
+		string $attr = $goalArg[0];
+		string $fullName[]; clear( $fullName );
+		tokenize( $attr, ".", $fullName );
+		if( size( $fullName ) < 2 )
+		{
+			print("No valid attribute name for goal attribute.\n");
+			return;
+		}
+		string $objName = $fullName[0];
+		string $attrName = $fullName[size( $fullName )-1];
+
+		float $weight;
+		float $offset;
+
+		int $argc = size( $goalArg );
+
+		if( $argc >= 3 )
+		{
+			for( $j = 1; $j < $argc; $j = $j + 2 )
+			{
+				if( ($argc-1) >= ($j+1) )
+				{
+					if( $goalArg[$j] == $wSymbol )
+					{
+						$weight = $goalArg[$j+1];
+					}
+					else if( $goalArg[$j] == $oSymbol )
+					{
+						$offset = $goalArg[$j+1];
+					}
+				}
+			}
+		}
+		else
+		{
+			$weight = 0.5;
+			$offset = 0.0;
+		}
+
+		string $wName = ($mainAttr+"To"+$objName+"_"+$attrName+"Weight");
+		addAttr -ln $wName -min 0 -max 1 -dv $weight $mainObj;
+		setAttr -k true ($mainObj + "."+$wName);	
+		string $offName = ($mainAttr+"To"+$objName+"_"+$attrName+"Offset");
+		addAttr -ln $offName -dv $offset $mainObj;
+		setAttr -k true ($mainObj + "."+$offName);	
+
+		if( $i == 0 )
+		{
+			$initGoalStr = ($mainAttr+" = ("+$objName+"."+$attrName+" + "+$offName);
+			$goalStr = ("$d = "+$objName+"."+$attrName+" + "+$offName+" - "+$mainAttr+";\n\t");
+			$goalStr = ($goalStr+"$w = "+$wName+"; $w = $w * $w * $w;\n\t");
+			$goalStr = ($goalStr+"$a = $w * ( ( $d / $dt ) - "+$velName+" ) / $dt;\n");
+		}
+		else
+		{
+			$initGoalStr = ($initGoalStr+" + "+$objName+"."+$attrName+" + "+$offName);
+			$goalStr = ($goalStr+"$d = "+$objName+"."+$attrName+" + "+$offName+" - "+$mainAttr+";\n\t");
+			$goalStr = ($goalStr+"$w = "+$wName+"; $w = $w * $w * $w;\n\t");
+			$goalStr = ($goalStr+"$a = $a + $w * ( ( $d / $dt ) - "+$velName+" ) / $dt;\n");
+		}
+	}
+	$initGoalStr = ($initGoalStr+" ) / "+(size( $goalSets ))+";\n\t");
+	$initGoalStr = ($initGoalStr+$velName+" = 0.0;\n");
+	addAttr -ln $velName -dv 0.0 $mainObj;
+
+	string $expr = 
+		"float $dt = 1.0 / 24.0;\n"+
+		"float $d;\n"+
+		"\n"+
+		"float $w = 0.0;\n"+
+		"$w = $w * $w * $w;\n"+
+		"\n"+
+		"float $a = 0.0;\n"+
+		"\n"+
+		"if( frame == `playbackOptions -q -min` )\n"+
+		"{\n"+
+		"\t"+$initGoalStr +
+		"}\n"+
+		"else\n"+
+		"{\n"+
+		"\t"+$goalStr +
+		"\t"+$velName+" = "+$velName+" + $a * $dt;\n"+
+		"\t"+$mainAttr+" = "+$mainAttr+" + "+$velName+" * $dt;\n"+
+		"}\n";
+
+	expression -o $mainObj -s $expr;
+}
+

@@ -1,0 +1,441 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// SUMMARY:
+// 1. tnpSortOutlinerGroup: sort the base curves in alphabet order
+// 2. tnpMuscleMirrorCopy: mirror copy a muscle (flip over the y axis)
+// 3. tnpLockUnlockTransf: lock or unlock the transforms of the input
+// 4. tnpDeleteMuscle: delete the selected muscle together with auxilary objects
+// 5. tnpMakeMuscleSoftBody: muscle jiggle effect with softbody
+//										 
+
+global proc tnpDeleteMuscle(){
+	string $sl[] = `ls -sl`;
+	for($item in $sl){
+		string $locator[] = `listConnections ($item + ".attachLocator")`;		
+		if(objExists($locator[0])) delete $locator[0];
+		$locator = `listConnections ($item + ".insertionLocator")`;
+		if(objExists($locator[0])) delete $locator[0];
+		
+		tnpMuscleRemove($item); delete $item;
+	}
+}
+global proc tnpSortOutlinerGroup(){
+	string $group[] = `ls -sl`;
+	if(size($group)>1) return;
+
+	string $children[] = `listRelatives -children $group[0]`;
+	$children = `sort $children`;
+	ungroup $group[0];
+
+	group -name $group[0] $children;
+}
+global proc tnpMuscleMirrorCopy(string $muscle, string $suffix, string $mirrorDirection){
+// WORKS FOR NURBS MUSCLE
+// first unlock the $muscle transformation, then duplicate with scaleX = -1
+// create 2 curves at isoparms: 0 and $end
+// CenterPivot these two curves
+// rename the values of the extra attributes of the muscle:
+//	+ ActionLine : delete this attribute if exists
+//	+ AttachLocator: old name + $suffix
+//	+ InsertionLocator: old name + $suffix
+//	+ MuscleType: unchanged
+//
+	string $prefix = `substitute "_envelope" $muscle ""`;
+	string $newMuscle = $prefix + "_" + $suffix + "_envelope";
+	string $attachLoc = $prefix + "_" + $suffix + "_attachLoc";
+	string $insertionLoc = $prefix + "_" + $suffix + "_insertionLoc";
+	string $baseAttachCurve = $prefix + "_" + $suffix + "_baseAttachCurve";
+
+	string $temp[] = `duplicate -rr $muscle`;
+	$newMuscle = `rename $temp[0] $newMuscle`;
+	tnpLockUnlockTransf $newMuscle unlock;	
+	switch($mirrorDirection){
+		case "X":
+			scale -r -1 1 1 $newMuscle;
+			break;
+		case "Y":
+			scale -r 1 -1 1 $newMuscle;
+			break;
+		case "Z":
+			scale -r 1 1 -1 $newMuscle;
+	}
+	// duplicate 2 curves on surface
+	int $end = `getAttr ($newMuscle + ".spansUV.spansV")`;
+	int $muscleType = `getAttr ($newMuscle + ".muscleType")`;
+	string $curve1[] = `duplicateCurve -ch 0 -range 0 -local 0 ($newMuscle + ".v[0]")`;
+	string $curve2[] = `duplicateCurve -ch 0 -range 0 -local 0 ($newMuscle + ".v[" + $end + "]")`;
+
+	catch(`parent -w $newMuscle`);
+
+	//
+	select $curve1[0] $curve2[0];
+	CenterPivot;
+	float $p[] = `getAttr ($curve1[0] + ".scalePivot")`;
+	$temp = `spaceLocator -name $attachLoc`;
+	$attachLoc = $temp[0];
+	xform -ws -translation $p[0] $p[1] $p[2] $attachLoc;
+
+	$p = `getAttr ($curve2[0] + ".scalePivot")`;
+	$temp = `spaceLocator -name $insertionLoc`;
+	$insertionLoc = $temp[0];
+	xform -ws -translation $p[0] $p[1] $p[2] $insertionLoc;
+
+	select $attachLoc $insertionLoc;
+	CenterPivot;
+	
+	// unlock attr before delete it
+	if(attributeExists("actionLine", $newMuscle)){
+		setAttr -lock false ($newMuscle + ".actionLine");
+		deleteAttr -attribute "actionLine" $newMuscle;
+	}
+
+	// deal with the old muscle's structure
+	setAttr -lock false ($newMuscle + ".attachLocator");
+	deleteAttr -attribute "attachLocator" $newMuscle;
+	addAttr -longName "attachLocator" -at message $newMuscle;
+	
+	setAttr -lock false ($newMuscle + ".insertionLocator");
+	deleteAttr -attribute "insertionLocator" $newMuscle;
+	addAttr -longName "insertionLocator" -at message $newMuscle;
+
+	connectAttr ( $attachLoc + ".message") ($newMuscle + ".attachLocator");
+	connectAttr ( $insertionLoc + ".message") ($newMuscle + ".insertionLocator");
+/*	if($muscleType==3){
+		$baseAttachCurve = `rename $curve1[0] $baseAttachCurve`;
+		if(attributeExists("attachCurve", $newMuscle)){
+			setAttr -lock false ($newMuscle + ".attachCurve");
+			deleteAttr -attribute "attachCurve" $newMuscle;
+		}
+		addAttr -longName "attachCurve" -at message $newMuscle;
+		connectAttr ($baseAttachCurve + ".message") ($newMuscle + ".attachCurve");
+	}
+*/
+	if(`objExists $curve1[0]`) 
+		delete $curve1[0];
+	delete $curve2[0];
+	// 
+	//tnpMuscleDeformer $newMuscle "" "";
+}
+global proc tnpLockUnlockTransf(string $obj, string $lock){
+	source generateChannelMenu; // CBunlockAttr
+
+	switch($lock){
+		case "lock":
+			setAttr -lock true ($obj + ".tx");
+			setAttr -lock true ($obj + ".ty");
+			setAttr -lock true ($obj + ".tz");
+			setAttr -lock true ($obj + ".rx");
+			setAttr -lock true ($obj + ".ry");
+			setAttr -lock true ($obj + ".rz");
+			setAttr -lock true ($obj + ".sx");
+			setAttr -lock true ($obj + ".sy");
+			setAttr -lock true ($obj + ".sz");
+			break;
+		case "unlock":
+			CBunlockAttr ($obj + ".tx");
+			CBunlockAttr ($obj + ".ty");
+			CBunlockAttr ($obj + ".tz");
+			CBunlockAttr ($obj + ".rx");
+			CBunlockAttr ($obj + ".ry");
+			CBunlockAttr ($obj + ".rz");
+			CBunlockAttr ($obj + ".sx");
+			CBunlockAttr ($obj + ".sy");
+			CBunlockAttr ($obj + ".sz");
+			/*
+			setAttr -lock false ($obj + ".tx");
+			setAttr -lock false ($obj + ".ty");
+			setAttr -lock false ($obj + ".tz");
+			setAttr -lock false ($obj + ".rx");
+			setAttr -lock false ($obj + ".ry");
+			setAttr -lock false ($obj + ".rz");
+			setAttr -lock false ($obj + ".sx");
+			setAttr -lock false ($obj + ".sy");
+			setAttr -lock false ($obj + ".sz");
+			*/
+			break;
+	}
+}
+// IMPORT/EXPORT MUSCLES WEIGHT AND MEMBERSHIP
+proc string getCompoundData(string $node, 
+								string $attrList, 
+								string $attr, 
+								string $attrType,
+								int $muscleIdx, 
+								int $vertexCount){
+// the wildcard style can't be used here
+// (wildcard: getAttr $node.$attrList["*"].$attr[$k])
+	string $retStr = "";
+	int $vertexIdx;
+	switch($attrType){
+		case "float":
+			for($vertexIdx=0; $vertexIdx<$vertexCount; $vertexIdx++){
+				float $float = `getAttr ($node + "." + $attrList + "["+$vertexIdx+"]." + $attr + "["+$muscleIdx+"]")`;
+				$retStr += $float + " ";	
+			}
+			break;
+		case "int":
+			for($vertexIdx=0; $vertexIdx<$vertexCount; $vertexIdx++){
+				int $int = `getAttr ($node + "." + $attrList + "["+$vertexIdx+"]." + $attr + "["+$muscleIdx+"]")`;
+				$retStr += $int + " ";
+			}
+			break;
+	}
+	return $retStr;
+}
+proc setCompoundData(string $node, 
+								string $attrList, 
+								string $attr, 
+								int $muscleIdx,
+								int $vertexCount,
+								string $data){
+	string $values[];
+	int $numTokens = `tokenize $data " " $values`;
+	
+	string $cmd;
+	int $vertexIdx;
+	for($vertexIdx=0; $vertexIdx<$vertexCount; $vertexIdx++){
+		if($values[$vertexIdx] == "0"){
+			// set the memberSet to 0 
+			$cmd = "setAttr " + $node + ".memberSetList["+$vertexIdx+"].memberSet["+$muscleIdx+"] 0";
+			eval($cmd);
+			// set internal data to default value
+			$cmd = "setAttr " + $node + ".uvCoordList["+$vertexIdx+"].uvCoord["+$muscleIdx+"] 0 0";
+			eval($cmd);
+			$cmd = "setAttr " + $node + ".distanceList["+$vertexIdx+"].distance["+$muscleIdx+"] 0";
+			eval($cmd);
+			$cmd = "setAttr " + $node + ".localPList["+$vertexIdx+"].localP["+$muscleIdx+"] 0 0 0";
+			eval($cmd);
+		}
+		$cmd = "setAttr " + $node + "." + $attrList + "["+$vertexIdx+"]." + $attr + "["+$muscleIdx+"] " + $values[$vertexIdx];
+		eval($cmd);	
+	}
+}
+proc int getPhysicalIndex(string $muscle, string $muscleList[]){
+	int $i;
+	for($i=0; $i<size($muscleList); $i++)
+		if($muscle==$muscleList[$i]) return $i;
+	return -1;
+}
+global proc tnpMuscleWeightExport()
+{
+	string $delimiter = ";"; 
+	string $sel[] = `ls -sl`;
+	if(size($sel)!=1 || !kcIsType($sel[0], "mesh"))
+		error "Select a skin mesh to export its muscles's weights";
+
+	string $skin = $sel[0];
+	string $shape[] = `ls  -dag -type mesh $skin`;			
+	string $skinDeformers[] = `tnpFindRelatedSkinDeformer $skin`;
+	if(size($skinDeformers) !=0){
+		
+		string $skinDeformer = $skinDeformers[0]; // only one skin deformer is allowed per skin mesh
+
+		string $directory = `workspace -q -dir`;	
+		string $outputFile = ( `substitute "scenes" $directory "data"` + $skin +".mw" );	
+		
+		//int $fileExists = `filetest -f $outputFile`;
+		int $bOverwrite = false;
+		while((`filetest -f $outputFile`==true) && ($bOverwrite==false)){
+			string $promptDlg = `promptDialog -title "Prompt Dialog"
+															-message ($skin + ".mw" + "already exists! Plz enter a new name:")
+															-text ($skin + ".mw")
+															-button "OK" -button "Overwrite"
+															-defaultButton "OK" -cancelButton "Overwrite"
+															-dismissString "Overwrite"`;
+			if($promptDlg == "OK"){
+				$outputFile = ( `substitute "scenes" $directory "data"` + `promptDialog -q`);	
+			}else if( $promptDlg == "Overwrite"){
+				$bOverwrite = true;
+			}	
+		}
+		print ("\n");
+		print ("Write to " + $outputFile);
+		$fileId =`fopen $outputFile "w"`; // overwrite file content
+		fprint $fileId ("");
+		fclose $fileId;
+				
+		$fileId =`fopen $outputFile "a"`; // append to file
+	
+		string $muscleList[] = `tnpFindRelatedMuscleList $skinDeformer`;
+		
+		// per muscle attributes
+		float $dropoffDistance;
+		float $deformationMode;
+		float $fattyOffset;
+		//string $memberSet;
+		string $muscleWeight;
+		
+		string $oneline;
+		// get $vertexCount of the skin mesh
+		int $vertexCount[] = `polyEvaluate -vertex $skin`;	
+		
+		for($muscle in $muscleList){
+			print ("\n");
+			print ("save out " + $muscle);
+			waitCursor -state on;
+			int $muscleIdx = `tnpMuscleGetIndex $muscle`;
+			$dropoffDistance = `getAttr ($skinDeformer + ".dropoffDistanceList["+$muscleIdx+"]")`;
+			$deformationMode = `getAttr ($skinDeformer + ".deformModeList["+$muscleIdx+"]")`;
+			$fattyOffset = `getAttr ($skinDeformer + ".fattyOffsetList["+$muscleIdx+"]")`;
+		//	$memberSet = `getCompoundData $skinDeformer "memberSetList" "memberSet" "int" $muscleIdx $vertexCount[0]`;
+			$muscleWeight = `getCompoundData $skinDeformer "muscleWeightList" "muscleWeight" "float" $muscleIdx $vertexCount[0]`;
+			
+			$oneline = $muscle + $delimiter;
+			$oneline += $dropoffDistance + $delimiter;
+			$oneline += $deformationMode + $delimiter;
+			$oneline += $fattyOffset + $delimiter;
+		//	$oneline += $memberSet + $delimiter;
+			$oneline += $muscleWeight;
+
+			fprint $fileId ($oneline + "\n");
+			waitCursor -state off;
+		}
+		fclose $fileId;
+	}
+}
+// import muscle weights
+global proc tnpMuscleWeightImport(){	
+	
+	string $delimiter = ";";
+	string $sel[] = `ls -sl` ;
+	if(size($sel)!=1 || !kcIsType($sel[0], "mesh"))
+		error "Select a skin mesh to import muscles's weights";
+	
+	string $defaultFolder = (`workspace -q -dir`) + "/*.mw";
+	string $inputFile = `fileDialog -directoryMask $defaultFolder`;
+	
+	string $skin = $sel[0];
+	//string $shape[] = `ls  -dag -type mesh $skin`;			
+	string $skinDeformers[] = `tnpFindRelatedSkinDeformer $skin`;
+	if(size($skinDeformers) !=0){
+		
+		string $skinDeformer = $skinDeformers[0]; // only one skin deformer is allowed per skin mesh
+		
+		$fileId = `fopen $inputFile "r"`;
+		string $muscleListData[]; // stored values
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0){
+			$muscleListData[size($muscleListData)] = $nextLine;
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+		
+		// data lists for each muscle
+		string $storedMuscleList[];
+		float $storedDropoffDistanceList[];
+		float $storedDeformModeList[];
+		float $storedFattyOffsetList[];
+		//string $storedMemberSetList[];
+		string $storedMuscleWeightList[];
+		string $buffer[];
+
+		for($oneline in $muscleListData){
+			int $numTokens = `tokenize $oneline $delimiter $buffer`;
+			
+			if($numTokens!=5)
+				error "File corrupted";
+
+			$storedMuscleList[size($storedMuscleList)] = $buffer[0];
+			$storedDropoffDistanceList[size($storedDropoffDistanceList)] = (float)$buffer[1];
+			$storedDeformModeList[size($storedDeformModeList)] = (float)$buffer[2];
+			$storedFattyOffsetList[size($storedFattyOffsetList)] = (float)$buffer[3];
+			//$storedMemberSetList[size($storedMemberSetList)] = $buffer[4];
+			$storedMuscleWeightList[size($storedMuscleWeightList)] = $buffer[4];
+		}
+
+		// NOW ASSIGN MUSCLE WEIGHT AND MEMBERSHIP TO THE SKIN
+		string $muscleList[] = `tnpFindRelatedMuscleList $skinDeformer`;
+		// get $vertexCount of the skin mesh
+		int $vertexCount[] = `polyEvaluate -vertex $skin`;			
+		int $count = 0;
+		for($muscle in $muscleList){
+			int $muscleIdx = `tnpMuscleGetIndex $muscle`;
+			// get the index of this muscle into the stored muscle list
+			int $physicalIdx = `getPhysicalIndex $muscle $storedMuscleList`;
+			if($physicalIdx==-1) continue; // no data stored for this muscle, continue to the next one
+			
+			$count++;
+			print ("\n");
+			print ($count + ": read in data for " + $muscle + "...");
+			waitCursor -state on;	
+			// update attrs
+			setAttr ($skinDeformer + ".dropoffDistanceList["+$muscleIdx+"]") ($storedDropoffDistanceList[$physicalIdx]);
+			setAttr ($skinDeformer + ".deformModeList["+$muscleIdx+"]") ($storedDeformModeList[$physicalIdx]);
+			setAttr ($skinDeformer + ".fattyOffsetList["+$muscleIdx+"]") ($storedFattyOffsetList[$physicalIdx]);
+			
+			// deal with mucle weight
+/*			string $currentPaintMuscle[] = `listConnections ($skinDeformer + ".paintMuscle")`;
+			if(size($currentPaintMuscle)!=0)
+				disconnectAttr ($currentPaintMuscle[0] + ".message") ($skinDeformer + ".paintMuscle");
+			connectAttr ($muscle + ".message") ($skinDeformer + ".paintMuscle");
+
+			setAttr ($skinDeformer + ".paintArrDirty") 1;
+			setAttr ($skinDeformer + ".paintMemberSetDirty") 0;
+
+			string $cmd = "setAttr " + $skinDeformer + ".paintWeights -type doubleArray " + $vertexCount[0] + " " + $storedMuscleWeightList[$physicalIdx];
+			evalEcho($cmd);
+			
+			evalDeferred "currentTime 10";
+*/
+			// Using painting method seems not work -> assign value one by one: damned slow
+			setCompoundData($skinDeformer, 
+									 "muscleWeightList", 
+									 "muscleWeight", 
+									 $muscleIdx, 
+									 $vertexCount[0], 
+									 $storedMuscleWeightList[$physicalIdx]);
+
+			waitCursor -state off;
+		}	
+	}
+}
+// prune membership: 
+global proc tnpMusclePruneMembership(){
+// For each muscle mi
+//		For each vertex vi
+//			get the muscleWeight at [vi][mi], mwL[vi].mw[mi]
+//			if (mwL[vi].mw[mi] == 0) -> setAttr msL[vi].ms[mi] = false
+	string $sl[] = `ls -sl`;
+	if(size($sl)!=1 || !kcIsType($sl[0], "mesh"))
+		error "Plz select a skin mesh";
+	
+	string $skin = $sl[0];
+	string $skinDeformers[] =`tnpFindRelatedSkinDeformer $skin`;
+	if(size($skinDeformers) == 0) return;
+	string $skinDeformer = $skinDeformers[0];
+	string $muscleList[] = `tnpFindRelatedMuscleList $skinDeformer`;
+	int $vertexCount[] = `polyEvaluate -vertex $skin`;
+	string $cmd;
+	int $vertexIdx;
+	for($muscle in $muscleList){
+		print ($muscle + " is being processed...\n");
+		int $muscleIdx = `tnpMuscleGetIndex $muscle`;	
+		waitCursor -state on;
+		for($vertexIdx=0; $vertexIdx<$vertexCount[0]; $vertexIdx++){
+			// get muscle weight 
+			$cmd = "getAttr " + $skinDeformer + ".muscleWeightList["+$vertexIdx+"].muscleWeight["+$muscleIdx+"]";
+			float $weight = `eval($cmd)`;
+			if($weight == 0){
+				// set the memberSet to 0 
+				$cmd = "setAttr " + $skinDeformer + ".memberSetList["+$vertexIdx+"].memberSet["+$muscleIdx+"] false";
+				eval($cmd);
+				// set internal data to default value
+				$cmd = "setAttr " + $skinDeformer + ".uvCoordList["+$vertexIdx+"].uvCoord["+$muscleIdx+"] 0 0";
+				eval($cmd);
+				$cmd = "setAttr " + $skinDeformer + ".distanceList["+$vertexIdx+"].distance["+$muscleIdx+"] 0";
+				eval($cmd);
+				$cmd = "setAttr " + $skinDeformer + ".localPList["+$vertexIdx+"].localP["+$muscleIdx+"] 0 0 0";
+				eval($cmd);
+			}
+		}// end inner for loop
+		waitCursor -state off;
+	}// end outer for loop
+}

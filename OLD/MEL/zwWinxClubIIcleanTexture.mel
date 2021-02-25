@@ -1,0 +1,95 @@
+// checkin texturing文件的时候将1k、2k、4k里面没有用到的贴图移到tmp
+global proc zwWinxClubIIcleanTexture(string $destFolder)
+{
+	// 列出所有贴图
+	string $list[];
+	clear $list;
+	zwWinxClubIIcleanTextureListTexture("file", "fileTextureName", $list);
+	if (`pluginInfo -query -loaded "Mayatomr"`)
+	{
+		zwWinxClubIIcleanTextureListTexture("mentalrayTexture", "fileTextureName", $list);
+		zwWinxClubIIcleanTextureListTexture("mentalrayIblShape", "texture", $list);
+	}
+	zwWinxClubIIcleanTextureListTexture("imagePlane", "imageName", $list);
+	zwWinxClubIIcleanTextureListTexture("brush", "imageName", $list);
+	zwWinxClubIIcleanTextureListTexture("brush", "leafImage", $list);
+	zwWinxClubIIcleanTextureListTexture("brush", "flowerImage", $list);
+
+	// 遍历所有图片
+	string $maps = `match "/scenes(/[^/]+){4}" $destFolder`;
+	$maps = `substitute "/scenes/" $maps "/sourceimages/"`;
+	$maps = `substitute "/scenes/.*$" $destFolder $maps`;
+	zwWinxClubIIcleanTextureListFile($maps + "/1k", $list);
+	zwWinxClubIIcleanTextureListFile($maps + "/2k", $list);
+	zwWinxClubIIcleanTextureListFile($maps + "/4k", $list);
+}
+
+global proc zwWinxClubIIcleanTextureListTexture(string $nodeType, string $attr, string $list[])
+{
+	string $nodes[];
+	catch($nodes = `ls -type $nodeType`);
+	for ($node in $nodes)
+	{
+		string $file = `getAttr ($node + "." + $attr)`;
+		$file = `substituteAllString $file "\\" "/"`;
+		$file = `match "/sourceimages/.*$" $file`;
+		
+		// 20090420添加
+		$file = zwGetFilenameWithoutRes($file);
+
+		$file = tolower($file);
+		$list[size($list)] = $file;
+	}
+}
+
+global proc zwWinxClubIIcleanTextureListFile(string $folder, string $list[])
+{
+	string $buf[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($file in $buf)
+	{
+		string $path = $folder + "/" + $file;
+		if (`filetest -f $path`)
+		{
+			string $str1 = `match "/sourceimages/.*$" $path`;
+
+			// 20090420添加
+			$str1 = zwGetFilenameWithoutRes($str1);
+
+			$str1 = tolower($str1);
+			int $find = false;
+			for ($str2 in $list)
+			{
+				if ($str1 == $str2)
+				{
+					$find = true;
+					break;
+				}
+			}
+			if (!$find)
+			{
+				string $dest = $folder + "/tmp/" + $file;
+				print ("move \"" + $path + "\" \"" + $dest + "\"\n");
+				zwSysFile "move" $path $dest true;
+			}
+		}
+	}
+}
+
+global proc string zwGetFilenameWithoutRes(string $path)
+{
+	string $fileName = `match "[^/\\]+$" $path`;
+	if (`match "_512[.]" $fileName` != "")
+	{
+		$fileName = `substitute "_512[.]" $fileName "."`;
+	}
+	else if (`match "_256[.]" $fileName` != "")
+	{
+		$fileName = `substitute "_256[.]" $fileName "."`;
+	}
+	else
+	{
+		$fileName = `substitute "_[124][kK][.]" $fileName "."`;
+	}
+
+	return $fileName;
+}

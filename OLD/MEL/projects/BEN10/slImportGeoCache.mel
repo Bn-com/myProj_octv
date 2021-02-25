@@ -1,0 +1,216 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-5-6
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-7-19
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slImportGeoCache(string $path)
+{
+	//避免弹出警告
+	cycleCheck -e off;
+	
+	file -f -newFile;
+	file -rename $path;
+	eval "source zwSceneOpenedScriptJob.mel";
+	catch(`zwSceneOpened`);
+	
+	string $info[] = slGetProjectInformation();//0 project 1 projShot 2 episode 3 scene 4 desc
+	string $sceneName = `file -q -sn -shn`;
+	string $cachePath=`zwGetPath "geoCache" $sceneName`+"/"+$info[4];
+	string $folders[] =`getFileList -folder $cachePath`;
+	for ($char in $folders)
+	{
+		string $charType="",$charName="",$referenceNum="",$referencePost="";
+		string $charNum[] = stringToStringArray($char,"_");
+		//判断道具还是角色
+		if (match("^[p-P]",$charNum[0]) != "")
+		{
+			$charType = "props";
+		}
+		else if (match("^[c-C]",$charNum[0]) != "")
+		{
+			$charType = "characters";
+		}
+		//获取角色名
+		if (match("^[0-9]+$",$charNum[size($charNum)-1]) == "")
+		{
+			$charName = $char;
+		}
+		else
+		{
+			$charName = `substring $char 1 (size($char)-size($charNum[size($charNum)-1])-1)`;
+			$referenceNum = "_"+$charNum[size($charNum)-1];
+			$referencePost="{"+$charNum[size($charNum)-1]+"}";
+		}
+		//print ($charType+"---"+$charName+"\n");
+		
+		string $charPath = `zwGetPath "scenes" ""`+"/"+$charType+"/"+$charName+"/master/"+$info[1]+"_"+$charName+"_h_ms_cache.mb";
+		$charPath = `substituteAllString $charPath "/" "\\"`;
+		if (!`filetest -r $charPath`)
+		{
+			continue;
+		}
+		slImportRef $charPath "mayaBinary";
+	}
+
+	//文件夹排序的问题，10会在2之前，导致超过10个同样角色或者道具时报错，改成为先只参考所有，后导cache
+	for ($char in $folders)
+	{
+		string $charType="",$charName="",$referenceNum="",$referencePost="";
+		string $charNum[] = stringToStringArray($char,"_");
+		//判断道具还是角色
+		if (match("^[p-P]",$charNum[0]) != "")
+		{
+			$charType = "props";
+		}
+		else if (match("^[c-C]",$charNum[0]) != "")
+		{
+			$charType = "characters";
+		}
+		//获取角色名
+		if (match("^[0-9]+$",$charNum[size($charNum)-1]) == "")
+		{
+			$charName = $char;
+		}
+		else
+		{
+			$charName = `substring $char 1 (size($char)-size($charNum[size($charNum)-1])-1)`;
+			$referenceNum = "_"+$charNum[size($charNum)-1];
+			$referencePost="{"+$charNum[size($charNum)-1]+"}";
+		}
+		//print ($charType+"---"+$charName+"\n");
+		
+		string $charPath = `zwGetPath "scenes" ""`+"/"+$charType+"/"+$charName+"/master/"+$info[1]+"_"+$charName+"_h_ms_cache.mb";
+		$charPath = `substituteAllString $charPath "/" "\\"`;
+		if (!`filetest -r $charPath`)
+		{
+			continue;
+		}
+		//slImportRef $charPath "mayaBinary";
+		/*string $allNodes[] = `referenceQuery -n ($charPath+$referencePost)`;
+		string $cacheObjs[] = `ls -dag -ni -type "mesh" ($info[1]+"_"+$charName+$referenceNum+":*")`;
+		string $xml[] = `getFileList -fld ($cachePath+$char+"/") -fs "*.xml"`;
+		if (size($xml))
+		{
+			doImportCacheFile(($cachePath+$char+"/"+$xml[size($xml)-1]), "xml",$cacheObjs,{});
+		}*/
+
+		string $cacheObjs[] = `ls -dag -ni -type "mesh" ($info[1]+"_"+$charName+$referenceNum+":*")`;
+		string $namespace = `file -q -rpr ($charPath+$referencePost)`;
+		string $xml[] = `getFileList -fld ($cachePath+$char+"/") -fs "*.xml"`;
+		if (size($xml))
+		{
+			string $buff[] = stringToStringArray($xml[0],".");
+			string $cacheName = $buff[0];
+			string $cacheFile=`cacheFile -ccn -dir ($cachePath+$char)  -f $cacheName`;
+			
+			string $channels[] = `cacheFile -f ($cachePath+$char+"/"+$xml[0]) -q -cnm`;
+			for ($i=0;$i<size($cacheObjs);$i++)
+			{
+				//print ($cacheObjs[$i]+"******");
+				
+				string $switch = `createNode historySwitch -n ($namespace+"_"+$i+"_swith")`;
+				source doImportCacheFile.mel;
+				string $channel = findChannelForObject($i,$channels,$cacheObjs[$i]);
+				//print ($channel+"\n");
+				
+				catch(`connectAttr -f ($cacheObjs[$i]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+				setAttr ($switch+".playFromCache") 1;
+				getAttr -silent ($switch+".op[0]");
+				setAttr ($switch+".playFromCache") 0;
+				catch(`disconnectAttr ($cacheObjs[$i]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+				setAttr ($switch+".ihi") 0;
+
+				setAttr ($cacheFile+".channel["+$i+"]") -type "string" $channel;
+				connectAttr -f ($cacheFile+".inRange") ($switch+".playFromCache");
+				connectAttr -f ($cacheFile+".outCacheData["+$i+"]") ($switch+".inPositions[0]");
+				connectAttr -f ($switch+".outputGeometry[0]") ($cacheObjs[$i]+".inMesh");
+
+				//polySmooth  -mth 0 -dv 1 -c 1 -kb 1 -ksb 1 -khe 0 -kt 1 -kmb 1 -suv 1 -peh 0 -sl 1 -dpe 1 -ps 0.1 -ro 1 -ch 1 $cacheObjs[$i];
+				//zjDelsmooth;
+
+			}
+		}
+	}
+	
+	//恢复材质连接
+	eyRenderRehyperShade;
+	
+	//导入相机
+	source zwCameraImportExport.mel;
+	catch(`zwGetCameraUIGetCameraEx $info[1] $info[2] $info[5] $info[3]`);
+
+	file -save;
+}
+
+global proc string[] slGetProjectInformation()
+{
+	string $porjInfo[];
+	string $projShot, $episode, $scene,$desc,$sequence="";
+	
+	string $project = zwGetProject("");
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $str = `match "^[^_.]+_[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+	if ($str == "")
+	{
+		error "未知项目";
+	}
+	else if ($project == "Enyo" || $project == "LilLarikkins")
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[3];
+
+		$desc = $buf[4];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+	}
+	else if ($project == "Woodlies")
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[3];
+
+		$desc = $buf[4];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+		
+		$sequence = $buf[2];
+	}
+	else
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[2];
+
+		$desc = $buf[3];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+	}
+
+	$projInfo[0] = $project;
+	$projInfo[1] = $projShot;
+	$projInfo[2] = $episode;
+	$projInfo[3] = $scene;
+	$projInfo[4] = $desc;
+
+	return $projInfo;
+}

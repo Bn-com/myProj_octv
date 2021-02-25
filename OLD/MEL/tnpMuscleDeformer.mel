@@ -1,0 +1,197 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// Date: 2004.07.09
+// ChangeLog:
+//
+// 2004.08.03
+proc addJiggle(string $muscle){
+// user only modifies jiggle's attributes after the node is created
+
+	string $shape[] = `ls -dag -type shape $muscle`; // get the shape name
+	string $deformer[] = `listConnections -type "jiggle" $shape[0]`; // get the deformer name
+	if(size($deformer)!=0){
+		//return; // return if there's already a jiggle deformer
+		for($item in $deformer) delete $item;
+	}
+
+	string $stiffness = 0.01;
+	string $damping = 0.0;
+	string $weight = 0.1; // jiggleWeight
+	string $ignoreTransform = 1;
+	string $ifResting = 1; // 0: enable,
+								 // 1: enable only when object stops
+	string $deformOrder = "default";
+	string $exclusiveName = "";
+
+	select $muscle;
+	doJiggle 1 {$stiffness, $damping, $weight, $ignoreTransform, $ifResting, $deformOrder, $exclusiveName};
+	$deformer = `listConnections -type "jiggle" $shape[0]`;
+
+	setAttr ($deformer[0] + ".forceAlongNormal") 1;
+	setAttr ($deformer[0] + ".forceOnTangent") 1;
+	//rename ($deformer[0] + "Cache") (substitute("_envelope", $muscle, "") + "JiggleDeformerCache");
+	//rename $deformer[0] (substitute("_envelope", $muscle, "") + "JiggleDeformer");
+
+	// create extra attribute on the muscle shape for easy access
+	if(!attributeExists("stiffness", $muscle))
+		eval("addAttr -longName \"stiffness\" -defaultValue " + $stiffness + " -max 1.0 -min 0.0 -keyable true " + $muscle);
+	connectAttr ($muscle + ".stiffness") ($deformer[0] + ".stiffness");
+
+	if(!attributeExists("damping", $muscle))
+		eval("addAttr -longName \"damping\" -defaultValue " + $damping + " -max 1.0 -min 0.0 -keyable true " + $muscle);
+	connectAttr ($muscle + ".damping") ($deformer[0] + ".damping");
+
+	if(!attributeExists("jiggleWeight", $muscle))
+		eval("addAttr -longName \"jiggleWeight\" -defaultValue " + $weight + " -max 1.0 -min 0.0 -keyable true " + $muscle);
+	connectAttr ($muscle + ".jiggleWeight") ($deformer[0] + ".jiggleWeight");
+
+	// set cv's jiggle weight 
+	if(kcIsType($muscle, "nurbsSurface")){
+		int $uv[2] = `getAttr ($muscle + ".spansUV")`;
+		int $Vdegree = `getAttr ($muscle + ".degreeV")`;
+		int $CVsInV = $uv[1] + $Vdegree -1;
+		percent -v 0 $deformer[0] ($muscle + ".cv[0:" + $uv[0] + "][0]");
+		percent -v 0 $deformer[0] ($muscle + ".cv[0:" + $uv[0] + "][" + $CVsInV +"]");
+	}
+}	
+////////////////////////////////////////////////////////////////// 
+global proc tnpMuscleDeformer( string $muscle, 
+										   string $attachLocator, 
+										   string $insertionLocator){
+
+	string $prefix = substitute("_envelope", $muscle, "");
+	$prefix = substitute("|", $prefix, "_");
+	string $deformer = $prefix + "MuscleDeformer"; 
+	
+	string $temp[];		
+	if(size($attachLocator)==0 && size($insertionLocator)==0){
+		if(!attributeExists("attachLocator", $muscle) && !attributeExists("insertionLocator", $muscle))
+			error ("attachLocator or insertionLocator is missing");
+		else{
+			$temp = `listConnections ($muscle + ".attachLocator")`;
+			$attachLocator = $temp[0];
+			$temp = `listConnections ($muscle + ".insertionLocator")`;
+			$insertionLocator = $temp[0];
+		}
+		if(!kcIsType($attachLocator, "locator") || !kcIsType($insertionLocator, "locator"))
+			error("attachLocator or insertionLocator is not a locator");
+	}
+
+	// clean up
+	delete -ch $muscle; // delete muscle's construction history
+	// hide the actionLine if any
+	if(attributeExists("actionLine", $muscle)){
+		string $actionLine[] = `listConnections ($muscle + ".actionLine")`;
+		catch(`setAttr ($actionLine[0] + ".visibility") 0`);
+	}
+
+	/////------>
+	print $deformer;
+	string $muscleDeformer[] = `deformer -name $deformer -type tnpMuscleDeformer $muscle`;
+	
+	// make connections
+	connectAttr ($attachLocator + ".worldMatrix") ($muscleDeformer[0] + ".attachMatrix");
+	connectAttr ($insertionLocator + ".worldMatrix") ($muscleDeformer[0] + ".insertionMatrix");
+
+	setAttr ($muscleDeformer[0] + ".reCompute") 1;
+
+	// finalize
+	setAttr ($muscle + ".inheritsTransform") 0;
+
+/*
+	source generateChannelMenu;
+	catch(`CBdeleteConnection ($attachLocator + ".translate")`);
+	catch(`CBdeleteConnection ($attachLocator + ".rx")`);	
+	catch(`CBdeleteConnection ($attachLocator + ".ry")`);	
+	catch(`CBdeleteConnection ($attachLocator + ".rz")`);	
+	catch(`CBdeleteConnection ($insertionLocator + ".translate")`);
+	catch(`CBdeleteConnection ($insertionLocator + ".rx")`);	
+	catch(`CBdeleteConnection ($insertionLocator + ".ry")`);	
+	catch(`CBdeleteConnection ($insertionLocator + ".rz")`);	
+*/	
+	// orientConstraint the $insertionLocator to $attachLocator
+	//select $attachLocator $insertionLocator;
+	//orientConstraint -offset 0 0 0 -weight 1;
+
+	// add jiggle deformer
+	//addJiggle($muscle);
+}
+global proc tnpMuscleAddConstraint(string $muscle, string $constraint){
+
+	if(!kcIsType($constraint,"locator"))
+		error( "only locator constraint is supported"); 
+	if(size(`listConnections -type "tnpMuscleDeformer" ($constraint + ".worldMatrix")`)!=0)
+		error($constraint + " is already connected to a muscle deformer! ");
+
+	string $history[] = `listHistory -future false $muscle`;
+	string $deformer[] = `ls -type "tnpMuscleDeformer" $history`;
+	
+	if(size($deformer)==0){ 
+		error("You need to create a muscle deformer for " + $muscle + " first!");
+	}
+	
+	// connect the constraint to the highest index
+	string $driverList[] = `listConnections ($deformer[0] + ".driverList")`;
+	int $driverIdx = -1;
+	if(size($driverList)==0) 
+		$driverIdx = 0;
+	else{
+		$driverIdx = `tnpMuscleConstraintGetIndex $muscle ($driverList[size($driverList)-1])`;			
+		$driverIdx += 1; // advance to next highest index
+	}
+	if($driverIdx == -1)
+		error "AddMuscle::Unknown error";
+		
+	// make new connection
+	connectAttr ($constraint + ".worldMatrix") ($deformer[0] + ".driverList[" + $driverIdx + "]");
+}
+/////////////////////////////////////////////////////////////////////////////////////
+global proc tnpMuscleRemoveConstraint(string $muscle, string $constraint){
+
+	string $history[] = `listHistory -future false $muscle`;
+	string $deformer[] = `ls -type "tnpMuscleDeformer" $history`;
+	
+	if(size($deformer)==0){ 
+		error("no muscle deformer found!");
+	}	
+	
+	// break connection to the driverList
+	int $driverIdx = `tnpMuscleConstraintGetIndex $muscle $constraint`;
+	if($driverIdx == -1) 
+		error("Removedriver::Unknown Error");
+	
+	disconnectAttr ($constraint + ".worldMatrix") ($deformer[0] + ".driverList[" + $driverIdx + "]");
+	setAttr ($deformer[0] + ".removeDriverIndex") $driverIdx;
+}
+//////////////////////////////////////////////////////////////////////////////////////
+global proc int tnpMuscleConstraintGetIndex(string $muscle, string $constraint){
+	
+	string $history[] = `listHistory -future false $muscle`;
+	string $deformer[] = `ls -type "tnpMuscleDeformer" $history`;
+
+	if(size($deformer)==0){
+		warning("no muscle deformer found");
+		return -1;
+	}	
+	string $dests[] = `connectionInfo -destinationFromSource ($constraint + ".worldMatrix")`;
+	string $temp[];
+	for($dest in $dests){
+		tokenize $dest "." $temp;
+		if($temp[size($temp)-2] == $deformer[0]){
+			tokenize $temp[size($temp)-1] "[" $temp;
+			tokenize $temp[1] "]" $temp;
+			// now get the index
+			return $temp[0];
+		}
+	}	
+	return -1;
+}

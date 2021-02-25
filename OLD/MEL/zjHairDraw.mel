@@ -1,0 +1,139 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ’‘÷æΩ‹
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjHairDraw()
+{
+	if (`window -q -exists hairDrawWin`)
+		return;
+
+	window -title "Assign Hair DrawOrder" -resizeToFitChildren true hairDrawWin;
+		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Assign Hair DrawOrder..." -command "zjHelpCallback zjHairDraw";
+				setParent ..;
+		
+		frameLayout -label ""  -collapsable false -borderStyle "etchedIn";
+			string $formLayout = `formLayout`;
+
+			string $camMenu = `optionMenu -label "Camera"`;
+				string $perspCameras[] = `listCameras -perspective`;
+				for ($i=0;$i<size($perspCameras);$i++)
+				{
+					$camera = $perspCameras[$i];
+						menuItem -label $camera;
+				}
+			string $intField = `intSliderGrp -field true -l "Grade:" -min 0 -max 9 -v 0 -cw 1 50`;
+			string $button1 = `button -label "Apply" -command ("AssignOrder " + " " + $camMenu + " " + $intField)`;
+			string $button2 = `button -label "Close" -command ("deleteUI -window  hairDrawWin")`;
+
+			setParent ..;
+
+			formLayout -edit
+				-attachForm		$camMenu		"top"		5
+				-attachForm		$camMenu		"left"		15
+				-attachForm		$camMenu		"right"		5
+			
+				-attachControl		$intField		"top"		5	$camMenu
+				-attachForm		$intField		"left"		5
+				-attachForm		$intField		"right"		5
+ 			
+				-attachControl		$button1		"top"		5	$intField
+				-attachForm		$button1		"left"		0
+				-attachPosition		$button1		"right"		0	50
+
+				-attachControl		$button2		"top"		5	$intField
+				-attachControl		$button2		"left"		5	$button1
+				-attachPosition		$button2		"right"		0	100
+
+			$formLayout;
+		setParent ..;
+
+
+	showWindow hairDrawWin;
+}
+
+
+// create paintEfx hair
+global proc AssignOrder(string $camMenu, string $intField)
+{
+	string $cam = `optionMenu -q -v $camMenu`;
+	if (!`objExists $cam`)
+	{
+		warning "no such camera";
+		return;
+	}
+	int $factor = 300*`intSliderGrp -q -v $intField`;
+	
+	string $curve[];
+	clear $curve;
+	string $selected[] = `ls -selection -dag -tr`;
+	for ($item in $selected)
+	{
+		if (`gmatch  $item "*_ctr_curve"`)
+			$curve[size($curve)] = $item;
+	}
+
+	if (size($curve) == 0)
+		error("Select hair group");
+
+
+	float $dis[];
+	clear $dis;
+	for ($i=0; $i<size($curve); $i++)
+	{
+		//get the distance of nurbsCurve and camera
+		string $cvs[] = `ls ($curve[$i] + ".cv[*]")`;
+		string $buf[];
+		tokenize $cvs[0] ":]" $buf;
+		int $mid = int($buf[1])/2;
+		float $curveTr[] = `xform -q -ws -translation ($curve[$i] + ".cv[" + $mid + "]")`;
+
+		float $CamTr[] = `xform -q -ws -translation $cam`;
+		float $distance = `mag<<($CamTr[0]-$curveTr[0]), ($CamTr[1]-$curveTr[1]), ($CamTr[2]-$curveTr[2])>>`;
+		$dis[size($dis)] = $distance;
+	}
+
+	int $myorder[];
+	clear $myorder;
+	for ($j=0; $j<size($dis); $j++)
+		$myorder[size($myorder)] = $j;
+
+	for($i=0;$i<size($dis)-1;$i++)
+	{
+		int $min=$i;
+		for($j=$i+1;$j<size($dis);$j++)
+		{
+			if($dis[$j]<$dis[$min])
+				$min=$j;
+		}
+		float $t=$dis[$min];
+		$dis[$min]=$dis[$i];
+		$dis[$i]=$t;
+
+		int $s=$myorder[$min];
+		$myorder[$min]=$myorder[$i];
+		$myorder[$i]=$s;
+	}
+
+	for ($m=0; $m<size($myorder); $m++)
+	{
+		string $item = $curve[$myorder[$m]];
+		int $order = $factor + $m;
+
+		string $buffer[];
+		tokenize $item "_" $buffer;
+		$hair = $buffer[0];
+		int $lastnum = `match "[0-9]+" $hair`;
+		string $stroke = "stroke" + $lastnum;
+
+		setAttr ($stroke + ".drawOrder") $order;
+	}
+}

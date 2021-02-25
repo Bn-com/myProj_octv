@@ -1,0 +1,173 @@
+global proc s100ProdManagerAddSqPre()
+{
+$selectItem  = `textScrollList -q -selectItem  s100ProdManagerUITSProd `;
+	if (size($selectItem) > 0 )
+	{
+	s100ProdManagerAddSqUI ;
+
+    }else{
+	warning "select a prod" ;
+    }
+}
+
+global proc s100ProdManagerAddSqUI()
+{
+if(`window -ex 	s100ProdManagerAddSqUI`)
+	deleteUI s100ProdManagerAddSqUI;
+
+string $ep;
+$ep = `optionMenu -q -v s100ProdManagerUIFormLayoutOPEP`;
+$selectItem  = `textScrollList -q -selectItem  s100ProdManagerUITSProd `;
+$prod = $selectItem[0] ;
+
+
+$test = s100ASGetAllSqFolders( $prod ,  $ep);
+$si = size($test) - 1  ;
+string $last ;
+	if(size($test) >0)
+		$last = substituteAllString($test[$si] , "Sq" ,"") ;
+
+
+int $heigh = 96 ;
+int $width = 100;
+window -title "s100 ADD Seq"   s100ProdManagerAddSqUI;
+columnLayout -adj 1 s100ProdManagerAddSqUIFLMain;
+
+
+$textName = `text -label "number of sequence"` ;
+$textFieldName = `intField -w  ($width * .8 ) s100ProdManagerAddSqUITFName  `;
+
+$separator = `separator -w ($width *.91)`;
+
+
+$butCrea = `button -c "s100ProdManagerAddSq;s100FileManagerRefreshUI;" -label "add Seq" -w ($width *.8)` ;
+
+$side = 5 ;
+window -e -h $heigh  -w $width  -sizeable 0  s100ProdManagerAddSqUI;
+	showWindow;
+
+}
+
+
+global proc s100ProdManagerAddSq()
+{
+int $toCreate = `intField -q -value s100ProdManagerAddSqUITFName  `;
+s100ProdManagerAddSqSt($toCreate ) ;
+
+}
+
+
+global proc s100ProdManagerAddSqSt(int $num )
+{
+
+$ep = `optionMenu -q -v s100ProdManagerUIFormLayoutOPEP`;
+$selectItem  = `textScrollList -q -selectItem  s100ProdManagerUITSProd `;
+$prod = $selectItem[0] ;
+string $sqc;
+//$dept = `optionMenu -q -v s100ProdManagerUIFormLayoutOPDepartment`;
+
+global string $base_prodFilesSystem;
+
+$deptSqc = $base_prodFilesSystem + "prod/" + $prod + "/deptSqc.txt";
+
+$fileId=`fopen $deptSqc "r" `;
+$sqc =`fread $fileId $sqc`;
+fclose $fileId ;
+
+$sqcTab = stringToStringArray($sqc, "|");
+
+
+$file = s100assetManagerGetEpPath($prod)   ;
+
+$path = $file;
+$path +=  $ep +"/";
+$way = $path;
+
+
+	if($num > 0 )
+	{
+			//int $multiply = `match "[0-9]+$" $toCreate`;
+			for($i = 0; $i < $num; $i++)
+			{
+			$toCreate = s100PMSqIncrementSequence($way);
+
+			$folder = $path + "/Sq" + $toCreate+"/" ;
+				sysFile -md $folder ;
+				for($obj in $sqcTab)
+					sysFile -md ($folder + $obj + "/") ;
+			menuItem -p s100ProdManagerUIFormLayoutOPSeq -l ("Sq" + $toCreate);
+				optionMenu -e -v ("Sq" + $toCreate) s100ProdManagerUIFormLayoutOPSeq ;
+			}
+			s100ProdManagerUIRefresh;
+			deleteUI s100ProdManagerAddSqUI;
+	}
+	else
+	{
+			$toCreate = s100PMSqIncrementSequence($way);
+			$path += "Sq" + $toCreate+"/" ;
+			sysFile -md $path ;
+			sysFile -md ($path + "_PREVIZ/") ;
+			deleteUI s100ProdManagerAddSqUI;
+			s100ProdManagerUIRefresh ;
+				menuItem -p s100ProdManagerUIFormLayoutOPSeq -l ("Sq" + $toCreate);
+			optionMenu -e -v ("Sq" + $toCreate) s100ProdManagerUIFormLayoutOPSeq ;
+    }
+}
+
+
+global proc string s100PMSqIncrementSequence(string $way)
+{
+$getFile = `getFileList -folder $way`;
+$getFile = sort($getFile);
+string $increment = "001";
+	if(size($getFile)>0)
+	{
+	string $match = $getFile[size($getFile)-1];
+	int $int = `match "[0-9]+$" $match`;
+	$increment = padNumber(($int + 1), 3);
+	}
+
+return $increment;
+}
+
+global proc s100MPRefreshSqListSeq()
+{
+
+	string $value = "none";
+	if(`optionMenu -q -numberOfItems s100ProdManagerUIFormLayoutOPSeq` > 0)
+		$value = `optionMenu -q -v s100ProdManagerUIFormLayoutOPSeq`;
+
+	string $listA[];
+	string $menuItem[];
+
+	$ep = `optionMenu -q -v s100ProdManagerUIFormLayoutOPEP`;
+	$selectItem  = `textScrollList -q -selectItem  s100ProdManagerUITSProd `;
+	$prod = $selectItem[0] ;
+	$file = s100assetManagerGetEpPath($prod)   ;
+
+	$path = $file;
+	$path +=  $ep +"/";
+
+
+	$getFile = `getFileList -folder $path`;
+
+	for($obj in $getFile)
+		{
+		if(startsWith ($obj,"Sq"))
+			$listA[size($listA)] = $obj;
+        }
+
+	$menuItem = `optionMenu -q -itemListShort s100ProdManagerUIFormLayoutOPSeq`;
+
+		for($obj in $menuItem)
+			deleteUI $obj;
+
+	$listA = sort($listA);
+	for($obj in $listA)
+		menuItem -p s100ProdManagerUIFormLayoutOPSeq -l $obj;
+
+	$contain = stringArrayContains($value, $listA);
+
+if($contain == 1)
+	optionMenu -e -v $value s100ProdManagerUIFormLayoutOPSeq ;
+}

@@ -1,0 +1,224 @@
+//
+// *** xyPolyTransferUV.mel ***
+//
+//  Version 0.1 [03-aug-2002] -- by Imre Tuske
+//
+//  (public beta version | please send bug reports)
+//
+//
+//  * THIS IS MAILWARE! *
+//
+//  If you use this software regularly and you like it, let me know by dropping me an
+//  e-mail. This will guarantee that I'll keep on writing another useful pieces of MEL
+//  code which will be shared with you. Thanks!
+//
+//  [ All Contents (C) by Imre Tuske (tusimi@freemail.hu), Hungary ]
+//  [ Developments done at Black Hole Ltd. / Animation Department  ]
+//
+//
+//
+//  Description:
+//
+//  The xyPolyTransferUV dependency node allows editing UV coordinates and topology of
+//  polygon mesh objects in 3d viewports. This way almost any modeling/deformation tools
+//  will also be available for UV editing as well.
+//
+//  UV editing in the 3d viewports are made possible by creating a '3d-uv' mesh from an
+//  object. This mesh later can be applied back to the original object (or a new mesh
+//  can also be created from the original and the '3d-uv' mesh).
+//
+//  The following functions are provided:
+//
+//  - transfer an object's uv topology to 3d;
+//  - transfer (apply) such an '3d-uv' object back to the original mesh (as UVs);
+//  - create a new mesh from the original object and the '3d-uv' mesh;
+//
+//  Note that all operations are construction history-aware.
+//
+//
+//  Notes:
+//
+//  - The plug-in requires all faces of the mesh to be mapped; otherwise strange results
+//    will occur (this will be addressed in later versions);
+//
+//  - It's not recommended to use any modeling operations on the '3d uv' that change the
+//    polygon order (e.g. create/append/delete face, extrude, etc.) as incorrect results
+//    will occur when applying back the edited UVs;
+//
+//
+//
+//  Installation:
+//
+//  Copy
+//            xyPolyTransferUV.mll  to your plug-ins/ directory,
+//            xyPolyTransferUV.mel  to your scripts/ directory.
+//
+//  Start up Maya, and load the xyPolyTransferUV.mll plug-in in the plug-in manager
+//  window (you should set it as auto-loadable as well).
+//
+//
+//  Usage:
+//
+//  To transfer UV topology into 3d space, select some polygon mesh objects, then
+//  type:
+//
+//    xyPolyTransferUV(0)
+//
+//  To apply the UV mesh back as 'regular' UVs to a polygonal object, select an
+//  '3d-uv' mesh, then a target mesh object; then type:
+//
+//    xyPolyTransferUV(1)
+//
+//  To create a new mesh from an object and it's '3d-uv' mesh, select an '3d-uv'
+//  mesh, and it's 'regular' 3d mesh, then type:
+//
+//    xyPolyTransferUV(2)
+//
+//  It's recommended to create some shelf items if you plan to use these commands
+//  frequently by the command:
+//
+//    xyPolyTransferUV(3)
+//
+//  This will create items on the current shelf.
+//
+//
+//
+//  History:
+//
+//  [03-aug-2002] 0.1		Initial version. (also first public beta)
+//
+//
+
+
+
+proc warn( string $mod, string $msg ) { warning("xyPolyTransferUV::"+$mod+"(): "+$msg); }
+
+
+proc string new_xfer( int $m )
+{
+	string	$r=`createNode xyPolyTransferUV`;
+	setAttr ($r+".m") $m;
+
+	return($r);
+}
+
+
+proc string short( string $n ) { return( (string)match("[^|]*$", $n) ); }
+
+
+proc string[] new_mesh( string $n )
+{
+	string	$r[]; $n=short($n);
+
+	$r[0]=`createNode transform -n $n`;							// transform
+	$r[1]=`createNode mesh -p $r[0] -n ((string)match("^[^0-9]*",$n)+"S1")`;		// shape
+
+	return($r);
+}
+
+
+global proc xyPolyTransferUV( int $mode )
+{
+	string	$mod="xyPolyTransferUV";
+	string	$sl[]=`ls -sl`, $s, $sh[], $n, $m[], $t, $sg[];
+
+	int	$ch=`constructionHistory -q -toggle`, $i=0;
+
+	switch($mode)
+	{
+		case 0:
+		if (size($sl))
+		{
+			for($s in $sl)
+			{
+				$sh=`ls -dag -lf -ni -type mesh $s`;
+
+				for($n in $sh)
+				{
+					$t=new_xfer(0);
+					$m=new_mesh("uv_"+short($n)); $sg[size($sg)]=$m[0];
+
+					connectAttr ($n+".outMesh") ($t+".inMesh");
+					connectAttr ($n+".outMesh") ($t+".inMeshUV");
+					connectAttr ($t+".outMesh") ($m[1]+".inMesh");
+
+					dgeval($t+".outMesh"); dgeval($m[1]+".outMesh");
+					if (!$ch) delete -ch $m[0];
+
+					setAttr ($m[0]+".tx") $i;
+					$i+=2;
+				}
+			}
+
+			select -r -ne $sg;
+		}
+		else warn($mod,"Select some polygon mesh objects to convert their UV topology to 3d");
+		break;
+
+
+		case 1: case 2:
+		$sl=`ls -sl -tr`;
+
+		if (size($sl)>1)
+		{
+			$sh=`ls -dag -lf -ni -type mesh $sl[1]`; $s=$sh[0];
+			$sh=`ls -dag -lf -ni -type mesh $sl[0]`; $sh[1]=$s;			// 0: uv  1: 3d
+
+			if (($sh[0]!="")&&($sh[1]!=""))
+			{
+				if ($mode==1)
+				{
+					$m[0]=$sl[1];
+					$m[1]=`createNode mesh -p $m[0] -n ((string)match("^[^0-9]*",short($m[0]))+"S1")`;
+
+					$sg=`listSets -o $sh[1] -t 1`;
+					sets -e -fe $sg[0] $m[1];
+
+					setAttr ($sh[1]+".io") 1;
+				}
+				else
+				{
+					$m=new_mesh("uvd_"+short($sl[1]));
+					sets -e -fe initialShadingGroup $m[1];
+				}
+
+				// src: $sh[1] uv: $sh[0] dst: $m[1]
+
+				$t=new_xfer(1);
+
+				connectAttr ($sh[1]+".outMesh") ($t+".inMesh");
+				connectAttr ($sh[0]+".outMesh") ($t+".inMeshUV");
+				catch(`connectAttr -f ($t+".outMesh") ($m[1]+".inMesh")`);
+
+				select -r -ne $m[0];
+				if (!$ch) delete -ch;
+			}
+			else warn($mod,"Select an 'uv-3d' mesh transform and the target mesh transform");
+		}
+		else warn($mod,"Select an 'uv-3d' mesh and a target polygon object");
+		break;
+
+
+		case 3:
+
+		if ((string)`confirmDialog -m "Proceed with creating icons on the current shelf?" -b "OK" -b "Cancel" -db "OK"`=="OK")
+		{
+			global string	$gShelfTopLevel;
+			$s=`tabLayout -q -st $gShelfTopLevel`;
+
+			string	$ls[]={"Transfer UV to 3D", "Transfer 3D back to UV", "Transfer 3D+UV to a new mesh"};
+			string	$as[]={"Transfer UV to 3D: Select poly mesh object(s)", "Transfer 3D back to UV: Select poly object and it's '3d-uv' mesh", "Transfer 3D+UV to a new mesh: Select poly object and it's '3d-uv' mesh"};
+			string	$is[]={"polyconverttouvs","polyconverttoface","polycreatefacet"};
+
+			for($i=0; $i<3; $i++) shelfButton -p $s -l $ls[$i] -i1 ($is[$i]+".xpm") -ann $as[$i] -c ("source xyPolyTransferUV; xyPolyTransferUV("+$i+")");
+
+			warn($mod,"Shelf icons created.");
+		}
+		else warn($mod,"No shelf icons created.");
+
+		break;
+	}
+}
+
+
+

@@ -1,0 +1,70 @@
+global proc zwCheckSmooth()
+{
+	int $val = 2;
+
+//	if(`window -exists zwCheckSmooth`)
+//	{
+//		deleteUI zwCheckSmooth;
+//	}
+//	window -title "Check Smooth" -resizeToFitChildren true -sizeable false zwCheckSmooth;
+//		columnLayout -adjustableColumn true;
+//			text -label "对选择的物体添加Smooth，用于检查穿插";
+//			intSliderGrp -label "Division" -field true -minValue 0 -maxValue 2 -value $val intSliderGrpCheckSmooth;
+//			button -label "OK" -command "zwCheckSmoothOK `intSliderGrp -query -value intSliderGrpCheckSmooth`";
+//	showWindow zwCheckSmooth;
+
+	zwCheckSmoothOK $val;
+}
+
+global proc zwCheckSmoothOK(int $val)
+{
+	string $objects[] = `ls -sl -noIntermediate -dagObjects -type "mesh"`;
+	
+	int $max = size($objects);
+	if ($max == 0)
+	{
+		return;
+	}
+	int $progress = 0;
+	progressWindow -progress $progress -max $max -title "Check Smooth" -status ($progress + "/" + $max) -isInterruptable true;
+
+	for ($obj in $objects)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+		$progress ++;
+		progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $obj);
+
+		int $find = false;
+		string $history[] = `listHistory -pruneDagObjects true -groupLevels true $obj`;
+		for ($polySmoothFace in $history)
+		{
+			if (`nodeType $polySmoothFace` == "polySmoothFace" && `match "checkSmooth" $polySmoothFace` != "")
+			{
+				setAttr ($polySmoothFace + ".divisions") $val;
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+		string $plyname[] = `polySmooth -divisions $val -continuity 1 -keepBorder 0 -kmb 0 -keepSelectionBorder 1 -keepTessellation 1 -constructionHistory 1 $obj`;
+		rename $plyname[0] "checkSmooth#";
+	}
+
+	progressWindow -endProgress;
+}
+
+global proc zwCheckSmoothDel()
+{
+	string $buf[] = `ls -type "polySmoothFace" "checkSmooth*"`;
+	for ($polySmoothFace in $buf)
+	{
+		setAttr ($polySmoothFace + ".divisions") 0;
+		delete $polySmoothFace;
+	}
+}

@@ -1,0 +1,96 @@
+global proc ezTreeCam()
+{
+	source "generateChannelMenu.mel";
+	//source "ezAutoCreateRL.mel";
+	
+	string $light = "keyLight_shadow";
+	if (!objExists($light))
+		error "请确认存在一个名为keyLight_shadow主阴影投射灯光！";
+	float $angle = `getAttr ($light+".ry")`;
+	string $shadows[] = `ls -type transform "*treeshadow*" "*:*treeshadow*"`;
+	string $allLights[] = `ls -type light`;
+	for ($shadow in $shadows)
+	{
+		if (`objExists ($shadow + ".ry")`)
+		{
+			select -r $shadow;
+			CBdeleteConnection  ($shadow + ".ry");
+			setAttr ($shadow + ".ry") ($angle - 90.0);
+			//setAttr ($shadow + ".visibility") 0;
+
+			for ($obj in $allLights)
+			{
+				lightlink -break -light $obj -object $shadow;
+			}
+			lightlink -make -light $light -object $shadow;
+
+		}
+	}
+	select -cl;
+
+	/*
+	if (!`objExists "sceneTreeShadow"`)
+		createRenderLayer -name "sceneTreeShadow" -e -mc -number 1 -noRecurse;
+	layerEditorLayerButtonSelect 0 "sceneTreeShadow";
+	updateHighlightSelectIcon;
+	ezMentalRayRG("sceneTreeShadow");
+	editRenderLayerMembers  "sceneTreeShadow" $shadows $light;
+	for ($shadow in $shadows)
+	{
+		if (`objExists ($shadow + ".visibility")`)
+		{
+			editRenderLayerAdjustment ($shadow+".visibility");
+			setAttr ($shadow + ".visibility") 1;
+		}
+	}
+	select -cl;
+	*/
+	
+	
+	string $cams = `lookThru -q`;
+	
+	string $mats[] = `ls -mat "*tree*" "*:*tree*"`;
+	string $des;
+	for ($mat in $mats)
+	{
+		string $cons[] = `listConnections -type vectorProduct $mat`;
+		string $oldcam[];
+		if (`objExists $cons[0]`)
+		{
+			$oldcam = `listConnections -p true ($cons[0]+".matrix")`;
+			if (`objExists $oldcam[0]`)
+				disconnectAttr  $oldcam[0] ($cons[0]+".matrix");
+			connectAttr -f ($cams+".worldInverseMatrix[0]")  ($cons[0]+".matrix");
+		}
+
+	}
+
+	float $ry = `getAttr ($cams+".ry")`;
+	string $loc[] = `ls -type locator "*:*treenrominversrot*" "*treenrominversrot*"`;
+	if (!`objExists $loc[0]`)
+		error "请检查Tree的旋转控制器命名！";
+	string $tree[] = `pickWalk -d up $loc[0]`;
+	setAttr ($tree[0]+".ry") (-1*$ry);
+	select -cl;
+	select -r $tree[0];
+}
+
+global proc ezTreeNormalMap()
+{
+	string $files[] = `ls -type file`;
+	for ($file in $files)
+	{
+		string $tex = `getAttr ($file+".fileTextureName")`;
+		if (endsWith($tex,"NSL.iff"))
+		{
+			string $replace = `substring $tex 1 (size($tex)-7)` + "NSR.iff";
+			setAttr -type "string" ($file+".fileTextureName") $replace;
+		}
+		else if (endsWith($tex,"NSR.iff"))
+		{
+			string $replace = `substring $tex 1 (size($tex)-7)` + "NSL.iff";
+			setAttr -type "string" ($file+".fileTextureName") $replace;
+		}
+	}
+	print "已更换normal贴图！";
+}

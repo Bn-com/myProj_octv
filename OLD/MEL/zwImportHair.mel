@@ -1,0 +1,85 @@
+global proc zwImportHair()
+{
+	string $sceneName = `file -query -sceneName -shortName`;
+	if ($sceneName == "")
+	{
+		error "«Îœ»¥Ê≈Ã";
+	}
+	string $folder = `zwGetPath "hair" ""`;
+	if (!`filetest -d $folder`)
+	{
+		warning "Hair CacheŒ¥…œ¥´";
+	}
+
+	float $currentTime = `currentTime -query`;
+	string $tempDir = `diskCache -tempDir`;
+
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $source = `referenceQuery -withoutCopyNumber -filename $reference`;
+		string $dest = `substitute "_ms_[^_]+[.]" $source "_ms_hair."`;
+		if ($dest != $source && `filetest -f $dest`)
+		{
+			string $namespace = `match "[^/]+$" $dest`;
+			$namespace = `match "^[^.]+" $namespace`;
+			zwDelNamespace $namespace;
+			file -import -type "mayaBinary" -ra true -namespace $namespace -options "v=0"  -pr -loadReferenceDepth "all" $dest;
+
+			string $character = `match "^[^_]+_[^_]+" $namespace`;
+
+			string $hairSystems[] = `ls -type "hairSystem" ($namespace + ":*")`;
+			if (size($hairSystems) == 0)
+			{
+				continue;
+			}
+			select $hairSystems;
+			DeleteHairCache;
+			doHairDiskCache 1 { "3", 1, $currentTime, $currentTime, 1 } ;
+			for ($hairSystem in $hairSystems)
+			{
+				string $diskCache[] = `listConnections -type "diskCache" $hairSystem`;
+				string $hiddenCacheName = `getAttr ($diskCache[0] + ".hiddenCacheName")`;
+				string $filespec = $folder + "/" + `substitute ("^[^_]+_" + $namespace) $hiddenCacheName "*"`;
+				string $files[] = `getFileList -filespec $filespec`;
+				for ($file in $files)
+				{
+					if (`match (tolower($character)) (tolower($file))` != "")
+					{
+						sysFile -copy ($tempDir + "/" + $hiddenCacheName) ($folder + "/" + $file);
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	zwSetIntAttrAll "hairSystem" "simulationMethod" 3;
+	currentTime -edit ($currentTime + 1);
+	currentTime -edit $currentTime;
+}
+
+global proc zwDelNamespace(string $namespace)
+{
+	namespace -setNamespace ":";
+	if (!`namespace -exists $namespace`)
+	{
+		return;
+	}
+	namespace -setNamespace $namespace;
+	string $namespaces[] = `namespaceInfo -listOnlyNamespaces`;
+	for ($i=0; $i<size($namespaces); $i++)
+	{
+		zwDelNamespace $namespaces[$i];
+	}
+	string $nodes[] = `namespaceInfo -dagPath -listOnlyDependencyNodes`;
+	for ($i=0; $i<size($nodes); $i++)
+	{
+		if (`objExists $nodes[$i]`)
+		{
+			delete $nodes[$i];
+		}
+	}
+	namespace -setNamespace ":";
+	namespace -removeNamespace $namespace;
+}

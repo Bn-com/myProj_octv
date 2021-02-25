@@ -1,0 +1,401 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc lrAnimReplaceAnimation()
+{
+	string $sel[] = `ls "*:Asset_Root*" "*Asset_Root*"`;
+	for ($sl in $sel)
+	{
+		//select -cl;
+		//select -r $sl;
+		if (`objExists $sl` && `referenceQuery -inr $sl`)
+		{
+			lrAnimReplaceAnimationRepair($sl);
+		}
+		//select -cl;
+	}
+	//lrAnimGetAssetReference();
+	//lrAnimRepairSound();
+	file -save;
+}
+
+global proc lrAnimReplaceAnimationRepair(string $item)
+{
+	string $reffile = `referenceQuery -f $item`;
+	string $refnode = `referenceQuery -rfn $item`;
+
+	string $file = lrAnimReplaceAnimationGetFile($reffile);
+	if ($file != "没有找到对应的内部前期文件!")
+	{
+		/*if (match("WildwoodForest_Ext",$item) == "WildwoodForest_Ext")
+		{
+			file -lr $refnode $file;
+		}
+		else */
+		{
+			slImportRef $file "mayaAscii";
+			string $current[] = `ls -sl`;
+			string $child[] = `listRelatives $current[0]`;
+			
+			//select -r $item ;select -add $child[0];
+			lrAnimReplaceAnimationCopy($item,$child[0]);
+		}
+	}
+}
+
+global proc string lrAnimReplaceAnimationGetFile(string $file)
+{
+	string $type,$typeexp;
+	string $buff[] ={};
+	int $num = `tokenize $file "/" $buff`;
+	for ($i=0;$i<$num;$i++)
+	{
+		if ($buff[$i] == "asset" || $buff[$i] == "Asset")
+		{
+			switch ($buff[$i+1])
+			{
+				case "char" :
+					$type = "characters";
+					break;
+				case "prop" :
+					$type = "props";
+					break;
+				case "set" :
+					$type = "sets";
+					break;
+			}
+			$typeexp = $buff[$i+2];
+			break;
+		}
+	}
+	string $buff1[] = {};
+	int $num1 = `tokenize $buff[$num-1] "{}." $buff1`;
+	string $char = $buff1[0];
+	string $bufftemp[] = stringToStringArray($char,"_");
+	$char = `substituteAllString $char $bufftemp[0] ""`;
+	$char = `substituteAllString $char $bufftemp[size($bufftemp)-1] ""`;
+	if ($bufftemp[1] == "full") 
+	{
+		$char = `substituteAllString $char $bufftemp[1] ""`;
+	}
+	//print $char;
+
+	int $finded=0;
+	string $rightFile="";
+	string $path = `zwGetPath "scenes" "lr"`+"/"+$type+"/";//+$typeexp+"/";
+	//print $path;
+	string $folders[] = `getFileList -fld $path`;
+	for($fld in $folders)
+	{
+		//print ($fld+"\n");
+		//string $newFld = `substituteAllString $fld "_" ""`;
+		string $newChar = `substituteAllString $char "_" ""`;
+		string $repfld = `substring $fld 8 (size($fld))`;
+		if(match(tolower($newChar),tolower($fld))==tolower($newChar) && startsWith(tolower($repfld),tolower($newChar)) )    
+		{
+			if ((tolower($newChar) == "ed" && tolower($repfld) =="ed") ||  tolower($newChar) != "ed")
+			{
+				if ($type == "sets" && endsWith(tolower($fld),tolower($newChar)))
+				{
+					$rightFile = $path+$fld+"/master/lr_"+$fld+"_h_ms_tex.ma";
+					$finded = 1;
+					break;
+				}
+				else if ($type != "sets")
+				{
+					$rightFile = $path+$fld+"/master/lr_"+$fld+"_h_ms_anim.ma";
+					$finded = 1;
+				}
+				if (endsWith(tolower($repfld),tolower($newChar)))
+					break;
+			}
+		}
+		//print $rightFile;
+	}
+
+	if(`filetest -r $rightFile` && $finded)
+	{
+		return $rightFile;
+	}
+	else
+	{
+		return "没有找到对应的内部前期文件!";    
+	}
+}
+
+global proc lrAnimReplaceAnimationCopy(string $rig,string $ms)
+{
+	string $sel[] = {$rig,$ms};//`ls -sl`;
+	/*if (size($sel) != 2)
+	{
+		error "请先选择导出角色，再选择导入的角色!";
+	}*/
+	
+	string $buff[] = stringToStringArray($sel[0],":");
+	string $old="";
+	if (size($buff)==1)
+	{
+		clear $buff;
+		$buff = stringToStringArray($sel[0],"_");
+		$old = $buff[0]+"_";
+	}
+	else 
+	{
+		$old = `substituteAllString $sel[0] $buff[size($buff)-1] ""`;
+	}
+	clear $buff;
+	$buff = stringToStringArray($sel[1],":");
+	string $new = `substituteAllString $sel[1] $buff[size($buff)-1] ""`;
+
+	
+	//
+	if (objExists($old+"Chest_Ctrl") && attributeExists("leftArm",($old+"Chest_Ctrl")) && objExists($new+"LfArm_Switch"))
+	{
+		
+		if (getAttr($old+"Chest_Ctrl.leftArm")==10)
+		{
+			setAttr ($new+"LfArm_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"Chest_Ctrl.leftArm")==0)
+		{
+			setAttr ($new+"LfArm_Switch.IKFK")  0;
+		}
+		
+		if (getAttr($old+"Chest_Ctrl.rightArm")==10)
+		{
+			setAttr ($new+"RtArm_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"Chest_Ctrl.rightArm")==0)
+		{
+			setAttr ($new+"RtArm_Switch.IKFK")  0;
+		}
+		
+	}
+	if (objExists($old+"Pelvis_Ctrl") && attributeExists("leftLeg",($old+"Pelvis_Ctrl")) && objExists($new+"LfLeg_Switch"))
+	{
+		
+		if (getAttr($old+"Pelvis_Ctrl.leftLeg")==10)
+		{
+			setAttr ($new+"LfLeg_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"Pelvis_Ctrl.leftLeg")==0)
+		{
+			setAttr ($new+"LfLeg_Switch.IKFK")  0;
+		}
+		
+		if (getAttr($old+"Pelvis_Ctrl.rightLeg")==10)
+		{
+			setAttr ($new+"RtLeg_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"Pelvis_Ctrl.rightLeg")==0)
+		{
+			setAttr ($new+"RtLeg_Switch.IKFK")  0;
+		}
+		
+	}
+
+
+	string $confile = "//file-cluster/GDC/Resource/Support/Maya/projects/Ninjago/controls.txt";
+	$fileId = `fopen $confile "r"`;
+	string $content = `fgetline $fileId`;
+	while (size($content) > 0 )
+	{
+		clear $buff;
+		int $num = `tokenize $content "\t \n" $buff`;
+		string $oldCon = $old+$buff[0];
+		string $newCon = $new+$buff[1];
+		string $list[] = `ls  ($old+"*"+$buff[0])`;
+		for ($item in $list)
+		{
+			if (endsWith($item,$oldCon))
+			{
+				string $ac[] = `listConnections -type animCurve -s 1 -d 0 $item`;
+				if (size($ac))
+				{
+					$oldCon = $item;
+				}
+			}
+		}
+		if (`objExists $oldCon` && catchQuiet(`select -r $oldCon`) == 0  && `objExists $newCon` && catchQuiet(`select -r $newCon`) == 0 )
+		{
+			select -r $oldCon;select -add $newCon;
+			lrAnimReplaceAnimationCopyCMD($oldCon,$newCon);
+		}
+		$content = `fgetline $fileId`;
+	}
+	fclose $fileId;
+}
+
+global proc lrAnimReplaceAnimationCopyCMD(string $sr,string $ds)
+{
+	string $master[] = {$sr,$ds};//`ls -sl`;
+	int $ct=3;
+	int $pt=1;
+	
+	//if (size($master) != 2)
+	//	error "请先选择导出动画的角色的character，再选择需要导入动画的角色的character !";
+
+	string $buff[];
+	int $num1 = `tokenize $master[0] ":" $buff`;
+	string $preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+	if ($num1==1)
+	{
+		$num1 = `tokenize $master[0] "_" $buff`;
+		$preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+		if ($num1==1)
+		{
+			$preCopy = "";
+		}
+	}
+
+	clear $buff;
+	int $num2 = `tokenize $master[1] ":" $buff`;
+	string $prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+	if ($num2==1)
+	{
+		$num1 = `tokenize $master[1] "_" $buff`;
+		$prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+		if ($num1==1)
+		{
+			$prePaste = "";
+		}
+	}
+	
+	
+	string $animSets[];
+	if ($pt ==1 )
+	{
+		$animSets = {"faceControls","TSM2Controls","FaceMachineControls","bodySet","CTRL_SET","face_controls_Sets"};
+	}
+	else if ($pt ==2)
+	{
+		$animSets = {"TSM2Controls","bodySet","CTRL_SET"};
+	}
+	else if ($pt ==3)
+	{
+		$animSets = {"faceControls","FaceMachineControls","face_controls_Sets"};
+	}
+	
+	string $source[];
+	for ($set in $animSets)
+	{
+		string $copySet = $preCopy + $set;
+		if (`objExists $copySet`)
+		{
+			select -r  $copySet;
+			string $setObjs[] = `ls -sl`;
+			$source = stringArrayCatenate($source,$setObjs);
+		}
+	}
+
+	/*string $pasteSet = $prePaste + "set";
+	string $pasteFset = $prePaste + "facial_set";
+	string $pasteAset = $prePaste + "accessory_set";
+	string $dest[];
+	if (`objExists $pasteFset`)
+		$dest = `sets -query $pasteSet $pasteFset`;
+	if (`objExists $pasteAset`)
+		$dest = `sets -query $pasteSet $pasteFset $pasteAset`;*/
+
+	if ($ct == 1 || $ct ==2)
+	{
+		for ($obj in $source)
+		{
+			string $paste = `substitute $preCopy $obj $prePaste`;
+			if ($preCopy == "")
+			{
+				$paste = $prePaste+$obj;
+			}
+			//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+			if (`objExists $paste` && !endsWith((tolower($paste)),"master"))
+			{
+				//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+				
+				string $attrs[] = stringArrayCatenate(`listAttr -k -o $obj`,`listAttr -cb -u $obj`);
+				for ($attr in $attrs)
+				{
+					if (`getAttr -type ($obj+"."+$attr)` != "double3")
+					{
+						float $value = `getAttr ($obj+"."+$attr)`;
+						if (`objExists ($paste+"."+$attr)` && `getAttr -se ($paste+"."+$attr)`)
+						{
+							setAttr ($paste+"."+$attr) $value;
+							if ($ct == 2)
+							{
+								setKeyframe ($paste+"."+$attr);
+							}
+						}
+					}
+				}
+				if (`copyKey $obj` && $ct == 1)
+				{
+					//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+					pasteKey -o "replaceCompletely" $paste;
+				}
+			}
+		}
+	}
+	else if ($ct == 3)
+	{
+		string $attrs[] = stringArrayCatenate(`listAttr -k -o $master[0]`,`listAttr -cb -u $master[0]`);
+		for ($attr in $attrs)
+		{
+			if (`objExists($master[1]+"."+$attr)` &&`getAttr -se ($master[1]+"."+$attr)` && `getAttr -type ($master[0]+"."+$attr)` != "double3")
+			{
+				float $value = `getAttr ($master[0]+"."+$attr)`;
+				setAttr ($master[1]+"."+$attr) $value;
+
+				if (`copyKey $master[0]`)
+				{
+					pasteKey -o "replaceCompletely" $master[1];
+				}
+			}
+		}
+	}
+}
+
+global proc lrAnimRepairSound()
+{
+	string $filename = `file -q -sn -shn`;
+	string $buff[] = stringToStringArray($filename,"_");
+	string $name = $buff[1]+"_"+$buff[2];
+	string $existAudio[] = `ls -type audio`;
+
+	string $ep = $buff[0];
+	string $audioPath = "//file-cluster/GDC/Projects/LORDoftheRINGS/Exchange/Handout/"+$ep+" Handout/blocking/shotAudio/";
+	if (`filetest -r ($audioPath+$name+".aif")`)
+	{
+		int $miss = 1;
+		for ($ad in $existAudio)
+		{
+			if (match($name,$ad) != "")
+			{
+				setAttr -type "string" ($ad+".filename") ($audioPath+$name+".aif");
+				$miss = 0;
+				float $sf = `playbackOptions -q -min`;
+				setAttr ($name+"_audio.offset") $sf;
+				setSoundDisplay  $ad 1;
+			}
+			else 
+				delete $ad;
+		}
+		if ($miss)
+		{
+			//string $abc = `file -import -type "audio" -rpr ($name+"_audio") -options "o=0"  -pr -loadReferenceDepth "all" ($audioPath+$name+".aif")`;
+			//print $abc;
+			float $sf = `playbackOptions -q -min`;
+			//setAttr ($name+"_audio.offset") $sf;
+			sound -file ($audioPath+$name+".aif") -o $sf -n ($name+"_audio");
+			setSoundDisplay  ($name+"_audio") 1;
+		}
+	}
+}

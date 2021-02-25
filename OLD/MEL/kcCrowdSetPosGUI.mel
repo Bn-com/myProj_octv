@@ -1,0 +1,304 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc string kcColorMapExist(string $surface)
+{
+	string $shape[] = `listRelatives -shapes $surface`;
+
+	string $connections[] = `listConnections -source false -destination true ($shape[0] + ".instObjGroups[0]")`;
+
+	for ($item in $connections)
+		if (`nodeType $item` == "shadingEngine")
+		{
+			// get the material node
+
+			string $materials[] = `listConnections -source true -destination false ($item + ".surfaceShader")`;
+
+			if (size($materials) > 0)
+			{
+				string $files[] = `listConnections -source true -destination false ($materials[0] + ".color")`;
+
+				if (size($files) > 0)
+					return $files[0];
+				else
+					return "";
+			}
+
+		}
+}
+
+proc vector[] kcGetPos(string $surface, int $num, string $file)
+{
+	// create an emitter
+
+	string $temp[] = `emitter -type surface -rate (24 * 4 * $num * 10) -scaleRateByObjectSize 0 -needParentUV 1 -cycleEmission none -cycleInterval 1 -speed 1 -speedRandom 0 -normalSpeed 1 -tangentSpeed 0 -maxDistance 0 -minDistance 0 -directionX 1 -directionY 0 -directionZ 0 -spread 0 $surface`;
+	string $emitter = $temp[1];
+
+	// create a particle
+	string $temp[] = `particle`;
+	string $particle = $temp[0];
+	string $particleShape = $temp[1];
+
+	connectDynamic -emitters $emitter $particle;
+	connectAttr -force ($file + ".outColor") ($emitter + ".textureRate");
+	setAttr ($emitter + ".enableTextureRate") 1;
+	setAttr ($emitter + ".emitFromDark") 1;
+
+	// make particle stick to surface
+	goal -weight 1 -useTransformAsGoal 0 -goal $surface $particle;
+	addAttr -longName parentU -dataType doubleArray $particleShape;
+	addAttr -longName parentU0 -dataType doubleArray $particleShape;
+	addAttr -longName parentV -dataType doubleArray $particleShape;
+	addAttr -longName parentV0 -dataType doubleArray $particleShape;
+	addAttr -longName goalU -dataType doubleArray $particleShape;
+	addAttr -longName goalU0 -dataType doubleArray $particleShape;
+	addAttr -longName goalV -dataType doubleArray $particleShape;
+	addAttr -longName goalV0 -dataType doubleArray $particleShape;
+
+	// create expression
+	dynExpression -string "goalU = parentU;\r\ngoalV = parentV;" -creation $particleShape;
+
+	// set maximum count on particle
+	setAttr ($particleShape + ".maxCount") $num;
+
+	float $time = `currentTime -q`;
+	currentTime ($time + 1);
+	currentTime ($time + 2);
+	currentTime ($time + 3);
+	currentTime ($time + 4);
+	currentTime ($time + 5);
+
+	vector $posV[];
+	clear $posV;
+
+	int $size = `particle -q -count $particle`;
+	
+	for ($i = 0; $i < $size; $i++)
+	{
+		float $pos[] = `particle -attribute worldPosition -order $i -q $particle`;
+		$posV[$i] = <<$pos[0], $pos[1], $pos[2]>>;
+	}
+
+//  KC
+	delete $emitter $particle;
+
+	currentTime $time;
+
+	return $posV;
+}
+
+proc int kcCrowdPosPosCollide(vector $obstaclePos[], float $obstacleRad[], vector $pos[], vector $newPos, float $collisionDist)
+{
+	for ($i = 0; $i < size($obstaclePos); $i++)
+	{
+		vector $temp = $obstaclePos[$i] - $newPos;
+
+		if ($temp.x * $temp.x + $temp.y * $temp.y + $temp.z * $temp.z < $obstacleRad[$i] * $obstacleRad[$i])
+			return true;
+	}
+
+
+	for ($item in $pos)
+	{
+		vector $temp = $item - $newPos;
+
+		if ($temp.x * $temp.x + $temp.y * $temp.y + $temp.z * $temp.z < $collisionDist * $collisionDist)
+			return true;
+	}
+
+	return false;
+}
+
+//
+// set random position for $static and $moving particles
+// 
+// NOTE:
+// $boundPlane MUST be axis-aligned and lies on X-Z plane
+//
+
+global proc kcCrowdSetPos(string $particle, string $boundPlane, float $collisionDist, int $size)
+{
+	int $maxAttempt = 500;
+
+
+	// get all static obstacle position and radius
+
+	vector $obstaclePos[];
+	float  $obstacleRad[];
+
+	string $obstacles[] = `ls "crowdObstacle*"`;
+
+	for ($item in $obstacles)
+		if (kcIsType($item, "nurbsCurve"))
+		{
+	 		// assuming uniform scaling
+
+			float $pos[] = `xform -q -worldSpace -translation $item`;
+			float $scale[] = `xform -q -relative -scale $item`;
+
+			$obstaclePos[size($obstaclePos)] = <<$pos[0], $pos[1], $pos[2]>>;
+			$obstacleRad[size($obstacleRad)] = $scale[0];
+		}
+
+
+	vector $pos[];
+
+	float $minX = `getAttr ($boundPlane + ".boundingBoxMinX")`;
+	float $maxX = `getAttr ($boundPlane + ".boundingBoxMaxX")`;
+	float $y	= `getAttr ($boundPlane + ".boundingBoxMinY")`;
+	float $minZ = `getAttr ($boundPlane + ".boundingBoxMinZ")`;
+	float $maxZ = `getAttr ($boundPlane + ".boundingBoxMaxZ")`;
+
+	if ($particle == "")
+	{
+		// create locator
+
+		// create a group node
+
+		string $group = `createNode transform -name locator_group`;
+
+		// check whether to use color map to distribute locators
+
+		string $colorMap = kcColorMapExist($boundPlane);
+
+		if ($colorMap != "")
+		{
+			// use color map to distribute locators
+
+			vector $posV[] = kcGetPos($boundPlane, $size, $colorMap);
+
+/*KC*/
+			for ($i = 0; $i < size($posV); $i++)
+			{
+				vector $newPos = $posV[$i];
+
+				if (kcCrowdPosPosCollide($obstaclePos, $obstacleRad, $pos, $newPos, $collisionDist) == false)
+				{
+					$pos[size($pos)] = $newPos;
+
+					string $locator[] = `spaceLocator -position 0 0 0`;
+					xform -worldSpace -translation ($newPos.x) ($newPos.y) ($newPos.z) $locator[0];
+					parent $locator[0] $group;
+				}			
+			}
+/*KC*/
+		}
+		else
+		{
+			for ($i = 0; $i < $size; $i++)
+			{
+				int $count = 0;
+
+				while (true) 
+				{
+					vector $newPos = <<rand($minX, $maxX), $y, rand($minZ, $maxZ)>>;
+
+//					vector $temp = gauss($minX / 2.0, $maxX / 2.0);
+//					vector $newPos = <<$temp.x, $y, $temp.y>>;
+
+					if (kcCrowdPosPosCollide($obstaclePos, $obstacleRad, $pos, $newPos, $collisionDist) == false)
+					{
+						$pos[size($pos)] = $newPos;
+
+						string $locator[] = `spaceLocator -position 0 0 0`;
+						xform -worldSpace -translation ($newPos.x) ($newPos.y) ($newPos.z) $locator[0];
+						parent $locator[0] $group;
+											
+						break;
+					}
+
+					$count++;
+
+					if ($count > $maxAttempt)
+					{
+						warning("Max attempt reached. Fail to compute position for locator " + $i);
+						break;
+					}
+				}
+			}
+		}
+
+		select $group;
+	}
+	else
+	{
+		int $size = `particle -q -count $particle`;
+
+		for ($i = 0; $i < $size; $i++)
+		{
+			float $statePP[] = `particle -attribute "statePP" -order $i -q $particle`;
+
+			if (($statePP[0] == 1) || ($statePP[0] == 2))
+			{
+				// static or moving
+
+				int $count = 0;
+
+				while (true) 
+				{
+					vector $newPos = <<rand($minX, $maxX), $y, rand($minZ, $maxZ)>>;
+
+					if (kcCrowdPosPosCollide($obstaclePos, $obstacleRad, $pos, $newPos, $collisionDist) == false)
+					{
+						$pos[size($pos)] = $newPos;
+						particle -e -attribute position -order $i -vectorValue ($newPos.x) ($newPos.y) ($newPos.z) $particle;
+
+						break;
+					}
+
+					$count++;
+
+					if ($count > $maxAttempt)
+					{
+						particle -e -attribute position -order $i -vectorValue 0 0 0 $particle;		// set to origin
+
+						warning("Max attempt reached. Fail to compute position for particleId " + $i);
+						break;
+					}
+				}
+			}
+			else   
+				particle -e -attribute position -order $i -vectorValue 0 0 0 $particle;		// set to origin
+		}
+	}
+
+	int $size = size($pos);
+	print("Create " + $size + " locators.");
+}
+
+global proc kcCrowdSetPosCB(string $collisionDistCtrl, string $numLocCtrl)
+{
+	string $selected[] = `ls -selection`;
+
+	if ((size($selected) !=  1) || (kcIsType($selected[0], "nurbsSurface") && kcIsType($selected[0], "mesh")))
+		error "select a NURBS or Poly plane.";
+
+	string $boundPlane = $selected[0];
+	float $collisionDist = `floatSliderGrp -q -value collisionDistValue $collisionDistCtrl`;
+	int $size = `intSliderGrp -q -value sizeValue $numLocCtrl`;
+
+	kcCrowdSetPos("",  $boundPlane,  $collisionDist,  $size);
+}
+
+global proc kcCrowdSetPosGUI()
+{
+	if (`window -exists kcCrowdSetPosWnd`)
+		deleteUI -window kcCrowdSetPosWnd;
+
+	window -title "kcCrowdSetPos" -iconName "Create Locators from Plane"  -wh 420 120 kcCrowdSetPosWnd;
+		columnLayout -columnAttach "both" 5 -rowSpacing 8 -adjustableColumn 1;
+			text -align left -label "        NOTE: you can paint a map on the NURBS surface to designate the placement of locators";
+			string $floatSliderGrp = `floatSliderGrp -label "Collision Distance" -field 1 -value 1.0 -fieldMaxValue 10 collisionDistValue`;
+			string $intSliderGrp = `intSliderGrp -label "Num Locators" -field 1 -value 100 -fieldMaxValue 1000000 sizeValue`;
+			button -label "Create" -command ("kcCrowdSetPosCB " + $floatSliderGrp + " " + $intSliderGrp); 
+		setParent ..;
+	showWindow kcCrowdSetPosWnd;
+}
+

@@ -1,0 +1,296 @@
+
+
+global proc oAttachImage(string $asset_type, string $control,string $mode)
+{
+	string $getfiles[];
+	clear $getfiles;
+	if ($asset_type !=  "")
+		$getfiles = `fileDialog2 -fileMode 1 -fileFilter "Image (*.jpg *jpeg *.exr)" -dialogStyle 2`;
+	else if($asset_type =="" && $mode == "lighting")
+		$getfiles = `fileDialog2 -fileMode 1 -fileFilter "Image (*.jpg *jpeg *.exr)" -dialogStyle 2`;
+	else
+		$getfiles = `fileDialog2 -fileMode 1 -fileFilter "Video (*.avi *.mov)" -dialogStyle 2`;
+
+	text -e -label $getfiles[0] oCTCtrlb6;
+}
+
+//add checkin avi path
+$aviFile = "E:/work/CDSGFC/scenes/sc02/CDSGFC_sc02_sh01_an(353-2980).avi";
+
+
+//、string $OCTV_PROJECTS = "E:/All_Projects/Checkin_dest";;	//production shared folder
+string $OCTV_PROJECTS = `getenv "OCTV_PROJECTS"`;
+string $fileName = `file -q -sn`;
+string $shortName = `file -q -sn -shortName`;
+string $upfilename = "";	//上传后的文件名
+string $destFolder = "";	//上传目录
+string $destMapFolder = "";	//上传贴图目录
+string $idName = "";
+string $ext = fileExtension($shortName);
+
+
+string $project = octvGetCurrentProject($shortName);
+string $asset_type = zwGetAssetType($shortName);
+string $mode = zwGetMode($shortName);
+//string $renname=`getenv username`;
+string $renname="liuf";
+
+print $asset_type;
+print "\n";
+string $buf[];
+clear $buf;
+//2015.12.8
+print $mode	;
+tokenize $shortName "_." $buf;
+
+
+tokenize $shortName "_." $buf;
+string $sceneNum = $buf[1];
+string $shotNum = $buf[2];
+string $testName = $buf[3];
+
+
+if (`match "cam" $testName` != ""||`match "ly" $testName` != ""||`match "an" $testName` != ""||`match "sm" $testName` != ""||`match "cd" $testName` != ""||`match "cc" $testName` != ""||`match "fx" $testName` != ""||`match "rd" $testName` != "" || `match "lg" $testName` != "")//$buf[3] is mode-segment
+	$upfilename = $buf[0] + "_" + $buf[1] + "_" + $buf[2] + "_" + $buf[3];
+else
+{
+	$testName = $buf[4];	//$buf[4] is mode-segment
+	if (`match "cam" $testName` != ""||`match "ly" $testName` != ""||`match "an" $testName` != ""||`match "sm" $testName` != ""||`match "cd" $testName` != ""||`match "cc" $testName` != ""||`match "fx" $testName` != ""||`match "rd" $testName` != "" || `match "lg" $testName` != "")	//$buf[3] is mode-segment
+		$upfilename = $buf[0] + "_" + $buf[1] + "_" + $buf[2] + "_" + $buf[3] + "_" + $buf[4];
+	else
+		error "文件命名错误，正确的名字格式为：项目名_场景号_镜头号_描述字段(可忽略)_环节_版本(可忽略)，例如 PROJ_sc10_sh02_fight_an_002.mb";
+}
+
+$destFolder = $OCTV_PROJECTS + "/" + $project + "/Project/scenes/animation/" + $sceneNum + "/" + $shotNum + "/" + $mode;
+string $fList[] = `getFileList -folder ($destFolder + "/") -filespec ($upfilename + "*")`;
+if (size($fList))
+{
+    //2015.8.12
+    string $fLists[];
+    clear $fLists;
+    for($fl in $fList)
+
+    {
+        string $lists=tolower($fl);
+        $fLists[size($fLists)]=$lists;
+    }
+    string $sortVerhis[] = `sort $fLists`;
+    //
+    string $lastVerfile = "";
+    if (size($sortVerhis))
+        $lastVerfile = $sortVerhis[size($sortVerhis)-1];
+    print ("\nlastVerf:" + $lastVerfile);
+    //int $newver = int(`match "[^c][0-9]{2}$" $lastVerfile`) + 1;
+    string $cver = `match "_c[0-9]{3}." $lastVerfile`;
+    int $newver = int(`substring $cver 3 5`) + 1;
+    int $padding = 3;
+    string $newNum = `python ("'%0" + $padding + "d' % " + $newver)`;
+    $upfilename = $upfilename + "_c" + $newNum + "." + $ext;
+}
+else
+{
+    $upfilename = $upfilename + "_c001." + $ext;
+}
+print $upfilename;
+
+$destMapFolder = $OCTV_PROJECTS + "/" + $project + "/Project/sourceimages/animation/" + $sceneNum + "/" + $shotNum + "/maps";
+
+string $mapFolder =  `substitute "//octvision.com/CG" $destFolder "Z:"`;
+string $slashDestfolder = `substituteAllString $mapFolder "/" "\\\\"`;
+string $web =  "http://192.168.80.200:801/content.htm";
+
+//error report
+if (($asset_type == "characters" || $asset_type == "props" )&& (`match "msTex" $upfilename` != ""||`match "msNoTex" $upfilename` != ""))
+    error "只有set才可以上传msTex/msNoTex文件";
+
+if ($project == "")
+    error "文件名不匹配运行中项目";
+
+if (!`filetest -d $destFolder`)
+    error "找不到对应编号目录，请检查文件名或联系PA张春月";
+
+if (!`filetest -d $destMapFolder`)
+    error "找不到对应贴图目录，请检查文件名或联系PA张春月";
+//whatIs filetest
+
+//test checkout user
+string $db;
+print $asset_type;
+
+    $db = "animation";
+    string $upUser = `getenv username`;
+    string $bufer[];
+    string $fileNames="";
+    int $i=`tokenize $upfilename "_." $bufer`;
+    if(`match "c" $bufer[$i-2]`!=""){
+        string $cver = `match "_c[0-9]{3}." $upfilename`;
+        int $newver = int(`substring $cver 3 5`) - 1;
+        int $padding = 3;
+        string $newNum = `python ("'%0" + $padding + "d' % " + $newver)`;
+
+        for($j=0; $j<$i; $j++){
+            if($fileNames==""){
+                $fileNames=$bufer[$j];
+            }else if($i-2==$j){
+                $fileNames=$fileNames+"_c"+$newNum;
+            }else if($i-1==$j){
+                $fileNames=$fileNames+"."+$bufer[$j];
+            }else{
+                $fileNames=$fileNames+"_"+$bufer[$j];
+            }
+        }
+    }
+
+    python("import octvDB");
+    string $dbreturn[] = `python("octvDB.queryCheckUserDB('" + $db + "','" + $fileNames +"')")`;
+    if($dbreturn[0] != ""){
+        string $checkUser = $dbreturn[0];
+        int $dbreturn1[] = `python("octvDB.queryCheckoutStateDB('" + $db + "','" + $fileNames +"')")`;
+
+    }
+
+//interface
+if (`window -q -exists ocvtCheckinWindow`)
+    deleteUI ocvtCheckinWindow;
+
+window -title "Octopus(Checkin Tool) v1.5" ocvtCheckinWindow;
+    menuBarLayout;
+        menu -label "Help";
+            menuItem -label "Help on Octopus(Checkin Tool)..." -command "showHelp -absolute \"//octvision.com/cg/Tech/maya/Doc/Help_for_Checkin.mht\";";
+        setParent ..;
+    string $form1 = `formLayout`;
+        string $b1 = `textFieldGrp -label "Source:" -adjustableColumn 2 -editable false oCTCtrlb1`;
+        string $b2 = `textFieldGrp -label "Target Name:" -editable false oCTCtrlb2`;
+        string $b3 = `iconTextButton -style "textOnly" -label "Web" -backgroundColor 0.2 0.2 0.2 -command ("system \"start explorer /n,/e, " + $web + " \"") oCTCtrlb2a`;
+        string $b4 = `iconTextButton -style "textOnly" -label "Target  Folder" -backgroundColor 0.2 0.2 0.2 -command ("system \"start explorer /n,/e, " + $slashDestfolder + " \"") oCTCtrlb2b`;
+        string $b5 = `intSliderGrp -label "Progress:" -field true -min 1 -max 100 -v 100 oCTCtrlb3`;
+
+        string $b6 = `checkBoxGrp -numberOfCheckBoxes 4 -label "Optimize:" -labelArray4 "Optimize scene size" "Copy local maps" "Remove imagePlanes" "Copy cache" -valueArray4 1 1 1 1 oCTCtrlb4`;
+        string $b7 = `textFieldGrp -label "Note:" -adjustableColumn 2 oCTCtrlb4a`;
+        string $b9 = `text -label "" oCTCtrlb6`;
+        string $b8 = `button -label "Attached File" -command  ("oAttachImage(\"" + $asset_type + "\", \"" + $b9 + "\",\"" + $mode+ "\")") oCTCtrlb5`;
+        string $b10 = `button -label "Checkin"  -w 160 -command  ("octvCheckinMain(\"" + $project + "\", \"" + $upfilename + "\", \"" + $destFolder + "\", \"" + $mode + "\", \"" + $destMapFolder + "\", \"" + $asset_type + "\")")`;
+        string $b11 = `text -label "Note: 首先存盘再Checkin，Checkin之后不要存盘！！！" -font "boldLabelFont" -backgroundColor 0 1 0`;
+        string $b12 = `image -image "octopus.png"`;
+        formLayout -edit
+
+            -attachForm	$b1	"top"	10
+            -attachForm	$b1	"left"	0
+            -attachPosition	$b1	"right"	0	90
+
+            -attachControl	$b2	"top"	10	$b1
+            -attachForm	$b2	"left"	0
+
+            -attachControl	$b3	"top"	10	$b1
+            -attachControl	$b3	"left"	10	$b2
+            -attachPosition	$b3	"right"	0	60
+
+            -attachControl	$b4	"top"	10	$b1
+            -attachControl	$b4	"left"	10	$b3
+            -attachPosition	$b4	"right"	0	80
+
+            -attachControl	$b5	"top"	10	$b2
+            -attachForm	$b5	"left"	0
+            -attachPosition	$b5	"right"	0	60
+
+            -attachControl	$b6	"top"	10	$b5
+            -attachForm	$b6	"left"	0
+            -attachPosition	$b6	"right"	0	90
+
+            -attachControl	$b7	"top"	10	$b6
+            -attachForm	$b7	"left"	0
+            -attachPosition	$b7	"right"	0	90
+
+            -attachControl	$b8	"top"	10	$b7
+            -attachForm	$b8	"left"	40
+            -attachPosition	$b8	"right"	0	30
+
+            -attachControl	$b9	"top"	10	$b7
+            -attachControl	$b9	"left"	20	$b8
+            -attachPosition	$b9	"right"	0	90
+
+            -attachControl	$b10	"top"	20	$b8
+            -attachForm	$b10	"left"	30
+            -attachPosition	$b10	"right"	0	90
+
+            -attachControl	$b11	"top"	20	$b10
+            -attachForm	$b11	"left"	20
+            -attachPosition	$b11	"right"	0	90
+
+            -attachControl	$b12	"top"	20	$b11
+            -attachForm	$b12	"left"	20
+            -attachPosition	$b12	"right"	0	90
+        $form1;
+        setParent ..;
+    setParent ..;
+
+showWindow ocvtCheckinWindow;
+
+textFieldGrp -e -text $fileName oCTCtrlb1;
+textFieldGrp -e -text $upfilename oCTCtrlb2;
+textFieldGrp -e -text "TD Test" oCTCtrlb4a;
+text -e -label $aviFile oCTCtrlb6;
+
+
+
+    //checkBoxGrp -e -value2 0 oCTCtrlb4;
+
+    checkBoxGrp -e -value2 1 oCTCtrlb4;
+    if ($mode == "cache")
+        checkBoxGrp -e -value4 1 oCTCtrlb4;
+scriptJob -event "SceneOpened" "if (`window -q -exists ocvtCheckinWindow`) deleteUI ocvtCheckinWindow";
+
+
+//
+//
+//
+//
+//string $project ="CDSGFC";
+//string $filename =  "CDSGFC_sc02_sh01_an_c001.mb";
+//
+
+// ===============setp 002   enter  checkin proc =====================
+string $cmdStr = "octvCheckinMain(\"" + $project + "\", \"" + $upfilename + "\", \"" + $destFolder + "\", \"" + $mode + "\", \"" + $destMapFolder + "\", \"" + $asset_type + "\")";
+
+
+
+//global proc octvCheckinMain(string $project,string $filename,string $destFolder,string $mode,string $destMapFolder,string $asset_type)
+
+////string $upfilename = $filename;
+//string $destFolder = "E:/All_Projects/Checkin_dest/CDSGFC/Project/scenes/animation/sc02/sh01/anim";
+//string $destMapFolder = "E:/All_Projects/Checkin_dest/CDSGFC/Project/sourceimages/animation/sc02/sh01/maps";
+//string $mode = "anim";
+//string $asset_type = "";
+
+
+string $filename = $upfilename;
+
+int $optimize = `checkBoxGrp -q -value1 oCTCtrlb4`;
+int $copyCache = `checkBoxGrp -q -value4 oCTCtrlb4`;
+int $optimizeImagePlane = `checkBoxGrp -q -value3 oCTCtrlb4`;
+int $copyMaps = `checkBoxGrp -q -value2 oCTCtrlb4`;
+int $progress = `intSliderGrp -q -v oCTCtrlb3`;
+string $attached = `text -q -label oCTCtrlb6`;
+string $desc = `textFieldGrp -q -text oCTCtrlb4a`;
+if (strip($desc) == "")
+    error "描述字段不能为空";
+
+if($copyMaps==0){
+    error "必须勾选Copy local maps";
+}
+
+if (($mode == "texture"||$mode == "lighting"||$mode == "action") && strip($attached) == "")
+    error "必须添加附件";
+
+if($mode == "anim" && strip($attached) == ""){
+    error "必须添加附件*.avi *.mov";
+
+}
+   //source "\\\\octvision.com\\cg\\Tech\\maya_sixteen\\scripts\\checkin\\octvCheckinCleanup.mel";
+string $path = "//octvision.com/cg/Tech/maya_sixteen/scripts/checkin/octvCheckinCleanup.mel";
+
+eval ("source \"" + $path + "\"");
+string $parameters[] = {$project,$filename,$destFolder,$copyMaps,$copyCache,$optimizeImagePlane,$progress,$optimize,$mode,$destMapFolder,$asset_type,$attached,$desc};
+//deleteUI ocvtCheckinWindow;
+//#octvCheckinCleanup($parameters);e
+

@@ -1,0 +1,318 @@
+
+
+global proc RZcreateConnectionOnStamp(string $stamp[])
+{
+//$stamp = $created
+
+string $md[];
+string $add[];
+string $clamp[];
+string $range[];
+float $minVA[] ;
+
+
+	for($i = 0 ; $i < size($stamp) ; $i++)
+	{
+	$baseName = substituteAllString ($stamp[$i], "_stamp","");
+	$md[$i] = `createNode -n ($baseName + "_st_md") multiplyDivide`;
+	$add[$i] = `createNode -n ($baseName + "_st_add") plusMinusAverage`;
+	$clamp[$i] = `createNode -n ($baseName + "_st_clamp") clamp`;
+	connectAttr -f ($stamp[$i] +".autoAnim") ($md[$i] +".input1X") ;
+	connectAttr -f ($stamp[$i] +".forceAnim") ($add[$i] +".input3D[0].input3Dx") ;
+	connectAttr -f ($md[$i] +".outputX") ($add[$i] +".input3D[1].input3Dx") ;
+	connectAttr -f ($add[$i] +".output3Dx") ($clamp[$i] +".inputR");
+	setAttr -l 1  ($clamp[$i] +".inputR");
+	setAttr -l 1  ($clamp[$i] +".minR");
+	setAttr -l 1  ($clamp[$i] +".maxR") 1;
+	connectAttr -f ($clamp[$i] +".outputR") ($stamp[$i] +".grow") ;
+	setAttr -k 0 -l 1 ($stamp[$i] +".grow") ;
+	$range[$i] = `createNode -n ($baseName +"_st_anim") setRange`;
+	$parent = RZVRGRgetParentForStamp($stamp[$i] ) ;
+	float $minValue ;
+	float $maxValue ;
+	float $maxValueP ;
+	float $minValueP ;
+	$rParent = RZVRGRgetReelParentForStamp($stamp[$i] ) ;
+
+		if($parent ==  "stampHierarchy_grp")
+		{
+		$minValue = 0;
+		$maxValue = 1 ;
+        }else{
+
+		$listP = `listRelatives -p $stamp[$i]`;
+
+			if($listP[0] == $parent)
+			{
+
+			$curve= substituteAllString($stamp[$i],"_stamp","_curv") ;
+			$curveP = substituteAllString($parent,"_stamp","_curv") ;
+			$curveT= substituteAllString($curve,"VRGR_","VRAR_") ;
+			$aTmp =  `listRelatives -p $curveT` ;
+
+			$curveP2 = $aTmp[0] ;
+			/*
+			marche deja !!!
+			$maxValueP = RZcurveGetLength($curveP) ;
+			$length = RZcurveGetLength($curve) ;
+			$closestV =  RZgetClosestLengthValueFromAObject($curve , $curveP) ;
+			$minValue = 1 / ($maxValueP / $closestV) ;
+
+			$max = $closestV + $length ;
+
+
+
+
+				if($max < $maxValueP)
+					$maxValue = 1 /($maxValueP / $max) ;
+				*/
+			print $rParent ;
+			$maxValueP = RZcurveGetLength($rParent) ;
+			$length = RZcurveGetLength($curve) ;
+			$closestV =  RZgetClosestLengthValueFromAObject($curve , $rParent) ;
+
+			$minValue = 1 / ($maxValueP / $closestV) ;
+					print "ici" ;
+
+			$max = $closestV + $length ;
+
+
+
+				if($max < $maxValueP)
+				{
+					$maxValue = 1 /($maxValueP / $max) ;
+				}else{
+						$maxValue = 1 ;
+
+                }
+				//print $maxValue ;
+
+            }
+
+        }
+
+
+
+
+
+	creaAttrFloat($stamp[$i],"minToGrow", 0, 1,$minValue ) ;
+	creaAttrFloat($stamp[$i],"maxToGrow", 0, 1,$maxValue ) ;
+
+
+	setAttr -l 1 ($range[$i] + ".minX") 0 ;
+	setAttr -l 1 ($range[$i] + ".maxX") 1 ;
+
+	connectAttr ($stamp[$i] +".minToGrow") ($range[$i] + ".oldMinX") ;
+	connectAttr ($stamp[$i] +".maxToGrow") ($range[$i] + ".oldMaxX") ;
+
+/*
+	setAttr -l 1 ($range[$i] + ".") $minValue ;
+	setAttr -l 1 ($range[$i] + ".oldMaxX") $maxValue ;
+*/
+	string $toConnect ;
+		if($parent ==  "stampHierarchy_grp")
+		{
+		$toConnect = ("root_ctrl.fullGrowCtrl");
+        }else{
+		$listPP = `listRelatives -p $stamp[$i]  `;
+		$toConnect = ($listPP[0] + ".grow");
+
+        }
+
+
+	connectAttr $toConnect ($range[$i] + ".valueX") ;
+	connectAttr ($range[$i] + ".outValueX") ($md[$i] + ".input2X") ;
+
+//***************************
+	$minVA[$i] = $minValue ;
+	}
+
+
+
+	for($i = 0 ; $i < size($stamp) ; $i++)
+	{
+	$checkP = `listRelatives -p $stamp[$i]`;
+
+		if($checkP[0] != "stampHierarchy_grp")
+		{
+
+
+		$minValue = $minVA[$i] ;
+		$baseName = substituteAllString ($stamp[$i], "_stamp","");
+
+		$jGrp = substituteAllString($stamp[$i] ,"_stamp","_jGrp") ;
+		$jGrpT = substituteAllString($jGrp ,"VRGR_","VR_") ;
+		$listP = `listRelatives -p $jGrpT` ;
+		$jntToCons =  substituteAllString($listP[0] ,"VR_","VRGR_") ;
+		$jntToCons =  substituteAllString($jntToCons ,"_jnt","_pJnt") ;
+		$nGrp = `group -em -n ($baseName + "_pGrp") -p $jntToCons`;
+
+	/*
+		select $stamp[$i] ;
+	select $jntToCons
+
+	*/
+
+
+		parent $nGrp "VRGR_jnt_grp" ;
+		parent ($baseName +"_jGrp") $nGrp ;
+		string $listAllJnt[] = `listRelatives -ad -type "joint" $jGrp `;
+
+
+		$cond = `createNode -n ($stamp[$i] + "_cond") condition ` ;
+		connectAttr ($stamp[$i] + ".grow") ($cond +".firstTerm") ;
+		setAttr ($cond +".operation") 2;
+		setAttr "root_ctrl.fullGrowCtrl" 1 ;
+
+		setAttr "root_ctrl.fullGrowCtrl" 1 ;
+
+
+		$objC = RZgetClostestObjOnParentCurve($listAllJnt[0], $stamp[$i]);
+
+		$objBefC = RZgetObjBeforeClostestObjOnParentCurve($listAllJnt[0], $stamp[$i]);
+
+		setAttr "root_ctrl.fullGrowCtrl" $minVA[$i] ;
+
+
+			for($j = 0 ; $j < size($listAllJnt) ; $j++)
+			{
+
+
+			$listPT = `listRelatives -p $listAllJnt[$j]`;
+			$grpNT = `group -em -n ($listAllJnt[$j] +"_tGrp") -p $listPT[0]`;
+/*
+				if($j >0)
+				{
+				$m = $j - 1;
+				$listPT[0] =  $listAllJnt[$m];
+
+                }
+
+*/
+			$pa = `pointConstraint  $listPT[0] $objC  $grpNT` ;
+
+			//$sc = `scaleConstraint -mo $jntToCons $listAllJnt[$j]` ;
+			//setKeyframe  ($grpNT +".translate") ;
+			//setKeyframe  ($grpNT +".rotate") ;
+
+			//connectAttr ($cond +".outColorR") ($grpNT +".blendParent1") ;
+			//connectAttr ($cond +".outColorR") ($grpNT +".blendPoint1") ;
+
+			$grpNTO = `group -em -n ($listAllJnt[$j] +"_oGrp") -p $listPT[0]`;
+
+
+			parent $listAllJnt[$j] $grpNTO;
+
+			$tmpSetRange = `createNode -n ($grpNT +"_setRange") setRange `;
+
+			$pStampt = `listRelatives -p  $stamp[$i]`;
+
+
+			setAttr "root_ctrl.fullGrowCtrl" 1 ;
+
+			connectAttr ($tmpSetRange +".outValueX") ($pa[0] +"." + $listPT[0] + "W0") ;
+			$rev = `createNode -n  ($tmpSetRange +"_rev") reverse`;
+
+
+			connectAttr ($tmpSetRange +".outValueX") ($rev +".inputX" ) ;
+			connectAttr  ($rev +".outputX" ) ($pa[0] +"." + $objC + "W1");
+
+
+
+			//connectAttr ($tmpSetRange +".outValueX") ($pa[0] +"." + $objC + "W0") ;
+
+
+			$conLast = substituteAllString ($objC , "_pJnt" , "_clamp") ;
+			$conLast += ".maxR" ;
+
+			$conBef = substituteAllString ($objBefC , "_pJnt" , "_clamp") ;
+			$conBef += ".maxR" ;
+
+			connectAttr ($pStampt[0] + ".grow") ($tmpSetRange +".valueX") ;
+			setAttr  ($tmpSetRange +".minX") 0;
+			setAttr  ($tmpSetRange +".maxX") 1;
+
+			connectAttr  $conBef ($tmpSetRange +".oldMinX") ;
+			connectAttr  $conLast  ($tmpSetRange +".oldMaxX") ;
+
+			connectAttr ($tmpSetRange +".outValueX") ($grpNT +".scaleX") ;
+			connectAttr ($tmpSetRange +".outValueX") ($grpNT +".scaleY") ;
+			connectAttr ($tmpSetRange +".outValueX") ($grpNT +".scaleZ") ;
+			parent  $grpNTO $grpNT;
+
+			}
+
+	/*
+
+		$nRange[$i] = `createNode -n ($baseName + "_p_setRange") setRange` ;
+		setAttr ($nRange[$i] + ".maxX") 1;
+		connectAttr (
+		select $range ;
+	*/
+			setAttr "root_ctrl.fullGrowCtrl" 1 ;
+
+        }
+
+    }
+print "succeded";
+}
+
+global proc string RZVRGRgetReelParentForStamp(string $obj)
+{
+
+$list =`listRelatives -p $obj` ;
+
+$sub = substituteAllString($list[0], "_stamp","_curv");
+
+//	$parent = RZVRGRgetParentForStamp($stamp[$i] ) ;
+return $sub;
+}
+
+global proc string RZgetClostestObjOnParentCurve(string $obj, string $stampO )
+{
+/*
+$obj = $listAllJnt[$j]
+$stampO = $stamp[$i]
+
+*/
+
+string $p[] = `listRelatives -p $stampO ` ;
+string $baseN = substituteAllString ($p[0] , "_stamp","") ;
+string $list[] = sort(`listRelatives -ad -type joint  ($baseN + "_jGrp")`);
+$list[0] = $list[1] ;
+string $closts = s100VRReturnClosestElement($obj, $list) ;
+
+return $closts ;
+}
+
+
+
+
+global proc string RZgetObjBeforeClostestObjOnParentCurve(string $obj, string $stampO )
+{
+/*
+$obj = $listAllJnt[$j]
+$stampO = $stamp[$i]
+
+*/
+
+$p = `listRelatives -p $stampO ` ;
+$baseN = substituteAllString ($p[0] , "_stamp","") ;
+$list = sort(`listRelatives -ad -type joint  ($baseN + "_jGrp")`);
+$list[0] = $list[1] ;
+
+$closts = s100VRReturnClosestElement($obj, $list) ;
+int $back ;
+
+	for ($i = 0 ; $i < size($list) ; $i++)
+	{
+		if(	$list[$i] == $closts)
+		{
+			$back = $i;
+
+        }
+    }
+ $back-= 1 ;
+$return = $list[$back ];
+return $return ;
+}

@@ -1,0 +1,156 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: Buffalorender2
+//	Author: zhangben
+//	Created: 20121220
+//
+//	Description:render all renderable cameras,such as StereoCamera pair
+//					
+//////////////////////////////////////////////////////////
+//rehash//
+global proc Buffalorender2()
+{
+	python("import idmt.maya.DOD.DODIV.Maya.commonProperties as docp");
+	python("reload(docp)");
+	python("from maya.app.stereo import stereoCameraCustomPanel");
+	zwSetImageFilePrefix;
+	string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+	int $all = false;
+	if (size($buf) > 1)
+	{
+		string $rs = `confirmDialog -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -defaultButton "Current Layer" -cancelButton "Current Layer"`;
+		if ($rs == "dismiss")
+		{
+			return;
+		}
+		$all = ($rs == "All Renderable Layers");
+	}
+
+	string $layers[];
+	if ($all)
+	{
+		for ($layer in $buf)
+		{
+			if (`getAttr ($layer + ".renderable")`)
+			{
+				$layers[size($layers)] = $layer;
+			}
+		}
+	}
+	else
+	{
+		$layers[size($layers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+	}
+
+	string $imgDir = `workspace -query -renderTypeEntry "images"`;
+	string $fullPath = `workspace -expandName $imgDir`;
+
+	for ($layer in $layers)
+	{
+	    //$layer = $layers[0]
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != $layer)
+		{
+			editRenderLayerGlobals -currentRenderLayer $layer;
+			//renderLayerButton -edit -select false -current false $currentRenderLayer;
+			//renderLayerButton -edit -select true -current true $layer;
+		}
+		int $s = `getAttr defaultRenderGlobals.startFrame`;
+		int $e = `getAttr defaultRenderGlobals.endFrame`;
+		int $i;
+			
+		global string $gMainProgressBar;
+		progressBar -edit -beginProgress -isInterruptable true -status "BuffaloRender ..." -maxValue $e $gMainProgressBar;
+
+		for ($i=$s; $i<=$e; $i++)
+		{
+			if (`progressBar -query -isCancelled $gMainProgressBar`)
+			{
+				progressBar -edit -endProgress $gMainProgressBar;
+				return;
+			}
+			string $rnd_cams[] = python("docp.get_crrent_rnd_camera(False)");
+			string $cut_rnder = `getAttr defaultRenderGlobals.currentRenderer`;
+			for ($eachCame in $rnd_cams)
+			{
+				currentTime $i ;
+				//++++++++加了对渲染器的判断，如果是mentalray，就调用renderWindowRenderCamera render renderView 
+				//if ($cut_rnder == "mentalRay")	// 黄仲维2014-04-28改
+				if ($cut_rnder == "mentalRayx")
+				{
+					int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+					setAttr "defaultRenderGlobals.startFrame" $i;
+				    //string $img_gnms[] = `renderSettings -fp`;
+					string $cameraFolder = `match "[^|]+$" $eachCame`;
+					string $cameraFolder = `match "[^:]+$" $cameraFolder`;
+					string $images[] = `renderSettings -firstImageName`;
+					string $image_shn = `match "[^/]+$" $images[0]` ;
+					setAttr "defaultRenderGlobals.startFrame" $startFrame;
+					string $image_folderPath = $fullPath + "/" + $layer + "/" + $cameraFolder;
+					sysFile -md $image_folderPath;
+					string $path =  $image_folderPath+ "/" + $image_shn;
+		     //++++++++++++++++图片存储的临时路径下全经+++++++++++++++++++++++++++++++++++++++++++
+				        string $img_tmp_full = $fullPath + "/tmp/" + $layer + "/" + $cameraFolder + "/" + $image_shn;
+					progressBar -edit -step 1 $gMainProgressBar;
+		    //================set model panel display nothing =============================
+					string $cur_panel = python("docp.get_currentActivViewPanel()");
+					if ($cur_panel == "StereoPanel") modelEditor -e -allObjects 0 StereoPanelEditor;
+					else modelEditor -e -allObjects 0 $cur_panel;
+		    //======================================================================
+					python("docp.lookThroughRndCame(\"" + $eachCame + "\")");
+					//python("docp.set_mrTextur_writ_lightmap()");
+					renderWindowRenderCamera render renderView  $eachCame;
+					//renderWindowRender redoPreviousRender renderView $eachCame;
+					setAttr defaultRenderGlobals.imfkey -type "string" "";
+					// modified by huangzhongwei@idmt.com.cn, 20100803
+					string $renderedImageName = `optionVar -query "renderedImageName"`;
+					if ($renderedImageName == "")
+					{				 
+					    if (`filetest -e $img_tmp_full`)
+					    {
+						$renderedImageName =   $img_tmp_full;      
+					    }
+					}
+					string $folder = `substitute "[/\\][^/\\]+$" $path ""`;
+					if (!`filetest -d $folder`)
+						{
+							sysFile -md $folder;
+						}
+						sysFile -move $path $renderedImageName;
+						print ("\nBuffaloRender " + $path + "\n");
+				 }
+				 //++++++++++++++++++++++++若不是mentalray 则掉用 render 命令=================
+				else
+				{
+					string $cur_panel = python("docp.get_currentActivViewPanel()");
+					lookThroughModelPanel $eachCame $cur_panel;
+					currentTime $i ;
+					int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+					setAttr "defaultRenderGlobals.startFrame" $i;
+					string $tempfrp = 1000000+$i;///////修改了图片获取算法，原算法始终为1开始   wanshoulong@idmt.com.cn 2015/5/27
+					string $frp = substring($tempfrp,(size($tempfrp)-3),size($tempfrp));
+					//string $images[] = `renderSettings -layer $layer -camera $eachCame -fullPath -firstImageName`;
+					string $images[] = `renderSettings -layer $layer -camera $eachCame -fullPath -genericFrameImageName $frp`;
+					string $out = $images[0];
+					setAttr "defaultRenderGlobals.startFrame" $startFrame;
+					
+					//string $tmp = `render`;
+					renderWindowRenderCamera render renderView  $eachCame;
+					string $tmp = `optionVar -query "renderedImageName"`;
+					progressBar -edit -step 1 $gMainProgressBar;
+
+					string $folder = `substitute "[/\\][^/\\]+$" $out ""`;
+					if (!`filetest -d $folder`)
+					{
+						sysFile -md $folder;
+					}
+						sysFile -move $out $tmp;
+						print ("BuffaloRender " + $out + "\n");
+				}
+			}
+					
+		}
+
+		progressBar -edit -endProgress $gMainProgressBar;
+	}
+}

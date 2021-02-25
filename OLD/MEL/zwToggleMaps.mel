@@ -1,0 +1,1674 @@
+/// Copyright (C) 2000-2009 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2009/02/09
+///
+/// Description: 
+///
+
+
+global proc zwToggleMaps(string $project)
+{
+	python "try:\n\treload(idmt.maya.texture)\nexcept:\n\timport idmt.maya.texture";
+
+	if (`getenv "OFFICE_LOCATION"` == "")
+	{
+		if (!`pluginInfo -query -loaded "idmtCmd.mll"`)
+		{
+			eval ("loadPlugin \"" + `internalVar -userScriptDir` + "idmtCmd.mll\"");
+		}
+	}
+
+	if ($project == "")
+	{
+		$project = zwGetProject("");
+	}
+	//if ($project == "")
+	//{
+	//	$project = "Enyo";
+	//}
+	if ($project == "Ninjago")
+	{
+		zwImportModule("idmt.maya.ToggleMaps", true);
+		python "idmt.maya.ToggleMaps.ToggleMaps().showWindow()";
+		return;
+	}
+
+	global string $zwToggleMapsProject;
+	$zwToggleMapsProject = $project;
+
+	global string $zwToggleMapsLevels[];
+	string $labels[];
+	if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+	{
+		$zwToggleMapsLevels = {"4k", "2k", "1k", "512", "256"};
+		$labels = $zwToggleMapsLevels;
+	}
+	else
+	{
+		$zwToggleMapsLevels = {"", "h", "m", "l", "s"};
+		$labels = {"1/1", "_h    1/2", "_m    1/4", "_l    1/8", "_s    1/16"};
+	}
+
+	if(`window -exists zwToggleMaps`)
+	{
+		deleteUI zwToggleMaps;
+	}
+	window -menuBar true -title "Toggle Maps" -width 600 -height 600 -resizeToFitChildren true zwToggleMaps;
+		menu -label "批量模式";
+		if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+		{
+			menuItem -subMenu true -label "针对所有贴图";
+				menuItem -label "4k" -command "zwToggleMapsAll true \"4k\"";
+				menuItem -label "2k" -command "zwToggleMapsAll true \"2k\"";
+				menuItem -label "1k" -command "zwToggleMapsAll true \"1k\"";
+				menuItem -label "512" -command "zwToggleMapsAll true \"512\"";
+				menuItem -label "256" -command "zwToggleMapsAll true \"256\"";
+				setParent -menu ..;
+			menuItem -subMenu true -label "针对选择物体";
+				menuItem -label "4k" -command "zwToggleMapsAll false \"4k\"";
+				menuItem -label "2k" -command "zwToggleMapsAll false \"2k\"";
+				menuItem -label "1k" -command "zwToggleMapsAll false \"1k\"";
+				menuItem -label "512" -command "zwToggleMapsAll false \"512\"";
+				menuItem -label "256" -command "zwToggleMapsAll false \"256\"";
+				setParent -menu ..;
+		}
+		else
+		{
+			menuItem -subMenu true -label "针对所有贴图";
+				menuItem -label "1/1" -command "zwToggleMapsAll1 true 0";
+				menuItem -label "1/2" -command "zwToggleMapsAll1 true 1";
+				menuItem -label "1/4" -command "zwToggleMapsAll1 true 2";
+				menuItem -label "1/8" -command "zwToggleMapsAll1 true 3";
+				menuItem -label "1/16" -command "zwToggleMapsAll1 true 4";
+				setParent -menu ..;
+			menuItem -subMenu true -label "针对选择物体";
+				menuItem -label "1/1" -command "zwToggleMapsAll1 false 0";
+				menuItem -label "1/2" -command "zwToggleMapsAll1 false 1";
+				menuItem -label "1/4" -command "zwToggleMapsAll1 false 2";
+				menuItem -label "1/8" -command "zwToggleMapsAll1 false 3";
+				menuItem -label "1/16" -command "zwToggleMapsAll1 false 4";
+				setParent -menu ..;
+		}
+		menuItem -label "目录..." -command "zwToggleMapsDir";
+		menu -label "Help";
+			menuItem -label "Help on Toggle Maps..." -command "zjHelpCallback zwToggleMaps";
+
+			string $formLayoutWin = `formLayout`;
+
+				string $scrollLayout = `scrollLayout -horizontalScrollBarThickness 0`;
+					string $columnLayoutNode = `columnLayout`;
+						setParent ..;
+					setParent ..;
+
+				string $rowLayoutRes = `rowLayout -numberOfColumns 6 -columnAttach6 "both" "both" "both" "both" "both" "both" -columnAlign6 "center" "center" "center" "center" "center" "center" -columnWidth 1 78`;
+					string $text = `text -width 80 -label "针对本页"`;
+					for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+					{
+						button -width 80 -label $labels[$i] -command ("catch(`zwToggleMapsChangeShot \"" + $columnLayoutNode + "\" " + $i + "`); progressWindow -endProgress;");
+					}
+					setParent..;
+
+				string $formLayoutCtrl = `formLayout`;
+					string $optionMenu = `optionMenu`;
+					optionMenu -edit -changeCommand ("zwToggleMapsRefreshCatch \"" + $columnLayoutNode + "\" \"" + $optionMenu + "\" true `optionMenu -query -select \"" + $optionMenu + "\"`") $optionMenu;
+					string $buttonAll = `button -label "Show All" -command ("zwToggleMapsRefreshCatch \"" + $columnLayoutNode + "\" \"" + $optionMenu + "\" true 1")`;
+					string $buttonSel = `button -label "Selected Objects Only" -command ("zwToggleMapsRefreshCatch \"" + $columnLayoutNode + "\" \"" + $optionMenu + "\" false 1")`;
+					setParent..;
+				formLayout -edit
+					-attachForm		$optionMenu	"top"		5
+					-attachForm		$optionMenu	"left"		0
+
+					-attachControl		$buttonAll	"top"		5	$optionMenu
+					-attachForm		$buttonAll	"left"		0
+					-attachPosition		$buttonAll	"right"		0	50
+
+					-attachControl		$buttonSel	"left"		0	$buttonAll
+					-attachOppositeControl	$buttonSel	"top"		0	$buttonAll
+					-attachForm		$buttonSel	"right"		0
+				$formLayoutCtrl;
+
+			formLayout -edit
+				-attachForm		$rowLayoutRes	"top"		0
+				-attachForm		$rowLayoutRes	"left"		0
+
+				-attachControl		$scrollLayout	"top"		0	$rowLayoutRes
+				-attachForm		$scrollLayout	"left"		0
+				-attachControl		$scrollLayout	"bottom"	0	$formLayoutCtrl
+				-attachForm		$scrollLayout	"right"		0
+
+				-attachForm		$formLayoutCtrl	"left"		0
+				-attachForm		$formLayoutCtrl	"bottom"	0
+				-attachForm		$formLayoutCtrl	"right"		0
+			$formLayoutWin;
+
+	showWindow zwToggleMaps;
+}
+
+global proc zwToggleMapsRefreshCatch(string $columnLayoutNode, string $optionMenu, int $showAll, int $page)
+{
+	catch(`zwToggleMapsRefresh $columnLayoutNode $optionMenu $showAll $page`);
+	progressWindow -endProgress;
+}
+
+global proc zwToggleMapsRefresh(string $columnLayoutNode, string $optionMenu, int $showAll, int $page)
+{
+	int $pagesize = 100;
+	string $version = zwAboutVersion();
+	if ((int)$version >= 2011)
+	{
+		$pagesize = 1000;
+	}
+
+	global string $zwToggleMapsProject;
+	global string $zwToggleMapsLevels[];
+
+	string $fileNode1[];
+	if ($showAll)
+	{
+		$fileNode1 = `ls -type "file"`;
+	}
+	else
+	{
+		$fileNode1 = `zwTextureNetwork`;
+	}
+
+	string $fileNode[];
+
+	int $pagecount = size($fileNode1) / $pagesize + 1;
+	if ($page > $pagecount)
+	{
+		$page = 1;
+	}
+	string $buf[] = `optionMenu -query -itemListLong $optionMenu`;
+	for ($i=0; $i<`size $buf`; $i++)
+	{
+		deleteUI -menuItem $buf[$i];
+	}
+	setParent -menu $optionMenu;
+	for ($i=0; $i<$pagecount; $i++)
+	{
+		int $start = $i * $pagesize + 1;
+		int $end;
+		if ($i == $pagecount - 1)
+		{
+			$end = size($fileNode1);
+		}
+		else
+		{
+			$end = ($i + 1) * $pagesize;
+		}
+		menuItem -label ("第 " + ($i + 1) + " 页：" + $start + " - " + $end);
+
+		if ($i == $page - 1)
+		{
+			for ($j=$start-1; $j<$end; $j++)
+			{
+				$fileNode[size($fileNode)] = $fileNode1[$j];
+			}
+		}
+	}
+	optionMenu -edit -select $page -label ("共 " + size($fileNode1) + " 个节点，分 " + $pagecount + " 页显示") $optionMenu;
+
+	string $buf[] = `columnLayout -query -childArray $columnLayoutNode`;
+	for ($i=0; $i<`size $buf`; $i++)
+	{
+		deleteUI $buf[$i];
+	}
+	setParent $columnLayoutNode;
+	
+	int $max = `size $fileNode`;
+	if ($max)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+
+	for ($i=0; $i<`size $fileNode`; $i++)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			progressWindow -endProgress;
+			return;
+		}
+		progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "\t" + $fileNode[$i]);
+		
+		string $fileTextureName = `getAttr ($fileNode[$i] + ".fileTextureName")`;
+
+		string $msg = "";
+
+		int $getResByName = zwToggleMapsGetResByName($fileTextureName);
+		if (!$getResByName)
+		{
+			$msg = "不能根据文件名判断分辨率（" + `match "[^/\\]+[^/\\][^/\\]+$" $fileTextureName` + "）";
+		}
+
+		string $largestPath = "";
+		float $largestScale = 0.0;
+		int $largestRes[2];
+
+		string $warning = "";
+		if ($getResByName)
+		{
+			for ($j=0; $j<size($zwToggleMapsLevels); $j++)
+			{
+				$largestPath = zwToggleMapsGetFile($fileTextureName, $zwToggleMapsLevels[$j]);
+				string $sourceExpand = `workspace -expandName $largestPath`;
+
+				if (!`filetest -f $sourceExpand` && `match "/MC_[^/]+/" $sourceExpand` != "")
+				{
+					string $filename = `match "[^/\\]+$" $sourceExpand`;
+					string $tempExpand = `substitute "[^/\\]+$" $sourceExpand ("tmp/" + $filename)`;
+					if (`filetest -f $tempExpand`)
+					{
+						$sourceExpand = $tempExpand;
+					}
+				}
+
+				if (`filetest -f $sourceExpand`)
+				{
+					int $size = `idmtFile -size $sourceExpand`;
+					if ($size <= 12)
+					{
+						break;
+					}
+					$largestScale = zwToggleMapsGetScale($zwToggleMapsLevels[$j]);
+					$largestRes = zwImageSize($sourceExpand);
+					if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+					{
+						if (!($largestRes[0] == 4096/pow(2, $j) && $largestRes[1] == 4096/pow(2, $j)))
+						{
+							if ($zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+							{
+								$warning = "分辨率与文件名不符（" + `match "[^/\\]+$" $largestPath` + "：" + $largestRes[0] + "x" + $largestRes[1] + "）";
+							}
+							else if (zwIsRainbowProject($zwToggleMapsProject))
+							{
+								$msg = "分辨率与文件名不符（" + `match "[^/\\]+$" $largestPath` + "：" + $largestRes[0] + "x" + $largestRes[1] + "）";
+								$largestPath = "";
+							}
+						}
+					}
+					break;
+				}
+				else
+				{
+					$largestPath = "";
+				}
+			}
+		}
+
+		string $formLayout = `formLayout`;
+			popupMenu;
+				menuItem -label "Select" -command ("select \"" + $fileNode[$i] + "\"");
+				menuItem -label "View" -command ("zwToggleMapsView \"" + $fileNode[$i] + "\"");
+				menuItem -label "Explore" -command ("zwToggleMapsExplore \"" + $fileNode[$i] + "\"");
+			string $swatchDisplayPort = `swatchDisplayPort -width 64 -height 64 -shadingNode $fileNode[$i]`;
+			string $text1 = `text -label $fileNode[$i]`;
+			string $text2 = `text -backgroundColor 1 0 ($warning != "") -visible (($msg + $warning) != "") -label ($msg + $warning)`;
+			int $enableRow = !(`getAttr ($fileNode[$i] + ".useFrameExtension")` && `match "[\\\\/][^\\.]+\\.[0-9]+\\.[^\\.\\\\/]+$" $fileTextureName` == "") && $msg == "";
+		//	string $rowLayout = `rowLayout -numberOfColumns 5 -docTag ($fileNode[$i] + "|" + $largestPath) -enable $enableRow ("rowLayout" + $i)`;
+			string $md5 = `python ("idmt.maya.texture.md5('" + $fileNode[$i] + "')")`;
+			string $rowLayout = "rowLayout_" + $md5;
+			rowLayout -numberOfColumns 5 -docTag ($fileNode[$i] + "|" + $largestPath) -enable $enableRow $rowLayout;
+			radioCollection;
+			for ($j=0; $j<size($zwToggleMapsLevels); $j++)
+			{
+				string $currentPath = zwToggleMapsGetFile($fileTextureName, $zwToggleMapsLevels[$j]);
+				string $currentFilename = `match "[^/\\]+$" $currentPath`;
+				
+				int $dive = 0;
+
+				float $currentScale = zwToggleMapsGetScale($zwToggleMapsLevels[$j]);
+				int $currentRes[2];
+				if ($largestScale != 0)
+				{
+					$currentRes = zwToggleMapsGetRes($largestRes, $largestScale, $currentScale);
+					$dive = ($largestRes[0] % ($largestScale / $currentScale) == 0 && $largestRes[1] % ($largestScale / $currentScale) == 0);
+				}
+
+				string $label = "";
+			//	if ($msg == "")
+			//	{
+					$label = $currentRes[0] + " x " + $currentRes[1];
+			//	}
+				int $enable1Radio = $enableRow && ($currentScale <= $largestScale) && ($currentRes[0] >= 16) && ($currentRes[1] >= 16);// && $dive;
+			//	string $radioButton = `radioButton -label $label -enable $enable1Radio -annotation $currentFilename -docTag $currentPath ("radioButton" + $i + $j)`;
+				string $radioButton = "radioButton_" + $md5 + "_" + $j;
+				radioButton -width 80 -label $label -enable $enable1Radio -annotation $currentFilename -docTag $currentPath $radioButton;
+				if ($fileTextureName == $currentPath && $currentPath != "")
+				{
+					radioButton -edit -select $radioButton;
+				}
+				radioButton -edit -onCommand ("zwToggleMapsChange \"" + $rowLayout + "\" \"" + $radioButton + "\"") $radioButton;
+			}
+			setParent..;
+		setParent ..;
+		
+		formLayout -edit
+			-attachForm	$swatchDisplayPort	"left"		5
+			-attachForm	$swatchDisplayPort	"top"		5
+			-attachForm	$swatchDisplayPort	"bottom"	5
+
+			-attachControl	$text1			"left"		5	$swatchDisplayPort
+			-attachForm	$text1			"top"		15
+
+			-attachControl	$text2			"left"		5	$text1
+			-attachForm	$text2			"top"		15
+
+			-attachControl	$rowLayout		"left"		5	$swatchDisplayPort
+			-attachForm	$rowLayout		"bottom"	15
+		$formLayout;
+	}
+
+	if ($max)
+	{
+		progressWindow -endProgress;
+	}
+}
+
+global proc zwToggleMapsView(string $node)
+{
+	string $fileTextureName = `getAttr ($node + ".fileTextureName")`;
+	$fileTextureName = `workspace -expandName $fileTextureName`;
+	if (`filetest -f $fileTextureName`)
+	{
+		launchImageEditor -vif $fileTextureName;
+	}
+}
+
+global proc zwToggleMapsExplore(string $node)
+{
+	string $fileTextureName = `getAttr ($node + ".fileTextureName")`;
+	$fileTextureName = `workspace -expandName $fileTextureName`;
+	string $folder = `substitute "[/\\][^/\\]+$" $fileTextureName ""`;
+	if (`filetest -d $folder`)
+	{
+		$folder = `substituteAllString $folder "/" "\\"`;
+		system ("load \"" + $folder + "\"");
+	}
+}
+
+global proc zwToggleMapsChange(string $rowLayout, string $radioButton)
+{
+	global string $zwToggleMapsProject;
+
+	if (!`rowLayout -query -enable $rowLayout`)
+	{
+		return;
+	}
+	if ($radioButton == "")
+	{
+		return;
+	}
+	if (!`radioButton -query -enable $radioButton`)
+	{
+		return;
+	}
+
+	string $docTag = `rowLayout -query -docTag $rowLayout`;
+	string $buf[];
+	tokenize $docTag "|" $buf;
+	string $node = $buf[0];
+	string $largest = $buf[1];
+
+	$docTag = `radioButton -query -docTag $radioButton`;
+	tokenize $docTag "|" $buf;
+	string $current = $buf[0];
+	string $label = `radioButton -query -label $radioButton`;
+	int $res[2];
+	$res[0] = `match "^[0-9]+" $label`;
+	$res[1] = `match "[0-9]+$" $label`;
+
+	if (!`objExists $node`)
+	{
+		return;
+	}
+	string $source = `workspace -expandName $largest`;
+
+	if (!`filetest -f $source` && `match "/MC_[^/]+/" $source` != "")
+	{
+		string $filename = `match "[^/\\]+$" $source`;
+		string $tempExpand = `substitute "[^/\\]+$" $source ("tmp/" + $filename)`;
+		if (`filetest -f $tempExpand`)
+		{
+			$source = $tempExpand;
+		}
+	}
+
+	if (!`filetest -f $source`)
+	{
+		return;
+	}
+
+	string $dest = $current;
+//	if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+	{
+		$dest = `workspace -expandName $dest`;
+	}
+
+	waitCursor -state on;
+
+	if (!`filetest -f $dest` && `match "/MC_[^/]+/" $dest` != "")
+	{
+		string $filename = `match "[^/\\]+$" $dest`;
+		string $tempExpand = `substitute "[^/\\]+$" $dest ("tmp/" + $filename)`;
+		if (`filetest -f $tempExpand`)
+		{
+			string $rs = `zwSysFile "move" $tempExpand $dest true`;
+			if ($rs == "" && $tempExpand == $source)
+			{
+				$source = $dest;
+			}
+		}
+	}
+	
+//	if (!`filetest -f $dest`)
+//	{
+//		catch(`idmtImage -resize $res[0] $res[1] $source $dest`);
+//	}
+//	else if (!`idmtFile -compareModified $source $dest`)
+//	{
+//		catch(`idmtImage -resize $res[0] $res[1] $source $dest`);
+//	}
+//	if (`filetest -f $dest`)
+//	{
+//		eval ("setAttr \"" + $node + ".fileTextureName\" -type \"string\" \"" + $current + "\"");
+//	}
+
+	int $exists = `zwToggleMapsExists $source $dest`;
+	if (!$exists)
+	{
+		catch(`zwToggleMapsResize $source $dest $res[0] $res[1]`);
+	//	print ("idmtImage -resize " + $res[0] + " " + $res[1] + " \"" + $source + "\" \"" + $dest + "\";\n");
+		if (zwIsRainbowProject($zwToggleMapsProject))
+		{
+			$exists = `filetest -f $dest`;
+		}
+		else
+		{
+			$exists = `zwToggleMapsExists $source $dest`;
+		}
+	}
+	if ($exists)
+	{
+		evalEcho ("setAttr \"" + $node + ".fileTextureName\" -type \"string\" \"" + `substituteAllString $current "\\" "/"` + "\"");
+	}
+	
+	waitCursor -state off;
+	
+	string $fileTextureName = `getAttr ($node + ".fileTextureName")`;
+	string $childArray[] = `rowLayout -query -childArray $rowLayout`;
+	for ($radioButton in $childArray)
+	{
+		$docTag = `radioButton -query -docTag $radioButton`;
+		tokenize $docTag "|" $buf;
+		string $current = $buf[0];
+		if ($current == $fileTextureName)
+		{
+			radioButton -edit -select $radioButton;
+			break;
+		}
+	}
+}
+
+global proc zwToggleMapsChangeShot(string $columnLayout, int $index)
+{
+	global string $zwToggleMapsLevels[];
+
+	string $fileNode[] = `ls -type "file"`;
+
+	int $max = `size $fileNode`;
+	if ($max)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+	
+	for ($i=0; $i<`size $fileNode`; $i++)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+		progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "    " + $fileNode[$i]);
+
+		string $md5 = `python ("idmt.maya.texture.md5('" + $fileNode[$i] + "')")`;
+		string $rowLayout = "rowLayout_" + $md5;
+		if (!`rowLayout -query -exists $rowLayout`)
+		{
+			continue;
+		}
+		if (!`rowLayout -query -enable $rowLayout`)
+		{
+			continue;
+		}
+
+		string $radioButton = "";
+		
+		int $min = size($zwToggleMapsLevels) - 1;
+		int $max = 0;
+		for ($j=0; $j<size($zwToggleMapsLevels); $j++)
+		{
+			$radioButton = "radioButton_" + $md5 + "_" + $j;
+			if (`radioButton -query -enable $radioButton`)
+			{
+				if ($j < $min)
+				{
+					$min = $j;
+				}
+				else if ($j > $max)
+				{
+					$max = $j;
+				}
+			}
+		}
+		if ($index < $min)
+		{
+			$radioButton = "radioButton_" + $md5 + "_" + $min;
+		}
+		else if ($index > $max)
+		{
+			$radioButton = "radioButton_" + $md5 + "_" + $max;
+		}
+		else
+		{
+			$radioButton = "radioButton_" + $md5 + "_" + $index;
+		}
+
+		zwToggleMapsChange($rowLayout, $radioButton);
+	}
+
+	if ($max)
+	{
+		progressWindow -endProgress;
+	}
+}
+
+global proc int zwToggleMapsGetResByName(string $path)
+{
+	int $rs = false;
+
+	global string $zwToggleMapsProject;
+	global string $zwToggleMapsLevels[];
+
+	if ($zwToggleMapsProject == "ROMA")
+	{
+		string $folder = `substitute "[/\\][^/\\]+$" $path ""`;
+		string $levelFolder = `match "[^/\\]+$" $folder`;
+		for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+		{
+			if ($zwToggleMapsLevels[$i] == tolower($levelFolder))
+			{
+				$rs = true;
+				break;
+			}
+		}
+	}
+	else if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+	{
+		string $filename = `match "[^/\\]+$" $path`;
+		string $title = `match "^[^.]+" $filename`;
+		string $levelFilename = `match "[^_]+$" $title`;
+		string $folder = `substitute "[/\\][^/\\]+$" $path ""`;
+		string $levelFolder = `match "[^/\\]+$" $folder`;
+		if (tolower($levelFilename) == $levelFolder)
+		{
+			for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+			{
+				if ($zwToggleMapsLevels[$i] == tolower($levelFilename))
+				{
+					$rs = true;
+					break;
+				}
+			}
+		}
+	}
+	else
+	{
+		$rs = true;
+	}
+
+	return $rs;
+}
+
+global proc string zwToggleMapsGetFile(string $source, string $level)
+{
+	string $dest = "";
+
+	global string $zwToggleMapsProject;
+	global string $zwToggleMapsLevels[];
+
+	if ($zwToggleMapsProject == "ROMA")
+	{
+		string $filename = `match "[^/\\]+$" $source`;
+		string $folder = `substitute "[/\\][^/\\]+$" $source ""`;
+		string $levelFolder = `match "[^/\\]+$" $folder`;
+		int $find = false;
+		for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+		{
+			if ($zwToggleMapsLevels[$i] == tolower($levelFolder))
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			return $dest;
+		}
+
+
+		$folder = `substitute "[^/\\]+$" $folder $level`;
+		$dest = $folder + "/" + $filename;
+	}
+	else if (zwIsRainbowProject($zwToggleMapsProject) || $zwToggleMapsProject == "Enyo" || $zwToggleMapsProject == "WinxTV" || $zwToggleMapsProject == "ShenShou")
+	{
+		string $filename = `match "[^/\\]+$" $source`;
+		string $ext = `substitute "^[^.]+" $filename ""`;
+		
+		string $title = `match "^[^.]+" $filename`;
+		string $levelFilename = `match "[^_]+$" $title`;
+		int $find = false;
+		for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+		{
+			if ($zwToggleMapsLevels[$i] == tolower($levelFilename))
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			return $dest;
+		}
+
+		string $folder = `substitute "[/\\][^/\\]+$" $source ""`;
+		string $levelFolder = `match "[^/\\]+$" $folder`;
+		if (tolower($levelFilename) != $levelFolder)
+		{
+			return $dest;
+		}
+
+		$folder = `substitute "[^/\\]+$" $folder $level`;
+		$title = `substitute "[^_]+$" $title $level`;
+		$dest = $folder + "/" + $title + $ext;
+	}
+	else
+	{
+		string $filename = `match "[^/\\]+$" $source`;
+		string $ext = `substitute "^[^.]+" $filename ""`;
+		string $title = `match "^[^.]+" $filename`;
+		string $folder = `substitute "[/\\][^/\\]+$" $source ""`;
+		$title = `substitute "_[hmls]$" $title ""`;
+		if ($level != "")
+		{
+			$title += "_" + $level;
+		}
+		$dest = $folder + "/" + $title + $ext;
+	}
+
+	return $dest;
+}
+
+global proc int[] zwToggleMapsGetRes(int $largestRes[], float $largestScale, float $destScale)
+{
+	int $destRes[2];
+
+	float $scale = 1.0 / $largestScale * $destScale;
+	$destRes[0] = ceil($largestRes[0] * $scale);
+	$destRes[1] = ceil($largestRes[1] * $scale);
+
+	return $destRes;
+}
+
+global proc float zwToggleMapsGetScale(string $level)
+{
+	float $scale = 1.0;
+
+	global string $zwToggleMapsLevels[];
+	for ($i=0; $i<size($zwToggleMapsLevels); $i++)
+	{
+		if ($zwToggleMapsLevels[$i] == $level)
+		{
+			break;
+		}
+		$scale = $scale / 2.0;
+	}
+
+	return $scale;
+}
+
+// 为了处理序列，20150916
+global proc zwToggleMapsResize(string $source, string $dest, int $width, int $height)
+{
+	if (`match "[\\\\/][^\\.]+\\.[0-9]+\\.[^\\.\\\\/]+$" $source` != "")
+	{
+		string $buf[] = zwGetSequence($source);
+		for ($filename in $buf)
+		{
+			$source = `substitute "[^\\\\/]+$" $source $filename`;
+			string $index = `match "\\.[0-9]+\\." $filename`;
+			$filename = `match "[^/\\\\]+$" $dest`;
+			$filename = `substitute "\\.[0-9]+\\." $filename $index`;
+			$dest = `substitute "[^\\\\/]+$" $dest $filename`;
+			zwToggleMapsResizeOld($source, $dest, $width, $height);
+		}
+	}
+	else
+	{
+		zwToggleMapsResizeOld($source, $dest, $width, $height);
+	}
+}
+
+global proc zwToggleMapsResizeOld(string $source, string $dest, int $width, int $height)
+{
+	global string $zwToggleMapsProject;
+
+	string $folder = `substitute "[/\\][^/\\]+$" $dest ""`;
+	if (!`filetest -d $folder`)
+	{
+		sysFile -md $folder;
+	}
+
+	string $format = zwGetFormatByExt($source);
+	if ($format == "map")
+	{
+//		string $originalSource = `substitute "[.][^/\\.]+$" $source ""`;
+//		string $originalDest = `substitute "[.][^/\\.]+$" $dest ""`;
+//		$format = zwGetFormatByExt($originalSource);
+//		if ($format == "")
+//		{
+//			$originalSource += ".iff";
+//			$originalDest += ".iff";
+//		}
+//
+//		if (!`zwToggleMapsExists $source $originalSource`)
+//		{
+//			string $filname = `match "[^/\\]+$" $originalSource`;
+//			string $temp = `internalVar -userTmpDir` + $filname;
+//			zwImgcvt $source $temp;
+//			zwSysFile "move" $temp $originalSource true;
+//		}
+//
+//		if (!`zwToggleMapsExists $originalSource $originalDest`)
+//		{
+//			string $filname = `match "[^/\\]+$" $originalDest`;
+//			string $temp = `internalVar -userTmpDir` + $filname;
+//			idmtImage -resize $width $height $originalSource $temp;
+//			zwSysFile "move" $temp $originalDest true;
+//		}
+//
+//		if (!`zwToggleMapsExists $originalDest $dest`)
+//		{
+//			string $filname = `match "[^/\\]+$" $dest`;
+//			string $temp = `internalVar -userTmpDir` + $filname;
+//			zwImgcvt $originalDest $temp;
+//			zwSysFile "move" $temp $dest true;
+//		}
+		string $filname = `match "[^/\\]+$" $dest`;
+
+		string $tempIff = `internalVar -userTmpDir` + $filname;
+		string $tempIff = `substitute "[.][^/\\.]+$" $tempIff ""`;
+		$format = zwGetFormatByExt($tempIff);
+		if ($format == "")
+		{
+			$filname += ".iff";
+		}
+		idmtImage -resize $width $height $source $tempIff;
+		
+		string $tempMap = `internalVar -userTmpDir` + $filname;
+		zwImgcvt $tempIff $tempMap;
+		sysFile -delete $tempIff;
+		zwSysFile "move" $tempMap $dest (`getenv "OFFICE_LOCATION"` != "");
+	}
+//	else if (($format == "tif" || $format == "tiff") && zwIsRainbowProject($zwToggleMapsProject) || $format == "png")
+//	{
+//		int $bits = zwGetTiffBits($source);
+//		if ($bits != 32)
+//		{
+//			string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+//			sysFile -del $temp;
+//			string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\ImageMagick-6.6.7-0\\convert.exe \"" + `substituteAllString $source "/" "\\"` + "\" -resize " + $width + "x" + $height + " \"" + `substituteAllString $temp "/" "\\"` + "\"";
+//			system $cmd;
+//			if (`filetest -f $temp`)
+//			{
+//				if (`idmtFile -copyModified $source $temp`)
+//				{
+//					zwSysFile "move" $temp $dest true;
+//				}
+//				sysFile -del $temp;
+//			}
+//		}
+//	}
+	else
+	{
+		zwToggleMapsIdmtImageResize $width $height $source $dest $format;
+	}
+
+//	if (`match "^[\\][\\]file-cluster[\\]gdc[\\]projects[\\]diveollydive3[\\]project[\\]" (tolower($dest))` != "")
+//	{
+//		string $cloud = `substitute "[\\]Project[\\]" $dest "\\DiveollyDive3_Scratch\\Cloud\\Project\\"`;
+//		string $folder = `substitute "[\\][^\\]+$" $cloud ""`;
+//		if (!`filetest -d $folder`)
+//		{
+//			sysFile -makeDir $folder;
+//		}
+//		sysFile -copy $cloud $dest;
+//	}
+}
+
+global proc int zwToggleMapsExists(string $source, string $dest)
+{
+	int $rs = false;
+
+	if (`filetest -f $dest`)
+	{
+		string $modifiedSource = `idmtFile -modified $source`;
+		string $modifiedDest = `idmtFile -modified $dest`;
+		$rs = (`strcmp $modifiedDest $modifiedSource` >= 0);
+	}
+
+	return $rs;
+}
+
+global proc int zwToggleMapsAll(int $showAll, string $newRes)
+{
+	global string $zwToggleMapsProject;
+	if (zwIsRainbowProject($zwToggleMapsProject))
+	{
+		return zwToggleMapsAllROMA($showAll, $newRes);
+	}
+
+	int $dirty = false;
+
+	string $res[] = {"4k", "2k", "1k", "512", "256"};
+
+	string $files[];
+	if ($showAll)
+	{
+		$files = `ls -type "file"`;
+	}
+	else
+	{
+		$files = `zwTextureNetwork`;
+	}
+
+	int $max = `size $files`;
+	if ($max && !`about -batch`)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+
+	for ($i=0; $i<$max; $i++)
+	{
+		if (!`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "    " + $files[$i]);
+		}
+
+		// 原始分辨率
+		string $oldShort = `getAttr ($files[$i] + ".fileTextureName")`;
+		string $oldName = "";
+		string $oldRes = "";
+		for ($oldRes in $res)
+		{
+			string $pattern = "/" + $oldRes + "/[^/.]+_" + $oldRes + "[.][^/]+$";
+			$oldName = `match $pattern $oldShort`;
+			if ($oldName != "")
+			{
+				break;
+			}
+		}
+		if ($oldName == "" || $oldRes == $newRes)
+		{
+			continue;
+		}
+		string $oldLong = `workspace -expandName $oldShort`;
+		string $dir = "";
+		int $len = size($oldShort) - size($oldName);
+		if ($len > 0)
+		{
+			$dir = `substring $oldShort 1 $len`;
+		}
+
+		// 最大分辨率
+		string $maxTime = "";
+		string $maxName = "";
+		string $maxLong = "";
+		string $maxRes = "";
+		for ($j=0; $j<size($res); $j++)
+		{
+			string $currentName = `substitute ("/" + $oldRes + "/") $oldName ("/" + $res[$j] + "/")`;
+			$currentName = `substitute ("_" + $oldRes + "[.]") $currentName ("_" + $res[$j] + ".")`;
+			string $currentLong = `workspace -expandName ($dir + $currentName)`;
+			
+			if (!`filetest -f $currentLong` && `match "/MC_[^/]+/" $currentLong` != "")
+			{
+				string $filename = `match "[^/\\]+$" $currentLong`;
+				string $tempExpand = `substitute "[^/\\]+$" $currentLong ("tmp/" + $filename)`;
+				if (`filetest -f $tempExpand`)
+				{
+					$currentLong = $tempExpand;
+				}
+			}
+			
+			if (`filetest -f $currentLong`)
+			{
+				string $currentTime = `idmtFile -modified $currentLong`;
+				if (`strcmp $currentTime $maxTime` == 1)
+				{
+					$maxTime = $currentTime;
+					$maxName = $currentName;
+					$maxLong = $currentLong;
+					$maxRes = $res[$j];
+				}
+			}
+		}
+		if ($maxLong == "")
+		{
+			continue;
+		}
+
+		// 最终分辨率
+		float $factor = 1.0;
+		int $oldIndex = 0;
+		int $maxIndex = 0;
+		int $newIndex = 0;
+		for ($j=0; $j<size($res); $j++)
+		{
+			if ($res[$j] == $oldRes)
+			{
+				$oldIndex = $j;
+			}
+			if ($res[$j] == $maxRes)
+			{
+				$maxIndex = $j;
+			}
+			if ($res[$j] == $newRes)
+			{
+				$newIndex = $j;
+			}
+		}
+		string $newShort = "";
+		if ($maxIndex >= $newIndex)
+		{
+			$newIndex = $maxIndex;
+			$newShort = $dir + $maxName;
+		}
+		else
+		{
+			string $newName = `substitute ("/" + $oldRes + "/") $oldName ("/" + $newRes + "/")`;
+			$newName = `substitute ("_" + $oldRes + "[.]") $newName ("_" + $newRes + ".")`;
+			$newShort = $dir + $newName;
+
+			$factor = float(pow(2, $maxIndex)) / float(pow(2, $newIndex));
+		}
+		if ($newIndex == $oldIndex)
+		{
+			continue;
+		}
+		string $newLong = `workspace -expandName $newShort`;
+		
+		if (!`filetest -f $newLong` && `match "/MC_[^/]+/" $newLong` != "")
+		{
+			string $filename = `match "[^/\\]+$" $newLong`;
+			string $tempExpand = `substitute "[^/\\]+$" $newLong ("tmp/" + $filename)`;
+			if (`filetest -f $tempExpand`)
+			{
+				string $rs = `zwSysFile "move" $tempExpand $newLong true`;
+				if ($rs == "" && $tempExpand == $maxLong)
+				{
+					$maxLong = $newLong;
+				}
+			}
+		}
+
+		// 缩放
+		int $exists = `zwToggleMapsExists $maxLong $newLong`;
+		if (!$exists)
+		{
+			int $maxSize[] = zwImageSize($maxLong);
+			int $width = ceil($maxSize[0] * $factor);
+			int $height = ceil($maxSize[1] * $factor);
+
+		//	print ("zwToggleMapsResize \"" + $maxLong + "\" \"" + $newLong + "\" " + $width + " " + $height + ";\n");
+			catch(`zwToggleMapsResize $maxLong $newLong $width $height`);
+			if (zwIsRainbowProject($zwToggleMapsProject))
+			{
+				$exists = `filetest -f $newLong`;
+			}
+			else
+			{
+				$exists = `zwToggleMapsExists $maxLong $newLong`;
+			}
+		}
+		if ($exists)
+		{
+		//	print ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + $newShort + "\";\n");
+			evalEcho ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + `substituteAllString $newShort "\\" "/"` + "\"");
+			$dirty = true;
+		}
+	}
+
+	if ($max && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+global proc int zwToggleMapsAllROMA(int $showAll, string $newRes)
+{
+	int $dirty = false;
+
+	string $res[] = {"4k", "2k", "1k", "512", "256"};
+
+	string $files[];
+	if ($showAll)
+	{
+		$files = `ls -type "file"`;
+	}
+	else
+	{
+		$files = `zwTextureNetwork`;
+	}
+
+	int $max = `size $files`;
+	if ($max && !`about -batch`)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+
+	for ($i=0; $i<$max; $i++)
+	{
+		if (!`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "    " + $files[$i]);
+		}
+
+		// 原始分辨率
+		string $oldShort = `getAttr ($files[$i] + ".fileTextureName")`;
+		string $oldName = "";
+		string $oldRes = "";
+		for ($oldRes in $res)
+		{
+			string $pattern = "/" + $oldRes + "/[^/]+$";
+			$oldName = `match $pattern $oldShort`;
+			if ($oldName != "")
+			{
+				break;
+			}
+		}
+		if ($oldName == "" || $oldRes == $newRes)
+		{
+			continue;
+		}
+		string $oldLong = `workspace -expandName $oldShort`;
+		string $dir = "";
+		int $len = size($oldShort) - size($oldName);
+		if ($len > 0)
+		{
+			$dir = `substring $oldShort 1 $len`;
+		}
+
+		// 最大分辨率
+		string $maxTime = "";
+		string $maxName = "";
+		string $maxLong = "";
+		string $maxRes = "";
+		for ($j=0; $j<size($res); $j++)
+		{
+			string $currentName = `substitute ("/" + $oldRes + "/") $oldName ("/" + $res[$j] + "/")`;
+			string $currentLong = `workspace -expandName ($dir + $currentName)`;
+			
+			if (!`filetest -f $currentLong` && `match "/MC_[^/]+/" $currentLong` != "")
+			{
+				string $filename = `match "[^/\\]+$" $currentLong`;
+				string $tempExpand = `substitute "[^/\\]+$" $currentLong ("tmp/" + $filename)`;
+				if (`filetest -f $tempExpand`)
+				{
+					$currentLong = $tempExpand;
+				}
+			}
+			
+			if (`filetest -f $currentLong`)
+			{
+				string $currentTime = `idmtFile -modified $currentLong`;
+				if (`strcmp $currentTime $maxTime` == 1)
+				{
+					$maxTime = $currentTime;
+					$maxName = $currentName;
+					$maxLong = $currentLong;
+					$maxRes = $res[$j];
+				}
+			}
+		}
+		if ($maxLong == "")
+		{
+			continue;
+		}
+
+		// 最终分辨率
+		float $factor = 1.0;
+		int $oldIndex = 0;
+		int $maxIndex = 0;
+		int $newIndex = 0;
+		for ($j=0; $j<size($res); $j++)
+		{
+			if ($res[$j] == $oldRes)
+			{
+				$oldIndex = $j;
+			}
+			if ($res[$j] == $maxRes)
+			{
+				$maxIndex = $j;
+			}
+			if ($res[$j] == $newRes)
+			{
+				$newIndex = $j;
+			}
+		}
+		string $newShort = "";
+		if ($maxIndex >= $newIndex)
+		{
+			$newIndex = $maxIndex;
+			$newShort = $dir + $maxName;
+		}
+		else
+		{
+			string $newName = `substitute ("/" + $oldRes + "/") $oldName ("/" + $newRes + "/")`;
+			$newShort = $dir + $newName;
+
+			$factor = float(pow(2, $maxIndex)) / float(pow(2, $newIndex));
+		}
+		if ($newIndex == $oldIndex)
+		{
+			continue;
+		}
+		string $newLong = `workspace -expandName $newShort`;
+		
+		if (!`filetest -f $newLong` && `match "/MC_[^/]+/" $newLong` != "")
+		{
+			string $filename = `match "[^/\\]+$" $newLong`;
+			string $tempExpand = `substitute "[^/\\]+$" $newLong ("tmp/" + $filename)`;
+			if (`filetest -f $tempExpand`)
+			{
+				string $rs = `zwSysFile "move" $tempExpand $newLong true`;
+				if ($rs == "" && $tempExpand == $maxLong)
+				{
+					$maxLong = $newLong;
+				}
+			}
+		}
+
+		// 缩放
+		int $exists = `zwToggleMapsExists $maxLong $newLong`;
+		if (!$exists)
+		{
+			int $maxSize[] = zwImageSize($maxLong);
+			int $width = ceil($maxSize[0] * $factor);
+			int $height = ceil($maxSize[1] * $factor);
+
+		//	print ("zwToggleMapsResize \"" + $maxLong + "\" \"" + $newLong + "\" " + $width + " " + $height + ";\n");
+			catch(`zwToggleMapsResize $maxLong $newLong $width $height`);
+		//	if (zwIsRainbowProject($zwToggleMapsProject))
+		//	{
+				$exists = `filetest -f $newLong`;
+		//	}
+		//	else
+		//	{
+		//		$exists = `zwToggleMapsExists $maxLong $newLong`;
+		//	}
+		}
+		if ($exists)
+		{
+		//	print ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + $newShort + "\";\n");
+			evalEcho ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + `substituteAllString $newShort "\\" "/"` + "\"");
+			$dirty = true;
+		}
+	}
+
+	if ($max && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+global proc int zwGetTiffBits(string $path)
+{
+	int $rs = 0;
+	
+	string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\bin\\GetTiffBits.exe \"" + `substituteAllString $path "/" "\\"` + "\"";
+	chdir "C:";
+	system $cmd;
+	string $str = `system $cmd`;
+	$str = `match "^[0-9]+" $str`;
+	if ($str != "")
+	{
+		$rs = (int)$str;
+	}
+	
+	return $rs;
+}
+
+global proc int zwToggleMapsAll1(int $showAll, int $level)
+{
+	int $dirty = false;
+
+	global string $zwToggleMapsLevels[];
+
+	string $files[];
+	if ($showAll)
+	{
+		$files = `ls -type "file"`;
+	}
+	else
+	{
+		$files = `zwTextureNetwork`;
+	}
+
+	int $max = `size $files`;
+	if ($max && !`about -batch`)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+
+	for ($i=0; $i<$max; $i++)
+	{
+		if (!`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "    " + $files[$i]);
+		}
+
+		if (!`objExists $files[$i]`)
+		{
+			continue;
+		}
+
+		string $fileTextureName = `getAttr ($files[$i] + ".fileTextureName")`;
+
+		if (`getAttr ($files[$i] + ".useFrameExtension")` && `match "[\\\\/][^\\.]+\\.[0-9]+\\.[^\\.\\\\/]+$" $fileTextureName` == "")
+		{
+			continue;
+		}
+
+		string $largestPath = "";
+		int $largestLevel;
+		for ($j=0; $j<size($zwToggleMapsLevels); $j++)
+		{
+			$largestPath = zwToggleMapsGetFile($fileTextureName, $zwToggleMapsLevels[$j]);
+			string $sourceExpand = `workspace -expandName $largestPath`;
+			if (`filetest -f $sourceExpand`)
+			{
+				int $size = `idmtFile -size $sourceExpand`;
+				if ($size <= 12)
+				{
+					$largestPath = "";
+					break;
+				}
+				$largestLevel = $j;
+				break;
+			}
+			else
+			{
+				$largestPath = "";
+			}
+		}
+		if ($largestPath == "")
+		{
+			continue;
+		}
+		string $source = `workspace -expandName $largestPath`;
+		int $largestRes[2] = zwImageSize($source);
+
+		string $currentPath = "";
+		int $currentLevel;
+		int $currentRes[2];
+		for ($j=$level; $j>=$largestLevel; $j--)
+		{
+			$currentPath = zwToggleMapsGetFile($fileTextureName, $zwToggleMapsLevels[$j]);
+			$currentRes = zwToggleMapsGetRes($largestRes, pow(0.5, $largestLevel),  pow(0.5, $j));
+			if ($currentRes[0] >= 16 && $currentRes[1] >= 16)
+			{
+				if ($largestRes[0] % (pow(0.5, $largestLevel) / pow(0.5, $j)) == 0 && $largestRes[1] % (pow(0.5, $largestLevel) / pow(0.5, $j)) == 0)
+				{
+					$currentLevel = $j;
+					break;
+				}
+			}
+			else
+			{
+				$currentPath = "";
+			}
+		}
+		if ($currentPath == "")
+		{
+			continue;
+		}
+		string $dest = `workspace -expandName $currentPath`;
+
+		int $exists = `zwToggleMapsExists $source $dest`;
+		if (!$exists)
+		{
+			waitCursor -state on;
+			catch(`zwToggleMapsResize $source $dest $currentRes[0] $currentRes[1]`);
+		//	print ("idmtImage -resize " + $res[0] + " " + $res[1] + " \"" + $source + "\" \"" + $dest + "\";\n");
+			waitCursor -state off;
+			$exists = `zwToggleMapsExists $source $dest`;
+		}
+		if ($exists)
+		{
+			evalEcho ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + `substituteAllString $currentPath "\\" "/"` + "\"");
+		}
+		
+	//	if (!`about -batch`)
+	//	{
+	//		string $md5 = `python ("idmt.maya.texture.md5('" + $files[$i] + "')")`;
+	//		string $radioButton = "radioButton_" + $md5 + "_" + $currentLevel;
+	//		if (`radioButton -exists $radioButton`)
+	//		{
+	//			radioButton -edit -select $radioButton;
+	//		}
+	//	}
+	}
+
+	if ($max && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+
+global proc zwToggleMapsDir()
+{
+	if(`window -exists zwToggleMapsDir`)
+		deleteUI zwToggleMapsDir;
+
+	window -title "Toggle Maps" -resizeToFitChildren true zwToggleMapsDir;
+		string $formLayout = `formLayout`;
+			string $text1 = `text -label "将目录里面tga、iff、tif/tiff、jpg、png图片生成1/2、1/4、1/8副本"`;
+			string $text2 = `text -label "Folder"`;
+			string $textField = `textField`;
+			string $symbolButton1 = `symbolButton -image "navButtonBrowse.xpm" -command ("zwToggleMapsDirBrowse \"" + $textField + "\"")`;
+			string $symbolButton2 = `symbolButton -image "timeplay.xpm" -command ("zwToggleMapsDirOK \"" + $textField + "\"")`;
+
+	formLayout -edit
+		-attachForm		$text1		"top"		10
+		-attachForm		$text1		"left"		50
+
+		-attachOppositeControl	$text2		"bottom"	0	$symbolButton1
+		-attachControl		$text2		"right"		5	$textField
+
+		-attachOppositeControl	$textField	"top"		0	$symbolButton1
+		-attachForm		$textField	"left"		50
+		-attachOppositeControl	$textField	"bottom"	0	$symbolButton1
+		-attachControl		$textField	"right"		0	$symbolButton1
+
+		-attachControl		$symbolButton1	"top"		10	$text1
+		-attachForm		$symbolButton1	"right"		50
+
+		-attachOppositeControl	$symbolButton2	"top"		0	$symbolButton1
+		-attachControl		$symbolButton2	"left"		0	$symbolButton1
+		-attachOppositeControl	$symbolButton2	"bottom"	0	$symbolButton1
+	$formLayout;
+
+	showWindow zwToggleMapsDir;
+}
+
+global proc zwToggleMapsDirBrowse(string $textField)
+{
+	string $folder = `textField -query -fileName $textField`;
+	if (!`filetest -d $folder`)
+	{
+	//	$folder = "//file-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/WORKING";
+	}
+	$folder = `idmtFolderDialog -initialDir $folder`;
+	$folder = `substituteAllString $folder "\\" "/"`;
+	if($folder != "")
+	{
+		string $annotation = `substituteAllString $folder "/" "\\"`;
+		textField -edit -fileName $folder -annotation $annotation $textField;
+	}
+}
+
+global proc zwToggleMapsDirOK(string $textField)
+{
+	string $folder = `textField -query -fileName $textField`;
+	if (`filetest -d $folder`)
+	{
+		catch(`zwToggleMapsDirProc $folder`);
+		progressWindow -endProgress;
+	}
+}
+
+global proc int zwToggleMapsDirProc(string $folder)
+{
+	int $rs = true;
+
+	string $filenames[] = `getFileList -filespec ($folder + "/*.*")`;
+
+	// progressWindow
+	int $max = `progressWindow -query -max`;
+	int $progress = `progressWindow -query -progress`;
+	if ($progress <= 0)
+	{
+		$max = size($filenames);
+		$progress = 0;
+		progressWindow -progress $progress -max $max -title "Toggle Maps" -status ($progress + "/" + $max) -isInterruptable true;
+	}
+	else
+	{
+		$max += size($filenames);
+		progressWindow -edit -max $max;
+	}
+
+	for ($filename in $filenames)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			progressWindow -endProgress;
+			return false;
+		}
+
+		$progress = `progressWindow -query -progress`;
+		$progress ++;
+		$max = `progressWindow -query -max`;
+		progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $filename);
+
+		string $source = $folder + "/" + $filename;
+		if (`filetest -f $source`)
+		{
+			string $format = zwGetFormatByExt($filename);
+			if (!($format == "tga" || $format == "iff" || $format == "tif" || $format == "tiff" || $format == "jpg" || $format == "png"))
+			{
+				continue;
+			}
+			if (`match "_[hmls][.]" $filename` != "")
+			{
+				continue;
+			}
+		//	if (`match " " $source` != "")
+		//	{
+		//		warning ("路径不能包含空格：" + $source);
+		//		continue;
+		//	}
+			int $size = `idmtFile -size $source`;
+			if ($size <= 12)
+			{
+				continue;
+			}
+			int $res[] = zwImageSize($source);
+		//	if ($res[0] % 2 == 1 || $res[1] % 2 == 1)
+		//	{
+		//		print ($source + "\n" + $res[0] + "x" + $res[1] + "\n");
+		//		continue;
+		//	}
+			string $h = $folder + "/" + `substitute "[.]" $filename "_h."`;
+			if (!`filetest -f $h`)
+			{
+				if ($res[0] % 2 == 0 && $res[1] % 2 == 0)
+				{
+					zwToggleMapsIdmtImageScale 0.5 $source $h $format;
+					print ($h + "\n");
+				}
+			}
+			string $m = $folder + "/" + `substitute "[.]" $filename "_m."`;
+			if (!`filetest -f $m`)
+			{
+				if ($res[0] % 4 == 0 && $res[1] % 4 == 0)
+				{
+					zwToggleMapsIdmtImageScale 0.25 $source $m $format;
+					print ($m + "\n");
+				}
+			}
+			string $l = $folder + "/" + `substitute "[.]" $filename "_l."`;
+			if (!`filetest -f $l`)
+			{
+				if ($res[0] % 8 == 0 && $res[1] % 8 == 0)
+				{
+					zwToggleMapsIdmtImageScale 0.125 $source $l $format;
+					print ($l + "\n");
+				}
+			}
+			string $s = $folder + "/" + `substitute "[.]" $filename "_s."`;
+			if (!`filetest -f $s`)
+			{
+				if ($res[0] % 16 == 0 && $res[1] % 16 == 0)
+				{
+					zwToggleMapsIdmtImageScale 0.0625 $source $s $format;
+					print ($s + "\n");
+				}
+			}
+		}
+		else if (`filetest -d $source`)
+		{
+			if ($filename != ".mayaSwatches")
+			{
+				$rs = $rs && `zwToggleMapsDirProc $source`;
+			}
+		}
+	}
+
+	// progressWindow
+	if ($progress == $max)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $rs;
+}
+
+global proc zwToggleMapsIdmtImageResize(int $width, int $height, string $source, string $dest, string $format)
+{
+	if ($format != "iff")
+	{
+		string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+		sysFile -del $temp;
+		string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\ImageMagick-6.6.7-0\\convert.exe \"" + `substituteAllString $source "/" "\\"` + "\" -resize " + $width + "x" + $height + " \"" + `substituteAllString $temp "/" "\\"` + "\"";
+		system $cmd;
+		if (`filetest -f $temp`)
+		{
+			int $res[2] = `zwImageSize $temp`;
+			if (!($res[0] < 16 || $res[1] < 16))
+			{
+				if (`idmtFile -copyModified $source $temp`)
+				{
+					zwSysFile "move" $temp $dest true;
+				}
+			}
+			sysFile -del $temp;
+		}
+	}
+	else
+	{
+		string $s = $source;
+		if (`match " " $source` != "")
+		{
+			$s = `internalVar -userTmpDir` + `match "[^/\\]+$" $source`;
+			$s = `idmtFile -shortPath $s`;
+			sysFile -del $s;
+			sysFile -copy $s $source;
+		}
+
+		string $d = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+		sysFile -del $d;
+
+		idmtImage -resize $width $height $s $d;
+		int $res[2] = `zwImageSize $d`;
+		if (!($res[0] < 16 || $res[1] < 16))
+		{
+			zwSysFile "move" $d $dest true;
+		}
+
+		if ($s != $source)
+		{
+			sysFile -del $s;
+		}
+	}
+}
+
+global proc zwToggleMapsIdmtImageScale(float $scale, string $source, string $dest, string $format)
+{
+	if ($format != "iff")
+	{
+		string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+		sysFile -del $temp;
+		string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\ImageMagick-6.6.7-0\\convert.exe \"" + `substituteAllString $source "/" "\\"` + "\" -scale " + $scale * 100 + "% \"" + `substituteAllString $temp "/" "\\"` + "\"";
+		system $cmd;
+		if (`filetest -f $temp`)
+		{
+			int $res[2] = `zwImageSize $temp`;
+			if (!($res[0] < 16 || $res[1] < 16))
+			{
+				if (`idmtFile -copyModified $source $temp`)
+				{
+					zwSysFile "move" $temp $dest true;
+				}
+			}
+			sysFile -del $temp;
+		}
+	}
+	else
+	{
+		string $s = $source;
+		if (`match " " $source` != "")
+		{
+			$s = `internalVar -userTmpDir` + `match "[^/\\]+$" $source`;
+			$s = `idmtFile -shortPath $s`;
+			sysFile -del $s;
+			sysFile -copy $s $source;
+		}
+
+		string $d = `internalVar -userTmpDir` + `match "[^/\\]+$" $dest`;
+		sysFile -del $d;
+
+		idmtImage -scale $scale $s $d;
+		int $res[2] = `zwImageSize $d`;
+		if (!($res[0] < 16 || $res[1] < 16))
+		{
+			zwSysFile "move" $d $dest true;
+		}
+
+		if ($s != $source)
+		{
+			sysFile -del $s;
+		}
+	}
+}

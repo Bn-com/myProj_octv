@@ -1,0 +1,78 @@
+global proc zwRelpaceP008611electrickiddiecar()
+{
+	string $buf[] = `ls -long -sl`;
+	if (size($buf) != 2)
+	{
+		error "先选旧车的MASTER，再加新车的MASTER";
+	}
+	string $oldMatser = $buf[0];
+	string $newMaster = $buf[1];
+
+	string $oldGeo = `substitute "_MASTER$" $oldMatser "_GEO"`;
+
+	string $oldRun = $oldMatser;
+	string $newRun = $newMaster;
+	$buf = `ls -long "*_run" "*:*_run"`;
+	for ($run in $buf)
+	{
+		if (`gmatch $run ($oldMatser + "|*")`)
+		{
+			$oldRun = $run;
+		}
+		else if (`gmatch $run ($newMaster + "|*")`)
+		{
+			$newRun = $run;
+		}
+	}
+	pointConstraint $oldRun $newRun;
+	orientConstraint $oldRun $newRun;
+//	delete `scaleConstraint $oldRun $newRun`;
+
+	string $newPrefix = `match "[^|]+$" $newMaster`;
+	if (`gmatch $newPrefix "*:*"`)
+	{
+		$newPrefix = `match "^[^:]+" $newPrefix`;
+	}
+	else if (`tokenize $newPrefix "_" $buf` > 2)
+	{
+		$newPrefix = `substring $newPrefix 1 (size($newPrefix) - size($buf[size($buf)-2] + "_" + $buf[size($buf)-1]))`;
+	}
+	else
+	{
+		$newPrefix = "";
+	}
+
+	string $lights[] = `ls "LightBarGrp" ($newPrefix + "LightBarGrp") "car_light" ($newPrefix + "car_light")`;
+	for ($light in $lights)
+	{
+		$buf = `listConnections -type "parentConstraint" $light`;
+		$buf = `listConnections ($buf[0] + ".target[0].targetParentMatrix")`;
+		string $newCar = $buf[0];
+		$newCar = `match "[^|]+$" $newCar`;
+		if ($newPrefix != "" && `gmatch $newCar ($newPrefix + "*")`)
+		{
+			$newCar = `substring $newCar (size($newPrefix)+1) (size($newCar) - size($newPrefix))`;
+		}
+
+		delete `listConnections -type "constraint" $light`;
+
+		string $oldCar = "";
+		$buf = `ls -long $newCar ("*:" + $newCar) ("*_" + $newCar)`;
+		for ($str in $buf)
+		{
+			if (`gmatch $str ($oldMatser + "|*")` || `gmatch $str ($oldGeo + "|*")`)
+			{
+				$oldCar = $str;
+				break;
+			}
+		}
+
+		$buf = `parent $light $oldCar`;
+		$light = `match "[^|]+$" $light`;
+		if ($newPrefix != "" && `gmatch $light ($newPrefix + "*")`)
+		{
+			$light = `substring $light (size($newPrefix)+1) (size($light) - size($newPrefix))`;
+		}
+		rename $buf[0] $light;
+	}
+}

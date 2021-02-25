@@ -1,0 +1,307 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WanShouLong
+//	Created: 2008-12-9
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc slRepairReferenceNew()
+{
+	//print "text\n";
+	
+	string $referenceFiles[] = `file -q -r`;
+	
+	for ($file in $referenceFiles )
+	{
+		string $referenceNode = `referenceQuery -rfn $file`;
+
+		string $buff[];
+		int $num = `tokenize $file "{}" $buff`;
+		string $old = $buff[0];
+		
+		$num = `tokenize $old "\/" $buff`;
+		string $fileName = $buff[$num-1];
+		
+		string $idmtFile = `slOemRRGetFile $fileName`;
+		if ($old != $idmtFile)
+		{
+			file -lr $referenceNode $idmtFile;
+		}
+	}
+	
+	string $fullName= `file -q -sn`;
+	string $shortName = `file -q -sn -shn`;
+	string $path = `substring $fullName 1 (size($fullName)-size($shortName))`;
+
+	string $buff[]={};
+	int $num = `tokenize $shortName "_." $buff`;
+	string $newName="";
+	for ($i=0;$i<($num-2);$i++)
+	{
+		$newName += $buff[$i]+"_";
+	}
+
+	if (startsWith($buff[$num-2],"c"))
+	{
+		string $ed = (int)`substring $buff[$num-2] 2 4`+1001;
+		$ed = `substring $ed 2 4`;
+		$newName += "c"+ $ed+"."+$buff[$num-1];
+	}
+	else
+	{
+		string $ed = (int)$buff[$num-2]+1001;
+		$ed = `substring $ed 2 4`;
+		$newName +=  $ed+"."+$buff[$num-1];
+	}
+	//print $newName;
+
+	string $cam[] = `ls -type camera ("*_"+$buff[1]+"_*")`;
+	if (size($cam))
+	{
+		string $camtr[] = `listRelatives -f -p $cam[0]`;
+		if (`match ("_"+$buff[1]+"_"+$buff[2]) $camtr[0]` == ("_"+$buff[1]+"_"+$buff[2]))
+		{
+			select -r $camtr[0];
+			source zwCameraImportExport.mel; zwBakeCamera;
+		}
+	}
+	select -cl;
+	
+	file -rename ($path+$newName);
+	file -save;
+
+	string $avi = `substring $shortName 1 (size($shortName)-size($buff[$num-1]))`+"avi";
+	string $aviobj[] = `getFileList -fld $path -fs $avi`;
+	if (size($aviobj))
+	{
+		$avi = `substring $newName 1 (size($newName)-size($buff[$num-1]))`+"avi";
+		sysFile -copy ($path+$avi) ($path+$aviobj[0]);
+	}
+	
+	string $txt = `substring $shortName 1 (size($shortName)-size($buff[$num-1]))`+"txt";
+	string $txtobj[] = `getFileList -fld $path -fs $txt`;
+	if (size($txtobj))
+	{
+		$txt = `substring $newName 1 (size($newName)-size($buff[$num-1]))`+"txt";
+		sysFile -copy ($path+$txt) ($path+$txtobj[0]);
+	}
+	
+	print ("ÐÂÎÄ¼þ------"+$path+$newName+"\n");
+}
+
+global proc slRepairReferenceUI()
+{
+	if (`window -q -exists slRepairReferenceWin`)
+		deleteUI -window slRepairReferenceWin;
+
+	window -title "Batch Run" -resizeToFitChildren true -h 210 slRepairReferenceWin;
+		
+		columnLayout -adj true ;
+			text -label "FILES:";
+			textScrollList -numberOfRows 8 -allowMultiSelection true -w 400 slRepairReferenceWin_fileList;
+			string $form = `formLayout `;
+				string $butadd = `button -label "Add"  -command "slRepairReferenceAddFile" `;
+				string $butrem = `button -label "Remove" -command "slRepairReferenceRemoveFile" `;
+			setParent ..;
+			formLayout -edit
+			-af		$butadd		"left"	5
+			-ap		$butadd		"right"	0	49
+			-ac		$butrem		"left"	10	$butadd
+			-af		$butrem		"right"	5
+			$form;
+			separator -st "doubleDash" -h 10;
+			button -label "Run" -h 20 -command "slRepairReferenceRun" ;
+			checkBox -label "For MasterLighting" -vis 0 slRepairReferenceWin_type;
+		setParent ..;	
+	showWindow slRepairReferenceWin;
+}
+
+global proc slRepairReferenceAddFile()
+{
+	string $buf[] = `idmtFileDialog -filter "Maya Scene (*.mb;*.ma)|*.mb;*.ma||" -m`;
+
+	string $objFiles[] = `textScrollList -q -ai slRepairReferenceWin_fileList`;
+	for ($item in $buf)
+	{
+		if (!stringArrayCount($item,$objFiles))
+		{
+			textScrollList -e -a $item slRepairReferenceWin_fileList;
+		}
+	}
+}
+
+global proc slRepairReferenceRemoveFile()
+{
+	string $selected[] = `textScrollList -q -selectItem slRepairReferenceWin_fileList`;
+
+	for ($item in $selected)
+		textScrollList -edit -removeItem $item slRepairReferenceWin_fileList;
+}
+
+global proc slRepairReferenceRun()
+{
+	
+	string $allFiles[] = `textScrollList -q -ai slRepairReferenceWin_fileList`;
+	for ($file in $allFiles)
+	{
+		//slOemCollectMissReference $file;
+		//string $cmd = "D:/Alias/Maya2011x64/bin/mayabatch -proj \""+$WHOOempath+"\" -file \""+$file+"\" -script \""+$WHOOempath+"WHOOem.mel\"";
+		//system($cmd);
+		string $newfile = njModelRepairReference($file);
+		string $cmd = ""+`getenv "MAYA_LOCATION"` +"/bin/mayabatch.exe -file \""+$newfile+"\" -command \"source ydAnimCameraSequence.mel;ydAnimCameraSequenceSplit();\"";
+		//system($cmd);
+		print $cmd;
+	}
+
+	//sysFile -del ($WHOOempath+"WHOOem.mel");
+}
+
+
+
+
+global proc string njModelRepairReference(string $file)
+{
+	string $mType=`checkBox -q -v slRepairReferenceWin_type`;	
+
+	
+	string $buff[] = stringToStringArray($file,"\\/");
+	string $filename = $buff[size($buff)-1];
+	clear $buff;
+	$buff=stringToStringArray($filename,"_");
+	string $dir = "D:/YODA/"+$buff[1]+"/"+$buff[2];
+	sysFile -md $dir;
+	string $newFile = $dir+"/yd_"+$buff[1]+"_"+$buff[2]+"_"+$buff[3]+"_"+$buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+	string $txtFile = $dir+"/yd_"+$buff[1]+"_"+$buff[2]+"_"+$buff[3]+".txt";
+	//sysFile -copy $newFile $file;
+	$fileId = `fopen $newFile w`;	
+	fprint $fileId "" ;
+	fclose $fileId;
+
+	$fileId = `fopen $newFile w`;	
+	$fileIdOld=`fopen $file r`;
+	$fileIdTxt = `fopen $txtFile w`;
+	string $nextLine = `fgetline $fileIdOld`;
+	while(size($nextLine)>0)
+	{
+		string $new;
+		string $temp="";
+		if (`gmatch $nextLine "file *"`)
+		{
+			if (!endsWith($nextLine,";") && !endsWith($nextLine,";\n") )
+			{
+				$temp = $nextLine;
+				$nextLine = `fgetline $fileIdOld`;
+				$temp+= $nextLine;
+			}
+			else
+			{
+				$temp=$nextLine;
+			}
+		}
+		else
+			$temp = $nextLine;
+
+		//print $temp;
+		//print "\n";
+		if (`gmatch $temp "*Z:/Client/270_tvs_lsw/*"`||`gmatch $temp "*Z:/Client/287_tvs_lsw2016/*"`)
+		{
+			string $oldfile;
+			if (`gmatch $temp "*Z:/Client/270_tvs_lsw/*"`)
+			{
+			    $oldfile = `match "Z:/Client/270_tvs_lsw/.*.mb" $temp`;
+			}
+			else
+			{
+			    $oldfile = `match "Z:/Client/287_tvs_lsw2016/.*.mb" $temp`;
+			}
+			//print ("-------------------------\n"+$nextLine+"\n");
+			//print ($oldfile+"\n");
+			if (size($oldfile))
+			{
+				string $buff[] = stringToStringArray($oldfile,"\\/");
+				string $newfile = "Z:/Projects/YODA/Reference/Handout/Asset from Wilfilm/Yoda_Proxy/"+$buff[size($buff)-1];
+				$newfile = njModelRepairReferenceGetExistsFile($newfile);
+				
+				string $assettype="";
+				string $b=match("^.*release/",$oldfile);
+				string $c = substring($oldfile,(size($b)+1),size($oldfile));
+				string $types[] = stringToStringArray($c,"/\\");
+				if ($types[0]=="char")
+					$assettype = "characters";
+				else if ($types[0]=="set")
+					$assettype = "sets";
+				else if ($types[0]=="prop")
+					$assettype = "props";
+				else 
+					$assettype = "props";
+				
+				fprint $fileIdTxt ($assettype+" "+$newfile+"\n");
+
+				if ($mType)
+				{
+					if ($assettype=="sets")
+					{
+						$new = `substituteAllString $temp $oldfile $newfile`;
+						fprint $fileId $new;
+					}
+				}
+				else
+				{
+					$new = `substituteAllString $temp $oldfile $newfile`;
+					fprint $fileId $new;
+				}
+
+			}
+			else
+			{
+				fprint $fileId $temp;
+			}
+		}
+		else
+		{
+			fprint $fileId $temp;
+		}
+
+		
+		
+		$nextLine = `fgetline $fileIdOld`;
+		$temp="";
+	}
+	fclose $fileIdOld;
+	fclose $fileId;
+	fclose $fileIdTxt;
+
+
+	return $newFile;
+}
+
+global proc string njModelRepairReferenceGetExistsFile(string $file)
+{
+	string $return="";
+	
+	string $buff[] = stringToStringArray($file,"\\/");
+	string $filename = $buff[size($buff)-1];
+	string $filepath = substituteAllString($file,$filename,"");
+
+	if (!`filetest -r $file`)
+	{
+		string $name = `match "^.*[.]" $filename`;
+		$name = substring($name,1,(size($name)-4));
+		string $allfiles[] = `getFileList -fld $filepath`;
+		for ($f in $allfiles)
+		{
+			if (match($name,$f)!="")
+			{
+				$filename = $f;
+			}
+		}
+	}
+	$return = $filepath+$filename;
+	return $return;
+}

@@ -1,0 +1,50 @@
+global proc zjSetMrLine()
+{
+	//首先将当前渲染器设置成mental ray
+	setAttr -type "string" defaultRenderGlobals.currentRenderer "mentalRay";
+	
+	//为所选物体赋予一个统一的新lambert材质，这个lambert材质将会用来产生线
+	string $objs[] = `ls -sl -dag`;
+	if (size($objs))
+	{
+		string $lam = `shadingNode -name "lamcontour" -asShader lambert`;
+		string $contour = `mrCreateCustomNode -asUtility "" contour_shader_tran`;
+		select -r $objs;
+		hyperShade -assign lamcontour;
+		connectAttr -f ($contour+".outValue") lamcontourSG.miContourShader;
+	}
+	else 
+	{
+		warning "please select objects";
+		return;
+	}
+
+	//得到激活视窗
+	string $pane = `getPanel -withFocus`;
+
+	if (`getPanel -typeOf $pane` == "modelPanel")	//该视窗必须是modelPanel
+	{		
+		//根据视窗得到摄像机
+		string $whichCam = `modelPanel -q -camera $pane`;
+		string $whichCamShape[] = `ls -dag -shapes -ap $whichCam`;
+		//适用于渲染mental ray contour的render global设置
+		setAttr "miDefaultFramebuffer.contourEnable" 1;
+		setAttr "miDefaultFramebuffer.contourClearImage" 1;
+		setAttr "miDefaultFramebuffer.contourClearColor" -type double3 1 1 1 ;
+		setAttr "miDefaultFramebuffer.contourSamples" 3;
+		string $cs = `mrCreateCustomNode -asUtility "defaultNavigation -connectToExisting -destination miDefaultOptions.contourContrast -source %node" contour_contrast_function_levels`;
+		setAttr ($cs + ".diff_mat") 1;
+		setAttr ($cs + ".diff_label") 0;
+		setAttr ($cs + ".diff_index") 0;
+		setAttr ($cs + ".contrast") 0;
+		setAttr ($cs + ".zdelta") 5;
+		setAttr ($cs + ".ndelta") 24;
+		setAttr ($cs + ".min_level") 1;
+		setAttr ($cs + ".max_level") 1;
+		mrCreateCustomNode -asUtility "defaultNavigation -connectToExisting -destination miDefaultOptions.contourStore -source %node" contour_store_function;
+	}
+	else
+	{
+		warning("Please select a model panel.");
+	}
+}

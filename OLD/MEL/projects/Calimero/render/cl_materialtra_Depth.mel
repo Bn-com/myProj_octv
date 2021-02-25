@@ -1,0 +1,220 @@
+//透明物体Depth
+
+global proc cl_materialtra_Depth()
+{
+	string $done[];
+	clear $done;
+
+	string $Selectobj[] = `ls-sl`;
+	for ($i=0; $i<size($Selectobj); $i++)
+	{
+
+		string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+		if (size($NodeShape) == 0)
+		{
+			continue;
+		}
+		string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+		if (size($ShadingEngine) == 0)
+		{
+			continue;
+		}
+		string $Shaders[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+		for ($Shader in $Shaders)
+		{
+			int $find = false;
+			for ($j=0; $j<size($done); $j++)
+			{
+				if ($done[$j] == $Shader)
+				{
+					$find = true;
+					break;
+				}
+			}
+			if ($find)
+			{
+				continue;
+			}
+			$done[size($done)] = $Shader;
+		
+		string $Scolor =$Shader+".color";
+		if (!`objExists $Scolor`)
+		{
+			continue;
+		}
+				
+		string $conAmb[] = `listConnections -plugs true -connections true ($Shader+".ambientColor")`; 
+		for ($i=0; $i<size($conAmb); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conAmb[$i+1] + "\" \"" +  $conAmb[$i] + "\"");
+		}
+        
+		string $conInc[] = `listConnections -plugs true -connections true ($Shader+".incandescence")`; 
+		for ($i=0; $i<size($conInc ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conInc [$i+1] + "\" \"" +  $conInc [$i] + "\"");
+		}
+
+		string $conCo[] = `listConnections -plugs true -connections true ($Shader+".color")`; 
+		for ($i=0; $i<size($conCo ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conCo [$i+1] + "\" \"" +  $conCo [$i] + "\"");
+		}
+		string $conCo[] = `listConnections -plugs true -connections true ($Shader+".colorR")`; 
+		for ($i=0; $i<size($conCo ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conCo [$i+1] + "\" \"" +  $conCo [$i] + "\"");
+		}
+		string $conCo[] = `listConnections -plugs true -connections true ($Shader+".colorG")`; 
+		for ($i=0; $i<size($conCo ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conCo [$i+1] + "\" \"" +  $conCo [$i] + "\"");
+		}
+		string $conCo[] = `listConnections -plugs true -connections true ($Shader+".colorB")`; 
+		for ($i=0; $i<size($conCo ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $conCo [$i+1] + "\" \"" +  $conCo [$i] + "\"");
+		}
+		string $Stxt =$Shader+".TXT_Outline_Color";
+		if (`objExists $Stxt`)
+		{
+		string $StxCo[] =`listConnections -plugs true -connections true $Stxt`; 
+		for ($i=0; $i<size($StxCo ); $i+=2)
+		{
+			evalEcho ("disconnectAttr \"" +  $StxCo [$i+1] + "\" \"" +  $StxCo [$i] + "\"");
+		}
+		}
+
+		
+		   //创建Depth节点
+		   	setAttr ($Shader+".ambientColor") -type double3 1 1 1 ;
+			setAttr ($Shader+".diffuse")  0;
+			string $ifo = "cl_DepthShader_samplerInfo";
+			string $mul = "cl_DepthShader_multiplyDivide";
+			string $rng = "cl_DepthShader_setRange";
+
+			if(!`objExists  $ifo`)
+			{
+				string $ifo = `shadingNode -asUtility samplerInfo -n "cl_DepthShader_samplerInfo"`;
+			}
+			if(!`objExists  $mul`)
+			{
+				string $mul = `shadingNode -asUtility multiplyDivide -n "cl_DepthShader_multiplyDivide"`;
+			}
+			if(!`objExists  $rng`)
+			{
+				string $rng = `shadingNode -asUtility setRange -n "cl_DepthShader_setRange"`;
+			}
+			string $comNear = $ifo+".cameraNearClipPlane";
+			if(!`objExists $comNear`)
+			{
+			addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+                        addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+			connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+			}
+			
+		  //修改放大值
+			setAttr ($mul+".input2X") -20.0;
+                  //连接节点
+		       	string $conmul[]=`listConnections -s 1 -d 0 -c 1 -p 1 $mul`;
+			if(size($conmul)<1)
+			{
+			
+			connectAttr ($mul+".outputX") ($rng+".valueX");
+			connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+			connectAttr ($ifo+".cameraFarClipPlane") ($rng+".oldMaxX");
+			}
+                        connectAttr ($rng+".outValueX") ($Shader+".colorR");
+			connectAttr ($rng+".outValueX") ($Shader+".colorG");
+			connectAttr ($rng+".outValueX") ($Shader+".colorB");
+
+			
+		 //参数调整
+			if (!`objExists ($Shader + ".black")`)
+			{
+				addAttr -longName "black" -attributeType "float" $Shader;
+				addAttr -longName "white" -attributeType "float" $Shader;
+				string $conblack[]=`listConnections -s 1 -d 0 -c 1 -p 1($rng+".maxX")`;
+				if(size($conblack)==0)
+				{
+					connectAttr ($Shader+".black") ($rng+".maxX");
+					connectAttr ($Shader+".white") ($rng+".minX");
+				}
+			setAttr ($Shader+".black") 0;
+			setAttr ($Shader+".white") 1;
+			setAttr ($ifo+".cameraNearClipPlane") 0.1;
+			setAttr ($ifo+".cameraFarClipPlane") 10000;
+			}
+                   //
+			select -cl;
+			string $cameras[] = `listCameras`;
+			string $attrs[] = {"nearClipPlane","farClipPlane"};
+			for ($cam in $cameras)
+			     {
+				for ($attr in $attrs)
+				{
+					string $connects[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($cam+"."+$attr)`;
+					if (size($connects)>1)
+					{
+						for ($i=0;$i<size($connects);$i=$i+2 )
+						{
+							disconnectAttr $connects[$i+1]  $connects[$i];
+						}
+					}
+				}
+			     }
+			}
+}
+}
+//所有物体depth(支持透明物体）
+global proc HHDepth()
+{
+
+	string $Selectobj[] = `ls-sl`;
+	for ($i=0; $i<size($Selectobj); $i++)
+	{
+		
+		
+			string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+			if (size($NodeShape) == 0)
+			{
+				continue;
+			}
+			string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+			if (size($ShadingEngine) == 0)
+			{
+				continue;
+			}
+			string $Shaders[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+			for ($shader in $Shaders )
+			{
+				
+
+				if (`match "Depth_surfaceShader" $shader` != "")
+				{
+					continue;
+				}
+				string $Stran=$shader+".transparency";
+			        select $Selectobj[$i];
+				if (!`objExists $Stran`)
+				{
+					source "//file-cluster/GDC/Resource/Support/Maya/projects/Calimero/render/cl_DepthShader.mel";
+					cl_DepthShader; 
+				}
+				string $FileTexture[]=`listConnections $Stran`;
+			
+				if(size($FileTexture)==0)
+				{
+					source "//file-cluster/GDC/Resource/Support/Maya/projects/Calimero/render/cl_DepthShader.mel";
+					cl_DepthShader; 
+				}
+				else
+				{
+				//	source "//file-cluster/GDC/Resource/Support/Maya/projects/Calimero/render/cl_materialtra_Depth.mel";
+					cl_materialtra_Depth;				
+
+				}
+			}
+		}
+	
+}

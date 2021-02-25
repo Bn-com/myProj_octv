@@ -1,0 +1,508 @@
+global proc yuCreateCache()
+{
+	string $project = zwGetProject("");
+
+	if($project=="Enyo")
+	{
+		string $files[]=`file -q -reference`;
+		string $RN;
+		for($singleFile in $files)
+		{
+			$RN=`referenceQuery -referenceNode $singleFile`;
+			file -loadReference $RN;
+		}
+		//string $fileName=`file -q -sn`;
+	    setDynamicTime();
+        //file -open -force $fileName;
+	}
+
+	string $cacheFile[]=`ls -type "cacheFile"`;
+	for($cache in $cacheFile)
+	{
+		delete $cache;
+	}
+	string $nClothTypes[]=`ls -type nCloth`;
+	string $hairTypes[]=`ls -type hairSystem`;
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+/*	if (size($setsName)>0&&size($nClothTypes)>0&&size($hairTypes)>0&&$project!="Enyo")
+	{
+		creatAllCache;
+	}
+	else if(size($nClothTypes)>0&&size($hairTypes)>0&&$project!="Enyo")
+	{
+		createNclothHairCache;
+	}
+	else if (size($setsName)>0&&size($nClothTypes)>0&&$project!="Enyo")
+	{
+		creatGeoNclothCache;
+	}
+	else if (size($setsName)>0&&size($hairTypes)>0&&$project!="Enyo")
+	{
+		creatGeoHairCache;
+	}
+	else */if (size($setsName)>0)
+	{
+		createGeoCache;
+	}
+	else if(size($hairTypes)>0&&$project!="Enyo")
+	{
+		creatHairCache;
+	}
+	else if(size($nClothTypes)>0&&$project!="Enyo")
+	{
+		creatNclothCache;
+	}
+	else
+	{
+		error "1.文件里没有nCloth、Hair、并且也没有需要geometry cache的模型!";
+	}
+
+}
+
+//创建nCloth cache
+global proc creatNclothCache()
+{
+	string $types[]=`ls -type nCloth`;
+	if(size($types)<=0)
+	{
+		error "文件里没有nCloth!";
+	}
+	else
+	{
+		//select -r $types;
+		//string $polyName[]=`listConnections -destination 1 -source 1 -type "mesh" -shapes 1`;
+		select -r "*:output*";
+		//file name
+		string $fullFileName=`file -q -sn`;
+		string $fullFileNames[];
+		tokenize $fullFileName ("/"+".") $fullFileNames;
+		string $fileName=$fullFileNames[3];
+		//project name
+		string $projcetName=`zwGetProject $fullFileNames[3]`;
+		//camera name and scene name
+		string $fileNames[];
+		tokenize $fullFileNames[3] ("_") $fileNames;
+		string $camName=$fileNames[1];
+		string $sceneName=$fileNames[3];
+		string $simple_direc=`zwGetPath "nCloth" $fullFileName`;
+		string $cache_direc=$simple_direc+"/"+$fileName;
+		string $minFrame=cutSTime();
+		string $maxFrame=`playbackOptions -q -max`;
+		string $moreNcloth[]=`ls -sl`;
+		if(size($moreNcloth)>1)
+		{
+			doCreateNclothCache 4 { "3", $minFrame, $maxFrame, "OneFilePerFrame", "1", $cache_direc,"1","","0", "add", "1", "1", "1","0","1" } ;
+		}
+		else
+		{
+			doCreateNclothCache 4 { "3", $minFrame, $maxFrame, "OneFilePerFrame", "1", $cache_direc,"0","","0", "add", "1", "1", "1","0","1" } ;
+		}
+	}
+}
+
+//创建Hair cache
+global proc creatHairCache()
+{
+	string $types[]=`ls -type hairSystem`;
+	string $dynamicHair[];
+	for($i=0;$i<size($types);$i++)
+	{
+		if(`getAttr ($types[$i]+".simulationMethod")`==3 )
+			$dynamicHair[size($dynamicHair)]=$types[$i];
+	}
+	if(size($types)<=0)
+	{
+		error "文件里没有Hair!";
+	}
+	else
+	{
+		float $minFrames=cutSTime();
+		float $maxFrames=`playbackOptions -q -max`;
+		select -r $dynamicHair;
+		string $hairCache[]=`ls -type diskCache`;
+		if(size($hairCache)>0)
+		{
+			DeleteHairCache;
+		}
+		doHairDiskCache 1 { "3", 1, $minFrames, $maxFrames, 1 } ;
+		file -save;
+	}
+}
+
+
+//创建geometry cache
+global proc createGeoCache()
+{
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	string $newSets[];
+	for($set in $setsName)
+	{
+		if(`gmatch $set "ey_s*:*"`!=1)
+		{
+			$newSets[size($newSets)]=$set;
+		}
+	}
+	print $newSets;
+	string $characterName[];
+	int $compareReslut;
+
+	delete `ls -type cacheFile`;
+	delete `ls -type historySwitch`;
+
+
+	if(size($newSets)<=0)
+	{
+		error "此文件没有需要做geometry cache的模型!!";
+	}
+	else
+	{
+		for ($cacheFolder in $newSets)
+		{
+			select  $cacheFolder;
+			string $setContent[]=`sets -q $cacheFolder`;
+			if (size($setContent)>=1)
+			{
+				string $chrNameSpace=basename($cacheFolder,":CACHE_OBJS");
+				$compareReslut=`compareName($chrNameSpace)`;
+				clear $characterName;
+				//tokenize $cacheFolder ("_:") $characterName;
+				//匹配多重前缀名
+				string $buff[];
+				int $num = `tokenize $cacheFolder ":" $buff`;
+				tokenize $buff[$num-2] "_" $characterName;
+
+				string $fullFileName=`file -q -sn -shortName`;
+				string $simple_dir=`zwGetPath "geoCache" $fullFileName`;
+				string $fullFileNames[];
+				tokenize $fullFileName (".") $fullFileNames;
+				string $fileName=$fullFileNames[0];
+				//project name
+				string $projcetName=`zwGetProject $fullFileNames[0]`;
+				//camera name and scene name
+				string $fileNames[];
+				tokenize $fullFileNames[0] ("_") $fileNames;
+				string $camName=$fileNames[1];
+				string $sceneName=$fileNames[3];
+				string $cache_direc;
+				string $cacheName;
+				string $result=rlowOrHigh($chrNameSpace);
+				if($compareReslut>=1)
+				{
+					if (`match "_[0-9]+$" $chrNameSpace` == "")
+					{
+						////maya默认命名规则
+						if (`match "[0-9]+$" $chrNameSpace` != "")
+						{
+							string $index = `match "[0-9]+$" $chrNameSpace`;
+							if($result=="rlow")
+							{
+								$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_"+$index+"_l_ms_render");
+								$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+$index+"_l_ms_cache";
+							}
+							else
+							{
+								$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_"+$index+"_h_ms_render");
+								$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+$index+"_h_ms_cache";
+							}
+						}
+						else
+						{
+							if($result=="rlow")
+							{
+								$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_0_l_ms_render");
+								$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+"_0_l_ms_render";
+							}
+							else
+							{
+								$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_0_h_ms_render");
+								$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+"_0_h_ms_render";
+							}
+						}
+					}
+					else
+					{
+						if($result=="rlow")
+						{
+							$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_"+$characterName[2]+"_l_ms_render");
+							$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+$characterName[2]+"_l_ms_cache";
+						}
+						else
+						{
+							$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_"+$characterName[2]+"_h_ms_render");
+							$cacheName=$characterName[0]+"_"+$characterName[1]+"_"+$characterName[2]+"_h_ms_cache";
+						}
+					}
+
+				}
+				else
+				{
+					if($result=="rlow")
+					{
+						$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_l_ms_render");
+						$cacheName=$characterName[0]+"_"+$characterName[1]+"_l_ms_cache";
+					}
+					else
+					{
+						$cache_direc=($simple_dir+"/"+$characterName[0]+"_"+$characterName[1]+"_h_ms_render");
+						$cacheName=$characterName[0]+"_"+$characterName[1]+"_h_ms_cache";
+					}
+				}
+				string $minFrame=cutSTime();
+				string $maxFrame=`playbackOptions -q -max`;
+				select(`sets -q $setContent[0]`);
+				python("import sys");
+				///外包用路径
+				if (`getenv "OFFICE_LOCATION"` == "")
+				{
+					string $localpath = `internalVar -usd`;
+					$localpath = `substitute "[/\\]$" $localpath ""`;
+					python("sys.path.append(\""+$localpath+"\")");
+				}
+				else
+				{
+					python("sys.path.append(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT\")");
+				}
+				python("from yuCreateGeoCmd import *");
+				python("yuCreateGeoCmd(\""+$cache_direc+"\",\""+$cacheName+"\",\""+$minFrame+"\",\""+$maxFrame+"\")");
+			}
+		}
+
+	}
+}
+
+
+//创建nCloth和Hair cache
+global proc createNclothHairCache()
+{
+	string $nClothType[]=`ls -type nCloth`;
+	string $hairType[]=`ls -type pfxHair`;
+	if(size($nClothType)<=0&&size($hairType)<=0)
+	{
+		error "文件里没有nCloth、Hair";
+	}
+	else
+	{
+
+		creatHairCache;
+		creatNclothCache;
+		//file -save;
+	}
+}
+
+//创建geomerty cache和nCloth cache
+global proc creatGeoNclothCache()
+{
+	string $nClothType[]=`ls -type nCloth`;
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	if(size($setsName)<=0&&size($nClothType)<=0)
+	{
+		error "文件里没有nCloth、需要geometry cache的模型!";
+	}
+	else
+	{
+		creatNclothCache;
+		createGeoCache;
+		//file -save;
+	}
+
+
+}
+
+//创建geometry cache和Hair cache
+global proc creatGeoHairCache()
+{
+	string $hairType[]=`ls -type pfxHair`;
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	if(size($setsName)<=0&&size($hairType)<=0)
+	{
+		error "文件里没有Hair、需要geometry cache的模型!";
+	}
+	else
+	{
+		creatHairCache;
+		createGeoCache;
+		//file -save;
+	}
+
+
+}
+
+//创建所有cache
+global proc creatAllCache()
+{
+	string $nClothType[]=`ls -type nCloth`;
+	string $hairType[]=`ls -type pfxHair`;
+	string $setsName[]=`ls -sets "*:CACHE*" "*:*:CACHE*" "*:*:*:CACHE*" "*:*:*:*:CACHE*" "*:CAChE*" "*:*:CAChE*" "*:*:*:CAChE*" "*:*:*:*:CAChE*"`;
+	if(size($setsName)<=0&&size($nClothType)<=0&&size($hairType)<=0)
+	{
+		error "2.文件里没有nCloth、Hair、并且也没有需要geometry cache的模型!";
+	}
+	else
+	{
+		creatHairCache;
+		creatNclothCache;
+		createGeoCache;
+		//file -save;
+	}
+
+
+}
+
+/*global proc int compareName(string $comStr)
+{
+    string $setsName[]=`ls -sets "*:CACHE*"`;
+    string $str1=basename($comStr,":CACHE_OBJS");
+    string $str;
+    int $j=0;
+	int $eq = false;
+	if (`match "_[0-9]+$" $comStr` == "")//这句话判断字符后面是否有下划线和数字
+	{
+		$str=$str1;
+	}
+	else
+	{
+	    $str = `substitute "_[^_]+$" $str1 ""`;//这句话是把字符最一个下划线后面的字符变成空（包括下划线）
+	}
+
+    for($i=0;$i<size($setsName);$i++)
+    {
+
+    	string $str2=basename($setsName[$i],":CACHE_OBJS");
+    	if ($str != $str2 || $str == $str2)
+    	{
+    		if(`gmatch $str2 ($str+"*")`==1)
+    		{
+    			$j++;
+    		}
+    	}
+
+    }
+    if($j>1)
+    {
+    	$eq=1;
+    }
+    else
+    {
+    	$eq=0;
+    }
+
+	return $eq;
+}*/
+
+global proc string cutSTime()
+{
+	string $project = zwGetProject("");
+	string $minFrame;
+	if($project=="Strawberry"||$project=="Enyo")
+	{
+		$minFrame="950";
+		currentTime $minFrame;
+	}
+	else
+	{
+		$minFrame="980";
+		currentTime $minFrame;
+	}
+	return $minFrame;
+}
+
+global proc setDynamicTime()
+{
+    string $minFrame;
+	$minFrame="950";
+	currentTime $minFrame;
+	playbackOptions -minTime $minFrame;
+	string $nCloth[]=`ls -type "nucleus"`;
+	string $dynamicAttr[]=`ls "*:*.dynamic"`;
+	string $ncDynamicAttr[]=`ls "*:*.nc_dynamic"`;
+	string $chrNcloth[]=`ls -type "nCloth"`;
+	for ($nCl in $nCloth)
+	{
+	    if(`getAttr ($nCl+".startFrame")`!=950)
+	    {
+		//不修改文件解算设置
+		catch(`setAttr ($nCl+".startFrame") 950`);
+		zwSetIntAttrAll "nCloth" "isDynamic" true;
+		zwSetIntAttrAll "nucleus" "enable" true;
+	    }
+	}
+	string $chrName[];
+	for($eachDyn in $dynamicAttr)
+	{
+	   clear $chrName;
+	   tokenize $eachDyn (":") $chrName;
+	   int $dynValue=`getAttr $eachDyn`;
+	   string $chrNclothName[];
+	   for($eachNcloth in $nCloth)
+	   {
+	        clear $chrNclothName;
+	        tokenize $eachNcloth (":") $chrNclothName;
+	        if ($chrName[0]==$chrNclothName[0]&&$dynValue==0)
+	        {
+	            catch(`setAttr ($eachNcloth+".startFrame") 50000`);
+
+	        }
+	        else
+	            catch(`setAttr ($eachNcloth+".startFrame") 950`);
+	   }
+
+	}
+	for($eachNcDyn in $ncDynamicAttr)
+	{
+		int $ncDynValue=`getAttr $eachNcDyn`;
+		string $nClothName=`substitute ".nc_dynamic" $eachNcDyn ""`;
+		if($ncDynValue==0)
+		{
+			catch(`setAttr ($nClothName+".startFrame") 50000`);
+		}
+		else
+		{
+			catch(`setAttr ($nClothName+".startFrame") 950`);
+		}
+	}
+	string $hairs[]=`ls -type hairSystem`;
+	for( $hair in $hairs)
+	{
+		string $hairAttr=$hair+".simulationMethod";
+		//不修改文件解算设置
+		if(`getAttr $hairAttr`!=3)
+			catch(`setAttr $hairAttr 3`);
+
+	}
+    //catch(`setAttr "ey_c005001shamani_0:capCtr_crv.hairStatus" 3`);
+
+}
+global proc setDynamicTimeOff()
+{
+	string $nCloth[]=`ls -type "nucleus"`;
+	for ($nCl in $nCloth)
+	{
+		if(`getAttr ($nCl+".startFrame")`==950)
+		{
+			catch(`setAttr ($nCl+".startFrame") 50000`);
+			zwSetIntAttrAll "nCloth" "isDynamic" false;
+			zwSetIntAttrAll "nucleus" "enable" false;
+		}
+	}
+	string $hairs[]=`ls -type hairSystem`;
+	for( $hair in $hairs)
+	{
+		string $hairAttr=$hair+".simulationMethod";
+		if(`getAttr $hairAttr`==3)
+			catch(`setAttr $hairAttr 1`);
+	}
+}
+
+global proc string rlowOrHigh(string $chrName)
+{
+	string $namespace=$chrName+":*";
+	string $sel[]=`ls -type mesh $namespace`;
+	string $RN=`referenceQuery -referenceNode $sel[0]`;
+	string $file=`reference -q -f -rfn $RN -shortName`;
+	string $result;
+	if(`gmatch $file "*_l_*"`==1)
+		$result="rlow";
+	else if(`gmatch $file "*_h_*"`==1)
+		$result="high";
+	return $result;
+}

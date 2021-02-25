@@ -1,0 +1,88 @@
+
+proc string hjgetLayerValuePlug(string $layer, string $scenePlug)
+
+{
+    // Find the adjustment if it exists
+	string $plugs[] = `listConnections -p 1 $scenePlug`;
+	for ($plug in $plugs) {
+	if (plugNode($plug) == $layer) {
+	if (`editRenderLayerGlobals -q -currentRenderLayer` == $layer) {
+	return $scenePlug;
+	}
+	else {
+	return substitute("\\.plug$", $plug, ".value");
+	}
+	}
+	}
+    // No adjustment
+    return "";
+}
+
+
+proc hjsetLayerInt(string $layer, string $scenePlug, int $value)
+
+{
+			editRenderLayerAdjustment -layer $layer $scenePlug;
+			string $plug = hjgetLayerValuePlug($layer, $scenePlug);
+			if ($plug != "") {
+			setAttr $plug $value;
+			}
+}
+proc int  Hjcamerref()
+{
+	string $camerall[]=`ls -cameras`;
+	string $camerlist;
+	string $jayetimeq = `confirmDialog -title "信息" -message "参考摄像机转成导入"
+				-button "确认" -defaultButton "确认"`;
+	if($jayetimeq=="确认"){
+	for ($camerlist in $camerall){
+	if(`reference -q -inr$camerlist`==1){
+		string $camerref=`reference -q -filename $camerlist`;
+		file -importReference $camerref;
+	}
+	}
+	}
+return 0;
+}
+
+
+global proc int Hjcalayer()
+{
+	
+		Hjcamerref;
+		string $allObjects	[] 	= 	`ls -type surfaceShape`;
+		string $allLights	[] 	= 	`ls -lights`;
+		string $allcamer	[]  =	`ls -cameras`;
+		string $cameraslisht;
+		string $camerasset;
+		for ($cameraslisht in $allcamer){
+			if (`gmatch $cameraslisht "*[0-9]*"`){
+		   	string 	$number[];
+			string 	$numberls	=`tokenize $cameraslisht "_" $number`;
+		    int    	$size		=`size $number`;
+			string 	$hjscene	=`match "[0-9]+" ($number[$size - 2])`;
+			string 	$hjshort	=`substitute "[^0-9]+" ($number[$size - 1]) ""`;
+			string 	$scenename	="br_"+$hjscene+"_"+$hjshort+"_an";
+			print $scenename;
+			int 	$buf[3];
+			if (!catch($buf = `idmtProject -timeLine -echo on $scenename `)){
+			string 	$hairRL 		= `createRenderLayer -name $scenename -number 1 -makeCurrent -noRecurse $allObjects $allLights`;	
+		    string 	$camernow[0]	={$cameraslisht};
+			string 	$removecamer[] 	= stringArrayRemove($camernow,$allcamer);
+			string 	$othercamer;
+			for ($othercamer in $removecamer){
+				if (`gmatch $othercamer "*[0-9]*"`){
+				editRenderLayerAdjustment 	($othercamer+".renderable");
+				setAttr ($othercamer+".renderable") 0;
+			}
+			}
+			editRenderLayerAdjustment 	($cameraslisht+".renderable");
+			setAttr ($cameraslisht+".renderable") 1;
+			hjsetLayerInt($hairRL, "defaultRenderGlobals.startFrame",$buf[0]);
+			hjsetLayerInt($hairRL, "defaultRenderGlobals.endFrame" 	,$buf[1]);
+			}
+			}
+			}
+			setAttr "defaultRenderLayer.renderable" 0;
+			return 1;
+}

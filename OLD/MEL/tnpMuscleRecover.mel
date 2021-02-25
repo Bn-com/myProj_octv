@@ -1,0 +1,118 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc muscleRecover(string $actionLine){
+// Rebuild a muscle given the $actionLine input curve
+
+	string $prefix = `substitute "_baseCurve" $actionLine ""`;
+	string $attachLocator = $prefix + "_attachLoc";
+	string $insertionLocator = $prefix + "_insertionLoc";
+	string $envelope = $prefix + "_envelope";
+	string $crossSections[] = `listRelatives -fullPath -children -type transform $actionLine`;
+	int	$spans = `getAttr ($actionLine + ".spans")`;
+	int $muscleType = `getAttr ($actionLine + ".muscleType")`;
+
+	// create $attach locator at cv[0]
+	if(objExists($attachLocator)) delete $attachLocator;
+	float $p[] = `pointPosition -w ($actionLine + ".cp[0]")`;
+	string $temp[] = `spaceLocator -n $attachLocator`;
+	$attachLocator = $temp[0];
+	setAttr ($attachLocator + ".scale") 0.3 0.3 0.3;
+	xform -ws -translation $p[0] $p[1] $p[2] $attachLocator;
+	// tangent constraint	
+	tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0 $actionLine $attachLocator;
+	connectAttr ($crossSections[0] + ".translate") ($attachLocator + ".translate");
+
+	// create $insertion locator at cv[$end]
+	if(objExists($insertionLocator)) delete $insertionLocator;
+	$p = `pointPosition -w ($actionLine + ".cp[" + $spans + "]")`;
+	string $temp[] = `spaceLocator -n $insertionLocator`;
+	$insertionLocator = $temp[0];
+	xform -ws -translation $p[0] $p[1] $p[2] $insertionLocator;
+	setAttr ($insertionLocator + ".overrideEnabled") 1;
+	setAttr ($insertionLocator + ".overrideColor") 6;
+	setAttr ($insertionLocator + ".scale") 0.5 0.5 0.5;
+	tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0 $actionLine $insertionLocator;
+	connectAttr ($crossSections[size($crossSections)-1] + ".translate") ($insertionLocator + ".translate");
+
+	// create envelope
+	if(objExists($envelope)) {tnpMuscleRemove($envelope); delete $envelope;}
+	select $crossSections;
+	string $temp[] = `loft -ch 1 -u 1 -c 0 -ar 0 -d 3 -ss 1 -rn 0 -po 0 -rsn true -name $envelope`;
+	$envelope = $temp[0];
+	setAttr ($envelope + ".template") 0;
+	setAttr -lock true ($envelope + ".translate");
+	setAttr -lock true ($envelope + ".rotate");
+	setAttr -lock true ($envelope + ".scale");
+	setAttr ($envelope + ".inheritsTransform") 0;
+	
+	// add extra attributes to the muscle to store the attach, insertion, and actionLine
+	addAttr -longName "attachLocator" -at message $envelope;
+	addAttr -longName "insertionLocator" -at message $envelope;
+	if($muscleType==3) 
+		addAttr -longName "attachCurve" -at message $envelope;
+	addAttr -longName "actionLine" -at message $envelope;
+	addAttr -longName "muscleType" -defaultValue 0 $envelope;
+	
+	connectAttr ($attachLocator + ".message") ($envelope + ".attachLocator");
+	connectAttr ($insertionLocator + ".message") ($envelope + ".insertionLocator");
+	if($muscleType==3){
+		$attachCurve = $crossSections[0];
+		connectAttr ($attachCurve + ".message") ($envelope + ".attachCurve");
+	}
+	connectAttr ($actionLine + ".message") ($envelope + ".actionLine");
+	setAttr -lock 1 ($envelope + ".muscleType") $muscleType;
+	
+	// Create shading network
+	string $shadingNet[];
+	string $map[];
+	$shadingNet[1] = "tnpMuscleType1Lambert";
+	$shadingNet[2] = "tnpMuscleType2Lambert";
+	$shadingNet[3] = "tnpMuscleType3Lambert";
+	$map[1]			 = "tnpMuscleType1Map";
+	$map[2]			 = "tnpMuscleType2Map";
+	$map[3]			 = "tnpMuscleType3Map";
+	string $lambert = $shadingNet[$muscleType];
+	if(!objExists($lambert + "SG")){
+		$lambert = `shadingNode -asShader lambert -name $lambert`;
+		string $set = `sets -renderable true -noSurfaceShader true -empty -name ($lambert + "SG")`;
+		connectAttr -f ($lambert+".outColor") ($set + ".surfaceShader");
+
+		string $checker = `shadingNode -asTexture checker -name $map[$muscleType]`;	
+		string $p2d = `shadingNode -asUtility place2dTexture`;
+		connectAttr ($p2d + ".outUV") ($checker + ".uv");
+		connectAttr ($p2d + ".outUvFilterSize") ($checker + ".uvFilterSize");
+		connectAttr -f ($checker + ".outColor") ($lambert + ".color");
+
+		setAttr ($p2d + ".coverageU") 2;
+		setAttr ($p2d + ".coverageV") 2;
+		setAttr ($p2d + ".repeatU") 60;
+		setAttr ($p2d + ".repeatV") 1;
+		if($muscleType == 2) setAttr ($p2d + ".rotateFrame") 90;
+		setAttr ($checker + ".color1") -type double3 1 0 0;
+		setAttr ($checker + ".color2") -type double3 0.548 0 0;
+	}
+	sets -edit -forceElement ($lambert+"SG") $envelope;
+
+	// Grouping
+	string $muscleGroup = $prefix + "_muscle";
+	if(objExists($muscleGroup)) {delete $muscleGroup;}
+	string $parent[] = `listRelatives -parent $actionLine`;
+	if(objExists($parent[0])) parent $attachLocator $insertionLocator $envelope $parent[0];
+}
+global proc tnpMuscleRecover(){
+	string $sl[] = `ls -sl`;
+	for($item in $sl){
+		if(attributeExists("muscleType", $item) && kcIsType($item, "nurbsCurve"))
+			muscleRecover($item);
+		else
+			warning($item + " is not recoverable!");
+	}
+}

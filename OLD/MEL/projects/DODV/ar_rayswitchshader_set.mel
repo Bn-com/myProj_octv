@@ -1,0 +1,205 @@
+global proc rayswitch_shader()
+{
+  string $obj[] = `ls -sl`;
+  for($i in $obj)
+  {
+    string $shapes[] = `listHistory  $i`;
+    string $sg[] = `listConnections -type shadingEngine -s 0 -d 1 $shapes[0]`;   
+   
+    string $nodes[] = `hyperShade -lun $sg[0]`;
+                   
+     for($n in $nodes)
+   {
+    
+    if(`nodeType $n `=="alLayer"
+    || `nodeType $n `=="layeredShader")
+
+    {
+        
+    string $rayswitch = `shadingNode -asShader aiRaySwitch`;
+    string $diff = `shadingNode -asShader aiAmbientOcclusion`;
+        setAttr  ($diff + ".samples") 4;
+        setAttr  ($diff + ".white") -type double3 0.3 0.3 0.3;
+        setAttr  ($diff + ".falloff") 0.1; 
+        setAttr  ($diff + ".invertNormals")  1;
+        
+        connectAttr -f ($rayswitch +".outColor") ($sg[0] +".surfaceShader.");
+        connectAttr -f ($n +".outColor") ($rayswitch +".camera");
+        connectAttr -f ($n +".outColor") ($rayswitch +".shadow");
+        connectAttr -f ($n +".outColor") ($rayswitch +".reflection");
+        connectAttr -f ($n +".outColor") ($rayswitch +".refraction");
+        
+        connectAttr -f ($diff +".outColor") ($rayswitch +".diffuse");
+        connectAttr -f ($diff +".outColor") ($rayswitch +".glossy");
+    }
+    
+    if(`nodeType $n `=="aiRaySwitch"
+    || `nodeType $n `=="layeredShader"
+    || `nodeType $n `=="alLayer")
+    {
+        break;
+    }    
+    
+       
+    if(    `nodeType $n `=="aiStandard" 
+        || `nodeType $n `=="aiSkin" 
+        || `nodeType $n `=="aiSkinSss" 
+        || `nodeType $n `=="lambert" 
+        || `nodeType $n `=="blinn")
+
+    {
+        
+    string $rayswitch = `shadingNode -asShader aiRaySwitch`;
+    string $diff = `shadingNode -asShader aiAmbientOcclusion`;
+        setAttr  ($diff + ".samples") 4;
+        setAttr  ($diff + ".white") -type double3 0.3 0.3 0.3;
+        setAttr  ($diff + ".falloff") 0.1; 
+        setAttr  ($diff + ".invertNormals")  1;
+        
+        connectAttr -f ($rayswitch +".outColor") ($sg[0] +".surfaceShader.");
+        connectAttr -f ($n +".outColor") ($rayswitch +".camera");
+        connectAttr -f ($n +".outColor") ($rayswitch +".shadow");
+        connectAttr -f ($n +".outColor") ($rayswitch +".reflection");
+        connectAttr -f ($n +".outColor") ($rayswitch +".refraction");
+        
+        connectAttr -f ($diff +".outColor") ($rayswitch +".diffuse");
+        connectAttr -f ($diff +".outColor") ($rayswitch +".glossy");
+    }                                                                               
+  }
+  }
+}
+        
+
+global proc Diff_falloff()
+{
+  float $r = `floatSliderGrp -q -v ar_rayswitch_falloff`;
+    
+  string $obj[] = `ls -sl`;
+  for($i in $obj)
+  {
+    string $shapes[] = `listHistory  $i`;
+    string $sg[] = `listConnections -type shadingEngine -s 0 -d 1 $shapes[0]`;    
+   
+    string $nodes[] = `hyperShade -lun $sg[0]`;
+  
+                   
+    for($n in $nodes)
+  {
+    
+    if(`nodeType $n `=="aiAmbientOcclusion")
+
+    {
+        
+        setAttr  ($n + ".falloff") $r; 
+        
+     }
+                  
+  }
+  }
+}
+
+global proc Diff_color()
+{
+  float $r[] = `colorSliderGrp -q -rgb ar_rayswitch_writeColor`;
+    
+  string $obj[] = `ls -sl`;
+  for($i in $obj)
+  {
+    string $shapes[] = `listHistory  $i`;
+    string $sg[] = `listConnections -type shadingEngine -s 0 -d 1 $shapes[0]`;    
+   
+    string $nodes[] = `hyperShade -lun $sg[0]`;
+  
+                   
+    for($n in $nodes)
+  {
+    
+    if(`nodeType $n `=="aiAmbientOcclusion")
+
+    {
+        
+        setAttr  ($n + ".white") $r[0] $r[1] $r[2]; 
+        
+     }
+                  
+  }
+  }
+}
+
+global proc Diff_mulwrite()
+{
+  float $r = `floatSliderGrp -q -v ar_rayswitch_mulwrite`;
+    
+  string $obj[] = `ls -sl`;
+  for($i in $obj)
+  {
+    string $shapes[] = `listHistory  $i`;
+    string $sg[] = `listConnections -type shadingEngine -s 0 -d 1 $shapes[0]`;    
+   
+    string $nodes[] = `hyperShade -lun $sg[0]`;
+  
+                   
+    for($n in $nodes)
+  {
+    
+    if(`nodeType $n `=="aiAmbientOcclusion")
+
+    {
+        float $write[] = getAttr ($n + ".white");
+        setAttr ($n + ".white") -type double3 ($write[0]*$r) ($write[1]*$r) ($write[2]*$r); 
+        
+     }
+                  
+  }
+  }
+}
+
+global proc selectAllPolygon()
+{
+    select `ls -type mesh`;
+}
+
+
+global proc ar_rayswitchshader_set()
+{
+
+ if (`window  -exists "lg_ar_simGI"`)
+	deleteUI "lg_ar_simGI";
+
+window  -title "场景优化处理" -wh 400 300 "lg_ar_simGI";
+   
+   rowColumnLayout  -numberOfColumns 1 ;
+   
+       button -label "选择场景当中所有物体"  -w 100 -h 50 -c"selectAllPolygon()"; 
+       button -label "一键优化（选中物体）"  -w 100 -h 50 -c"rayswitch_shader()" -ann"替换rayswtich材质"; 
+   
+       floatSliderGrp 
+           -label "     衰减系数     " 
+           -field true
+           -minValue 0 -maxValue 2
+           -precision  3
+           -cc "Diff_falloff()"
+           -ann "影响GI的衰减，通常取值0-1之间"
+           -value 0.1 ar_rayswitch_falloff;
+       colorSliderGrp
+           -label "     GI颜色     "
+           -columnWidth 5 30
+           -cc"Diff_color()"
+           -ann "批量定义GI的颜色"
+           -rgb 0.3 0.3 0.3 ar_rayswitch_writeColor;
+       floatSliderGrp 
+           -label "     GI强度调节   " 
+           -field true
+           -minValue 0  -maxValue 2 
+           -cc "Diff_mulwrite()"
+           -ann "GI颜色乘以设定的数值，用于整体调节GI的强弱"
+           -value 1  ar_rayswitch_mulwrite;    
+           
+     /*  button 
+           -label "使用说明:\n 1.衰减系数，影响GI的衰减，通常取值0-1之间。\n 2.GI颜色，批量定义GI的颜色。\n 3.GI调节强度，GI颜色乘以设定的数值，用于整体调节GI的强弱。" 
+           -w 100 -h 100
+           -ebg true;*/
+              
+showWindow "lg_ar_simGI";
+    
+}     

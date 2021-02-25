@@ -1,0 +1,134 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwAnimOffset(string $selected, int $num, float $offset)
+{
+	//GET ALL KEYED ATTRIBUTES
+	string $animCurves[], $dAttrs[];
+	int $a = 0;
+	string $cons[] = `listConnections -s 1 -d 0 $selected`;
+	for($con in $cons)
+	{
+		string $type[] = `ls -st $con`;
+		if(`gmatch $type[1] "animCurve*"`)
+		{
+			$animCurves[$a] = $con;
+			string $dCons[] = `listConnections -s 0 -d 1 -scn on -p 1 ($con+".output")`;
+			string $name_parts[];
+			int $tok = tokenize($dCons[0], ".", $name_parts);
+			$dAttrs[$a] = $name_parts[1];	//ONLY THE ATTRIBUTE
+			$a++;
+		}
+	}
+
+	//INSTANCE NODE AND APPLY ANIMATION OFFSET EXPRESSION
+	string $instance[];
+	for($i=0;$i<$num;$i++)
+	{
+		float $rand = `rand (-$offset) $offset`;
+		$tmp = `instance $selected`;
+		$instance[$i] = $tmp[0];
+		addAttr -ln animOffset -at double $instance[$i];
+		setAttr -e -keyable true ($instance[$i]+".animOffset");
+		setAttr ($instance[$i]+".animOffset") $rand;
+
+		string $string;
+		for($j=0;$j<`size $animCurves`;$j++)
+		{
+			print ("OFFSETTING ROOT: "+$instance[$i]+"\n");
+			$string = ($string+"float \$val[] = `keyframe -time \(frame\+"+$instance[$i]+".animOffset\) -q -eval "+$selected+"_"+$dAttrs[$j]+"`;\n"+$instance[$i]+"."+$dAttrs[$j]+" = \$val[0];\n");  
+		}
+		string $exp = `expression -s $string -o $instance[$i] -ae 1 -uc all`;
+		rename $exp ($instance[$i]+"_ANIM_OFFSET");
+	}
+	clear $animCurves;
+	clear $dAttrs;
+
+	//CHECK THRU HIERARCHIES
+	for($inst in $instance)
+	{
+		string $orig_hier[] = `listRelatives -ad -pa $selected`;
+		//print $orig_hier;
+		//string $node = $orig_hier[1];
+		for($node in $orig_hier)
+		{
+			if(`gmatch $node "*Shape*"`!=1)
+			{
+				//CHECK FOR ANIM CURVES
+				string $cons1[] = `listConnections -s 1 -d 0 $node`;
+				for($con in $cons1)
+				{
+					string $node1;
+					string $string;
+					string $type[] = `ls -st $con`;
+					if(`gmatch $type[1] "animCurve*"`)
+					{
+						string $dCons[] = `listConnections -s 0 -d 1 -scn on -p 1 ($con+".output")`;
+						string $name_parts[];
+						int $tok = tokenize($dCons[0], ".", $name_parts);
+				
+						//WRITE OFFSET EXPRESSION
+						$node1 = `substitute $selected $node $inst`;
+						print ("OFFSETTING: "+$node1+" CHANNEL: "+$name_parts[1]+"\n");
+						$string = ($string+"float \$val[] = `keyframe -time \(frame\+"+$inst+".animOffset\) -q -eval "+$node+"_"+$name_parts[1]+"`;\n"+$node1+"."+$name_parts[1]+" = \$val[0];\n");  
+					}
+					string $exp = `expression -s $string -o $node1 -ae 1 -uc all`;
+					string $name_parts[];
+					int $tok = tokenize($node1, "|", $name_parts);
+					$node1 = $name_parts[$tok-1];
+					rename $exp ($node1+"_ANIM_OFFSET");
+				}
+			}
+		}
+	}
+}
+
+global proc mwInstanceAnim()
+{
+	$tmp = `ls -sl`;
+	string $selected = $tmp[0];
+
+	string $window = `window -title "Instance Animation"
+    		-iconName "Instancer"
+    		-widthHeight 200 55`;
+   	string $parent = `columnLayout -adjustableColumn true`;
+        	intSliderGrp
+ 			-label "Number of Instances"
+ 		-field true
+		-minValue 1
+		-maxValue 100
+		-fieldMaxValue 1000
+		-value 1
+		numCopies;
+
+      	floatSliderGrp
+ 			-label "Randomize"
+ 		-field true
+		-minValue -10
+		-maxValue 10
+		-fieldMinValue -100
+		-fieldMaxValue 100
+		-value 0
+		randomField;
+
+		separator;
+
+		string $cmd = ("\$tmp = `ls -sl`;\nstring \$selected = \$tmp[0];\n"+
+		"int \$num;\nif\(`intSliderGrp -exists numCopies`\)\n"+
+		"{\n\t\$num = `intSliderGrp -q -v numCopies`;\n}\n"+
+		"float $offset;\nif\(`floatSliderGrp -exists randomField`\)\n"+
+		"{\n\t\$offset = `floatSliderGrp -q -v randomField`;\n}\n"+
+		"mwAnimOffset  \$selected \$num \$offset");
+
+		button -label "Instance" -command ($cmd+"; select -cl; deleteUI -window "+$window);
+	setParent ..;
+
+	showWindow $window;
+}

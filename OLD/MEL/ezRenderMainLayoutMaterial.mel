@@ -1,0 +1,253 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/09/26
+///
+/// Description: 
+////			Ben&Izzy项目渲染环节材质面板（综合工具面板子面板）
+///				主要功能：提供规范化的常用材质工具
+///
+
+global proc ezRenderMainLayoutMaterial()
+{
+	string $path = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\icons\\BenAdnIzzy\\render\\";
+	
+	if(`window -exists ez_render_mainLayout_material`)
+		deleteUI ez_render_mainLayout_material;
+	window -title "Auto Create RenderLayers" -mb true -s false -resizeToFitChildren true ez_render_mainLayout_material;
+		frameLayout -label "" -labelAlign "top" -cl false  -cll false  -borderStyle "etchedIn";
+			string $formLayout = `formLayout`;
+				string $colorB = `symbolButton -ann "ColorB" -image ($path+"colorB.bmp") -command "ezRenderMainLayoutMaterial_Assign(\"colorB\")"`;
+				string $colorR = `symbolButton -ann "ColorR" -image ($path+"colorR.bmp") -command "ezRenderMainLayoutMaterial_Assign(\"colorR\")"`;
+				string $colorG = `symbolButton -ann "ColorG" -image ($path+"colorG.bmp") -command "ezRenderMainLayoutMaterial_Assign(\"colorG\")"`;
+				string $colorA = `symbolButton -ann "ColorA" -image ($path+"colorA.bmp") -command "ezRenderMainLayoutMaterial_Assign(\"colorA\")"`;
+				string $matte  = `symbolButton -ann "Matte"  -image ($path+"matte.bmp")  -command "ezRenderMainLayoutMaterial_Assign(\"matte\")"`;
+				string $depth  = `symbolButton -ann "Depth"  -image ($path+"depth.bmp")  -command "ezRenderMainLayoutMaterial_Assign(\"depth_new\")"`;
+				string $shadow = `symbolButton -ann "Shadow" -image ($path+"shadow.bmp") -command "ezRenderMainLayoutMaterial_Assign(\"shadow\")"`;
+				string $AO     = `symbolButton -ann "AO"     -image ($path+"AO.bmp")     -command "ezRenderMainLayoutMaterial_Assign(\"AO\")"`;
+			setParent ..;
+			formLayout -edit
+				-attachForm	$colorB		"top"		0
+				-attachForm	$colorB		"left"		5
+
+				-attachForm	$colorR		"top"		0
+				-attachControl	$colorR		"left"		5	$colorB
+
+				-attachForm	$colorG		"top"		0
+				-attachControl	$colorG		"left"		5	$colorR
+
+				-attachForm	$colorA		"top"		0
+				-attachControl	$colorA		"left"		5	$colorG
+
+				-attachControl	$matte		"top"		5	$colorB
+				-attachForm	$matte		"left"		5
+
+				-attachControl	$depth		"top"		5	$colorB
+				-attachControl	$depth		"left"		5	$matte
+
+				-attachControl	$shadow		"top"		5	$colorB
+				-attachControl	$shadow		"left"		5	$depth
+
+				-attachControl	$AO		"top"		5	$colorB
+				-attachControl	$AO		"left"		5	$shadow
+			$formLayout;
+	window -edit -h 145 -w 180 ez_render_mainLayout_material;
+	showWindow ez_render_mainLayout_material;
+}
+
+global proc ezRenderMainLayoutMaterial_Assign(string $material)
+{
+	string $objs[] = `ls -sl`;
+	
+	if (!`objExists ("ez_"+$material)`)
+	{
+		switch ($material)
+		{
+			case "colorB" :
+				shadingNode -asShader surfaceShader -name ez_colorB;
+				setAttr "ez_colorB.outColor" -type double3 0 0 1 ;
+				setAttr "ez_colorB.outMatteOpacity" -type double3 0 0 0 ;
+				sets -renderable true -noSurfaceShader true -empty -name ez_colorBSG;
+				connectAttr -f ez_colorB.outColor ez_colorBSG.surfaceShader;				
+				break;
+			case "colorR" :
+				shadingNode -asShader surfaceShader -name ez_colorR;
+				setAttr "ez_colorR.outColor" -type double3 1 0 0 ;
+				setAttr "ez_colorR.outMatteOpacity" -type double3 0 0 0 ;
+				sets -renderable true -noSurfaceShader true -empty -name ez_colorRSG;
+				connectAttr -f ez_colorR.outColor ez_colorRSG.surfaceShader;				
+				break;
+			case "colorG" :
+				shadingNode -asShader surfaceShader -name ez_colorG;
+				setAttr "ez_colorG.outColor" -type double3 0 1 0 ;
+				setAttr "ez_colorG.outMatteOpacity" -type double3 0 0 0 ;
+				sets -renderable true -noSurfaceShader true -empty -name ez_colorGSG;
+				connectAttr -f ez_colorG.outColor ez_colorGSG.surfaceShader;				
+				break;
+			case "colorA" :
+				shadingNode -asShader surfaceShader -name ez_colorA;
+				setAttr "ez_colorA.outColor" -type double3 0 0 0 ;
+				setAttr "ez_colorA.outMatteOpacity" -type double3 1 1 1;
+				sets -renderable true -noSurfaceShader true -empty -name ez_colorASG;
+				connectAttr -f ez_colorA.outColor ez_colorASG.surfaceShader;				
+				break;
+			case "matte" :
+				shadingNode -asShader lambert -name ez_matte;
+				setAttr "ez_matte.color" -type double3 0 0 0 ;
+				setAttr ez_matte.matteOpacityMode 0;
+				sets -renderable true -noSurfaceShader true -empty -name ez_matteSG;
+				connectAttr -f ez_matte.outColor ez_matteSG.surfaceShader;				
+				break;
+			case "depth" :
+				file -import -type "mayaBinary" (`getenv "DEV_PATH"` + "/Maya/shaders/MOEBIUS_SHADER_DEPTH.mb");
+				rename DepthShader "ez_depth";
+				break;
+			case "depth_new" :
+				string $ifo = `shadingNode -asUtility samplerInfo`;
+				string $mul = `shadingNode -asUtility multiplyDivide`;
+				string $rng = `shadingNode -asUtility setRange`;
+				string $sdr = `shadingNode -asShader surfaceShader`;
+				string $set = `sets -renderable true -noSurfaceShader true -empty`;
+				addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+				addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+				connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+				setAttr ($mul+".input2X") -1.0;
+				connectAttr ($mul+".outputX") ($rng+".valueX");
+				setAttr ($rng+".minX") 0.0; // fcheck will scale to 200/255.
+				setAttr ($rng+".maxX") 1.0;
+				connectAttr ($rng+".outValueX") ($sdr+".outColorR");
+				connectAttr ($rng+".outValueX") ($sdr+".outColorG");
+				connectAttr ($rng+".outValueX") ($sdr+".outColorB");
+				connectAttr ($sdr+".outColor") ($set+".surfaceShader");
+				addAttr -ln "Far"  -at double -dv 600  $sdr;
+				setAttr -e-keyable true ($sdr+".Far");
+				addAttr -ln "Near"  -at double -dv 0 $sdr;
+				setAttr -e-keyable true ($sdr+".Near");
+				addAttr -ln "Max"  -at double  -min 0 -max 1 -dv 1 $sdr;
+				setAttr -e-keyable true ($sdr+".Max");
+				addAttr -ln "Min"  -at double  -min 0 -max 1 -dv 0 $sdr;
+				setAttr -e-keyable true ($sdr+".Min");
+				connectAttr -f ($sdr+".Far") ($rng+".oldMaxX");
+				connectAttr -f ($sdr+".Near") ($rng+".oldMinX");
+				connectAttr -f ($sdr+".Max") ($rng+".maxX");
+				connectAttr -f ($sdr+".Min") ($rng+".minX");
+				rename $sdr "ez_depth_new" ; 
+				rename $set "ez_depth_newSG";
+				break;
+			case "shadow" :
+				shadingNode -asShader useBackground -name ez_shadow;
+				setAttr "ez_shadow.reflectivity" 0;
+				setAttr "ez_shadow.reflectionLimit" 0;
+				setAttr "ez_shadow.shadowMask" 1;
+				sets -renderable true -noSurfaceShader true -empty -name ez_shadowSG;
+				connectAttr -f ez_shadow.outColor ez_shadowSG.surfaceShader;				
+				break;
+			case "AO" :
+				if (!`pluginInfo -query -loaded "Mayatomr.mll"`)
+					loadPlugin "Mayatomr.mll";
+				shadingNode -asShader surfaceShader -name ez_AO;
+				mrCreateCustomNode -asTexture "" mib_amb_occlusion;rename ezAO_mib_amb_occlusion;
+				setAttr "ezAO_mib_amb_occlusion.samples" 80;
+				setAttr "ezAO_mib_amb_occlusion.dark" -type double3 0.2 0.2 0.2;
+				setAttr "ezAO_mib_amb_occlusion.max_distance" 10;
+				setAttr "ezAO_mib_amb_occlusion.spread" 0.8;
+				connectAttr -force ezAO_mib_amb_occlusion.outValue ez_AO.outColor;
+				sets -renderable true -noSurfaceShader true -empty -name ez_AOSG;
+				connectAttr -f ez_AO.outColor ez_AOSG.surfaceShader;				
+				break;
+			case "lambert" :
+				shadingNode -asShader lambert -name ez_lambert;
+				setAttr "ez_lambert.color" -type double3 1 1 1 ;
+				sets -renderable true -noSurfaceShader true -empty -name ez_lambertSG;
+				connectAttr -f ez_lambert.outColor ez_lambertSG.surfaceShader;				
+				break;
+			case "normal" :
+				if (!`pluginInfo -query -loaded "Mayatomr.mll"`)
+					loadPlugin "Mayatomr.mll";
+				shadingNode -asShader surfaceShader -name ez_normal;
+				mrCreateCustomNode -asTexture "" mib_amb_occlusion;rename eznormal_mib_amb_occlusion;
+				setAttr "eznormal_mib_amb_occlusion.samples" 80;
+				setAttr "eznormal_mib_amb_occlusion.dark" -type double3 0.2 0.2 0.2;
+				setAttr "eznormal_mib_amb_occlusion.max_distance" 5;
+				setAttr "eznormal_mib_amb_occlusion.spread" 0.8;
+				connectAttr -force eznormal_mib_amb_occlusion.outValue ez_normal.outColor;
+				sets -renderable true -noSurfaceShader true -empty -name ez_normalSG;
+				connectAttr -f ez_normal.outColor ez_normalSG.surfaceShader;	
+				setAttr "eznormal_mib_amb_occlusion.output_mode"  3;
+				break;
+		}
+	}
+	select -cl;
+
+	if (`objExists $objs[0]`)
+	{
+		select -r $objs;
+		switch ($material)
+		{
+			case "colorB" :
+				catch(`sets -e -forceElement ez_colorBSG`);
+				//hyperShade -assign ez_colorB;	
+				break;
+			case "colorR" :
+				catch(`sets -e -forceElement ez_colorRSG`);
+				//hyperShade -assign ez_colorR;	
+				break;
+			case "colorG" :
+				catch(`sets -e -forceElement ez_colorGSG`);
+				//hyperShade -assign ez_colorG;	
+				break;
+			case "colorA" :
+				catch(`sets -e -forceElement ez_colorASG`);
+				//hyperShade -assign ez_colorA;	
+				break;
+			case "matte" :
+				catch(`sets -e -forceElement ez_matteSG`);
+				//hyperShade -assign ez_matte;	
+				break;
+			case "depth" :
+				catch(`hyperShade -assign ez_depth`);
+				select -r ez_depth;	
+				break;
+			case "depth_new" :
+				catch(`sets -e -forceElement ez_depth_newSG`);
+				select -r ez_depth_new;	
+				break;
+			case "shadow" :
+				catch(`sets -e -forceElement ez_shadowSG`);
+				//hyperShade -assign ez_shadow;	
+				break;
+			case "AO" :
+				catch(`sets -e -forceElement ez_AOSG`);
+				//hyperShade -assign ez_AO;
+				select -r ezAO_mib_amb_occlusion;	
+				break;
+			case "lambert" :
+				catch(`sets -e -forceElement ez_lambertSG`);
+				//hyperShade -assign ez_lambert;	
+				break;
+			case "normal" :
+				catch(`sets -e -forceElement ez_normalSG`);
+				//hyperShade -assign ez_lambert;	
+				break;
+		}
+	}
+	else 
+	{
+		switch ($material)
+		{
+			case "depth" :
+				select -r ez_depth;	
+				break;
+			case "depth_new" :
+				select -r ez_depth_new;	
+				break;
+			case "AO" :
+				select -r ezAO_mib_amb_occlusion;	
+				break;
+			case "normal" :
+				select -r eznormal_mib_amb_occlusion;	
+				break;
+		}
+	}
+}

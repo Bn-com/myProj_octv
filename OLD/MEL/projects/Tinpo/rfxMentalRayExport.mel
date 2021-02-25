@@ -1,0 +1,107 @@
+global proc collapseSubdHier ()
+{
+	string $subds[] = `ls -ni -type subdiv`;
+	for ($subd in $subds)
+	{
+		subdCollapse -ch 1  -level 2 $subd;
+		catch (`setAttr ($subd+".v") 0`);
+	}	
+}
+// -------------------------------------------------------------------
+global proc setAndKeyAttr (string $objAndAttr,float $val)
+{
+	setAttr -l 0 $objAndAttr;
+	string $inplug[] = `listConnections -s 1 -d  0 -p 1 ($objAndAttr)`;
+	if (size($inplug))
+		disconnectAttr $inplug 	$objAndAttr;
+		
+	setKeyframe -v $val $objAndAttr;
+}
+// -------------------------------------------------------------------
+global proc rfxMentalRayExport(int $frame_number) {
+	// from mrBatchExport: check that mental ray is loaded
+	if( ! `pluginInfo -q -l "Mayatomr"` )
+		loadPlugin "Mayatomr";
+	miCreateDefaultNodes();
+
+	// do a little pre-roll to make sure the point cache evaluates
+	currentTime ($frame_number - 1);
+	// go to the frame
+	currentTime $frame_number;
+
+	print("RFX MENTAL RAY EXPORT: preparing frame " + $frame_number + "\n");
+//	setAndKeyAttr("defaultRenderGlobals.startFrame", $frame_number);
+//	setAndKeyAttr("defaultRenderGlobals.endFrame",   $frame_number);
+
+	// for unknown reasons, this fixes bump problem
+
+
+	// make sure the render globals range is set correctly - Chris, please don't remove this line!
+	setAttr -l 0 defaultRenderGlobals.startFrame;
+	setAttr -l 0 defaultRenderGlobals.endFrame;
+	setAttr defaultRenderGlobals.startFrame $frame_number;
+	setAttr defaultRenderGlobals.endFrame $frame_number;
+
+
+// THIS IS NEEDED FOR THE SILLY CAR PAINT SHADERS
+	setAttr -type "string" mentalrayGlobals.includes "base.mi mayabase.mi subsurface.mi paint.mi";
+
+
+// THIS CHANGED IN MAYA7!
+	//setAttr mentalrayGlobals.animation 0;
+	setAndKeyAttr ("defaultRenderGlobals.animation",0);
+
+	// set other export options here:
+	setAndKeyAttr ("mentalrayGlobals.exportVerbosity",4);
+
+	// this disables glow
+	// setAndKeyAttr ("mentalrayGlobals.exportPostEffects", 1);
+	
+	
+	// add the attributes to control the float precision on the export
+	if (!`objExists "mentalrayGlobals.exportFloatPrecision"`)
+		addAttr -at short -ln "exportFloatPrecision" mentalrayGlobals;
+	if (!`objExists "mentalrayGlobals.exportDoublePrecision"`)
+		addAttr -at short -ln "exportDoublePrecision" mentalrayGlobals;
+	
+	// use 12 digits for float
+	setAttr mentalrayGlobals.exportFloatPrecision 12;
+
+	// use 20 digits for double
+	setAttr mentalrayGlobals.exportDoublePrecision 20;
+
+	// output format
+	//setAttr "miDefaultFramebuffer.format" 27;  // openEXR
+	// This changed in 7.
+	setAttr defaultRenderGlobals.imageFormat 51;
+	setAttr -type "string" defaultRenderGlobals.imfkey "exr";
+	setAttr "miDefaultFramebuffer.datatype" 16; // RGBA 16 bit half
+
+	print("RFX MENTAL RAY EXPORT: done preparing frame\n");
+
+	print("RFX MENTAL RAY EXPORT: preparing caches ...\n");
+	// from mrBatchExport: do runup for hair/fluid/particles
+	//dynRunupForBatchRender("mentalrayGlobals");
+	print("RFX MENTAL RAY EXPORT: done preparing caches\n");
+
+	if (`exists "rfxMentalRayExportPreCB"`)
+	{
+		print("RFX MENTAL RAY EXPORT: Executing pre-export callback...\n");
+		catch (`evalEcho ("rfxMentalRayExportPreCB")`);
+	}
+
+
+	print("RFX MENTAL RAY EXPORT: Exporting frame ...\n");
+	if (`pluginInfo -q -l "shaveNode"`)
+		shaveMayatomr -mi -v 5 -file "/usr/tmp/exported.mi" -binary -xp "3311313333"; // changed light map paths to absolute (4th digit)
+	else
+		Mayatomr -mi -v 5 -file "/usr/tmp/exported.mi" -binary -xp "3311313333"; // changed light map paths to absolute (4th digit)
+
+	if (`exists "rfxMentalRayExportPostCB"`)
+	{
+		print("RFX MENTAL RAY EXPORT: Executing post-export callback...\n");
+		catch (`evalEcho ("rfxMentalRayExportPostCB")`);
+	}
+	
+	print("RFX MENTAL RAY EXPORT: Done\n");
+}

@@ -1,0 +1,370 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc maCGMatte()
+{
+	string $sel[] = `ls -sl`;
+
+	string $curLayer = `editRenderLayerGlobals -q -crl`;
+	string $renderLayers[] = `ls -type renderLayer`;
+	string $listLayers[]={};
+	for ($rl in $renderLayers)
+	{
+		if (match("default",$rl)=="")
+		{
+			$listLayers[size($listLayers)] = $rl;
+		}
+	}
+
+	string $selShapes[]={};
+	for ($item in $sel)
+	{
+		string $temp="";
+		if (nodeType($item)=="transform")
+		{
+			string $shape[] = `listRelatives -f -ni -s $item`;
+			$temp = $shape[0];
+		}
+		else
+		{
+			$temp = $item;
+		}
+		$selShapes[size($selShapes)] = $temp;
+
+		if (!attributeExists("GDC_matte",$temp))
+		{
+			addAttr -ln "GDC_matte"  -dt "string"  $temp;
+			setAttr -e-keyable true ($temp+".GDC_matte");
+		}
+		setAttr -type "string" ($temp+".GDC_matte") ($curLayer+";");
+		if (match("beauty",$curLayer)!="")
+		{
+			string $pairLayer = substituteAllString($curLayer,"beauty","xtraPass");
+			setAttr -type "string" ($temp+".GDC_matte") ($curLayer+";"+$pairLayer+";");
+		}
+	}
+
+	maCGMatteOverride($selShapes);
+}
+
+global proc maCGMatteOverride(string $sel[])
+{
+	string $matteShapes[]={};
+	if (!size($sel))
+	{
+		string $allShapes[] = `ls -ni -dag -type mesh`;
+		for ($mesh in $allShapes)
+		{
+			if (attributeExists("GDC_matte",$mesh))
+			{
+				$matteShapes[size($matteShapes)] = $mesh;
+			}
+		}
+	}
+	else
+		$matteShapes = $sel;
+	
+	
+	string $curLayer = `editRenderLayerGlobals -q -crl`;
+	string $renderLayers[] = `ls -type renderLayer`;
+	string $listLayers[]={};
+	for ($rl in $renderLayers)
+	{
+		if (match("default",$rl)=="")
+		{
+			$listLayers[size($listLayers)] = $rl;
+		}
+	}
+	
+	/*for ($item in $matteShapes)
+	{
+		string $matteAttr = `getAttr ($item+".GDC_matte")`;
+		string $matteLayers[] = stringToStringArray($matteAttr," ;");
+		if (size($matteLayers))
+		{
+			string $bhNode;
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			string $buff[] = `hyperShade -lun $sg[0]`;
+			for ($un in $buff)
+			{
+				if (match("blackhole",$un)!="")
+				{
+					if(objExists($un+".input"))
+					{
+						string $nodes = `getAttr ($un+".notes ")`;
+						if(match("Blackhole",$nodes)!="")
+						{
+							$bhNode = $un;
+							break;
+						}
+					}
+				}
+			}
+
+			for ($rl in $listLayers)
+			{
+				editRenderLayerAdjustment -layer $rl ($bhNode+".input");
+				if (stringArrayCount($rl,$matteLayers))
+				{
+					editRenderLayerGlobals -crl $rl;
+					setAttr ($bhNode+".input") 1;
+				}
+				else
+				{
+					editRenderLayerGlobals -crl $rl;
+					setAttr ($bhNode+".input") 0;
+				}
+			}
+		}
+	}*/
+
+	for ($rl in $listLayers)
+	{
+		editRenderLayerGlobals -crl $rl;
+		for ($item in $matteShapes)
+		{
+			string $matteAttr = `getAttr ($item+".GDC_matte")`;
+			string $matteLayers[] = stringToStringArray($matteAttr," ;");
+			string $glowPass=substituteAllString($matteLayers[0],"beauty","_GlowPass");
+			$matteLayers = stringArrayCatenate($matteLayers,{$glowPass});
+			//string $bhNode;
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			//string $buff[] = `hyperShade -lun $sg[0]`;
+			for ($is in $sg)
+			{
+				string $bhNode;
+				string $buff[] = `listHistory $is`;
+				for ($un in $buff)
+				{
+					if (match("blackhole",$un)!="")
+					{
+						if(objExists($un+".input"))
+						{
+							//string $nodes = `getAttr ($un+".notes ")`;
+							//if(match("Blackhole",$nodes)!="")
+							//{
+								$bhNode = $un;
+								break;
+							//}
+						}
+					}
+				}
+				
+				editRenderLayerAdjustment -layer $rl ($bhNode+".input");
+				if (stringArrayCount($rl,$matteLayers))
+				{
+					//print $bhNode;
+					//editRenderLayerGlobals -crl $rl;
+					setAttr ($bhNode+".input") 1;
+					setAttr ($item+".primaryVisibility") 1;
+				}
+				else
+				{
+					//print $bhNode;
+					//editRenderLayerGlobals -crl $rl;
+					setAttr ($bhNode+".input") 0;
+				}
+			}
+		}
+	}
+	maCGMatteBGStatic();
+	
+	editRenderLayerGlobals -crl $curLayer;
+	print "Íê³É!";
+}
+
+global proc maCGMatteClearOverride()
+{
+	string $sel[] = `ls -sl`;
+	string $selShapes[]={};
+	for ($item in $sel)
+	{
+		string $temp="";
+		if (nodeType($item)=="transform")
+		{
+			string $shape[] = `listRelatives -f -ni -s $item`;
+			$temp = $shape[0];
+		}
+		else
+		{
+			$temp = $item;
+		}
+		$selShapes[size($selShapes)] = $temp;
+	}
+	
+
+	string $matteShapes[]={};
+	if (!size($sel))
+	{
+		string $allShapes[] = `ls -ni -dag -type mesh`;
+		for ($mesh in $allShapes)
+		{
+			if (attributeExists("GDC_matte",$mesh))
+			{
+				$matteShapes[size($matteShapes)] = $mesh;
+			}
+		}
+	}
+	else
+		$matteShapes = $selShapes;
+	
+	for ($item in $matteShapes)
+	{
+		if (attributeExists("GDC_matte",$item))
+		{
+			setAttr -type "string" ($item+".GDC_matte") "";
+		}
+	}
+	
+	maCGMatteOverride($matteShapes);
+}
+
+global proc maCGMatteBGStatic()
+{
+	//maCGBGStaticMatte();
+	
+	string $animMatteSet = "BG_anim_blackMatted";
+	string $staticMatteSet = "BG_static_blackMatted";
+	if (objExists($animMatteSet) && objExists("BGbeauty_anim"))
+	{
+		string $animMatte[] = `sets -q $animMatteSet`; 
+		string $staticMatte[] = `sets -q $staticMatteSet`;
+		
+		editRenderLayerGlobals -crl "BGbeauty_anim";
+		for ($item in $animMatte)
+		{
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			for ($is in $sg)
+			{
+				string $bhNode;
+				string $buff[] = `listHistory $is`;
+				for ($un in $buff)
+				{
+					if (match("blackhole",$un)!="")
+					{
+						if(objExists($un+".input"))
+						{
+							//string $nodes = `getAttr ($un+".notes ")`;
+							//if(match("Blackhole",$nodes)!="")
+							//{
+								$bhNode = $un;
+								break;
+							//}
+						}
+					}
+				}
+				//print ($bhNode+"\n");
+				if (objExists($bhNode))
+				{
+					editRenderLayerAdjustment -layer "BGbeauty_anim" ($bhNode+".input");
+					setAttr ($bhNode+".input") 1;
+				}
+				//editRenderLayerAdjustment -layer "BGbeauty_static" ($bhNode+".input");
+				//setAttr ($bhNode+".input") 0;
+			}
+		}
+		for ($item in $staticMatte)
+		{
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			for ($is in $sg)
+			{
+				string $bhNode;
+				string $buff[] = `listHistory $is`;
+				for ($un in $buff)
+				{
+					if (match("blackhole",$un)!="")
+					{
+						if(objExists($un+".input"))
+						{
+							//string $nodes = `getAttr ($un+".notes ")`;
+							//if(match("Blackhole",$nodes)!="")
+							//{
+								$bhNode = $un;
+								break;
+							//}
+						}
+					}
+				}
+				//print ($bhNode+"\n");
+				if (objExists($bhNode))
+				{
+					editRenderLayerAdjustment -layer "BGbeauty_anim" ($bhNode+".input");
+					setAttr ($bhNode+".input") 0;
+				}
+			}
+		}
+
+		
+		editRenderLayerGlobals -crl "BGbeauty_static";
+		for ($item in $staticMatte)
+		{
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			for ($is in $sg)
+			{
+				string $bhNode;
+				string $buff[] = `listHistory $is`;
+				for ($un in $buff)
+				{
+					if (match("blackhole",$un)!="")
+					{
+						if(objExists($un+".input"))
+						{
+							//string $nodes = `getAttr ($un+".notes ")`;
+							//if(match("Blackhole",$nodes)!="")
+							//{
+								$bhNode = $un;
+								break;
+							//}
+						}
+					}
+				}
+				if (objExists($bhNode))
+				{
+					editRenderLayerAdjustment -layer "BGbeauty_static" ($bhNode+".input");
+					setAttr ($bhNode+".input") 1;
+				}
+				//editRenderLayerAdjustment -layer "BGbeauty_anim" ($bhNode+".input");
+				//setAttr ($bhNode+".input") 0;
+			}
+		}
+		for ($item in $animMatte)
+		{
+			string $sg[] = `listConnections -type shadingEngine $item`;
+			for ($is in $sg)
+			{
+				string $bhNode;
+				string $buff[] = `listHistory $is`;
+				for ($un in $buff)
+				{
+					if (match("blackhole",$un)!="")
+					{
+						if(objExists($un+".input"))
+						{
+							//string $nodes = `getAttr ($un+".notes ")`;
+							//if(match("Blackhole",$nodes)!="")
+							//{
+								$bhNode = $un;
+								break;
+							//}
+						}
+					}
+				}
+				if (objExists($bhNode))
+				{
+					editRenderLayerAdjustment -layer "BGbeauty_static" ($bhNode+".input");
+					setAttr ($bhNode+".input") 0;
+				}
+			}
+		}
+	}
+}

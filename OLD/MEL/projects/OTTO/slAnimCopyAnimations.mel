@@ -1,0 +1,184 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slAnimCopyAnimations()
+{
+	string $master[] = `ls -sl`;
+
+	
+	int $ct=1;
+	if (`radioButtonGrp -q -ex window_slAnimCopyAnimation_ct`)
+	{
+		$ct= `radioButtonGrp	-q -select window_slAnimCopyAnimation_ct`;
+	}
+
+	int $pt=1;
+	if (`radioButtonGrp -q -ex window_slAnimCopyAnimation_pt`)
+	{
+		$pt= `radioButtonGrp	-q -select window_slAnimCopyAnimation_pt`;
+	}
+	
+	if (size($master) != 2)
+		error "请先选择导出动画的角色的character，再选择需要导入动画的角色的character !";
+
+	string $buff[];
+	int $num1 = `tokenize $master[0] ":" $buff`;
+	string $preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+	if ($num1==1)
+	{
+		$num1 = `tokenize $master[0] "_" $buff`;
+		$preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+		if ($num1==1)
+		{
+			$preCopy = "";
+		}
+	}
+
+	clear $buff;
+	int $num2 = `tokenize $master[1] ":" $buff`;
+	string $prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+	if ($num2==1)
+	{
+		$num1 = `tokenize $master[1] "_" $buff`;
+		$prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+		if ($num1==1)
+		{
+			$prePaste = "";
+		}
+	}
+	
+	
+	string $animSets[];
+	if ($pt ==1 )
+	{
+		$animSets = {"faceControls","TSM2Controls","FaceMachineControls","bodySet","CTRL_SET","face_controls_Sets","ALL_CONTROLS","keySet","ControlSet"};
+	}
+	else if ($pt ==2)
+	{
+		$animSets = {"TSM2Controls","bodySet","CTRL_SET"};
+	}
+	else if ($pt ==3)
+	{
+		$animSets = {"faceControls","FaceMachineControls","face_controls_Sets"};
+	}
+	
+	string $source[];
+	for ($set in $animSets)
+	{
+		string $copySet = $preCopy + $set;
+		if (`objExists $copySet`)
+		{
+			select -r  $copySet;
+			string $setObjs[] = `ls -sl`;
+			$source = stringArrayCatenate($source,$setObjs);
+		}
+	}
+
+	string $specCon[] = slAnimCopyAnimationsGetSpecialControl($preCopy);
+	print $specCon;
+	$source = stringArrayCatenate($source,$specCon);
+	$source = stringArrayRemoveDuplicates($source);
+
+	/*string $pasteSet = $prePaste + "set";
+	string $pasteFset = $prePaste + "facial_set";
+	string $pasteAset = $prePaste + "accessory_set";
+	string $dest[];
+	if (`objExists $pasteFset`)
+		$dest = `sets -query $pasteSet $pasteFset`;
+	if (`objExists $pasteAset`)
+		$dest = `sets -query $pasteSet $pasteFset $pasteAset`;*/
+
+	if ($ct == 1 || $ct ==2)
+	{
+		for ($obj in $source)
+		{
+			string $paste = `substitute $preCopy $obj $prePaste`;
+			if ($preCopy == "")
+			{
+				$paste = $prePaste+$obj;
+			}
+			if (match(":c_",$obj) == "" && !`objExists $paste`)
+			{
+				$paste = substituteAllString($paste,":",":c_");
+			}
+			if (match(":c_",$obj) != "" && !`objExists $paste`)
+			{
+				$paste = substituteAllString($paste,":c_",":");
+			}
+			//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+			if (`objExists $paste` && !endsWith((tolower($paste)),"master"))
+			{
+				//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+				
+				string $attrs[] = stringArrayCatenate(`listAttr -k -o $obj`,`listAttr -cb -u $obj`);
+				for ($attr in $attrs)
+				{
+					if (`getAttr -type ($obj+"."+$attr)` != "double3")
+					{
+						float $value = `getAttr ($obj+"."+$attr)`;
+						if (`objExists ($paste+"."+$attr)` && `getAttr -se ($paste+"."+$attr)`)
+						{
+							catchQuiet(`setAttr ($paste+"."+$attr) $value`);
+							if ($ct == 2)
+							{
+								setKeyframe ($paste+"."+$attr);
+							}
+						}
+					}
+				}
+				if (`copyKey $obj` && $ct == 1)
+				{
+					//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+					pasteKey -o "replaceCompletely" $paste;
+				}
+			}
+		}
+	}
+	else if ($ct == 3)
+	{
+		string $attrs[] = stringArrayCatenate(`listAttr -k -o $master[0]`,`listAttr -cb -u $master[0]`);
+		for ($attr in $attrs)
+		{
+			if (`objExists($master[1]+"."+$attr)` &&`getAttr -se ($master[1]+"."+$attr)` && `getAttr -type ($master[0]+"."+$attr)` != "double3")
+			{
+				float $value = `getAttr ($master[0]+"."+$attr)`;
+				setAttr ($master[1]+"."+$attr) $value;
+
+				if (`copyKey $master[0]`)
+				{
+					pasteKey -o "replaceCompletely" $master[1];
+				}
+			}
+		}
+	}
+
+	select -r $source;
+}
+
+
+global proc string[] slAnimCopyAnimationsGetSpecialControl(string $pre)
+{
+	string $specCon[]={};
+	string $file = `file -q -sn -shn`;
+	string $buff[] = stringToStringArray($file,"_");
+	if($buff[0]=="csl")
+	{
+		$specCon = `ls ($pre+"c_*_CTRL")`;
+		string $s[]={"c_eye_M","c_Lf_eye_M","c_Lf_spec_M","c_Rt_eye_M","c_Rt_spec_M","c_tongue_joit2","c_tongue_joint10","c_tongue_joint9","c_tongue_joint8","c_tongue_joint7","c_tongue_joint6","c_tongue_joint5","c_tongue_joint4","c_tongue_joint3","c_tongue_joint1","uptooth_ctrl","lowtooth_ctrl","mouthMove_ctrl"};
+		for($i in $s)
+		{
+			if(`objExists($pre+$i)`)
+				$specCon[size($specCon)]=$pre+$i;
+		}
+	}
+	return $specCon;
+}

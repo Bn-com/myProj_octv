@@ -1,0 +1,109 @@
+global proc int zwWinx2k()
+{
+	int $dirty = false;
+
+	string $files[] = `ls -type "file"`;
+
+	int $max = `size $files`;
+	if ($max && !`about -batch`)
+	{
+		progressWindow -progress 0 -max $max -title "Toggle Maps" -status ("0/" + $max) -isInterruptable true;
+	}
+
+	for ($i=0; $i<$max; $i++)
+	{
+		if (!`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			progressWindow -edit -progress ($i + 1) -status (($i + 1) + "/" + $max + "    " + $files[$i]);
+		}
+
+		string $fileTextureName = `getAttr ($files[$i] + ".fileTextureName")`;
+		if (`match "^${MC_roma}" $fileTextureName` == "")
+		{
+			$fileTextureName = `substitute ".*/MC_[^/]+/" $fileTextureName "${MC_roma}/"`;
+		}
+		string $dest = `substitute "/4k/" $fileTextureName "/2k/"`;
+		$dest = `substitute "/6k/" $dest "/2k/"`;
+	//	$dest = `substitute "_4k[.]" $dest "_2k."`;
+		if ($dest == $fileTextureName)
+		{
+			continue;
+		}
+		string $four = `workspace -expandName $fileTextureName`;
+		if (!`filetest -f $four`)
+		{
+			continue;
+		}
+		string $two = `workspace -expandName $dest`;
+		int $scale = true;
+		if (`filetest -f $two`)
+		{
+			if (`idmtFile -compareModified $four $two`)
+			{
+				$scale = false;
+			}
+		}
+		if ($scale)
+		{
+			string $ext = `match "[^.]+$" $four`;
+			$ext = tolower($ext);
+			if ($ext == "tif" || $ext == "tiff")
+			{
+				int $bits = zwGetTiffBits($four);
+				if ($bits != 32)
+				{
+					string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $two`;
+					sysFile -del $temp;
+					string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\ImageMagick-6.6.7-0\\convert.exe \"" + `substituteAllString $four "/" "\\"` + "\" -resize \"2048x2048>\" \"" + `substituteAllString $temp "/" "\\"` + "\"";
+					system $cmd;
+					if (`filetest -f $temp`)
+					{
+						if (`idmtFile -copyModified $four $temp`)
+						{
+							zwSysFile "move" $temp $two true;
+						}
+						sysFile -del $temp;
+					}
+				}
+			}
+			else
+			{
+			//	catch(`idmtImage -scale 0.5 $four $two`);
+				continue;
+			}
+		}
+		if (`filetest -f $two`)
+		{
+			evalEcho ("setAttr \"" + $files[$i] + ".fileTextureName\" -type \"string\" \"" + $dest + "\"");
+			$dirty = true;
+		}
+	}
+
+	if ($max && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+global proc int zwGetTiffBits(string $path)
+{
+	int $rs = 0;
+	
+	string $cmd = "\\\\file-cluster\\GDC\\Resource\\Support\\bin\\GetTiffBits.exe \"" + `substituteAllString $path "/" "\\"` + "\"";
+	chdir "C:";
+	system $cmd;
+	string $str = `system $cmd`;
+	$str = `match "^[0-9]+" $str`;
+	if ($str != "")
+	{
+		$rs = (int)$str;
+	}
+	
+	return $rs;
+}

@@ -1,0 +1,842 @@
+// AnimationSubmission.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Call by Insight (via PreAnimationSubmission) every time animation is submitted. Does the following.
+		- Opens the file. If a playlist is specified, opens the file in selective file open mode,
+		and loads only the references specified in the playlist
+		- exports animation cache
+		- exports custom point cache
+		- exports structure file
+		- exports distance info file
+		- updates Insight's asset linking
+Use:
+	AnimationSubmission args
+Options:
+	args (string)	- List of arguments separated by semi-colons, e.g. "arg1=value1;arg2=value2"
+	
+Dependancies:
+
+	html_log.mel
+	argList.mel
+	parseXML.mel
+	fileIO.mel
+	rfxCameras.mel
+	
+	parsePlaylist
+	selectiveFileLoad
+	loadDependentReferences
+	getInsightShotGroupLength
+	writeConstraintsXML
+	findAssetsByType
+	exportCustomPointCache
+	exportCacheApi
+	buildExportControlList
+	buildExportCameraList
+	exportDistanceInfo
+	insightUpdateAssetLinking
+	insightCallWebservice
+	php
+	php_scripts
+	
+
+	xml_parser plug-in
+	timeQuery plug-in
+
+	php language
+
+	mail.php
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	08/21/06
+Revisions:	09/11/06	Rev 1.1
+		- Added code to output job number to html log
+
+		09/15/06	Rev 1.2
+		- Generalized code so that this script may be called by LayoutSubmission and PostLayout
+		- Implemented config file for reading defaults. Distribution criteria is also read from here.
+		- Made qube logging able to handle custom clusters
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// 
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "timeQuery"`)
+		loadPlugin "timeQuery";
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+// build_dir - check for and create a directory if it doesn't exist. Check that it got made. Return value of 1 indicates success
+// ---------------------------------------------------------------------------------------------------
+proc int build_dir (string $dir)
+{
+	if (`filetest -d $dir`)
+		return true;
+
+	sysFile -md $dir;
+	
+	if (!`filetest -d $dir`)
+		return false;
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+// check_cameraMain - checks that cameraMain is as we expect it - it exists, and has been created by RFX Camera tools
+// 0 = success, 1 = no cameraMain, 2 = exists, but not created by RFX Camera Tools
+// ---------------------------------------------------------------------------------------------------
+proc int check_cameraMain()
+{
+	if (!`objExists cameraMain`)
+		return 1;
+	if (!`objExists cameraMain.rev`)
+		retutn 2;
+	return 0;
+}
+// ---------------------------------------------------------------------------------------------------
+// find the globals file, depending on task type 
+// ---------------------------------------------------------------------------------------------------
+proc string getConfig ()
+{
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	
+	// look in shotGroupInfo first. 
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gParentTaskType+".xml";
+	if (`filetest -f $file`)
+		return $file;
+	// look in projectGlobals next
+	$file = getPath ("ProjectGlobals",{})+"/"+$gParentTaskType+".xml";
+
+	if (`filetest -f $file`)
+		return $file;
+	
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+proc int do_animationSubmission()
+{
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+
+	global string $gSequence;				// The sequence
+	global string $gShot;					// The shot
+	global string $gHost;					// Who is calling this, "insight" or "maya"
+	global int $gDoCache;					// Do the animation cache export?
+	global int $gDoDistanceInfo;				// Do the distance info export
+	global string $gEmailNotify;				// Who to email when things go wrong
+	global int $gUsePlaylist;				// Use playlist to decide what to load?
+	global string $gPlaylist;				// Playlist filename
+	global int $gPlaylistItem;				// Which item from playlist?
+	global int $gUpdateInsightAssetLinking;			// Update Insight asset linking with new contents of scene
+	global int $gPerformInsightCallback;			// Whether or not to call back to Insight
+	global string $gInsightCallbackPath;			// Path to web service to perform a callback to Insight through
+	global string $gInsightCallbackArgs;			// Args to send to web service
+	global string $gQubeJobName;				// Job name passed from calling process
+	global string $gParentTaskType;				// Who called this "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskType;				// In what context is this process being called. "AnimationSubmissionExport", "PostLayoutExport", "LayoutSubmissionExport"
+	global string $gTaskConfig;				// Config file for this task	
+	global string $gCluster;				// Cluster this is being executed on.
+	
+
+
+	// ------------------------------------------------------
+	// build up a list of paths
+	// These are the defaults for exporting everything. If we are using a playlist they will be overriden.
+	// ------------------------------------------------------
+	string $shotBase = 	getPath ("ShotBase",{$gSequence,$gShot});
+	string $shotInfo = 	getPath ("ShotInfoDir",{$gSequence,$gShot});
+	string $suffix = 	($gParentTaskType == "AnimationSubmission")?"ani":"lay";
+	string $filename = 	$shotBase + "/" + $gSequence + "_" + $gShot + "_"+$suffix+".ma";
+	string $log = 		$shotInfo + "/"+$gParentTaskType+"_log.html";
+	string $structure = 	$shotInfo + "/" + $gSequence+"_"+$gShot+"_structure.xml";
+	string $distanceInfo = 	$shotInfo + "/" + $gSequence+"_"+$gShot+"_distanceInfo.xml";
+	string $cacheDir = 	$shotBase+"/cache/animation/";
+	string $constraints = 	$shotInfo + "/" + $gSequence+"_"+$gShot+"_constraints.xml";
+	string $custom_point_cache_dir = $shotBase+"/cache/point";
+
+	// ------------------------------------------------------
+	// other important variables
+	// ------------------------------------------------------
+	int $cacheExportCameras = true;
+	string $lock_file;
+	string $depRefsLoadedNs[];
+	int $qubeJobId;
+
+	// --------------------------------------------------------
+	// Get Qube Job ID, so we can put it in the log. We don't need to update qubeJobHistory.xml, PreAnimationSubmission has done it for us.
+	/*
+	*/
+	// --------------------------------------------------------
+	
+	if ($gQubeJobName == "")
+	{
+		string $searchName = $gTaskType+"*"+$gSequence+"*"+$gShot;	
+		$qubeJobId = getQubeJobIdFromName($searchName,$gCluster,"--running",0);
+	}
+	else
+	{
+		$qubeJobId = getQubeJobIdFromName($gQubeJobName,$gCluster,"--running",1);
+	}
+
+	// ------------------------------------------------------
+	// start the log
+	// ------------------------------------------------------
+	html_log_init ($gTaskType+" Log",$log);
+	html_log_bold_output ($gTaskType+"\n\n");
+	html_log_bold_output ("File: ");
+	html_log_output ($filename+"\n");
+	html_log_bold_output ("Date: ");
+	html_log_output (eval ("systemTime")+"\n");
+	html_log_output ("Qube Job ID: "+$qubeJobId+"\n");
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Check the hold status
+	// --------------------------------------------------------
+	int $hold = queryHoldStatus ($gParentTaskType,$gSequence,$gShot,{});
+	
+	if ($hold)
+	{	
+		html_log_bold_output ($gTaskType+": The Technical Supervisor has placed this shot on hold. Exiting...\n\n");
+		html_log_write ();
+		return false;
+	}
+
+	// --------------------------------------------------------
+	// Check that we have a file
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Checking for "+$filename+" file...\n\n");
+	html_log_write ();
+	
+	if (!`filetest -f $filename`)
+	{
+		html_log_bold_output ($gTaskType+": Error: "+$filename+" doesn't exist.\n\n");
+		html_log_write ();
+		return false;
+	}	
+	
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	// --------------------------------------------------------
+	// If we are using a playlist, parse it, override paths, and open file. Otherwise just open the file
+	// --------------------------------------------------------
+	if ($gUsePlaylist)
+	{
+		// -----------------------------
+		// Check that the playlist exists
+		// -----------------------------
+		if (!`filetest -f $gPlaylist`)
+		{
+			html_log_bold_output ($gTaskType+": Error: Playlist "+$gPlaylist+" doesn't exist.\n\n"); 
+			html_log_write ();
+			return false;
+		}
+		// -----------------------------
+		// variables to hold data from playlist
+		// All playlist vars are prefixed with "p"
+		// -----------------------------
+		string $p_namespaces[];
+		string $p_refNodes[];
+		int $p_deferred[];
+		string $p_filenames[];
+		string $p_xml_output[];
+		string $p_cache_output[];
+		int $p_cache_exportCameras[];
+
+		html_log_bold_output ($gTaskType+": Parsing playlist "+$gPlaylist+"...\n\n");
+		html_log_write ();
+	
+		// -----------------------------
+		// Parse the playlist
+		// -----------------------------
+		int $success = parsePlaylist(
+			$p_namespaces,
+			$p_refNodes,
+			$p_deferred,
+			$p_filenames,
+			$p_xml_output,
+			$p_cache_output,
+			$p_cache_exportCameras,
+			$gPlaylist,
+			$gPlaylistItem);
+
+		if (!$success)
+		{
+			html_log_bold_output ($gTaskType+": Error: Problems parsing playlist "+$gPlaylist+".\n\n");
+			html_log_write ();
+			return false;
+		}
+
+		// -----------------------------
+		// Output some info about the playlist
+		// -----------------------------
+		for ($i=0;$i<size($p_filenames);$i++)
+		{
+			html_log_output ($p_filenames[$i]+" (namespace "+$p_namespaces[$i]+")\n");
+		}
+		html_log_output ("\n");
+
+		// -----------------------------
+		// Override paths
+		// -----------------------------
+		$log = 			$p_xml_output[0]+"/"+$gParentTaskType+"_log.html";
+		$structure = 		$p_xml_output[0]+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+		$distanceInfo = 	$p_xml_output[0]+"/"+$gSequence+"_"+$gShot+"_distanceInfo.xml";
+		$cacheDir = 		$p_cache_output[0]+"/";
+		$constraints = 		$p_xml_output[0]+"/"+$gSequence+"_"+$gShot+"_constraints.xml";
+		$cacheExportCameras = 	$p_cache_exportCameras[0];
+
+		// -----------------------------
+		// Write lock
+		// -----------------------------
+		$lock_file = $p_xml_output[0]+"/"+$gTaskType+"_lock";
+		int $f = fopen ($lock_file,"w"); fprint ($f,"\n"); fclose ($f);
+
+		// -----------------------------
+		// Open file (using selective preload)
+		// -----------------------------
+
+		html_log_bold_output ($gTaskType+": Opening file "+$filename+" in selective load mode...\n\n");
+		html_log_write ();
+
+		global int $gAlwaysLoadSubRefs;
+		$gAlwaysLoadSubRefs = true;
+		int $import = false;
+		int $loaded = selectiveFileLoad(
+			$filename,
+			$p_namespaces,
+			$p_refNodes,
+			$p_filenames,
+			$import
+		);
+
+		if(!$loaded)
+		{
+			html_log_bold_output ($gTaskType+": Error: Problems loading "+$filename+".\n\n");
+			html_log_write ();
+			return false;
+		}
+
+		// -----------------------------
+		// Load assets that the loaded assets depend upon
+		// -----------------------------
+		html_log_bold_output ($gTaskType+": Loading dependencies (if any)...\n\n");
+		html_log_write ();
+	
+		$depRefsLoadedNs = loadDependentReferences();
+	}
+	else
+	{
+		// -----------------------------
+		// Open file (normal version - no playlist)
+		// -----------------------------
+		html_log_bold_output ($gTaskType+": Opening file "+$filename+"...\n\n");
+		html_log_write ();
+
+		file -f -o $filename;
+	}
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Build directories
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Building directories...\n\n");
+	html_log_write ();
+
+	string $outputDirs[] = {
+		dirname ($log),
+		dirname ($structure),
+		dirname ($distanceInfo),
+		$cacheDir
+	};
+
+	for ($i=0;$i<size($outputDirs);$i++)
+	{
+		int $success = build_dir ($outputDirs[$i]);
+		if (!$success)
+		{
+			html_log_bold_output ($gTaskType+": Error: Unable to create directory "+$outputDirs[$i]+".\n\n");
+			html_log_write ();
+			return false;
+		}
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Check for existance of cameraMain
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Checking for cameraMain...\n\n");
+	html_log_write ();
+	
+	int $stat = check_cameraMain();
+	
+	if ($stat == 1)
+	{
+		html_log_bold_output ($gTaskType+": Error: No cameraMain found.\n\n");
+		html_log_write ();
+		return false;
+	}
+	if ($stat == 2)
+	{
+		html_log_bold_output ($gTaskType+": Error: cameraMain was not created with RFX Camera Tools.\n\n");
+		html_log_write ();
+		return false;
+	}
+	
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Get frame range from Insight
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Getting frame range from Insight...\n\n");
+	html_log_write ();
+
+	int $data[];
+	getInsightShotGroupLength ($gSequence,$gShot,$data);
+	$frameStart = $data[0];
+	$frameEnd = $data[1];
+
+	if ($frameStart == 0 && $frameEnd == 0)
+	{
+		html_log_bold_output ($gTaskType+": Error: Couldn't get frame range from Insight.\n\n");
+		html_log_write ();
+		return false;
+	}
+	else
+	{
+		html_log_output ($gTaskType+": Success: Retrieved frame range. It is "+$frameStart+" - "+$frameEnd+".\n\n");
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Get references in the scene. Print a warning if any are unloaded
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Getting references...\n\n");
+	html_log_write ();
+
+	string $refs[] = `file -q -r`;
+	string $unloaded[], $unloadedNs[];
+
+	for ($i=0;$i<size($refs);$i++)
+	{
+		if (`file -q -dr $refs[$i]`)
+		{
+			int $c = size ($unloaded);
+			$unloaded[$c] = $refs[$i];
+			$unloadedNs[$c] = `file -q -ns $refs[$i]`;
+		}
+	}
+
+	if (size($unloaded))
+	{
+		html_log_bold_output ($gTaskType+": Warning: The following references are unloaded. No cache will be exported for these assets:\n\n");
+		for ($i=0;$i<size($unloaded);$i++)
+		{
+			html_log_output ($unloaded[$i]+" (in namespace "+$unloadedNs[$i]+")\n");
+		}
+		html_log_write ();
+	}
+	
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	
+	// --------------------------------------------------------
+	// Get assets for cache export
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Getting Character Groups for cache export...\n\n");
+	html_log_write ();
+
+	string $tmp[] = findAssetsByType ("cpefsdvwl",0);
+	string $charGrps[];
+	string $nonReferenced[];
+
+	for ($i=0;$i<size($tmp);$i++)
+	{
+		if (!`reference -q -inr $tmp[$i]`)
+		{
+			$nonReferenced[size($nonReferenced)] = $tmp[$i];
+			continue;
+		}
+		$charGrps[size($charGrps)] = $tmp[$i];
+	}
+	
+	if (size($nonReferenced))
+	{
+		html_log_bold_output ($gTaskType+": Warning: The following character groups are not from references. No cache will be exported for these assets:\n\n");
+		for ($i=0;$i<size($nonReferenced);$i++)
+		{
+			html_log_output ($nonReferenced[$i]+"\n");
+		}
+		html_log_write ();
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Write constraints xml file.
+	// This is used later on when applying the cache to determine if the rotation channels need to be filtered to remove jumps
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Writing constraints xml...\n\n");
+	html_log_write ();
+
+	string $constControls[] = writeConstraintsXML($constraints,{});
+
+	if (size($constControls))
+	{
+		html_log_bold_output ($gTaskType+": Wrote the following controls to "+$constraints+":\n\n"); 
+		for ($i=0;$i<size($constControls);$i++)
+		{
+			html_log_output ($constControls[$i]+"\n");
+		}
+		html_log_write ();
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Build Controls list for cache export
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Building control list for anim cache export...\n\n");
+	html_log_write ();
+
+	string $controls[] = buildExportControlList ($charGrps);
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Filter the control list.
+	// Controls that belong to guest references - i.e. those loaded because of dependencies - should not be exported. They will be exported in their pass
+	// --------------------------------------------------------
+	if ($gUsePlaylist && size($depRefsLoadedNs))
+	{
+		html_log_bold_output ($gTaskType+": Removing controls from guest assets from export list...\n\n");
+		html_log_write ();
+
+		string $tmp[];
+		for ($i = 0; $i < size($controls);$i++)
+		{
+			string $ns = getNamespaceFromString ($controls[$i]);
+			if (stringArrayFindIndex ($ns,$depRefsLoadedNs) != -1)
+				continue;
+
+			$tmp[size($tmp)] = $controls[$i];
+		}
+		$controls = $tmp;
+	}
+	// --------------------------------------------------------
+	// Build Camera list for cache export
+	// Note - cameraMain is omitted from this list, the cache exporter includes this automatically
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Building camera list for anim cache export...\n\n");
+	html_log_write ();
+
+	string $cameras[] = buildExportCameraList();
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Export Animation Cache
+	// If $cacheExportCameras is set to 0, do not export cameras
+	// --------------------------------------------------------
+	if ($gDoCache)
+	{
+		html_log_bold_output ($gTaskType+": Exporting Animation Cache...\n\n");
+		html_log_write ();
+
+		string $exportCams[];
+		if ($cacheExportCameras)
+			$exportCams = $cameras;
+
+		// time it
+		float $startTime = `timerX`;
+
+		exportCacheApi ($cacheDir,$frameStart,$frameEnd,1,$controls,$exportCams);
+
+		float $elapsedTime = `timerX -st $startTime`;
+		html_log_output ($gTaskType+": Animation Cache Export Complete. Elapsed time: "+$elapsedTime+" seconds.\n\n");
+		html_log_write ();
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+": Animation Cache Export Skipped (doCache set to 0)...\n\n");
+		html_log_write ();
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Export Custom Point Cache (non-point caching assets with have been deformed in the shot)
+	// --------------------------------------------------------
+	if ($gDoCache)
+	{
+		html_log_bold_output ($gTaskType+": Exporting Custom Point Cache...\n\n");
+		html_log_write ();
+		
+		// time it
+		float $startTime = `timerX`;
+	
+		exportCustomPointCache ($custom_point_cache_dir, $frameStart,$frameEnd);
+
+		float $elapsedTime = `timerX -st $startTime`;
+		html_log_output ($gTaskType+": Custom Point Cache Export Complete. Elapsed time: "+$elapsedTime+" seconds.\n\n");
+		html_log_write ();
+		
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+": Custom Point Cache Export Skipped (doCache set to 0)...\n\n");
+		html_log_write ();
+	}
+	
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Get assets for distance info export
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Getting Character Groups for distance info export...\n\n");
+	html_log_write ();
+
+	string $tmp[] = findAssetsByType ("cpvt",0);
+	string $distInfoCharGrps[];
+	clear $nonReferenced;
+
+	for ($i=0;$i<size($tmp);$i++)
+	{
+		if (!`reference -q -inr $tmp[$i]`)
+		{
+			$nonReferenced[size($nonReferenced)] = $tmp[$i];
+			continue;
+		}
+		$distInfoCharGrps[size($distInfoCharGrps)] = $tmp[$i];
+	}
+	
+	if (size($nonReferenced))
+	{
+		html_log_bold_output ($gTaskType+": Warning: The following character groups are not from references. No distance info data will be exported for these assets:\n\n");
+		for ($i=0;$i<size($nonReferenced);$i++)
+		{
+			html_log_output ($nonReferenced[$i]+"\n");
+		}
+		html_log_write ();
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	
+	// --------------------------------------------------------
+	// Do the distance info export
+	// --------------------------------------------------------
+	if ($gDoDistanceInfo)
+	{
+		html_log_bold_output ($gTaskType+": Exporting Distance Info...\n\n");
+		html_log_write ();
+		
+		// time it
+		float $startTime = `timerX`;
+	
+		exportDistanceInfo ($gSequence, $gShot, $distInfoCharGrps, $frameStart, $frameEnd, $distanceInfo);
+
+		float $elapsedTime = `timerX -st $startTime`;
+		html_log_output ($gTaskType+": Distance Info Export Complete. Elapsed time: "+$elapsedTime+" seconds.\n\n");
+		html_log_write ();
+		
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+": Distance Info Export Skipped (doDistanceInfo set to 0)...\n\n"); 
+		html_log_write ();
+	}
+	
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	
+	// --------------------------------------------------------
+	// Export Structure file
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Exporting Structure File...\n\n");
+	html_log_write ();
+
+	exportStructure ($gSequence,$gShot,$structure);
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Tell Insight about the assets in the scene
+	// --------------------------------------------------------
+	if ($gUpdateInsightAssetLinking)
+	{
+		html_log_bold_output ($gTaskType+": Updating Insight asset linking...\n\n");
+		html_log_write ();
+	
+		insightUpdateAssetLinking ($gSequence,$gShot,"");
+		
+		html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+		
+	}
+
+	// --------------------------------------------------------
+	// Perform Insight callback
+	// Included for temp compatibility - this callback should be made by PostAnimationSubmission in the case of distributed exports
+	// --------------------------------------------------------
+	if ($gHost == "insight" && $gPerformInsightCallback)
+	{
+		html_log_bold_output ($gTaskType+": Calling back to Insight...\n\n");
+		html_log_write ();
+
+		string $res = insightCallWebservice ($gInsightCallbackPath,$gInsightCallbackArgs);
+		html_log_output ($res);
+		html_log_output ("\n");
+
+		html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+		html_log_write ();
+	}
+	
+	// --------------------------------------------------------
+	// Delete lock file
+	// --------------------------------------------------------
+	if ($gUsePlaylist && `filetest -f $lock_file`)
+	{
+		sysFile -delete $lock_file;
+	}
+
+	return true;	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc AnimationSubmission(string $args) 
+{
+	// load plugins and source scripts
+	loadPlugins;
+	eval ("source \"html_log.mel\"");
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+	eval ("source \"rfxCameras.mel\"");
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+
+	global string $gSequence;				// The sequence
+	global string $gShot;					// The shot
+	global string $gHost;					// Who is calling this, "insight" or "maya"
+	global int $gDoCache;					// Do the animation cache export?
+	global int $gDoDistanceInfo;				// Do the distance info export
+	global string $gEmailNotify;				// Who to email when things go wrong
+	global int $gUsePlaylist;				// Use playlist to decide what to load?
+	global string $gPlaylist;				// Playlist filename
+	global int $gPlaylistItem;				// Which item from playlist?
+	global int $gUpdateInsightAssetLinking;			// Update Insight asset linking with new contents of scene
+	global int $gPerformInsightCallback;			// Whether or not to call back to Insight
+	global string $gInsightCallbackPath;			// Path to web service to perform a callback to Insight through
+	global string $gInsightCallbackArgs;			// Args to send to web service
+	global string $gQubeJobName;				// Job name passed from calling process
+	global string $gParentTaskType;				// Who called this "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskType;				// In what context is this process being called. "AnimationSubmissionExport", "PostLayoutExport", "LayoutSubmissionExport"
+	global string $gTaskConfig;				// Config file for this task	
+	global string $gCluster;				// Cluster this is being executed on.
+
+	// ------------------------------------------------------
+	// Obselete variables
+	// ------------------------------------------------------
+	//global int $PL_seqID;					// Obselete - this is obtained by calling Insight
+	//global string $PL_seqXML;				// Obselete
+	//global string $PL_fileName;				// Obselete - derived from sequence and shot
+	//global int $PL_dontCache;				// Obselete	
+	//global int $PL_doRender;				// Obselete
+	//global int $PL_taskID;				// Obselete
+	//global int $PL_doShotCast;				// Obselete
+	//global int $PL_saveFile;				// Obselete
+	//global int $PL_forceCache;				// Obselete. Decision of whether to export cache is made by PreAnimationSubmission
+	//global int $PL_useApiCacheWriter;			// Obselete. Api Cache export is always used
+	//global string $PL_psQue;				// Obselete - Playblasting is handled by PreAnimationSubmission
+	//global string $PL_psArgs;				// Obselete - Playblasting is handled by PreAnimationSubmission
+	//global int $PL_doPlayblast;				// Obselete - Playblasting is handled by PreAnimationSubmission
+	//global string $PL_cacheEmail;				// Obselete - Email address of artist who submitted the animation. This should be handled by Pre or PostAnimationSubmission
+	//global string $gInsightCallbackPath;				// Soon to be Obselete - Path to web service to perform a callback to Insight through. This should be handled by Pre or PostAnimationSubmission
+	//global string $gInsightCallbackArgs;				// Soon to be Obselete - Args to send to web service. This should be handled by Pre or PostAnimationSubmission
+
+
+	// ------------------------------------------------------
+	// get farm defaults
+	// ------------------------------------------------------
+	string $defaultCluster[];
+	getFarmClusters ($defaultCluster,{});
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gParentTaskType = getArgValue ($args,"parentTaskType");
+	$gTaskType = getArgValue ($args,"taskType");
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gTaskConfig = getArgValueDefault ($args,"taskConfig",getConfig());
+
+	$args = argListMergeWithConfig ($args,$gTaskConfig);	// embed default arg values in config into args
+
+	
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gDoCache = (int)getArgValue ($args,"doCache");
+	$gDoDistanceInfo = (int)getArgValue ($args,"doDistanceInfo");
+	$gEmailNotify = getArgValue ($args,"emailNotify");
+	$gUpdateInsightAssetLinking = (int)getArgValue ($args,"updateInsightAssetLinking");
+	$gUsePlaylist = (int)getArgValueDefault ($args,"usePlaylist","0");
+	$gPlaylist =  getArgValue ($args,"playlist");
+	$gPlaylistItem = (int)getArgValueDefault ($args,"playlistItem","0");
+	$gPerformInsightCallback = (int)getArgValue ($args,"performInsightCallback");
+	$gInsightCallbackPath = getArgValue ($args,"returnpath");
+	$gInsightCallbackArgs = getArgValue ($args,"arguments");
+	$gQubeJobName = getArgValue ($args,"qubeJobName");
+	$gCluster = getArgValueDefault ($args,"cluster",$defaultCluster[0]);
+
+	// ------------------------------------------------------
+	// Call the main proc
+	// ------------------------------------------------------
+	int $result = do_animationSubmission();
+
+	if (!$result)
+	{
+		html_log_bold_output ($gTaskType+" FAILED.\n\n"); 
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+" DONE.\n\n"); 
+	}
+	html_log_write();
+
+	// ------------------------------------------------------
+	// Email notification if something went wrong
+	// ------------------------------------------------------
+	if (!$result && $gEmailNotify != "")
+	{
+		string $subj = $gTaskType+" Failure Notification: "+$gSequence+"_"+$gShot;
+		string $body = $gTaskType+" failed on Sequence "+$gSequence+" Shot "+$gShot+"\n";
+		
+		string $mailCmd = php()+" "+getPath ("GlobalPHPDir",{})+"/mail.php "+$gEmailNotify+" \""+$subj+"\" \""+$body+"\" "+$gTaskType;
+		system ($mailCmd);	
+	}
+}
+
+
+

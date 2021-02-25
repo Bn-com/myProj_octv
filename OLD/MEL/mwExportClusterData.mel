@@ -1,0 +1,302 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwExportClusterData(string $master, string $data)
+{
+	//EXPORT DEFORMER WEIGHTS
+	//GET ALL CLUSTERS
+	string $cluster_list[] = `ls -type cluster`;
+	//eval ("string $cluster_list[] = `ls -type cluster`");
+	for($cluster in $cluster_list)
+	{
+		print ("EXPORTING CLUSTER: "+$cluster+"\n");
+		string $file = ($data+$master+"_"+$cluster+"_EXPORT_DATA.data");
+		int $fileId = `fopen $file "w"`;
+		string $con_list[] = `listConnections $cluster`;
+		string $set, $wNode;
+		for($con in $con_list)
+		{
+			string $type[] = `ls -st $con`;
+			if(`strcmp "objectSet" $type[1]`==0)
+			{
+				$set = $con;
+				break;
+			}
+		}
+
+		//GET CV WEIGHT VALUES
+		string $member_list[] = `sets -q $set`;
+		string $cv_list[] = `filterExpand -sm 31 $member_list`;
+		if(`size $cv_list`==0)
+		{
+			$cv_list[0] = $member_list[0];
+		}
+		string $cmd;
+		if(`getAttr ($cluster+".relative")`)
+		{
+			$cmd = "cluster -relative";
+		}
+		else
+		{
+			$cmd = "cluster";
+		}
+		for($cv in $cv_list)
+		{
+			$cmd = ($cmd+" "+$cv);
+		}
+		fprint $fileId ("string \$clusters[] = `"+$cmd+"`;\n");
+		for($cv in $cv_list)
+		{
+			float $val[] = `percent -q -v $cluster $cv`;
+			fprint $fileId ("percent -v "+$val[0]+" \$clusters[0] "+$cv+";\n");
+		}
+
+		//GET WEIGHTED NODE INFO
+		$con_list = `listConnections -s 1 -d 0 ($cluster+".matrix")`;	
+		string $wNode = $con_list[0];
+		float $translate[3] = `getAttr ($wNode+".translate")`;
+		float $rotate[3] = `getAttr ($wNode+".rotate")`;
+		float $scale[3] = `getAttr ($wNode+".scale")`;
+
+		int $other = 0;	//WEIGHTED NODE IS FROM CLUSTER
+		int $ok = 1;
+		string $check[] = `listRelatives -shapes $wNode`;
+		if(`size $check`>1)
+		{
+			print ("WEIGHTED NODE FOR CLUSTER: "+$cluster+" IS ANOTHER TRANSFORM: "+$wNode+"\n");
+			$other = 1;		//WEIGHTED NODE IS ANOTHER TRANSFORM OTHER THAN CLUSTER
+
+			//DETERMINE TYPE OF WEIGHT NODE AND CREATE NEW NODE
+			for($shape in $check)
+			{
+				string $checkType[] = `ls -st $shape`;
+				if(`strcmp "clusterHandle" $checkType[1]`!=0)
+				{
+					print ("WEIGHTED NODE IS A: "+$checkType[1]+"\n");
+					if(`strcmp "locator" $checkType[1]`==0)
+					{
+						$checkType[1] = "spaceLocator";
+					}
+					fprint $fileId ("string \$node[];\n");
+					fprint $fileId ("int \$setP = 0;\n");
+					fprint $fileId ("if\(`objExists "+$wNode+"`==0\)\n{\n\t");
+					fprint $fileId ("\$node = `"+$checkType[1]+"`;\n\t");
+					fprint $fileId ("\$setP = 1;\n\t");
+					break;
+				}
+			}
+
+			//SET TRANSFORMS FOR NEW NODE
+			fprint $fileId ("setAttr \(\$node[0]+\".translate\"\) "+$translate[0]+" "+$translate[1]+" "+$translate[2]+";\n\t");
+			fprint $fileId ("setAttr \(\$node[0]+\".rotate\"\) "+$rotate[0]+" "+$rotate[1]+" "+$rotate[2]+";\n\t");
+			fprint $fileId ("setAttr \(\$node[0]+\".scale\"\) "+$scale[0]+" "+$scale[1]+" "+$scale[2]+";\n\t");
+
+			//RENAME NEW NODE
+			fprint $fileId ("\$node[0] = `rename \$node[0] "+$wNode+"`;\n}\n");
+		
+			//SET WEIGHTED NODE
+			fprint $fileId ("cluster -e -bs 1 -wn "+$wNode+" "+$wNode+" \$clusters[0];\n");
+			fprint $fileId ("delete \$clusters[1];\n");
+		}
+		else
+		{
+			print ("WEIGHTED NODE FOR CLUSTER: "+$cluster+" IS NORMAL\n");
+			//CHECK FOR ZERO STATUS OF CLUSTER
+			string $tCheck = ($translate[0]+" "+$translate[1]+" "+$translate[2]);
+			if(`strcmp $tCheck "0 0 0"`==0)
+			{
+				string $rCheck = ($rotate[0]+" "+$rotate[1]+" "+$rotate[2]);
+				if(`strcmp $rCheck "0 0 0"`==0)
+				{
+					string $sCheck = ($scale[0]+" "+$scale[1]+" "+$scale[2]);
+					if(`strcmp $sCheck "1 1 1"`==0)
+					{
+						print "CLUSTER TRANSFORMS ARE OK\n";
+					}
+					else
+					{
+						print "\nCLUSTER SCALE IS NOT 1\n\n";
+						$ok = 0;
+					}
+				}
+				else
+				{
+					print "\n******************************************************************\n";
+					print "***************CLUSTER ROTATION IS NOT ZERO***********************\n";
+					print "******************************************************************\n\n";
+					$ok = 0;
+				}
+			}
+			else
+			{
+				print "\nCLUSTER TRANSLATION IS NOT ZERO\n\n";
+				$ok = 0;
+			}
+		}
+
+		//SCALE PIVOT BY 0.01
+		float $piv[3] = `xform -q -ws -rp $wNode`;
+		float $x = $piv[0]*0.01;
+		float $y = $piv[1]*0.01;
+		float $z = $piv[2]*0.01;
+		if(`size $check`>1)
+		{
+			fprint $fileId ("if\(\$setP==1\)\n{\n\t");
+			fprint $fileId ("xform -ws -piv "+$x+" "+$y+" "+$z+" "+$wNode+";\n}\n");
+		}
+		else
+		{	
+			fprint $fileId ("xform -ws -piv "+$x+" "+$y+" "+$z+" \$clusters[1];\n");	
+		}
+
+		//GET SDK
+		string $attrs = "translateX translateY translateZ rotateX rotateY rotateZ scaleX scaleY scaleZ visibility";
+		string $attr_list[];
+		tokenize($attrs, $attr_list);
+		for($attr in $attr_list)
+		{
+			string $drivers;
+			float $driver_val[], $driven_val[];
+			if(`connectionInfo -id ($wNode+"."+$attr)`)
+			{
+				string $driver_check[] = `setDrivenKeyframe -q -cd ($wNode+"."+$attr)`;
+				if(`strcmp "No drivers." $driver_check[0]`!=0)
+				{
+					print ("FOUND SDK FOR: "+$wNode+"."+$attr+"\n");
+					print ("SDK DRIVER: "+$driver_check[0]+"\n");
+					$tmp = `ls -long $driver_check[0]`;
+					$drivers = $tmp[0];
+				}
+				string $curves[] = `listConnections ($wNode+"."+$attr)`;
+				$driven_val = `keyframe -q -vc $curves[0]`;
+				$driver_val = `keyframe -q -fc $curves[0]`;
+			}
+			for($v=0;$v<`size $driver_val`;$v++)
+			{
+				if($other==0)	//NORMAL CLUSTER
+				{
+					if($ok==0)	//TRANSFORMS NOT ZERO
+					{
+						fprint $fileId ("//setDrivenKeyframe -cd "+$drivers+" -dv "+$driver_val[$v]+" -v "+$driven_val[$v]+" \(\$clusters[1]+\"."+$attr+"\"\);\n");
+					}
+					else		//TRANSFORMS ARE ZERO
+					{
+						fprint $fileId ("setDrivenKeyframe -cd "+$drivers+" -dv "+$driver_val[$v]+" -v "+$driven_val[$v]+" \(\$clusters[1]+\"."+$attr+"\"\);\n");
+					}
+				}
+				else			//OTHER TRANSFORM
+				{
+					fprint $fileId ("setDrivenKeyframe -cd "+$drivers+" -dv "+$driver_val[$v]+" -v "+$driven_val[$v]+" \(\$clusters[1]+\"."+$attr+"\"\);\n");
+					float $val = `getAttr ($wNode+"."+$attr)`;
+					fprint $fileId ("setAttr \(\$clusters[1]+\"."+$attr+"\"\) "+$val+";\n");
+				}
+			}
+			clear $driver_val;
+			clear $driven_val;
+
+			//SET KEYABLE ATTRIBUTES
+			int $keyable = `getAttr -k ($wNode+"."+$attr)`;
+			if($keyable==0)
+			{
+				fprint $fileId ("setAttr -k 0 \(\$clusters[1]+\"."+$attr+"\"\);\n");
+			}
+		}
+		//fprint $fileId ("setAttr -k 0 \(\$clusters[1]+\".visibility\"\);\n");
+
+		//FIND PARENT
+		string $joint, $group;
+		float $gx, $gy, $gz;
+		string $parent[] = `listRelatives -parent -pa $wNode`;
+		string $pType[] = `ls -st $parent[0]`;
+		string $non_keys[];
+		if(`strcmp "joint" $pType[1]`==0)
+		{
+			$tmp = `ls -long $parent[0]`;
+			$joint = $tmp[0];
+			$group = "";
+		}
+		else
+		{
+			$tmp = `ls -long $parent[0]`;
+			$group = $tmp[0];
+			$gp = `xform -q -ws -rp $group`;
+			$gx = $gp[0]*0.01;
+			$gy = $gp[1]*0.01;
+			$gz = $gp[2]*0.01;
+
+			//GET KEYABLE ATTRIBUTES
+			string $keyable[] = `listAttr -k $group`;
+			int $k = 0;
+			for($attr in $attr_list)
+			{
+				int $found = 0;
+				for($key in $keyable)
+				{
+					if(`strcmp $attr $key`==0)
+					{
+						$found = 1;
+						break;
+					}
+				}
+				if($found==0)
+				{
+					$non_keys[$k] = $attr;
+					$k++;
+				}
+			}
+			$non_keys[$k] = "visibility";
+
+			$parent = `listRelatives -parent -pa $group`;
+			$tmp = `ls -long $parent[0]`;
+			$joint = $tmp[0];
+		}
+		if(`size $group`>0)
+		{
+			fprint $fileId ("if\(`objExists "+$group+"`==0\)\n");
+			fprint $fileId ("{\n\tstring \$name_parts[];\n\t");
+			fprint $fileId ("int $tok = tokenize\(\""+$group+"\", \"|\", \$name_parts\);\n\t");
+			fprint $fileId ("string \$name = \$name_parts[\$tok-1];\n\t");
+			fprint $fileId ("string \$group = `group -name \$name -em`;\n\t");
+			fprint $fileId ("xform -piv "+$gx+" "+$gy+" "+$gz+" \(\"|\"+\$group\);\n\t");
+			for($non in $non_keys)
+			{
+				fprint $fileId ("setAttr -k 0 \(\"|\"+\$group+\"."+$non+"\"\);\n\t");
+			}
+			if(`size $check`>1)
+			{
+				fprint $fileId ("parent -a \$node[0] \(\"|\"+\$group\);\n\t");
+			}
+			else
+			{
+				fprint $fileId ("parent -a \$clusters[1] \(\"|\"+\$group\);\n\t");
+			}
+			fprint $fileId ("parent -a \(\"|\"+\$group\) "+$joint+";\n}\n");
+			if(`size $check`>1)
+			{
+				fprint $fileId ("else\n{\n\tif\(\$setP==1\)\n\t{\n\t\t");
+				fprint $fileId ("parent -a "+$wNode+" "+$group+";\n\t}\n}\n");
+			}
+			else
+			{
+				fprint $fileId ("else\n{\n\tparent -a \$clusters[1] "+$group+";\n}\n");
+			}
+		}
+
+		$wNode = `cluster -q -wn $cluster`;
+		if(`size $check`<=1)
+		{	
+			fprint $fileId ("rename \$clusters[1] "+$wNode+";\n");
+		}
+		fclose $fileId;
+		print ("FINISHED EXPORTING CLUSTER: "+$cluster+"\n\n");
+	}
+
+	print "ALL DONE EXPORTING CLUSTER DATA\n\n";
+}

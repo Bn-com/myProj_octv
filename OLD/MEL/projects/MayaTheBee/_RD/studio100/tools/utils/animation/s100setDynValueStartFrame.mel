@@ -1,0 +1,1036 @@
+// -----------------------------------------s100MDUI----------------------------------------------------------------------------
+// Script made by Studio100 Animation, Paris. (Guillaume Dufief / Quentin Auger)
+// Date : 2011-2013
+// Update at your own risk!
+
+// Procs to deal with Dynamic joints selection, dynamics settings, baking/unbaking
+//
+
+// for ok/NoDynJoint tagging :
+	global string $gS100_noDynJointTag;
+	$gS100_noDynJointTag = "s100_isNoDynJoint";
+
+	global string $gS100_okDynJointTag;
+	$gS100_okDynJointTag = "s100_isOkDynJoint";
+
+
+global proc s100MDUI()
+{
+	global string $gS100_noDynJointTag;
+	global string $gS100_okDynJointTag;
+
+	int $resetPrefs = 1;
+	if(`window -ex 	s100MDUI`)
+		deleteUI s100MDUI;
+	if (`windowPref -exists s100MDUI` && ($resetPrefs) )
+		windowPref -r s100MDUI;
+
+	$width = 300;
+	//460
+
+	window -title "Manage Dynamics Hair System" -mnb 1 -h 310 -w ($width +15) -sizeable 1  s100MDUI;
+
+	columnLayout -adjustableColumn true s100MDUICLMain;
+
+		menuBarLayout s100VSMMLMain;
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100MDUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+
+		menu -to 1 -en 1 -label "- Tools -" ;
+			menuItem -l ("Tag selected objs as OK Dyn (joint)")
+				-ann ("Tags (adds bool attribute to) any selected node as '"+$gS100_okDynJointTag+"' (and removes '"+$gS100_noDynJointTag+"')")
+				-c ("string $sel[]=`ls -sl`; s100DMTagAsDynJoint($sel);");
+			menuItem -l ("Tag selected objs as NO Dyn (joint)")
+				-ann ("Tags (adds bool attribute to) any selected node as '"+$gS100_noDynJointTag+"'(and removes '"+$gS100_okDynJointTag+"')")
+				-c ("string $sel[]=`ls -sl`; s100DMTagAsNoDynJoint($sel);");
+			menuItem -l ("Entirely Un-Tag selected objs")
+				-ann ("Remove bool attribute '"+$gS100_okDynJointTag+"' and '"+$gS100_noDynJointTag+"' from any selected node ")
+				-c ("string $sel[]=`ls -sl`; s100DMUnTagDynJoint($sel);");
+			menuItem -divider 1 ;
+			menuItem -cb 0 -l ("Only keep 'tagged-as-Ok-Dyn.joints'")
+				-ann ("When using 'select Dynamic joints' only keeps the ones that carreies '"+$gS100_okDynJointTag+"' attr.")
+				s100MDUIcbxKeepOkDyn ;
+				// menuItem -q -cb s100MDUIcbxKeepOkDyn;
+
+		setParent ..;
+
+
+	$form = `formLayout s100MDUIFL `;
+
+	$txtIntro  = `text -l "Dynamics Controls" `;
+	$sep1 = `separator -w $width `;
+	$butSel = `button -c "s100DMselectCtrl(1)" -w $width -l "select Ctrls with \".startFrame\" Attr (dyn chain 1rst?)"
+		-ann "Selects all Ctrls with \".startFrame\" attribute (usually 1rst ctrl of a dyn chain)" `;
+	$butSel2 = `button -c "s100DMselectCtrl(0)" -w $width -l "select Ctrls with \".isDynamic\" Attr (dyn chain 1rst?)"
+		-ann "Selects all Ctrls with \".isDynamic\" attribute (usually 1rst ctrl of a dyn chain)" `;
+
+	$butSel3 = `button -c "s100DMselectSimMethodDrivers()" -w $width -bgc 1 1 1
+		-l "select Ctrls with \".Dyn*\"/\".simulationMethod\" Attrs"
+		-ann "Selects all Ctrls with \".simulationMethod\" attribute or their driver (usually 'Main/root_ctrl.Dyn*')" `;
+
+	$butSel4 = `button -c "s100DMselectDynJoints(`menuItem -q -cb s100MDUIcbxKeepOkDyn`)" -w $width
+		-l "select 'Dynamic' joints (connected \".rotate\" Attrs)"
+		-ann "Selects all joints with in-connected \".rotate*\" attributes." `;
+
+
+	$sep2 = `separator -w $width `;
+
+	$text1 = `text -l "Start Frame : " `;
+	$int = `intField -enterCommand s100DMsetStartFrame -value 100 s100MDUIFLIntStartFrame`;
+	$button = `button -l "set Value" -c s100DMsetStartFrame `;
+	$buttonSETFRAME = `button -c s100DMsetKeyFrameStartFrame -l "set key on attr " `;
+
+
+	$sep3 = `separator -w $width `;
+	$txtOnOff = `text -l "Set all Dynamics attributes in scene :" `;
+	$chOff = `button -c ("s100DMCBSetIntValue(0)") -bgc 0.5 0.5 0.5  -l "dynOFF" `;
+	$chOn = `button -c ("s100DMCBSetIntValue(1)") -bgc 1 1 1   -l "dynON" `;
+
+
+
+	$sepBk = `separator -w $width `;
+
+	$buttonBake = `button -bgc 0.7 0.2 0.2
+		-c "s100DMbakeDynFromPlus(`menuItem -q -cb s100MDUIcbxKeepOkDyn`)"  -l "bake all dyn joint" `;
+	$buttonUnBake = `button -bgc 0.2 0.6 0.2
+        -c "s100DMUnbakeDynPlus(`menuItem -q -cb s100MDUIcbxKeepOkDyn`)"  -l "unbake all dyn joint" `;
+
+
+	formLayout -e
+		-attachForm $txtIntro "top" 5
+		-attachForm $txtIntro "left" 5
+
+		-attachControl $sep1 "top" 5 $txtIntro
+		-attachForm $sep1 "left" 5
+
+
+		//select All
+		-attachControl $butSel "top" 5 $sep1
+		-attachForm $butSel "left" 5
+		-attachForm $butSel "right"  5
+
+		-attachControl $butSel2 "top" 5 $butSel
+		-attachForm $butSel2 "left" 5
+		-attachForm $butSel2 "right"  5
+
+		-attachControl $butSel3 "top" 5 $butSel2
+		-attachForm $butSel3 "left" 5
+		-attachForm $butSel3 "right"  5
+
+		-attachControl $butSel4 "top" 5 $butSel3
+		-attachForm $butSel4 "left" 5
+		-attachForm $butSel4 "right"  5
+
+		-attachControl $sep2 "top" 5 $butSel4
+		-attachForm $sep2 "left" 5
+
+
+		//state
+		-attachControl $txtOnOff "top" 10 $sep2
+		-attachForm $txtOnOff "left" 5
+
+		-attachControl $chOff "top" 10 $sep2
+		-attachControl $chOff "left" 10 $txtOnOff
+
+		-attachControl $chOn "top" 10 $sep2
+		-attachControl $chOn "left" 5 $chOff
+
+		-attachControl $sep3 "top" 5 $chOn
+		-attachForm $sep3 "left" 5
+
+		//start Frame
+		-attachControl $text1 "top" 10 $sep3
+		-attachForm $text1 "left" 5
+
+		-attachControl $int "top" 5 $sep3
+		-attachControl  $int "left" 5 $text1
+		-attachControl $button "top" 5 $sep3
+		-attachControl  $button "left" 5 $int
+		-attachControl $buttonSETFRAME "top" 5 $sep3
+		-attachControl  $buttonSETFRAME "left" 5 $button
+
+
+		//bake
+		-attachControl $sepBk "top" 5 $buttonSETFRAME
+		-attachForm $sepBk "left" 5
+
+		-attachControl $buttonBake "top" 5 $sepBk
+		-attachForm $buttonBake "left" 5
+		-attachPosition $buttonBake "right" 5 50
+
+
+		-attachControl $buttonUnBake "top" 5 $sepBk
+		-attachForm $buttonUnBake "right" 5	//$buttonBake
+		-attachPosition $buttonUnBake "left"  5 50
+	s100MDUIFL ;
+
+	showWindow s100MDUI;
+}
+
+
+
+// s100DMselectCtrl(1) : select ctrls with unlock .isDynamic + .startFrame attrs
+// s100DMselectCtrl(0) : select ctrls with unlock .isDynamic
+//
+global proc s100DMselectCtrl(int $hasStartFrameAttr)
+{
+	string $var[] =  s100DMreturnSettableIsDynamicAttrs();
+	select -cl ;
+	for($i = 0 ; $i < size($var) ; $i++)
+	{
+		// gets only object name
+		string $obj = `match "^[^\.]*" $var[$i]`;
+		if ($hasStartFrameAttr && (`attributeExists "startFrame" $obj ` || `attributeExists "StartFrame" $obj `))
+			select -add $obj ;
+		else if ($hasStartFrameAttr==0)
+			select -add $obj ;
+    }
+	print ("// "+size(`ls -sl`)+" object(s) selected.\n");
+}
+
+global proc s100DMselectSimMethodDrivers()
+{
+	string $attrs[] = {};
+	string $attrTypes[] = s100dyn_returnSimMethodAttrsAndTypes($attrs, "simulationMethod");
+	select -cl ;
+	for($i = 0 ; $i < size($attrs) ; $i++)
+	{
+		// gets only object name
+		string $obj = `match "^[^\.]*" $attrs[$i]`;
+		select -add $obj ;
+    }
+	print ("// "+size(`ls -sl`)+" object(s) selected.\n");
+}
+
+
+// returning *.isDynamic attrs if they are unlocked and driven by animCurve
+global proc string[] s100DMreturnSettableIsDynamicAttrs()
+{
+	string $attrs[]={};
+	string $var[] = `ls  "*:*.isDynamic" "*:*.IsDynamic" "**.isDynamic" "**.IsDynamic"`;
+	for($i=0 ; $i < size($var) ; $i++)
+	{
+		if ( `getAttr -l $var[$i]`==0)
+		{
+			if( (`connectionInfo -ied $var[$i]` && size(`listConnections -type "animCurve" -s 1 -d 0 $var[$i]`) )
+            || !(`connectionInfo -ied $var[$i]`) )
+				$attrs[size($attrs)] = $var[$i];
+        }
+		else
+			print ("// '"+$var[$i]+"' doesn't seem settable (locked or connected) - skipped\n");
+    }
+	return $attrs;
+}
+
+global proc s100DMbakeDynFromPlus(int $keepOnlyOkTaggedOnes)
+{
+	//s100setDynValueSimMethod(3);
+	string $units[] = `ls "*:*.currentTime" "*.currentTime"`;
+	for($tmp in $units)
+	{
+		string $list[]= `listConnections -plugs 1  -s 1 -d 0 $tmp`;
+		for($tmp2 in $list)
+		{
+			if($tmp2 != "time1.outTime")
+				connectAttr -f ("time1.outTime") $tmp ;
+		}
+	}
+
+	string $jnt [] = s100DMlistJoint($keepOnlyOkTaggedOnes);
+	if(size($jnt)> 0)
+	{
+		$sT = `playbackOptions -q -minTime `;
+		$eT = `playbackOptions -q -maxTime `;
+		//s100setDynValueStartFrame($sT,0) ;
+
+		currentTime -e  $sT ;
+		pause -sec 1 ;
+
+				//
+		bakeResults -simulation true -t (($sT) +":" + $eT) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -bakeOnOverrideLayer false -at "rx" -at "ry" -at "rz" $jnt ;
+
+		s100setDynValueStartFrame($sT,0) ;
+
+		// QA addendum :
+		// Saving current "traj.dynAntennas" value (with animation) into "traj.saveDynAntennas" and disabling it:
+		s100saveAnimOfHairSystem();
+
+		// disabling dynamics then:
+		s100setDynValueSimMethod(0) ;
+    }
+}
+
+global proc s100DMbakeDyn()
+{
+	//s100setDynValueSimMethod(3);
+	string $units[] = `ls "*:*.currentTime" "*.currentTime"`;
+	for($tmp in $units)
+	{
+		string $list[]= `listConnections -plugs 1  -s 1 -d 0 $tmp`;
+		for($tmp2 in $list)
+		{
+			if($tmp2 != "time1.outTime")
+				connectAttr -f ("time1.outTime") $tmp ;
+		}
+	}
+
+	string $jnt [] = s100DMlistJoint(0);
+	if(size($jnt)> 0)
+	{
+		$sT = `playbackOptions -q -minTime `;
+		$eT = `playbackOptions -q -maxTime `;
+		//s100setDynValueStartFrame($sT,0) ;
+
+		currentTime -e  $sT ;
+		pause -sec 1 ;
+
+				//
+		bakeResults -simulation true -t (($sT) +":" + $eT) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -bakeOnOverrideLayer false -at "rx" -at "ry" -at "rz" $jnt ;
+
+		s100setDynValueStartFrame($sT,0) ;
+
+		// QA addendum :
+		// Saving current "traj.dynAntennas" value (with animation) into "traj.saveDynAntennas" and disabling it:
+		s100saveAnimOfHairSystem();
+
+		// disabling dynamics then:
+		s100setDynValueSimMethod(0) ;
+    }
+}
+
+
+global proc s100DMUnbakeDynPlus(int $keepOnlyOkTaggedOnes)
+{
+	string $jnt[] = s100DMlistJoint($keepOnlyOkTaggedOnes);
+	if(size($jnt) > 0)
+	{
+		string $listC[] = `listConnections -type "animCurve" $jnt `;
+		if(size($listC)> 0)
+			delete $listC ;
+		int $actionDone = s100restoreAnimOfHairSystem();
+    }
+}
+
+
+// int $keepOnlyOkTaggedOnes = 1;
+global proc s100DMUnbakeDyn()
+{
+	string $jnt[] = s100DMlistJoint(0);
+	if(size($jnt) > 0)
+	{
+		string $listC[] = `listConnections -type "animCurve" $jnt `;
+		if(size($listC)> 0)
+			delete $listC ;
+		int $actionDone = s100restoreAnimOfHairSystem();
+    }
+}
+
+global proc string[] s100GetWilliMonsterJoint()
+{
+	string $list[] = `ls -type "joint"  "*WilliMonster*:Leaf01*"   "*WilliMonster*:Leaf02*" "*WilliMonster*:Leaf03*" "*WilliMonster*:Leaf06*" "*WilliMonster*:Leaf07*" "*WilliMonster*:Leaf04*" "*WilliMonster*:Leaf05*"  "*WilliMonster*:Branch03*"  "*WilliMonster*:Branch02*" `;
+	return $list;
+}
+
+global proc string[] s100DMlistJoint(int $keepOnlyOkTaggedOnes)
+{
+	string $list[] = `ls -type "joint" `;
+	string $ret[] = {} ;
+
+	$j= 0 ;
+	for($i = 0 ; $i < size($list) ;$i++)
+	{
+		string $listT[] = `listConnections -destination 0 -s 1 -type "joint" -exactType 1  ($list[$i] +".rotate" )`;
+		if(size($listT) > 0)
+		{
+			string $listT2[] = `listRelatives -s $list[$i] `;
+			if(size($listT2) == 0 )
+			{
+				if(!`gmatch $list[$i]  "*WilliMonster*:*"`)
+				{
+					$ret[$j] = $list[$i]  ;
+					$j++;
+                }
+            }
+		}
+    }
+
+	string $addWilli[] = `s100GetWilliMonsterJoint`;
+	$ret = stringArrayCatenate($ret , $addWilli ) ;
+
+	// QA ADDENDUM : filtering:
+	int $excludeTaggedOnes = true;
+	if ($excludeTaggedOnes)
+		$ret = s100DMupdateDynJointList($ret, $keepOnlyOkTaggedOnes);
+
+	return $ret ;
+}
+
+global proc string[] s100DMlistDynJointsByNameSpace( string $namespace, int $keepOnlyOkTaggedOnes )
+{
+	if (!endsWith($namespace,":"))
+		$namespace = $namespace+":";
+	string $list[] = `ls -type "joint" ($namespace+"*")`;
+	string $ret[] = {} ;
+
+	$j= 0 ;
+	for($i = 0 ; $i < size($list) ;$i++)
+	{
+		string $listT[] = `listConnections -destination 0 -s 1 -type "joint" -exactType 1  ($list[$i] +".rotate" )`;
+		if(size($listT) > 0)
+		{
+			string $listT2[] = `listRelatives -s $list[$i] `;
+			if(size($listT2) == 0 )
+			{
+				if(!`gmatch $list[$i]  "*WilliMonster*:*"`)
+				{
+					$ret[$j] = $list[$i]  ;
+					$j++;
+                }
+            }
+		}
+    }
+
+	string $addWilli[] = `s100GetWilliMonsterJoint`;
+	$ret = stringArrayCatenate($ret , $addWilli ) ;
+
+	// QA ADDENDUM : filtering:
+	int $excludeTaggedOnes = true;
+	if ($excludeTaggedOnes)
+		$ret = s100DMupdateDynJointList($ret, $keepOnlyOkTaggedOnes);
+
+	return $ret ;
+}
+
+
+// QA addendum, filtering thru tag:
+global proc string[] s100DMupdateDynJointList(string $sel[], int $keepOnlyOkTaggedOnes)
+{
+	global string $gS100_noDynJointTag;
+	global string $gS100_okDynJointTag;
+
+	string $updatedSel[] = {};
+	for ($sl in $sel)
+	{
+		if (!`attributeExists $gS100_noDynJointTag $sl`)
+		{
+			if ($keepOnlyOkTaggedOnes && `attributeExists $gS100_okDynJointTag $sl`)
+				$updatedSel[size($updatedSel)] = $sl;
+			else if ($keepOnlyOkTaggedOnes && !`attributeExists $gS100_okDynJointTag $sl`)
+			{
+				print ("//\t - \""+$sl+"\" is NOT tagged as '"+$gS100_okDynJointTag+"' : skipped. \n");
+				continue;
+            }
+			else
+				$updatedSel[size($updatedSel)] = $sl;
+        }
+		else
+			print ("//\t - \""+$sl+"\" is tagged as '"+$gS100_noDynJointTag+"' : skipped. \n");
+	}
+	return $updatedSel;
+}
+
+	global proc int s100DMTagAsDynJoint(string $sel[])
+	{
+		global string $gS100_okDynJointTag;
+
+		int $ok = s100DMUnTagDynJoint($sel);
+		if ($ok == size($sel))
+			return s100DMTagObjWithBoolAttr($sel, $gS100_okDynJointTag);
+		else
+		{
+			warning ("could only first untag "+$ok+" objects / "+size($sel)+" ! Tagging Stopped.\n");
+			return 0;
+        }
+    }
+
+
+	global proc int s100DMTagAsNoDynJoint(string $sel[])
+	{
+		global string $gS100_noDynJointTag;
+
+		int $ok = s100DMUnTagDynJoint($sel);
+		if ($ok == size($sel))
+			return s100DMTagObjWithBoolAttr($sel, $gS100_noDynJointTag);
+		else
+		{
+			warning ("could only first untag "+$ok+" objects / "+size($sel)+" ! Tagging Stopped.\n");
+			return 0;
+        }
+    }
+
+	global proc int s100DMUnTagDynJoint(string $sel[])
+	{
+		global string $gS100_okDynJointTag;
+		int $ok = s100DMUnTagObjFromAttr($sel, $gS100_okDynJointTag);
+
+		global string $gS100_noDynJointTag;
+		$ok = s100DMUnTagObjFromAttr($sel, $gS100_noDynJointTag);
+		return $ok;
+    }
+
+	global proc int s100DMUnTagObjFromAttr(string $sel[], string $attr)
+	{
+		int $ok = 0;
+		for ($sl in $sel)
+		{
+			int $okLocal = false;
+			if (`attributeExists $attr $sl`)
+			{
+				$okLocal = !catch(`setAttr -l 0 ($sl+"."+$attr) `);
+				$okLocal = !catch(`deleteAttr -at $attr $sl`);
+            }
+			else
+				$okLocal = 1;
+
+			if ($okLocal)
+				print ("//\t attribute '"+$attr+"' successfully removed from \""+$sl+"\".\n");
+			else
+				warning ("\t attribute '"+$attr+"' NOT successfully removed from \""+$sl+"\".");
+			$ok += $okLocal;
+        }
+		return $ok;
+    }
+
+	global proc int s100DMTagObjWithBoolAttr(string $sel[], string $attr)
+	{
+		int $ok = 0;
+		for ($sl in $sel)
+		{
+			int $okLocal = false;
+			if (!`attributeExists $attr $sl`)
+			{
+				$okLocal = !catch(`addAttr -k 0 -dv 1 -at bool -ln $attr $sl`);
+				if ($okLocal)
+					$okLocal = !catch(`setAttr -l 1 ($sl+"."+$attr)`);
+            }
+			else
+				$okLocal = 1;
+			if ($okLocal)
+				print ("//\t \""+$sl+"\" successfully tagged as '"+$attr+"'.\n");
+			else
+				warning ("  \""+$sl+"\" NOT successfully tagged as '"+$attr+"'!");
+			$ok += $okLocal;
+        }
+		return $ok;
+    }
+
+
+
+
+global proc s100DMselectDynJoints(int $keepOnlyOkTaggedOnes)
+{
+	string $sel[] = s100DMlistJoint($keepOnlyOkTaggedOnes);
+
+	if (size($sel))
+		select -r $sel;
+
+	print ("//\t - "+size($sel)+" 'dynamic' joints found in scene:\n");
+	if (size($sel))
+		for ($sl in $sel) print ("//\t  \""+$sl+"\"\n");
+
+	print ("//\n// Selected "+size($sel)+" 'dynamic' (in-connected rotate attr) joints in scene.\n");
+}
+
+
+
+
+
+
+global proc s100DMCBSetValueFromUI()
+{
+	int $value = `checkBox -q -v "s100MDUIFLCbOn" `;
+	s100DMCBSetIntValue( $value);
+}
+
+global proc s100DMCBSetIntValue(int $value)
+{
+	int $v = 0  ;
+	if($value==1)
+		$v = 3;
+	s100setDynValueSimMethod($v) ;
+}
+
+//s100MDUI ;
+
+
+global proc s100DMsetStartFrame()
+{
+	int $int = `intField -q -v s100MDUIFLIntStartFrame`;
+	s100setDynValueStartFrame($int,0) ;
+}
+
+global proc s100DMsetKeyFrameStartFrame()
+{
+	int $int = `intField -q -v s100MDUIFLIntStartFrame`;
+	s100setDynValueStartFrame($int,1) ;
+}
+
+// int $setKeyFrame = 0; $tmp = $dyn[2]
+global proc s100setDynValueStartFrame(int $frame, int $setKeyFrame)
+{
+	string $dyn[] = `ls -type hairSystem  `;
+
+	for($tmp in $dyn)
+	{
+		if (`getAttr -l ($tmp + ".startFrame")`==0)
+		{
+			$listConnections = `listConnections -d 0 -s 1  ($tmp + ".startFrame")`;
+
+			if(size($listConnections) == 0 )
+			{
+				s100bkdyn_setAttr( ($tmp + ".startFrame"), $frame ) ;
+				if($setKeyFrame == 1 )
+					setKeyframe ($tmp + ".startFrame");
+
+			}else if(`nodeType($listConnections[0]) ` == "animCurve")
+			{
+				s100bkdyn_setAttr( ($tmp + ".startFrame"), $frame ) ;
+				if($setKeyFrame == 1 )
+					setKeyframe ($tmp + ".startFrame");
+			}
+			else
+			{
+				$listConnectionsPlug = `listConnections -plugs 1  -d 0 -s 1  ($tmp + ".startFrame")`;
+				$list2 = `listConnections -d 0 -s 1  $listConnectionsPlug[0]`;
+				if(size($list2) == 0 )
+				{
+					s100bkdyn_setAttr( $listConnectionsPlug[0], $frame ) ;
+					if($setKeyFrame == 1 )
+						setKeyframe $listConnectionsPlug[0];
+				}
+				else
+				{
+					//setAttr  $listConnectionsPlug[0] $frame;
+					s100bkdyn_setAttr( $listConnectionsPlug[0], $frame ) ;
+					if($setKeyFrame == 1 )
+						setKeyframe $listConnectionsPlug[0];
+				}
+			}
+
+        }
+		else
+			print ("// \t '"+($tmp + ".startFrame")+"' is locked - skipped\n");
+    }
+
+	string $tmp1[] = `ls "*WilliMonster*:*" `;
+	if(size($tmp1) > 0)
+	{
+		string $tmp2[] = `ls  "*WilliMonster*:*.start_frame"  "*WilliMonster*:*.Start_frame"`;
+		$list = `listConnections -d 0 -s 1  $tmp2 `;
+
+		if(size($list) > 0)
+			delete $list ;
+
+		for($tmp4 in $tmp2)
+		{
+			//setAttr $tmp4 $frame ;
+			s100bkdyn_setAttr( ($tmp4), $frame ) ;
+        }
+	}
+
+}
+//s100setDynValueSimMethod(3);
+//s100setDynValueStartFrame(1);
+
+global proc s100setDynValueSimMethod(int $stat) // s100setDynValueSimMethod(3)
+{
+	// getting objects with ".simulationMethod" settable attrs in scene (sometimes their driver):
+	string $attrs[] = {};
+	string $attrTypes[] = s100dyn_returnSimMethodAttrsAndTypes($attrs, "simulationMethod");
+
+	// + .isDynamic ones (witho no $attrTypes related strings) :
+	string $dynAttrs[] = s100DMreturnSettableIsDynamicAttrs();
+
+	// treating both of them:
+	$attrs = stringArrayCatenate($attrs, $dynAttrs);
+
+	for ($i=0; $i<size($attrs);$i++)
+	{
+		// if we are beyond the list of $attrs (meaning there's no related $attrType[] for it:
+		if ($i<size($attrTypes) && $attrTypes[$i]=="hairSys")
+			s100bkdyn_setAttr( $attrs[$i], $stat ) ;
+		else if ($stat==3 || $stat==1)
+			s100bkdyn_setAttr( $attrs[$i], 1 ) ;
+		else
+			s100bkdyn_setAttr( $attrs[$i], 0 ) ;
+    }
+}
+
+// ex: s100setDynValueSimMethodAndRekey(0, 100, 1)
+//
+global proc s100setDynValueSimMethodAndRekey(int $stat, float $frameToKeyOn, int $rekey )
+{
+	// getting objects with ".simulationMethod" settable attrs in scene (sometimes their driver):
+	string $attrs[] = {};
+	string $attrTypes[] = s100dyn_returnSimMethodAttrsAndTypes($attrs, "simulationMethod");
+
+	// + .isDynamic ones (witho no $attrTypes related strings) :
+	string $dynAttrs[] = s100DMreturnSettableIsDynamicAttrs();
+
+	// treating both of them:
+	$attrs = stringArrayCatenate($attrs, $dynAttrs);
+
+	for ($i=0; $i<size($attrs);$i++)
+	{
+		s100dyn_cutOrSetKeysOnKeyableAttrs( $attrs[$i], "cutKey", $stat, $stat, $frameToKeyOn, 0);
+
+		// if we are beyond the list of $attrs (meaning there's no related $attrType[] for it:
+		if ($i<size($attrTypes) && $attrTypes[$i]=="hairSys")
+			s100bkdyn_setAttr( $attrs[$i], $stat ) ;
+		else if ($stat==3 || $stat==1)
+			s100bkdyn_setAttr( $attrs[$i], 1 ) ;
+		else
+			s100bkdyn_setAttr( $attrs[$i], 0 ) ;
+
+		if ($rekey)
+		{
+			print ("// Setting keyframe at frame "+$frameToKeyOn+" on attribute \""+$attrs[$i]+"\".\n");
+			$ok = !catch(`setKeyframe -time $frameToKeyOn $attrs[$i]` );
+		}
+    }
+}
+
+// Returns $searchedAttr objects from scene or the ones that are connected in to them thru drivenKeys:
+//	ex: string $searchedAttr = "simulationMethod"
+//
+global proc string[] s100dyn_returnSimMethodAttrsAndTypes(string $attrs[], string $searchedAttr)
+{
+	string $attrTypes[] = {};
+
+	string $dyn[] = `ls -type hairSystem  `;
+	$dyn = stringArrayRemoveDuplicates($dyn);
+	for($tmp in $dyn) // string $tmp = $dyn[0]
+	{
+		$listConnections = `listConnections -d 0 -s 1  ($tmp + "."+$searchedAttr)`;
+		if(size($listConnections) == 0 )
+		{
+			$attrs[size($attrs)] = ($tmp+"."+$searchedAttr);
+			$attrTypes[size($attrTypes)] = "hairSys";
+        }
+		else if( `nodeType($listConnections[0])`=="animCurveUU" || `nodeType($listConnections[0])`=="condition" )
+		{
+			$list2 = `listConnections -skipConversionNodes 1  -plugs 1  -d 0 -s 1  $listConnections[0]`;
+
+			$attrs[size($attrs)] = ($list2[0]);
+			$attrTypes[size($attrTypes)] = "dynAttr";
+        }
+    }
+
+	$attrs = stringArrayRemoveDuplicates($attrs);
+	return $attrTypes;
+}
+
+
+global proc string s100dyn_cutOrSetKeysOnKeyableAttrs(string $fullAttr, string $command, float $floatVal, string $stringVal, float $frameToKeyOn, int $verbose)
+    // $command = "cutKey" or "setKeyframe" or "setAttr", string $obj = $fullAttr
+    {
+        string $cmd = "";
+        if ($command=="cutKey")
+            $cmd = ("cutKey -cl -t \":\" -f \":\" ");
+        else if ($command=="setKeyframe" || $command=="setAttr")
+            $cmd = ("// "+$command+" on keyable attributes of '"+shortNameOf($fullAttr)+"' :\n");;
+
+        if (size($cmd)==0)
+        {
+            warning ("s100dyn_cutOrSetKeysOnKeyableAttrs >> No settable command! -> skipped.");
+            return "";
+        }
+        if (objExists($fullAttr)==0)
+        {
+            warning ("s100dyn_cutOrSetKeysOnKeyableAttrs >> '"+$fullAttr+"' does NOT exist. -> skipped.");
+            return "";
+        }
+
+        string $attr = `substitute "^[^.]*\\." $fullAttr ""`;
+		string $obj = `match "^[^\.]*" $fullAttr`;
+        string $relCutCmd[] = { ("-at "+$attr) };
+        int $addCount = 0;
+        for ($i=0;$i<size($relCutCmd);$i++)
+        {
+            string $res[] = `listAnimatable $fullAttr`;
+            if (size($res) && $command=="cutKey"  )
+            {
+                $cmd = $cmd+" "+$relCutCmd[$i];
+                $addCount += 1;
+            }
+            else if (size($res) && $command=="setKeyframe" )
+            {
+                $cmd = $cmd+"setKeyframe -time "+$frameToKeyOn+" "+$fullAttr+" ;\n";
+                $addCount += 1;
+            }
+            else if (size($res) && $command=="setAttr"  )
+            {
+                $cmd = $cmd+"setAttr "+$fullAttr;
+                if (size($stringVal))
+                    $cmd = $cmd+" "+$stringVal+" ;\n";
+                else
+                    $cmd = $cmd+" "+$floatVal+" ;\n";
+                $addCount += 1;
+            }
+        }
+        if ($addCount==0)
+        {
+            print ("// No animatable attribute to Set or Cut/Set keys here '"+shortNameOf($fullAttr)+"'! -> skipped.\n");
+            return "";
+        }
+        if ($command=="cutKey")
+            $cmd = $cmd+" "+$obj;
+
+        if ($verbose)
+        {
+            print ("// Preparing command on "+$addCount+" attribute of \""+shortNameOf($obj)+"\":\n");
+            print ("// $cmd = \""+$cmd+"\"\n");
+        }
+
+		int $ok = false;
+		if (size($cmd))
+			$ok=!catch(`eval($cmd)`);
+		else
+			print ("//\t - No keys to treat from '"+shortNameOf($fullAttr)+"'!\n");
+		if ($ok)
+			print ("//\t - "+$command+" on '"+shortNameOf($fullAttr)+"' animatable attribute.\n");
+
+		return $ok;
+    }
+
+
+global proc s100saveAnimOfHairSystem()
+{
+	// getting objects with ".simulationMethod" settable attrs in scene (sometimes their driver):
+	string $simMethAttrs[] = {};
+	string $attrTypes[] = s100dyn_returnSimMethodAttrsAndTypes($simMethAttrs, "simulationMethod");
+
+	// + .isDynamic ones (witho no $attrTypes related strings) :
+	string $dynAttrs[] = s100DMreturnSettableIsDynamicAttrs();
+
+	// treating both of them:
+	$simMethAttrs = stringArrayCatenate($simMethAttrs, $dynAttrs);
+
+
+	for($fullAttr in $simMethAttrs) // string $fullAttr = $simMethAttrs[0]
+	{
+		string $obj = `match "^[^\.]*" $fullAttr`;
+		string $attr = ` attributeName  -long ($fullAttr) `;
+		string $saveAttr = ("save"+capitalizeString($attr));
+
+		// making sure "saveAttribute" exists:
+        if (!objExists($obj+"."+$saveAttr))
+		{
+			addAttr -ln ($saveAttr) -at "enum" -en "off:on:" $obj;
+			//setAttr -e -k 1 ($obj+"."+$saveAttr) ;
+        }
+		// string $fullAttr = "C_PhilibertButterfly_01_01:traj.Dyn_Hair"
+		string $title = ("\""+$fullAttr+"\" was animated!");
+		string $message = ("\""+$fullAttr+"\" was animated!\nDo you want to save this animation so you can get it back when unbaking?");
+
+		int $saveAnim = s100bkdyn_checkIfAttrIsAnimated( $fullAttr, 0, $title, $message );
+		if ($saveAnim>0)
+			s100bkdyn_transferAnimBetweenAttrs( $fullAttr, ($obj+"."+$saveAttr), {"0"} );
+		else
+			print ("// No animation saved from \""+$fullAttr+"\"\n.");
+    }
+}
+
+global proc int s100restoreAnimOfHairSystem()
+{
+	int $forceAction = 0;
+	int $sameForAll = 0;
+
+	// getting all simulation methods attrs or their drivers :
+	string $simMethAttrs[] = {};
+	string $attrTypes[] = s100dyn_returnSimMethodAttrsAndTypes($simMethAttrs, "simulationMethod");
+	// + .isDynamic ones (witho no $attrTypes related strings) :
+	string $dynAttrs[] = s100DMreturnSettableIsDynamicAttrs();
+	// treating both of them:
+	$simMethAttrs = stringArrayCatenate($simMethAttrs, $dynAttrs);
+
+	int $res = 0;
+
+	for($fullAttr in $simMethAttrs) // string $fullAttr = $simMethAttrs[0]
+	{
+		string $obj = `match "^[^\.]*" $fullAttr`;
+		string $attr = ` attributeName  -long ($fullAttr) `;
+		string $saveAttr = ("save"+capitalizeString($attr));
+
+		// making sure "saveAttribute" exists:
+        if (objExists($obj+"."+$saveAttr))
+		{
+			string $title = ("\""+$attr+"\" used to be animated!");
+			string $message = ("Unbaking done.\nWarning:\n\""+$fullAttr+"\" used to be animated!\nDo you want to get his animation back on it?");
+
+			// checking if an animation exists on attribute, and prompting if "forceRestoreOrNot" is not asked :
+			int $animToRestore = 0;
+			$animToRestore = s100bkdyn_checkIfAttrIsAnimated( ($obj+"."+$saveAttr), (1-$sameForAll), $title, $message );
+
+			// If forcing restore without asking is not already set, setting it (if needed) :
+			if ($sameForAll==0)
+			{
+				//debug : print ("\n//\t Same Action (restore animation or not), not yet set...");
+				if ( $animToRestore>1 || ($animToRestore<-1) )
+				{
+					$sameForAll = 1;
+					$forceAction = $animToRestore/2;
+					print ("\n//\t Same Action (restore animation or not) set to TRUE! (Action : "+$forceAction+").\n");
+                }
+				//debug : else
+				//debug : 	print " set to false\n";
+            }
+			//debug : else
+			//debug : 	print ("\n//\t Force Restore Animation (or not), already set to TRUE! ($forceAction : "+$forceAction+").\n");
+
+			// DEBUG :
+			//print ("\n//### $sameForAll : "+$sameForAll+".\n");
+			//print   ("//### $forceAction : "+$forceAction+".\n");
+			//print   ("//### $animToRestore : "+$animToRestore+".\n");
+
+			if ($animToRestore>0 && $forceAction>=0)
+			{
+				print ("\n// Restoration of animation on \""+$fullAttr+"\" asked : \n");
+				s100bkdyn_transferAnimBetweenAttrs( ($obj+"."+$saveAttr), $fullAttr, {"0"} );
+				$res += 1;
+            }
+			else if ($animToRestore<=0 || $forceAction<0)
+			{
+				print ("\n// No restoration of animation on \""+$fullAttr+"\". \n");
+            }
+        }
+    }
+	if (size($simMethAttrs)==0)
+		return -1;
+	else
+		return $res;
+}
+
+
+global proc int s100bkdyn_setAttr(string $attr, float $val)
+{
+	int $res = false;
+	if (`getAttr -l $attr`==0)
+	{
+		$res = !catch(`setAttr $attr $val`);
+		if ($res)
+			print ("// Successfully setting \""+$attr+"\" to : "+$val+"\n");
+		else
+			print ("// Could NOT set \""+$attr+"\" to : "+$val+"\n");
+    }
+	else
+		print ("// Can NOT set \""+$attr+"\" to : "+$val+" b/c it's locked - skipped\n");
+	return $res;
+}
+
+// s100bkdyn_checkIfAttrIsAnimated:
+// 	checks if $attrPath is animated. If $prompt==1 : will ask user with message, proposing "Yes/all" and "No/all" answers:
+// Returns:
+// 0 : no anim on $attrPath,
+// 1 : animated (and if prompted : user said "Yes" to do what's proposed in the message for this attribute)
+// 2 : animated  and user said "Yes All" to do what's proposed in the message (for all attributes)
+// -1 : animated but user answered "No" to do what's proposed in the message (for this attribute)
+// -2 : animated but user answered "No All" to do what's proposed in the message (for all attributes)
+//
+// Example :
+// string $attrPath = "root.save_Dynamics";
+// string $message = ("\""+$attrPath+"\" used to be animated!\n(and not by static curves...)\nDo you want to get this animation back on it?")
+// string $title = ("\""+$attrPath+"\" used to be animated!");
+// s100bkdyn_checkIfAttrIsAnimated( $attrPath, 1, $title, $message );
+//
+global proc int s100bkdyn_checkIfAttrIsAnimated( string $attrPath, int $prompt, string $title, string $message )
+{
+	string $cons[] = `listConnections -s 1 -d 0 -type "animCurve" $attrPath `; //
+	if (size($cons))
+	{
+		if ($prompt)
+		{
+			string $res = `confirmDialog -title ($title) -message ($message)
+				-button "Yes" -button "No" -button "Yes All" -button "No All" -defaultButton "No"
+				-cancelButton "No" -dismissString "No"`;
+
+			if ($res == "No")
+				return -1;
+			else if ($res == "No All")
+				return -2;
+			else if ($res == "Yes All")
+				return 2;
+			else if ($res == "Yes")
+				return 1;
+        }
+		else
+			return 1;
+	}
+	else
+		return 0;
+}
+
+
+// Copy/Past animation from a list of attrs from one obj to other
+    //
+    global proc s100bkdyn_transferAnimBetweenAttrs( string $srcAttr, string $destAttr, string $defaultValue[] )
+    {
+		/*
+		 string $srcAttr = $fullAttr;
+		 string $destAttr = ($obj+"."+$saveAttr);
+		 string $defaultValue[] = {"0"};
+		*/
+
+		float $dv[]={};
+
+        if ( size(`ls $srcAttr`) && size(`ls $destAttr`))
+        {
+			string $attr = ` attributeName -long ($srcAttr) `;
+			string $srcObj = `match "^[^\.]*" $srcAttr`;
+			string $destObj = `match "^[^\.]*" $destAttr`;
+			string $attrDest = ` attributeName -long ($destAttr) `;
+
+			// First checking if we'll work with compounds attrs or not (double/float only..)
+			// and setting proper default values:
+			//
+			int $hasLeaves = false;
+			string $childrenAttrs[] = `attributeQuery  -listChildren -node $srcObj $attr`;
+			string $childrenDestAttrs[] = `attributeQuery  -listChildren -node $destObj $attrDest`;
+			if ( (size($childrenAttrs)==3) && (size($childrenAttrs)==size($childrenDestAttrs)) )
+			{
+				$hasLeaves = true;
+				if (size($defaultValue))
+					for ($i=0; $i<size($childrenAttrs); $i++)
+						$dv[$i] = float($defaultValue[$i]);
+			}
+			else if (size($defaultValue)>0)
+				$dv[0] = $defaultValue[0];
+
+
+
+			// ACTUAL copy/paste!
+			//
+			print ("// Copy/Pasting keys from \""+$srcAttr+"\" to \""+$destAttr+"\"...\n");
+				copyKey -time ":" -float ":" -hierarchy none -controlPoints 0 -shape 1 {($srcAttr)} ;
+				pasteKey -option replaceCompletely -copies 1 -connect 0 -timeOffset 0 -floatOffset 0 -valueOffset 0 {($destAttr)} ;
+
+
+			// Resetting source object in 2 steps:
+			//
+			print ("// Reset source object to its default value(s). No more anim.\n");
+			if ($hasLeaves)
+			{
+					// 1. erasing its animation:
+					for ($leaf in $childrenAttrs)
+						cutKey -cl -t ":" -f ":" -at $leaf $srcObj;
+					// 2. setting to default value:
+					if (size($dv))
+						for ($i=0; $i<size($childrenAttrs); $i++)
+							s100bkdyn_setAttr( ($srcObj+"."+$childrenAttrs[$i]), $dv[$i]);
+
+			}
+			else // in case of single dimension attribute:
+			{
+					// 1. erasing its animation:
+						cutKey -cl -t ":" -f ":" -at $attr $srcObj;
+					// 2. setting to default value:
+						if (size($dv))
+							s100bkdyn_setAttr( ($srcAttr), $dv[0]);
+			}
+
+        }
+        print (">> s100bkdyn_transferAnimBetweenAttrs(\""+$srcAttr+"\", \""+$destAttr+"\", {"+stringArrayToString($defaultValue,",")+"}) done.\n");
+    }
+    // end of s100bkdyn_transferAnimBetweenAttrs

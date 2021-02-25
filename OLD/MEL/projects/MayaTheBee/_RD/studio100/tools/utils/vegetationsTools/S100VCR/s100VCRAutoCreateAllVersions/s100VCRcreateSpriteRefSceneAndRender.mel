@@ -1,0 +1,223 @@
+global proc s100VCRGenerateSprites()
+{
+$file = `file -q -sn`;
+s100VCRcreateSpriteRefSceneAndRender($file) ;
+file -s;
+file -o $file ;
+}
+
+global proc s100VCRcreateSpriteRefSceneAndRender(string $scene)
+{
+//$scene = $file
+$file = `file -q -sn `;
+
+	if($scene != $file )
+		file -f -o $scene ;
+
+$cutHi = `s100GetFileOpenLastModifiedTime ` ;
+$chHiBDD = s100BDDcheckLocal("VCR_info_Sprites", $cutHi);
+	if($chHiBDD)
+	{
+	s100VCRRenderSprites($scene);
+	s100VCRCreateRefScenesSprite( $scene);
+	}else{
+	print "Sprites : same files" ;
+    }
+}
+
+global proc  s100VCRRenderSprites(string $scene)
+{
+string $return ;
+//$scene = $file
+$file = `file -q -sn `;
+
+	if ($scene != $file )
+		file -f -o $scene ;
+
+
+
+
+		$name = `s100VCRgetCleanName`;
+		$fold = s100VCRgetSpriteFolder($scene,"") ;
+		string $allAmbiance[] = `s100returnDifferentLightAmbiance` ;
+
+		string $toRender[] ;
+
+			if(`window -ex s100VCRUI`)
+			{
+			int $value = `checkBox -q -v  s100VCRambianceLightChb`;
+				if($value == 1 )
+				{
+				$toRender = $allAmbiance ;
+
+				}else{
+				$toRender[0] = ` optionMenu -q -v s100VCRambianceLight `;
+
+				}
+
+
+			}else{
+			$toRender = $allAmbiance ;
+			}
+
+
+			for($z = 0 ; $z < size($toRender) ; $z++)
+			{
+			s100setupUpLightForRendering($toRender[$z]) ;
+			//print $fold ;
+			$foldL = $fold + $toRender[$z] +"/" ;
+			sysFile -md $foldL ;
+
+
+			$list = `getFileList -folder $foldL -filespec ($name +"*.tga") `;
+				for($tmp in $list)
+				{
+				//print  ($fold +$tmp) ;
+					sysFile -delete ($fold + $toRender[$z] +"/"+$tmp) ;
+
+				}
+			$list = `getFileList -folder $foldL -filespec ($name +"*.png") `;
+				for($tmp in $list)
+				{
+				//print  ($fold +$tmp) ;
+					sysFile -delete ($fold + $toRender[$z] +"/"+$tmp) ;
+
+				}
+
+			$max = `getAttr "defaultRenderGlobals.endFrame"`;
+
+				 int $amount = 0;
+
+				 progressWindow
+					 -title "Creating Sprite textures"
+					 -progress $amount
+					 -status "% done : 0%"
+
+					 -isInterruptable false;
+
+
+			float $iF2 ;
+			float $maxF = $max ;
+			print ("\n render for ambiance : " + $toRender[$z]) ;
+
+			float $vert = `s100VCRGetSizeForRescaleScene("dt_vert_dt")` ;
+			float $returnScene[] = `s100VCRGetScaleVegForSpriteRenderingScene `;
+			int $baseS = 512 ;
+
+			float $t = $vert / $returnScene[1] ;
+				if($t > 1.5)
+				{
+				$baseS = 1024 ;
+				}
+
+			print ("\nres :" + $baseS +"\n") ;
+				for($i = 1 ; $i <= $max ; $i++)
+				{
+
+					 // Check if end condition has been reached
+
+
+
+				$iF2 = $i ;
+				$amount = ($iF2 / $maxF) * 100  ;
+				currentTime $i ;
+
+				string $varT[] = `ls "*:*Tree*"`;
+					if (size( $varT )> 0)
+					{
+					$baseS = 1024 ;
+                    }
+
+				$test1 = `Mayatomr -cam "render_cam" -pv -xResolution $baseS -yResolution $baseS`;
+				$path = s100VCRReturnSpriteFolder($scene,"");
+				$pad = padNumber($i,2);
+				$name = `s100VCRgetCleanName`;
+				$cleanName = ($foldL + $name + "_" + $toRender[$z] + "_SpritesDiffuse."+$pad + ".png");
+				sysFile -rename $cleanName $test1 ;
+					 progressWindow -edit
+						 -progress $amount
+						 -status ("rendering sprites: "+$amount+"%");
+
+				}
+				 progressWindow -endProgress;
+
+			}
+headsUpMessage  "sprites generated";
+}
+
+global proc s100VCRCreateRefScenesSprite(string $scene)
+{
+//$scene = `file -q -sn` ;
+$sceneToCopy  = `s100VCRlocateSpriteRefScene`;
+$path = `s100VCRgetSpriteRefFolder($scene)`;
+$name = `s100VCRgetCleanName`;
+$fileSp1 = $path + $name + "_Sp1.ma" ;
+$fileSp2 = $path + $name + "_Sp2.ma" ;
+sysFile -copy  $fileSp1 $sceneToCopy;
+//file -f -o $sceneToCopy
+file -f -o $fileSp1 ;
+$nameToPut   = s100VCRgetSpriteFolderAndName($scene,"") + ".01.png" ;
+$nameToPut = substituteAllString ($nameToPut , "/Sprites/", "/Sprites/Day/") ;
+
+$nameToPut = substituteAllString ($nameToPut , "SpritesDiffuse.", "Day_SpritesDiffuse.") ;
+
+setAttr -type "string" sprite_Textures.fileTextureName $nameToPut;
+$fold = s100VCRgetSpriteFolder($scene,"") +"Day/" ;
+$list = `getFileList -folder $fold -filespec ($name +"*.png") `;
+$nb = size($list) ;
+addAttr -e -minValue 1  "root_ctrl.spriteNumber";
+
+addAttr -e -maxValue $nb  "root_ctrl.spriteNumber";
+$pathLocal = `s100VCRgetRootFolderFromName($scene)`;
+
+file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace "VCR" -options "v=0;p=17" ($pathLocal + $name +"_Hi.ma");
+
+$var = `ls -visible  -type "mesh" ("VCR:*")` ;
+$var2 = `ls ("VCR:VR_*_scN")`;
+
+float $bbox[] = `exactWorldBoundingBox  -ignoreInvisible 1 $var`;
+
+$x1 = $bbox[3] - $bbox[0] ;
+$y1 = $bbox[4] - $bbox[1] ;
+
+$tmp = `sort{$x1,$y1} `;
+
+$facteur = $tmp[1] / 100 ;
+
+setAttr "root_scale_grp.sx" $facteur ;
+setAttr "root_scale_grp.sy" $facteur ;
+setAttr "root_scale_grp.sz" $facteur ;
+
+setAttr -l 1 "root_scale_grp.sx"  ;
+setAttr -l 1 "root_scale_grp.sy"  ;
+setAttr -l 1 "root_scale_grp.sz"  ;
+select -r root_ctrlShape.cv[0:7] ;
+scale -r -objectCenterPivot $facteur $facteur $facteur  ;
+select -cl ;
+
+file -removeReference ($pathLocal + $name +"_Hi.ma");
+
+$sub = substituteAllString($var2[0], "VCR:VR_","VR_");
+
+rename "VR_sprite_scN" $sub ;
+file -s ;
+sysFile -copy  $fileSp2  $fileSp1 ;
+delete "parented_grp" ;
+file -s  ;
+file -o $fileSp2;
+delete "deformed_grp" ;
+delete "hidden_grp" ;
+setAttr ("scale_msh_grp.v") 1 ;
+}
+
+global proc s100VCRdeleteOldSprite(string $scene)
+{
+//$scene = $tmp2;
+$path = s100VCRReturnSpriteFolder($scene,"");
+$var = `getFileList -folder $path -filespec "*.tga"`;
+	for($vart in $var)
+	{
+	sysFile -delete ($path +$vart) ;
+    }
+}
+

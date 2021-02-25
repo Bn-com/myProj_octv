@@ -1,0 +1,495 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: “¸Í…
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycCreateClothTube()
+{
+	if(`window -exists ycCreateClothTube`)
+	{
+		deleteUI -window ycCreateClothTube;
+	}
+		window -menuBar true -title "Create Cloth Tube" -width 445 -height 200 ycCreateClothTube;
+			menu -label "Help";
+				menuItem -label "Help on Create Cloth Tube..." -command "zjHelpCallback ycCreateClothTube";
+			formLayout formLayout1;
+				columnLayout columnLayout1;
+					radioButtonGrp -enable 1 
+							-numberOfRadioButtons 2 
+							-select 1 
+							-label "Create Tube Mothod" 
+							-labelArray2 "border" "Center"  
+							CreateEdgeMothod;					
+					floatSliderGrp -enable 1 -label "Tube Diameter" 
+							-field true 
+							-precision 4 
+							-minValue 0.0001 -maxValue 100.0 
+							-fieldMinValue 0.1 -fieldMaxValue 100000.000 
+							-value 1.000 
+							-changeCommand "CreateTessellateTest"
+							TubeDiameter;
+				setParent ..;
+				string $button1 = `button -label "Create Cloth Tube" -command "CreateClothTube;\ndeleteUI ycCreateClothTube"`;
+				string $button2 = `button -label "Apply" -command "CreateClothTube"`;
+				string $button3 = `button -label "Close" -command "deleteUI ycCreateClothTube"`;
+
+			formLayout -edit
+				-attachForm	columnLayout1	"top"		5
+				-attachForm	columnLayout1	"left"		5
+
+				-attachForm	$button1	"left"		5
+				-attachForm	$button1	"bottom"	5
+				-attachPosition	$button1	"right"		5	33
+
+				-attachControl	$button2	"left"		5	$button1
+				-attachForm	$button2	"bottom"	5
+				-attachPosition	$button2	"right"		5	67
+
+				-attachControl	$button3	"left"		5	$button2
+				-attachForm	$button3	"bottom"	5
+				-attachForm	$button3	"right"		5
+			formLayout1;
+
+	showWindow;
+}
+
+global proc CreateClothTube()
+{
+
+	int $SelectItem=`radioButtonGrp -q -select CreateEdgeMothod`;
+	switch ($SelectItem)
+	{
+	case 1:
+		CreateSelectEdgeCloth;
+		break;
+	case 2:
+		CreateCenterCurveCloth;
+		break;
+	default:
+		return;
+	}
+}
+ycCreateClothTube;
+
+global proc CreateTessellateTest()
+{
+	float $TubeDiameterSize=`floatSliderGrp -q -value TubeDiameter`;
+	float $zSize=$TubeDiameterSize*1.5;
+	curve -d 1 -per on -p 0 0 0 -p $TubeDiameterSize 0 $zSize -p (-$TubeDiameterSize) 0 $zSize -p 0 0 0 -k 0 -k 1 -k 2 -k 3;
+	if (`objExists "tubeShapeCurve"`)
+	{
+		delete "tubeShapeCurve";
+	}
+	rename "tubeShapeCurve";
+}
+
+global proc CreateSelectEdgeCloth()
+{
+	string $SelectObject[]=`ls -sl -fl`;
+	string $SelectShape[]=`listRelatives -type "nurbsCurve"`;
+	if (size($SelectObject)!=size($SelectShape)+1||size($SelectObject)==0)
+	{
+		error "Please select Curve";
+		return;
+	}
+
+	string $extc = "tubeShapeCurve";
+	float $dsize=`floatSliderGrp -q -value TubeDiameter`;
+	if ( $dsize <= 0.00001 )
+		$dsize = 1.0;
+	string $orgcuvs[] = `ls -l -sl`;
+	int $cnt = `size $orgcuvs`;	
+	
+	if ( `nodeType $SelectObject[$cnt-1]` != "transform" )
+	{
+		print("No correct transform node for cloth constraint!");
+		return;
+	}
+
+	float $zsize = $dsize * 1.5;
+
+	string $consloc=$SelectObject[$cnt-1];
+
+	curve -d 1 -per on -p 0 0 0 -p $dsize 0 $zsize -p (-$dsize) 0 $zsize -p 0 0 0 -k 0 -k 1 -k 2 -k 3;
+	if (`objExists $extc`)
+	{
+		delete $extc;
+	}
+	rename $extc;
+
+	cpSolver -n cpSolver -sf 1 -fs 1 -ss 0.02 -s 10 -g 0 -980 0 -rfl 5;
+
+	int $i;
+	for ( $i = 0; $i < $cnt-1; $i++ )
+		createHairCtrlCurve( $orgcuvs[$i], $extc, $consloc );
+}
+
+global proc createCrv(int $degree, int $ch, int $fit)
+{ 
+
+// Initialize edge and curve lists and check for valid selection
+//
+
+int $error = 0;
+string $crvs[];
+string $edgeList[] = `filterExpand -sm 32` ;
+int $size = `size $edgeList`;
+if ($size < 1)
+	{
+	print ("\n\n\/\/ERROR: Nothing valid selected.\/\/");
+	$error = 1;
+	}
+	
+// Disable paint select if it was in use
+//
+escapeCurrentTool; 
+
+// Duplicate edges as curves and put in temporary curve list
+//
+int $c = 0;
+for ($edge in $edgeList)
+	{
+	string $tmpCrv[] = `duplicateCurve -name tmpCrv -ch 1 -rn 0 -local 0 $edge`;
+	$crvs[$c] = $tmpCrv[0];
+	$c ++; 	
+	}
+
+// Get initial number of curves in list for loop
+// and make last curve in list the attach curve
+//
+if ($error)
+	{
+	$size = 0;
+	}
+else 
+	{
+	$size = `size  $crvs` - 1;
+	rename $crvs[`size  $crvs` - 1] tmpAttach;
+	}
+
+// Step through list of curves and attach adjacent curves to the attach curve
+// This is done by comparing the endpoints of all curves until a match is found
+//
+while ($size > 0)
+	{
+	
+	// Check size of list before comparison loop
+	//
+	$sizein = $size;
+
+	// Compare attach curve to all other curves in list
+	//
+	for ($c = 0; $c < $size; $c++)
+		{
+		
+		// Get number of points on attach curve
+		//
+		select -r "tmpAttach.cv[*]";
+		string $cvList[] = `filterExpand -sm 28`;
+		int $c1_lastCV = (`size($cvList)` - 1);
+				
+		// Get number of points on curve2
+		//
+		string $tmp = $crvs[$c]+".cv[*]";		
+		select -r $tmp;
+		string $cvList[] = `filterExpand -sm 28`;
+		int $c2_lastCV = (`size($cvList)` - 1);
+				
+
+		// Get positional values of endpoints for both curves
+		//
+		//print ("Compare "+$crvs[0]+" to "+$crvs[$c]+"\n");
+		string $tmp = "tmpAttach.cv[0]";
+		float $c1p1[] = `xform -q -t $tmp`;  //attach curve endpoint1
+		string $tmp = "tmpAttach.cv["+$c1_lastCV+"]";
+		float $c1p2[] = `xform -q -t $tmp`;  //attach curve endpoint2
+		string $tmp = $crvs[$c]+".cv[0]";
+		float $c2p1[] = `xform -q -t $tmp`;  //curve2 endpoint1
+		string $tmp = $crvs[$c]+".cv["+$c2_lastCV+"]";
+		float $c2p2[] = `xform -q -t $tmp`;  //curve2 endpoint2
+
+	
+		// Compare pairs of endpoints looking for a match. 
+		// If match is found, attach curves, replace first curve with
+		// new attached curve, rename second curve for later use
+		//
+		int $match = ptCmp($c1p1,$c2p1);
+		if ($match)
+			{
+			attachCurve  -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ;
+			rename $crvs[$c] TMPCRV;
+			}
+		else 
+			{
+			int $match = ptCmp($c1p1,$c2p2);
+			if ($match)
+				{
+				attachCurve  -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ;
+				rename $crvs[$c] TMPCRV;
+				}
+			else 
+				{
+				int $match = ptCmp($c1p2,$c2p1);
+				if ($match)
+					{
+					attachCurve  -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ;
+					rename $crvs[$c] TMPCRV;
+					}
+				else 
+					{
+					int $match = ptCmp($c1p2,$c2p2);
+					if ($match)
+						{
+						attachCurve  -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ;
+						rename $crvs[$c] TMPCRV;
+						}
+						
+					}
+				}	
+			} // close nested if statements
+			
+		} // close for statement
+
+	
+	// select all remaining tmpCrv's and rebuild
+	// list of remaining curves to be attached
+	//
+	select -cl;
+	string $sel[] = `ls "tmpCrv*"`;
+	if (`size($sel)`)
+		{
+		select -r $sel;
+		select -d "tmpCrv*Shape"; //remove shape nodes from selection list	
+		}
+	string $sel[] = `ls -sl`;
+	$crvs = $sel; //remaining curves
+
+
+	// Check size of new list after comparison loop. If unchanged,
+	// print ERROR message clean up temporary curves and exit.
+	// Otherwise set new size and check remaining curves.
+	//
+	$sizeout = (`size($crvs)`);
+	if (($sizeout == $sizein) && ($sizeout > 0))
+		{
+		print ("\n\n\/\/ERROR: All edges must be contiguous.\/\/");
+		$error = 1;
+		delete "tmpCrv*";
+		if( `objExists tmpAttach`)
+			delete "tmpAttach"; 
+		if( `objExists TMPCRV`) 
+			delete "TMPCRV*";
+		select $edgeList;
+		$size = 0;
+		break;
+		}
+	else
+		$size = $sizeout;
+
+	} // close while
+	
+		
+	// bypass this and exit if error was found otherwise finish the job.
+	// 
+	if ($error != 1)
+		{
+
+		//Make list of tmp curves for history
+		//
+		select -cl;
+		string $sel[] = `ls "TMPCRV*"`;
+		if (`size($sel)`)
+			{
+			select -r $sel;
+			select -d "TMPCRV*Shape"; //remove shape nodes from selection list	
+			}
+		string $sel[] = `ls -sl`;
+
+		if ($ch) 
+			{
+			//Maintain history and connection to mesh
+			//Rename all tmp curves in list to dupEdge and group under edgeHistGrp
+			//
+			for ($tmp in $sel)
+				{
+				rename $tmp "dupEdge";
+				}
+			if( `objExists edgeHistGrp`)
+				ungroup edgeHistGrp;
+			if( `objExists dupEdge`)
+				{
+				hide "dupEdge*";
+				select -r "dupEdge*";
+				group -name edgeHistGrp;
+				}	
+			}
+		else	
+			{
+			// Delete history and extra curves
+			//
+			select -r "tmpAttach";
+			DeleteHistory;
+			delete $sel;
+			}
+
+
+		//Get number of points on curve
+		select -r "tmpAttach.cv[*]";
+		string $cvs[] = `filterExpand -sm 28`;
+		select -r "tmpAttach";
+
+		//Rename tmpAttach curve to final edgeCurve
+		//			
+		rename "tmpAttach" "edgeCurve";
+
+		//Rebuild curve. Curve must have 4 or more points for rebuild
+		//Note: comment out rebuild line to generate a linear poly line instead
+		//
+
+
+		if (($degree == 3) && (`size($cvs)` >= 4))
+			{
+			rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 0 -kcp $fit -kep 1 -kt 0 -s 4 -d 3 -tol 0.01;
+			print ("\nEdges duplicated successfully as a cubic curve ");
+			}
+		else if (($degree == 2) && (`size($cvs)` >= 3))
+			{
+			rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 0 -kcp $fit -kep 1 -kt 0 -s 4 -d 2 -tol 0.01;
+			print ("\nEdges duplicated successfully as a 2 degree curve ");
+			}
+		else
+			print ("\nEdges duplicated successfully as a linear curve ");
+
+		if ($ch)
+			print (": with curve history");
+		else
+			print (": with out history");
+		}
+}
+
+global proc int ptCmp(float $p1[], float $p2[])
+{
+	// read in and compare two point positions
+	// return true:1 if the points are the same
+	//
+	float $distance;
+	float $v[3];
+	$v[0] = $p1[0] - $p2[0];
+	$v[1] = $p1[1] - $p2[1];
+	$v[2] = $p1[2] - $p2[2];
+	$distance = $v[0]*$v[0] + $v[1]*$v[1] + $v[2]*$v[2];
+	$distance = sqrt( $distance );				
+	//print ("Distance is : "+$distance+"\n");
+		
+	if ($distance == 0) 
+		{
+		return 1;
+		}
+	else
+		{
+		return 0;
+		}
+}	
+
+
+// -------------------------------------------------------------------
+global proc string[] createHairCtrlCurve( string $orgc, string $extc, string $consloc )
+{
+	string $ret[], $tmp[], $stmp;
+	$ret[0] = $ret[1] = "";
+
+	$tmp = `listRelatives -s -f $extc`;
+	$stmp = $tmp[0];
+	if ( `nodeType $stmp` != "nurbsCurve" )
+	{
+		print("No correct curve for extruding!");
+		return $ret;
+	}
+	
+	$tmp = `listRelatives -s -f $orgc`;
+	$stmp = $tmp[0];
+	if ( `nodeType $stmp` != "nurbsCurve" )
+	{
+		print("No correct curve as original hair curve!");
+		return $ret;
+	}
+	
+	if ( `nodeType $consloc` != "transform" )
+	{
+		print("No correct transform node for cloth constraint!");
+		return $ret;
+	}
+
+	$tmp = `ls $orgc`;
+//	$ret[0] = "hExtC" + $tmp[0];
+	$ret[1] = "hCtrC" + $tmp[0];
+	$ret[0] = $tmp[0]+"_Cloth";
+//	$ret[1] = $tmp[0];
+	// create tube
+	extrude -ch true -rn false -po 1 -et 2 -ucp 1 -fpt 1 -upn 1 -rotation 0 -scale 1 -rsp 1 $extc $orgc;
+	$tmp = `listHistory -lf on -lv 1`;
+	if ( `nodeType $tmp[1]` != "nurbsTessellate" )
+	{
+		print("Wrong extruding!");
+		delete;
+		$ret[0] = $ret[1] = "";
+		return $ret;
+	}
+	setAttr ( $tmp[1] + ".format" ) 3;
+	rename $ret[0];
+
+	// convert to cloth object
+	cpSolver -e -ccm;
+//	hide $orgc;
+//	hide $ret[0];
+
+	int $seg = `getAttr ( $orgc + ".spans" )`;
+	if ( `getAttr ( $orgc + ".form" )` != 2 )
+		$seg += `getAttr ( $orgc + ".degree" )`;		// it isn't periodic curve
+
+	int $nseg = `getAttr ( $extc + ".spans" )`;
+	if ( `getAttr ( $extc + ".form" )` != 2 )
+		$nseg += `getAttr ( $extc + ".degree" )`;		// it isn't periodic curve
+
+
+	int $i, $j;
+	select -r $consloc;
+	// select vertexs for constraint
+	for( $i = 0, $j = 0; $i < $nseg; $i++, $j += $seg )
+	{
+		select -tgl ( $ret[0] + ".vtx[" + $j + ":" + ( $j + 1 ) + "]" );
+	}
+	cpConstraint -type transform;
+
+	// select connected edges
+	select -r ( $ret[0] + ".e[0]");
+	if ( $seg > 2 )
+	{
+		for( $i = 2, $j = 5; $i < $seg; $i++, $j += 4 )
+		{
+			select -tgl ( $ret[0] + ".e[" + $j + "]" );
+		}
+	}
+
+	// create curve from selected connected edges from mesh
+	if ( $seg > 3 )
+		createCrv( 3, 1, 1 );
+	else
+	{
+		if ( $seg == 3 )
+			createCrv( 2, 1, 1 );
+		else
+			createCrv( 1, 1, 1 );
+	}
+	// warning !!! don't insert any sentence which may change corrent selection from createCrv,
+	// before the next sentence about rename issue.
+	rename $ret[1];
+	reverseCurve -ch 1 -rpo 1 $ret[1];
+
+	return $ret;
+}

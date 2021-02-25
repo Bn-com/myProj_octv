@@ -1,0 +1,139 @@
+global proc ChangeRes()
+{
+ global int  $ChangeResModel = 1;
+ global int  $ChangeResSke = 0;
+
+
+    if (!`window -exists ChangeResWin`)
+       {
+	        window -width 260 -height 130 -title "Toggle Model" ChangeResWin;
+
+		formLayout -numberOfDivisions 100 formLayout1;
+
+                checkBox  -label "Model"       -v $ChangeResModel  -cc "$ChangeResModel = #1;DispSkeleton"  DispMod ;
+                checkBox  -label "Skeleton"    -v $ChangeResSke    -cc "$ChangeResSke = #1;DispSkeleton"   DispSke;
+
+                button -label "Toggle"  -h 27 -command "ChangeResTog " Tog;
+                button -label "Close"   -h 27 -command "deleteUI -window  ChangeResWin" cancel;
+
+		formLayout -edit
+			-attachForm	  DispMod	"top"		20
+			-attachForm	  DispMod	"left"		100
+
+			-attachControl	  DispSke	"top"           5	DispMod
+			-attachForm	  DispSke	"left"		100
+ 
+			-attachForm	  Tog	        "left"		0
+			-attachForm	  Tog	        "bottom"	5	
+			-attachPosition	  Tog      	"right"		0       50
+			
+			-attachControl	  cancel	"left"		5	Tog
+			-attachForm	  cancel	"bottom"	5
+			-attachPosition	  cancel      	"right"		0       100
+
+		formLayout1;
+	
+	 showWindow ChangeResWin;
+	}
+}
+proc string[] Intersector (string $arr1[],string $arr2[])
+{
+   $myIntersector = `stringArrayIntersector -r`;
+
+   // Intersect some string arrays using the intersector
+   //
+   stringArrayIntersector -edit -intersect $arr1 $myIntersector;
+   stringArrayIntersector -edit -intersect $arr2 $myIntersector;
+
+   // Query the intersector to see what the intersection is so far
+   //
+   string $result[] = `stringArrayIntersector -query $myIntersector`;
+   stringArrayIntersector -edit -reset $myIntersector;
+   return $result;
+}
+global proc string getroot()
+{
+   string $buffer[];
+   string $nodes[] = `selectedNodes -dagObjects`;
+   tokenize $nodes[0] "|" $buffer;
+   return $buffer[0];
+}
+
+proc string[] SkinnedMod ()
+{
+   string $root = getroot();
+   string $char[] = `ls -dag -ap $root`;
+   string $Skinned1[] = `ls "*_hi_*"`;
+   string $Skinned2[] = `ls "*_md_*"`;
+   string $Skinned3[] = `ls "*_lo_*"`;
+   string $Skinned[] = stringArrayCatenate(stringArrayCatenate ($Skinned1,$Skinned2),$Skinned3 );
+   return Intersector ($Skinned,$char);
+}
+proc string[] LinkedMod ()
+{
+   string $root = getroot();
+   string $char[] = `ls -dag -ap $root`;
+   string $Linked[] = `ls "*_an_*"`;
+   return Intersector ($Linked,$char);
+}
+proc string[] InvLinkedMod ()
+{
+   string $root = getroot();
+   string $char[] = `ls -dag -ap $root`;
+   string $Linked[] = `ls -invisible "*_an_*"`;
+   return Intersector ($Linked,$char);
+}
+proc string[] OnlyJoints ()
+{
+   string $root = getroot();
+   string $char[] = `ls -dag -ap $root`;
+   string $Linked[] = `ls -type "joint" $char`;
+   return Intersector ($Linked,$char);
+}
+
+
+global proc DispSkeleton()
+{
+   global int  $ChangeResModel;
+   global int  $ChangeResSke;
+
+   if ($ChangeResModel==0 && $ChangeResSke==1)
+   {
+    string $SkinnedModel[] = SkinnedMod ();
+    string $linkedModel[] = LinkedMod();
+    string $joints[] = OnlyJoints();
+    string $hidearray[] = stringArrayCatenate ($SkinnedModel,$linkedModel);
+    hide $hidearray;
+    showHidden $joints;
+   }else {
+       string $SkinnedModel[] = SkinnedMod ();
+       string $linkedModel[] = LinkedMod();
+       string $hidearray[] = stringArrayCatenate ($SkinnedModel,$linkedModel);
+       showHidden $hidearray;
+   }
+}
+
+global proc ChangeResTog()
+{
+   global int  $ChangeResModel;
+   global int  $ChangeResSke;
+
+   checkBox -e -value true  DispMod;
+   checkBox -e -value false DispSke;
+   $ChangeResModel=1;
+   $ChangeResSke=0;
+
+   string $nodes[] = `selectedNodes -dagObjects`;
+
+   string $SkinnedModel[] = SkinnedMod ();
+   string $linkedModel[] = LinkedMod();
+   string $linkedModelhid[] = InvLinkedMod();
+   if (size($linkedModelhid)>0){
+       hide $SkinnedModel;
+       showHidden $linkedModel;
+   } else {
+           hide $linkedModel;
+           showHidden $SkinnedModel;
+   }
+   select -r $nodes;
+}

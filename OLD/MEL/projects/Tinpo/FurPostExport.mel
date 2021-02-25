@@ -1,0 +1,424 @@
+// FurPostExport.mel (c) 2007 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	After FurExport and FurMotionExport are done, this script is called to update the sym links to the latest fur, and remove temp files.
+Use:
+	FurPostExport argList
+
+Arguments:
+	argList (string)	- list of args, delimited by ';'
+
+Returns:
+	
+Dependancies:
+
+	xml_parser plug-in
+	getPath
+	argList.mel
+	parseXML.mel
+	getInsightShotGroupLength
+	stringArrayFindIndex
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	02/26/07
+Revisions:	02/27/07	Rev 1.1
+		- Optimized so that fur export data is only read once per asset
+		
+		02/28/07	Rev 1.2
+		- Remove links which are outside of the frame range of the shot.
+		
+		02/28/07	Rev 1.3
+		- Create [seq]_[shot]_furExport.xml to store versioning info from the export.
+		
+		03/01/07	Rev 1.4
+		- Store the filename and version of the furExport file that this fur came from in the furExport.xml file
+
+		03/06/07	Rev 1.5
+		- Store the pointCache version in furExport.xml.
+		- Remove process of making sym-links (not needed anymore)
+
+		03/06/07	Rev 1.6
+		- Store the timestamp of the fur export asset
+
+		03/16/07	Rev 1.7
+		- Upgrading to handle versioned cloth
+
+		03/23/07	Rev 1.8
+		- Plugging in auto-deletion of old fur versions
+
+		03/26/07	Rev 1.9
+		- Adding support for configuration of auto-deletion via project globals
+
+		04/07/07	Rev 2.0
+		- Adding support for alternative output locations for the fur. A link in the normal location
+
+		04/10/07	Rev 2.1
+		- Fixing some problems that occur when alternate output locations are used.
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// dev version of this file:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/FurPostExport.2.1.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+}
+// ---------------------------------------------------------------------------------------------------
+// getVersionData - get the pointCache version data for the specified namespace
+// ---------------------------------------------------------------------------------------------------
+proc string getVersionData (string $namespace,string $clothNames[], string $clothVersions[])
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+	global string $gTaskType;
+	string $ver = "0000";
+
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot+"_pointCacheExport.xml";
+	if (!`filetest -f $file`)
+	{
+		print ($gTaskType+": Warning: "+$file+" doesn't exist.\n\n");
+		return "0000";
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+ 
+	// put a version with each namespace
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $ns = xml_getVar ($nodes[$i],"namespace");
+		if ($ns == $namespace)
+		{
+			$ver = xml_getVar ($nodes[$i],"pointCacheVersion");
+			break;
+		}
+		
+	}
+	// get cloth versioning data
+	clear $clothNames;
+	clear $clothVersions;
+
+	$nodes = xml_getTag ($xml,"Cloth");
+	if (size($nodes))
+		$nodes = xml_getTag ($nodes[0],"Object");
+
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $clothNs = xml_getVar ($nodes[$i],"namespace");
+		if ($clothNs == $namespace)
+		{
+			int $c = size($clothNames);
+			$clothNames[$c] = xml_getVar ($nodes[$i],"name");
+			$clothVersions[$c] = xml_getVar ($nodes[$i],"version");
+		}
+	}
+	return $ver;
+}
+// ---------------------------------------------------------------------------------------------------
+proc int do_furPostExport ()
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global string $gTaskType;
+	global int $gRemoveOldVersions;
+	global float $gRemoveVersionsOlderThan;
+
+	string $objects[];
+	string $furExportData = "";
+	string $location = "";
+	string $visitedLocations[];
+	string $namespaces[], $furVersions[], $pointCacheVersions[], $exportAssetVersions[], $exportFilenames[], $exportStamps[];
+	int $newLocation = true;
+	int $frameRangeOk = true;
+	int $newNamespace = true;
+	string $clothNamespaces[], $clothNames[], $clothVersions[];	// output data to write to FurExport.xml
+	string $curClothNames[], $curClothVersion[];			// cloth data for current namespace
+	string $curPointCacheNames[];		// pointCache shape names being used by current furExport asset
+
+	// -------------------------------------------------
+	/*
+		Confirm that the playlist exists
+	*/
+	// -------------------------------------------------
+	if (!`filetest -f $gPlaylist`)
+	{
+		print ($gTaskType+": Playlist "+$gPlaylist+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+
+
+	print ($gTaskType+": Parsing playlist "+$gPlaylist+"...\n\n");
+	
+
+	// -------------------------------------------------
+	/*
+		Parse the playlist and loop through each item
+	*/
+	// -------------------------------------------------	
+	string $xml = readXML ($gPlaylist,0);
+	string $jobs[] = xml_getTag ($xml,"Job");
+
+	
+	print ($gTaskType+": Cleaning up temp files...\n\n");
+
+	for ($i=0;$i<size($jobs);$i++)
+	{
+		int $frame = (int)xml_getVar ($jobs[$i],"frame");
+
+		string $node[] = xml_getTag ($jobs[$i],"CacheOutput");
+		string $tmp = xml_getVar ($node[0],"location");
+		if ($tmp != $location)
+		{
+			$location = $tmp;
+			if (stringArrayFindIndex($location,$visitedLocations) == -1)
+			{
+				$newLocation = true;
+				$visitedLocations[size($visitedLocations)] = $location;
+			}
+			else
+				$newLocation = false;
+		}
+		else
+		{
+			$newLocation = false;
+		}
+
+		$node = xml_getTag ($jobs[$i],"VersionOutput");
+		string $ver_location = xml_getVar ($node[0],"location");
+
+		$node = xml_getTag ($jobs[$i],"FinalOutput");
+		string $final_location = "";
+		if (size($node))
+			$final_location =  xml_getVar ($node[0],"location");
+
+		$node = xml_getTag ($jobs[$i],"Asset");
+		string $assetName = xml_getVar ($node[0],"name");
+		string $assetType = xml_getVar ($node[0],"type");
+		string $filename = xml_getVar ($node[0],"filename");
+		string $namespace = xml_getVar ($node[0],"namespace");
+		if (stringArrayFindIndex ($namespace,$namespaces) == -1)
+		{
+			// a new namespace that hasn't been encountered yet
+			int $c = size($namespaces);
+			$namespaces[$c] = $namespace;
+			// update pointCache and fur version data
+			$pointCacheVersions[$c] = getVersionData ($namespace,$curClothNames,$curClothVersion);
+			$furVersions[$c] = basename ($ver_location,"");
+			$exportAssetVersions[$c] = getVersion ("FromFilenameGeneric",{$filename});
+			$exportFilenames[$c] = $filename;
+			int $stamp = getFileMTime ($filename);
+			$exportStamps[$c] = $stamp;
+
+			// clean up old versions
+			if ($gRemoveOldVersions)
+			{
+				print ($gTaskType+": Cleaning up old fur versions ...\n");
+				removeOldFurVersions ($gSequence,$gShot,$namespace,$gRemoveVersionsOlderThan,true,"");
+			}
+		}
+
+		string $tmp = getPath ("AssetInfoDir",{$assetType,$assetName})+"/furExportData.xml";
+		if ($tmp != $furExportData)
+		{
+			// asset is different than the one currently being worked on - re-read the export data
+			$furExportData = $tmp;
+			// -------------------------------------------------
+			/*
+				Confirm that fur export data exists.
+			*/
+			// -------------------------------------------------
+			if (!`filetest -f $furExportData`)
+			{
+				print ($gTaskType+": Fur Export Info file "+$furExportData+" doesn't exist. Can't continue.\n\n");
+				return false;
+			}
+			// -------------------------------------------------
+			/*
+				Parse the fur export data. This gives us a list of nodes that we exported in FurExport.
+			*/
+			// -------------------------------------------------
+			$xml = readXML ($furExportData,0);
+			string $furObjects[] = xml_getTag ($xml,"furObjects");
+			$objects = xml_getTag ($furObjects[0],"Object");
+
+			// Read the pointCache data for this asset. This will be used later to look up whether we used any cloth
+			string $pointCacheObjects[] = xml_getTag ($xml,"pointCache");
+			if (size($pointCacheObjects))
+				$pointCacheObjects = xml_getTag ($pointCacheObjects[0],"Object");
+
+			for ($j=0;$j<size($pointCacheObjects);$j++)
+			{
+				string $pcShape = xml_getVar ($pointCacheObjects[$j],"shape");
+				// look up in the pointCache version data to see if we used cloth
+				for ($k=0;$k<size($curClothNames);$k++)
+				{
+					if ($pcShape == $curClothNames[$k])
+					{
+						int $c = size($clothNamespaces);
+						$clothNamespaces[$c] = $namespace;
+						$clothNames[$c] = $pcShape;
+						$clothVersions[$c] = $curClothVersion[$k];
+						break;
+					}
+				}
+			}
+		}
+
+		for ($j=0;$j<size($objects);$j++)
+		{
+			string $type = xml_getVar ($objects[$j],"type");
+			string $exported = xml_getVar ($objects[$j],"shape");
+			
+			// for now, assume that type is "shaveHair", since this is the only one implemented yet.
+
+			// build a path to the fur files
+			string $temp_fur = "";
+			if ($final_location != "")
+			{
+				$temp_fur = $final_location+"/"+$exported+"."+padNumber($frame,4)+".fur.tmp";	// created by FurExport w/o motion vectors
+			}
+			else
+			{
+				$temp_fur = $ver_location+"/"+$exported+"."+padNumber($frame,4)+".fur.tmp";	// created by FurExport w/o motion vectors
+			}
+
+			// remove temp fur - it is not needed anymore
+			if (`filetest -f $temp_fur`)
+				system ("rm "+$temp_fur);
+			
+			// if we have exported to an alternate location, create a link in the normal place
+			if ($ver_location != $final_location && $final_location != "")
+			{
+				// make sure final_location exists
+				if (!`filetest -d $final_location`)
+				{
+					sysFile -md $final_location;
+					system ("chmod 777 "+$final_location);
+				}
+
+				string $real_file = $ver_location+"/"+$exported+"."+padNumber($frame,4)+".fur";
+				string $link = $final_location+"/"+$exported+"."+padNumber($frame,4)+".fur";
+
+				system ("ln -s "+$real_file+" "+$link);
+			}
+				
+		}
+
+	}
+	// Create/update the furExport file
+	// Read the previous one if it exists
+	string $furExportFile = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot+"_furExport.xml";
+	print ($gTaskType+": Updating "+$furExportFile+"...\n");
+
+	if (`filetest -f $furExportFile`)
+	{
+		string $xml = readXML ($furExportFile,0);
+		string $nodes[] = xml_getTag ($xml,"Asset");
+		for ($i=0;$i<size($nodes);$i++)
+		{
+			string $ns = xml_getVar ($nodes[$i],"namespace");
+			// have we encountered this namespace in the current export?
+			if (stringArrayFindIndex ($ns,$namespaces) == -1)
+			{
+				// if not, add to the data we are about to write out
+				string $furVer = xml_getVar ($nodes[$i],"furVersion");
+				string $pcVer = xml_getVar ($nodes[$i],"pointCacheVersion");
+				string $exportFilename = xml_getVar ($nodes[$i],"exportFilename");
+				string $exportVer = xml_getVar ($nodes[$i],"exportVersion");
+				string $stamp = xml_getVar ($nodes[$i],"exportStamp");
+
+				int $c = size ($namespaces);
+				$namespaces[$c] = $ns;
+				$pointCacheVersions[$c] = $pcVer;
+				$furVersions[$c] = $furVer;
+				$exportAssetVersions[$c] = $exportVer;
+				$exportFilenames[$c] = $exportFilename;
+				$exportStamps[$c] = $stamp;
+				
+			}
+			// if yes, disregard in favor of new data
+		}
+	}
+
+	// create the xml and write it out.
+	string $xml = "<FurExport>\n";
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		$xml += "\t<Asset namespace=\""+$namespaces[$i]+"\" furVersion=\""+$furVersions[$i]+"\" ";
+		$xml += "pointCacheVersion=\""+$pointCacheVersions[$i]+"\" ";
+		$xml += "exportFilename=\""+$exportFilenames[$i]+"\" ";
+		$xml += "exportVersion=\""+$exportAssetVersions[$i]+"\" ";
+		$xml += "exportStamp=\""+$exportStamps[$i]+"\" />\n";
+	}
+	// write cloth data
+	if (size($clothNamespaces))
+	{
+		$xml += "\t<Cloth>\n";
+		for ($i=0;$i<size($clothNamespaces);$i++)
+		{
+			$xml += "\t\t<Object namespace=\""+$clothNamespaces[$i]+"\" name=\""+$clothNames[$i]+"\" version=\""+$clothVersions[$i]+"\" />\n";
+		}
+		$xml += "\t</Cloth>\n";
+	}
+	$xml += "</FurExport>\n";
+
+	writeFile ($furExportFile,$xml);
+
+
+	print ($gTaskType+": DONE.\n\n");
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------------
+global proc FurPostExport(string $args) 
+{
+	loadDependencies();
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global int $gRemoveOldVersions;
+	global float $gRemoveVersionsOlderThan;
+	global string $gTaskType = "FurPostExport";
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gPlaylist = getArgValue ($args,"playlist");
+	$gRemoveOldVersions = (int)getArgValueDefault ($args,"cleanUpOldVersions","1");
+	$gRemoveVersionsOlderThan = (float)getArgValueDefault ($args,"oldVersionTimeoutAge","48.0");
+	
+	do_furPostExport();
+}

@@ -1,0 +1,227 @@
+ //-----------------------------------------------------------------------
+//
+//  Alias mel script
+//
+//  Procedure Name:
+//      landCurves
+//
+//  Description:
+//
+//		Land selected curves to surface
+//
+//  Note:
+//	
+//  Usage:
+//
+//  Input Arguments: none
+//
+//  Return Value: None.
+//
+//----------------------------------------------------------------------
+
+// Modification by cz August 19, 2006
+
+global proc landCurves()
+{
+	// build the user UI
+	if ( `window -ex landCurvesWin` )
+	{
+		deleteUI landCurvesWin ;
+	}  	
+	window -t "Land Curves"
+			-wh 358 150
+			-maximizeButton 0 
+			-sizeable 0
+			-resizeToFitChildren 1
+			landCurvesWin;
+	
+	// window -q -wh landCurvesWin;
+	// window -e -wh 358 150 landCurvesWin;
+	// windowPref -remove landCurvesWin;
+	
+	formLayout mainForm;
+	separator -style "in" -h 10 -w 350 sep1;
+
+	// get hairSystem that already exists
+	string $hairSystems[] = `ls -type "hairSystem"`;
+	optionMenuGrp -l "Hair System" -cal 1 right hSysMenu;
+		menuItem -label "Create New";
+		for( $i = 0; $i < size( $hairSystems ); $i++ )
+		{
+			menuItem -label $hairSystems[$i];
+		}
+
+	// connect to constraint or not
+	separator -style "none" -h 10 -w 350 sep2;
+	checkBoxGrp -l "Connect to Constraints" -v1 1 hConnect;
+	
+	// execute button
+	separator -style "in" -h 10 -w 350 sep3;
+	button -w 115 -h 30 
+			-al "center" 
+			-l "Refresh"
+			-c ("landCurves") refreshBtn; 
+	button -w 115 -h 30 
+			-al "center" 
+			-l "Land Curves"
+			-c ("landCurvesDo;landCurves") landCurveBtn; 
+	button -w 115 -h 30 
+			-al "center" 
+			-l "Close"
+			-c ("deleteUI landCurvesWin") closeBtn; 
+
+	formLayout -e 
+		-af sep1 "top" 1
+		-af sep1 "left" 1
+		-af sep1 "right" 1
+		
+		-ac hSysMenu "top" 10 sep1
+		-af hSysMenu "left" 10
+		-af hSysMenu "right" 10
+		
+		-ac sep2 "top" 5 hSysMenu
+		-af sep2 "left" 1
+		-af sep2 "right" 1
+
+		-ac hConnect "top" 5 sep2
+		-af hConnect "left" 10
+		-af hConnect "right" 10	
+		
+		-ac sep3 "top" 1 hConnect
+		-af sep3 "left" 1
+		-af sep3 "right" 1	
+		
+		-ac refreshBtn "top" 5 sep3
+		-af refreshBtn "left" 1
+		-af refreshBtn "bottom" 2
+
+		-ac landCurveBtn "top" 5 sep3
+		-ac landCurveBtn "left" 3 refreshBtn
+		-af landCurveBtn "bottom" 2
+
+		-ac closeBtn "top" 5 sep3
+		-ac closeBtn "left" 3 landCurveBtn
+		-af closeBtn "right" 1
+		-af closeBtn "bottom" 2
+
+		mainForm;
+
+	showWindow landCurvesWin; 
+}
+
+global proc landCurvesDo()
+{
+	// source statement
+	source generateChannelMenu.mel;
+	
+	// check if closestPointOnSurface plugin is loaded
+	// if not load it
+	if (!`pluginInfo -q -loaded -name "nearestPointOnMesh.mll"`)
+	{
+	    catch( `loadPlugin "nearestPointOnMesh.mll"`);
+	}
+
+	// get the user selection which at least
+	// include a surface and nurbsCurve
+	string $sel[] = `ls -sl -dag -s`;
+	string $surf = $sel[size($sel)-1];
+
+	// surface should be nurbs surface
+	if(nodeType($surf)!="mesh")
+	{
+		if(nodeType($surf)!="nurbsSurface")
+		{
+			error "You need to select curves FIRSTLY and THEN surface.";
+		}
+	}
+	
+	pickWalk -d down;
+	string $list[] = `ls -sl -type "nurbsCurve"`;
+	string $it;
+
+	string $hs=`optionMenuGrp -q -v hSysMenu`;
+	if($hs=="Create New") 
+	{
+		$hs = `createNode "hairSystem"`;
+		connectAttr time1.outTime ($hs + ".currentTime"); 
+	}
+
+	// hairCurveNode setting
+	string $cpos, $fol; 
+	float $u, $v;
+	float $rangeU=1, $rangeV=1, $minU=0, $minV=0;
+	int $doStart=1, $doRest=0, $isPass=0;
+	int $arr[]={0};
+	string $groupNames[] = getHairSystemGroups( $hs, true ); 
+	print $groupNames;
+	int $simulationType = 0;
+
+	if(`nodeType $surf` == "nurbsSurface" ) 
+	{
+		$cpos="cPos";
+		createNode -s closestPointOnSurface -n $cpos;
+		catchQuiet(`connectAttr -f ($surf+".worldSpace[0]") ($cpos+".inputSurface")`);
+		$minU=`getAttr ($surf+".mnu")`;
+		$minV=`getAttr ($surf+".mnv")`;
+		$rangeU = (`getAttr ($surf+".mxu")`-$minU);
+		$rangeV = (`getAttr ($surf+".mxv")`-$minV);
+	}
+	else 	
+	{  
+		$cpos="cPom";
+		createNode nearestPointOnMesh -n $cpos; 
+		catch(`connectAttr -f ($surf+".outMesh") ($cpos+".inMesh")`);
+	}
+	print ($list); 
+
+	// for each curve
+	for ($it in $list) 
+	{
+		string $itTrans[] = `listTransforms $it`;
+		catchQuiet(`parent -w $itTrans[0]`);
+		makeIdentity -apply true -t 1 -r 1 $itTrans[0];		
+		float $root[] = `pointOnCurve -p -pr 0 $it`;
+		setAttr ($cpos+".inPosition") $root[0] $root[1] $root[2];
+
+		$u= (`getAttr ($cpos+".u")` - $minU)/$rangeU;
+		$v= (`getAttr ($cpos+".v")` - $minV)/$rangeV;
+
+		$fol = createHairCurveNode($hs, $surf, $u, $v, 0, 1, $doStart, $doRest,$isPass, $it, 1.0,
+			$arr, $groupNames[0], $groupNames[1], $simulationType);
+		print ($fol+" "+$it+"\n"); 
+		if($fol=="") continue; // fail to create follicle
+
+
+		setAttr ($fol+".startDirection") 1;
+		setAttr ($fol+".restPose") 3;
+		catchQuiet(`parent -w $itTrans[0]`);
+		makeIdentity -apply false -t 1 -r 1 $itTrans[0];
+		parent $itTrans[0] $fol;
+		float $posOn[] = `getAttr (($fol + ".outTranslate"))`;
+		move -r ($posOn[0]-$root[0]) ($posOn[1]-$root[1]) ($posOn[2]-$root[2]) $it;
+
+	}
+
+	delete $cpos;
+
+	if(!`checkBoxGrp -q -v1  hConnect`)
+	{
+		return;
+	}
+
+	select -r $hs;
+	string $hsys[]={$hs};
+	convertHairSelection "follicles";
+	int $ind[] = selectedHairSystemIndices( $hsys );
+	int $numInd = size($ind);
+	int $ci;
+	$list = `listConnections -t  "hairConstraint" $hs`; 
+
+	for($it in $list)
+	{
+		for( $ci = 0; $ci < $numInd; $ci++ )
+		{
+			setAttr ($it + ".curveIndices[" + $ci + "]") ($ind[ $ci ]);
+		}
+	}
+}

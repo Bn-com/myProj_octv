@@ -1,0 +1,782 @@
+global int $MAX_SEQS = 20;
+
+global proc dimCycleInterval ( string $nodeName )
+//
+// Description:
+//  Dim the cycle interval if cycleEmission is set to none, undim it otherwise.
+// Emitter type doesn't matter, since cycleEmission applies to all.
+{
+	int $cycEmit = `getAttr( $nodeName + ".cycleEmission" )`;
+	if ($cycEmit == 0)
+	{
+		// cycleEmission == NONE, dim cycleInterval.
+		//
+		editorTemplate -dimControl $nodeName "cycleInterval" true;
+	}
+	else
+	{
+		editorTemplate -dimControl $nodeName "cycleInterval" false;
+	}
+}
+
+global proc checkInheritOpacity( string $nodeName )
+{
+	int $status = `getAttr ( $nodeName + ".inheritOpacity" )`;
+
+	if( $status )
+	{
+		editorTemplate -dimControl $nodeName "useLuminance" false;
+		editorTemplate -dimControl $nodeName "invertOpacity" false;
+	}
+	else
+	{
+		editorTemplate -dimControl $nodeName "useLuminance" true;
+		editorTemplate -dimControl $nodeName "invertOpacity" true;
+	}
+}
+
+proc dimTextureInheritanceAttributes( string $nodeName, int $val )
+{
+	// Do NOT ever dim particle color of texture rate.
+	// If we do that, the "map" button does not function thereafter (bug 125465).
+	// It suffices to dim/undim the boolean "inherit" and "enable" buttons.
+	// js 1-5-2000.
+
+	//editorTemplate -dimControl $nodeName "particleColor" $val;
+	editorTemplate -dimControl $nodeName "inheritColor" $val;
+	editorTemplate -dimControl $nodeName "inheritOpacity" $val;
+	editorTemplate -dimControl $nodeName "useLuminance" $val;
+	editorTemplate -dimControl $nodeName "invertOpacity" $val;
+	//editorTemplate -dimControl $nodeName "textureRate" $val;
+	editorTemplate -dimControl $nodeName "enableTextureRate" $val;
+	editorTemplate -dimControl $nodeName "emitFromDark" $val;
+}
+
+
+global proc dimVolumeAttributesByShape ( string $nodeName )
+//
+// Description:
+//  If current emitter type is volume, set volume emitter attribute
+//  dimming according to volume shape.  If current emitter type is
+//  different from volume, do nothing. This routine handles only attributes
+//  which are dimmed for some volumes but not for others.  Attributes
+//  which are the same for all are handled by dimVolumeAttributes.
+{
+	int $currEmitType = `getAttr( $nodeName + ".emitterType" )`;
+	// if not a volume emitter, do nothing
+	if ( $currEmitType != 4 ) return;
+
+	int $currEmitter = `getAttr ( $nodeName + ".volumeShape" )`;
+
+	// Set up the defaults
+	//
+	editorTemplate -dimControl $nodeName "sectionRadius" true;
+	editorTemplate -dimControl $nodeName "awayFromCenter" true;
+	editorTemplate -dimControl $nodeName "awayFromAxis"   false;
+	editorTemplate -dimControl $nodeName "volumeSweep"   false;
+
+	// Each shape type changes the settings as needed.
+	//
+	switch ( $currEmitter ){
+
+		case 0: // Cube
+			editorTemplate -dimControl $nodeName "volumeSweep"   true;
+			//
+			// NOTE: no "break;" -- this is intended.
+			//
+		case 1: // Sphere
+			editorTemplate -dimControl $nodeName "awayFromCenter" false;
+			editorTemplate -dimControl $nodeName "awayFromAxis"   true;
+			break;
+
+		case 2: // Cylinder
+			break;
+
+		case 3: // Cone
+			break;
+
+		case 4: // Torus
+			editorTemplate -dimControl $nodeName "sectionRadius" false;
+			break;
+		}
+}
+
+proc dimVolumeAttributes( string $nodeName, int $val )
+//
+// Description:
+//   if $val is true, disable all volume attributes.
+// If false, enable all those which apply to current volume shape.
+{
+	editorTemplate -dimControl $nodeName "volumeShape" $val;
+	editorTemplate -dimControl $nodeName "volumeOffset" $val;
+	editorTemplate -dimControl $nodeName "volumeSweep" $val;
+	editorTemplate -dimControl $nodeName "volumeSectionRadius" $val;
+	editorTemplate -dimControl $nodeName "awayFromCenter" $val;
+	editorTemplate -dimControl $nodeName "awayFromAxis" $val;
+	editorTemplate -dimControl $nodeName "aroundAxis" $val;
+	editorTemplate -dimControl $nodeName "alongAxis" $val;
+	editorTemplate -dimControl $nodeName "randomDirection" $val;
+	editorTemplate -dimControl $nodeName "directionalSpeed" $val;
+	editorTemplate -dimControl $nodeName "scaleSpeedBySize" $val;
+	editorTemplate -dimControl $nodeName "sectionRadius" $val;
+	editorTemplate -dimControl $nodeName "displaySpeed" $val;
+	// editorTemplate -dimControl $nodeName "volumeEfficiency" $val;
+
+	// if $val is true, we have now turned everything off, which
+	// is correct.  If $val is false, we have turned everything on,
+	// which is not quite correct.  Call special routine to handle
+	// specific attributes according to shape type.
+	//
+	if (!$val)
+	{
+		dimVolumeAttributesByShape( $nodeName );
+	}	
+}
+
+global proc setAttributeDimming ( string $nodeName )
+//
+// Description:
+//  Dim attributes in the attribute editor according to the type of emitter.
+// Does not handle the dimming of attributes for a specific volume shape.
+{
+	int $currEmitter = `getAttr ( $nodeName + ".emitterType" )`;
+
+	// Set default settings for all attributes.  Then each emitter 
+	// must set only those which vary from the defaults.  All attributes
+	// are on by default EXCEPT texture inheritance, needParentUV, and 
+	// volume emission attributes.
+	// We do not include un-dimming calls for parameters (eg rate)
+	// which apply to every emitter, since nobody ever dims them.
+	//
+	
+	// Enable useRatePP only if ratePP is properly connected.
+	string $connList[];
+	$connList = `listConnections ($nodeName + ".ratePP")`;
+	if( size($connList) > 0 )
+		editorTemplate -dimControl $nodeName "useRatePP" false;
+	else
+		editorTemplate -dimControl $nodeName "useRatePP" true;
+
+	editorTemplate -dimControl $nodeName "needParentUV" true;
+
+	editorTemplate -dimControl $nodeName "minDistance" false;
+	editorTemplate -dimControl $nodeName "maxDistance" false;
+	editorTemplate -dimControl $nodeName "spread" false;
+	editorTemplate -dimControl $nodeName "scaleRateByObjectSize" false;
+
+	editorTemplate -dimControl $nodeName "directionX" false;
+	editorTemplate -dimControl $nodeName "directionY" false;
+	editorTemplate -dimControl $nodeName "directionZ" false;
+
+	editorTemplate -dimControl $nodeName "spread" false;
+	editorTemplate -dimControl $nodeName "speed" false;
+	editorTemplate -dimControl $nodeName "tangentSpeed" false;
+	editorTemplate -dimControl $nodeName "normalSpeed" false;
+
+	dimTextureInheritanceAttributes( $nodeName, true );
+	dimVolumeAttributes( $nodeName, true );
+
+	switch ( $currEmitter ){
+
+		case 0: // Direction
+			editorTemplate -dimControl $nodeName "scaleRateByObjectSize" true;
+			editorTemplate -dimControl $nodeName "tangentSpeed" true;
+			editorTemplate -dimControl $nodeName "normalSpeed" true;
+			break;
+
+		case 1: // Omni
+			editorTemplate -dimControl $nodeName "spread" true;
+			editorTemplate -dimControl $nodeName "scaleRateByObjectSize" true;
+			editorTemplate -dimControl $nodeName "directionX" true;
+			editorTemplate -dimControl $nodeName "directionY" true;
+			editorTemplate -dimControl $nodeName "directionZ" true;
+			editorTemplate -dimControl $nodeName "tangentSpeed" true;
+			editorTemplate -dimControl $nodeName "normalSpeed" true;
+			break;
+
+		case 2: // Surface 
+			editorTemplate -dimControl $nodeName "needParentUV" false;
+			editorTemplate -dimControl $nodeName "useRatePP"  true;
+			editorTemplate -dimControl $nodeName "directionX" true;
+			editorTemplate -dimControl $nodeName "directionY" true;
+			editorTemplate -dimControl $nodeName "directionZ" true;
+			editorTemplate -dimControl $nodeName "spread" true;
+			dimTextureInheritanceAttributes( $nodeName, false );
+			
+			//NOTE: IF EMITTING OBJECT IS POLYGON, SHOULD DIM
+			//		TEXTURE INHERITANCE AND needParentUV.
+			break;
+
+		case 3: // Curve 
+			editorTemplate -dimControl $nodeName "useRatePP"  true;
+			//editorTemplate -dimControl $nodeName "directionX" true;
+			//editorTemplate -dimControl $nodeName "directionY" true;
+			//editorTemplate -dimControl $nodeName "directionZ" true;
+			break;
+
+		case 4: // Volume
+			editorTemplate -dimControl $nodeName "useRatePP"  true;
+			editorTemplate -dimControl $nodeName "minDistance"     true;
+			editorTemplate -dimControl $nodeName "maxDistance"     true;
+			editorTemplate -dimControl $nodeName "spread"     true;
+			editorTemplate -dimControl $nodeName "tangentSpeed" true;
+			editorTemplate -dimControl $nodeName "normalSpeed"  true;
+			editorTemplate -dimControl $nodeName "speed"  true;
+			dimVolumeAttributes( $nodeName, false );
+
+			break;
+		}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc setAttributeNum (string $nodeName, string $attr, int $index, int $value)
+{
+	string $setAttrStr = "setAttr " + $nodeName + "." + $attr + "[" + $index + "]";
+	$setAttrStr += " " + $value;
+	eval ($setAttrStr);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc setAttributeStr (string $nodeName, string $attr, int $index, string $value)
+{
+	string $setAttrStr = "setAttr " + $nodeName + "." + $attr + "[" + $index + "]";
+	$setAttrStr += " -type \"string\" " + "\"" + $value + "\"";
+	eval ($setAttrStr);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc OnChangeLoadCheckBox (string $nodeName, int $index, int $numSeqs)
+{
+	// Update the DG attribute
+	string $ctrlName = "loadSeqs_" + $index;
+	$value = `checkBox -q -v $ctrlName`;
+	setAttributeNum ($nodeName, "LoadSeqs", $index, $value);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc updateOptionsTpl (string $nodeName, int $index)
+{
+	// Arrays of options for all the sequences
+	int $offsets[];
+	int $minRanges[];
+	int $maxRanges[];
+	int $useRanges[];
+	int $clipRanges[];
+	int $loadViscosities[];
+	int $loadDensities[];
+	int $loadPressures[];
+	int $loadMasses[];
+	int $loadTemperatures[];
+	int $loadNormalVectors[];
+	int $loadForces[];
+
+	// Extract the sequences from the current dir
+	string $prefixes[];
+	int $begins[];
+	int $ends[];
+	string $dir = `getAttr ($nodeName + ".Dir")`;
+	int $numSeqs = `getAttr ($nodeName + ".NumSeqs")`;
+	for ($i=0; $i<$numSeqs; $i++)
+	{
+		$paths[$i] = `getAttr ($nodeName + ".Paths[" + $i + "]")`;
+		$prefixes[$i] = `getAttr ($nodeName + ".Prefixes[" + $i + "]")`;
+	}
+
+	// Update the offsets array and the optionVar
+	///////////////////////////////////////////////////////////////////////////
+	$offsets[$index] = `intFieldGrp -q -v1 offset`;
+
+	// Update the ranges arrays and the optionVars
+	///////////////////////////////////////////////////////////////////////////
+	$minRanges[$index] = `intFieldGrp -q -v1 range`;
+	$maxRanges[$index] = `intFieldGrp -q -v2 range`;
+
+	// Update the range check boxes
+	///////////////////////////////////////////////////////////////////////////
+	$useRanges[$index] = `checkBox -q -v useRange`;
+	$clipRanges[$index] = `checkBox -q -v clipRange`;
+
+	// Update the load check boxes
+	///////////////////////////////////////////////////////////////////////////
+	$loadViscosities[$index] = `checkBox -q -v loadViscosity`;
+	$loadDensities[$index] = `checkBox -q -v loadDensity`;
+	$loadPressures[$index] = `checkBox -q -v loadPressure`;
+	$loadMasses[$index] = `checkBox -q -v loadMass`;
+	$loadTemperatures[$index] = `checkBox -q -v loadTemperature`;
+	$loadNormalVectors[$index] = `checkBox -q -v loadNormalVector`;
+	$loadForces[$index] = `checkBox -q -v loadForce`;
+
+	// Update the DG attributes
+	///////////////////////////////////////////////////////////////////////////
+	// Offsets
+	setAttributeNum ($nodeName, "Offsets", $index, $offsets[$index]);
+
+	// Min Ranges
+	setAttributeNum ($nodeName, "MinRanges", $index, $minRanges[$index]);
+
+	// Max Ranges		
+	setAttributeNum ($nodeName, "MaxRanges", $index, $maxRanges[$index]);
+
+	// Check Boxes
+	setAttributeNum ($nodeName, "ClipRanges", $index, $clipRanges[$index]);
+	setAttributeNum ($nodeName, "UseRanges", $index, $useRanges[$index]);
+	setAttributeNum ($nodeName, "LoadViscosities", $index, $loadViscosities[$index]);
+	setAttributeNum ($nodeName, "LoadDensities", $index, $loadDensities[$index]);
+	setAttributeNum ($nodeName, "LoadPressures", $index, $loadPressures[$index]);
+	setAttributeNum ($nodeName, "LoadMasses", $index, $loadMasses[$index]);
+	setAttributeNum ($nodeName, "LoadTemperatures", $index, $loadTemperatures[$index]);
+	setAttributeNum ($nodeName, "LoadNormalVectors", $index, $loadNormalVectors[$index]);
+	setAttributeNum ($nodeName, "LoadForces", $index, $loadForces[$index]);
+
+	// Remove the window
+	///////////////////////////////////////////////////////////////////////////
+	deleteUI -window dlgOptions;
+	refresh;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc dlgOpionsTpl (string $nodeName, int $index)
+{
+	// Extract the sequences from the current dir
+	string $prefixes[];
+	int $begins[];
+	int $ends[];
+	string $dir = `getAttr ($nodeName + ".Dir")`;
+	int $numSeqs = `getAttr ($nodeName + ".NumSeqs")`;
+	for ($i=0; $i<$numSeqs; $i++)
+	{
+		$paths[$i] = `getAttr ($nodeName + ".Paths[" + $i + "]")`;
+		$prefixes[$i] = `getAttr ($nodeName + ".Prefixes[" + $i + "]")`;
+	}
+
+	window -w 300 -h 400 -title "Options" 
+		-sizeable true 
+		-resizeToFitChildren true
+		dlgOptions;
+		columnLayout
+			-adjustableColumn true
+			-rs	10;
+			rowLayout -numberOfColumns 2 -cw 1 200;
+				columnLayout -cat "left" 10;
+					checkBox -label "LoadViscosity"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadViscosities[" + $index + "]")` loadViscosity;
+					checkBox -label "LoadDensity"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadDensities[" + $index + "]")` loadDensity;
+					checkBox -label "LoadPressure"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadPressures[" + $index + "]")` loadPressure;
+					checkBox -label "LoadMass"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadMasses[" + $index + "]")` loadMass;
+					checkBox -label "LoadTemperature"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadTemperatures[" + $index + "]")` loadTemperature;
+					checkBox -label "LoadNormalVector"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadNormalVectors[" + $index + "]")` loadNormalVector;
+					checkBox -label "LoadForce"
+						-align "left"
+						-value `getAttr ($nodeName + ".LoadForces[" + $index + "]")` loadForce;
+				setParent..;
+				columnLayout -adjustableColumn true;
+					intFieldGrp -numberOfFields 1
+						-label "Offset"
+						-v1 `getAttr ($nodeName + ".Offsets[" + $index + "]")`
+						-cw2 50 60 
+						-cal 1 "left"
+						-cal 2 "right" offset;
+					intFieldGrp -numberOfFields 2
+						-label "Range"
+						-v1 `getAttr ($nodeName + ".MinRanges[" + $index + "]")`
+						-v2 `getAttr ($nodeName + ".MaxRanges[" + $index + "]")`
+						-cw3 50 60 60 
+						-cal 1 "left"
+						-cal 3 "right" range;
+					checkBox -label "Use Range"
+						-align "left" 
+						-value `getAttr ($nodeName + ".UseRanges[" + $index + "]")` useRange;
+					checkBox -label "Clip Range"
+						-align "left" 
+						-value `getAttr ($nodeName + ".ClipRanges[" + $index + "]")` clipRange;
+				setParent..;
+			setParent..;
+		setParent..;
+
+		string $buttonOK= `button -w 50 -h 25 -al "center" -label "OK"`; 
+		string $command = "updateOptionsTpl(\""+$nodeName+"\","+$index+")";
+		button -edit -command $command $buttonOK;
+		
+	showWindow;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc OnButtonSeqPressed (string $nodeName, int $index, int $numSeqs)
+{
+	// Show options dialog for the sequence $index is pointing to
+	dlgOpionsTpl ($nodeName, $index);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// global proc buildUISeqNew (string $bigToken)
+global proc buildUISeqNew (string $nodeName)
+{
+	global int $MAX_SEQS;
+
+	// Extract the node name
+	string $buffer[];
+	tokenize ($nodeName, ".", $buffer);
+	string $emitterName = $buffer[0];
+
+	// Extract the sequences from the current dir
+	string $prefixes[];
+	int $begins[];
+	int $ends[];
+	string $dir = `getAttr ($emitterName + ".Dir")`;
+	int $numSeqs = `getAttr ($emitterName + ".NumSeqs")`;
+	for ($i=0; $i<$numSeqs; $i++)
+	{
+		$prefixes[$i] = `getAttr ($emitterName + ".Prefixes[" + $i + "]")`;
+		$begins[$i] = `getAttr ($emitterName + ".Begins[" + $i + "]")`;
+		$ends[$i] = `getAttr ($emitterName + ".Ends[" + $i + "]")`;
+	}
+
+	string $line = "----------------------------------------------------";
+	$line = $line + $line + $line;
+	columnLayout -adjustableColumn true;
+
+		text -label $line -align "center";
+		text -label $dir -align "center";
+		text -label $line -align "center";
+
+	// Header
+    rowColumnLayout -numberOfColumns 5
+		-cw 1 35
+		-cw 2 150
+		-cw 3 50
+		-cw 4 50
+		-cw 5 50;
+		text -label "Load";
+		text -label "Prefix";
+		text -label "Begin";
+		text -label "End";
+		text -label "" -io;
+	setParent..;
+
+	// Create the controls for all the sequences
+	rowColumnLayout -numberOfColumns 5
+		-cw 1 35
+		-cw 2 150
+		-cw 3 50
+		-cw 4 50
+		-cw 5 50 myColum;
+
+		int $numSeqs = `size ($prefixes)`;
+		int $index;
+		for ($index = 0; $index < $MAX_SEQS; $index++)
+		{
+			if ($index < $numSeqs)
+			{
+				// A valid sequence
+				string $ctrlName = "loadSeqs_" + $index;
+
+				string $commandCheck = "OnChangeLoadCheckBox (\""+$emitterName+"\","+$index+","+$numSeqs+")";
+				checkBox -label " "
+					-value `getAttr ($emitterName + ".LoadSeqs[" + $index + "]")`
+					-cc $commandCheck
+					-en true
+					$ctrlName;
+				string $labelName = "label_prefix_" + $index;
+				text -label $prefixes[$index] -al left -en true $labelName;
+				$labelName = "label_begin_" + $index;
+				text -label $begins[$index] -al left -en true $labelName;
+				$labelName = "label_end_" + $index;
+				text -label $ends[$index] -al left -en true $labelName;
+				string $commandButton = "OnButtonSeqPressed (\""+$emitterName+"\","+$index+","+$numSeqs+")";
+				string $buttonName = "button_options_" + $index;
+				button -l Options
+					-rs false
+					-w 50
+					-en true
+					-c $commandButton
+					$buttonName;
+			}
+			else
+			{
+				string $ctrlName = "loadSeqs_" + $index;
+				checkBox -label " "
+					-value 0
+					-en false
+					$ctrlName;
+				string $labelName = "label_prefix_" + $index;
+				text -label "Empty" -al left -en false $labelName;
+				$labelName = "label_begin_" + $index;
+				text -label 0 -al left -en false $labelName;
+				$labelName = "label_end_" + $index;
+				text -label 0 -al left -en false $labelName;
+				string $buttonName = "button_options_" + $index;
+				button -l "Empty"
+					-rs false
+					-w 50
+					-en false
+					$buttonName;
+			}
+		}
+	setParent..;
+	setParent..;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// global proc buildUISeqEdit (string $bigToken)
+global proc buildUISeqEdit (string $nodeName)
+{
+	global int $MAX_SEQS;
+
+	// Extract the node name
+	string $buffer[];
+	tokenize ($nodeName, ".", $buffer);
+	string $emitterName = $buffer[0];
+
+	// Extract the sequences from the current dir
+	string $prefixes[];
+	int $begins[];
+	int $ends[];
+	string $dir = `getAttr ($emitterName + ".Dir")`;
+	int $numSeqs = `getAttr ($emitterName + ".NumSeqs")`;
+	for ($i=0; $i<$numSeqs; $i++)
+	{
+		$prefixes[$i] = `getAttr ($emitterName + ".Prefixes[" + $i + "]")`;
+		$begins[$i] = `getAttr ($emitterName + ".Begins[" + $i + "]")`;
+		$ends[$i] = `getAttr ($emitterName + ".Ends[" + $i + "]")`;
+	}
+
+	// Create the controls for all the sequences
+	int $numSeqs = `size ($prefixes)`;
+	int $index;
+	for ($index = 0; $index < $MAX_SEQS; $index++)
+	{
+		if ($index < $numSeqs)
+		{
+			// A valid sequence
+			string $ctrlName = "loadSeqs_" + $index;
+
+			string $commandCheck = "OnChangeLoadCheckBox (\""+$emitterName+"\","+$index+","+$numSeqs+")";
+			checkBox -e -label " "
+				-value `getAttr ($emitterName + ".LoadSeqs[" + $index + "]")`
+				-cc $commandCheck
+				-en true
+				$ctrlName;
+			string $labelName = "label_prefix_" + $index;
+			text -e -label $prefixes[$index] -al left -en true $labelName;
+			$labelName = "label_begin_" + $index;
+			text -e -label $begins[$index] -al left -en true $labelName;
+			$labelName = "label_end_" + $index;
+			text -e -label $ends[$index] -al left -en true $labelName;
+			string $commandButton = "OnButtonSeqPressed (\""+$emitterName+"\","+$index+","+$numSeqs+")";
+			string $buttonName = "button_options_" + $index;
+			button -e -l Options
+				-rs false
+				-w 50
+				-en true
+				-c $commandButton
+				$buttonName;
+		}
+		else
+		{
+			string $ctrlName = "loadSeqs_" + $index;
+			checkBox -e -label " "
+				-value 0
+				-en false
+				$ctrlName;
+			string $labelName = "label_prefix_" + $index;
+			text -e -label "Empty" -al left -en false $labelName;
+			$labelName = "label_begin_" + $index;
+			text -e -label 0 -al left -en false $labelName;
+			$labelName = "label_end_" + $index;
+			text -e -label 0 -al left -en false $labelName;
+			string $buttonName = "button_options_" + $index;
+			button -e -l "Empty"
+				-rs false
+				-w 50
+				-en false
+				$buttonName;
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc AERealflowEmitterTemplate (string $nodeName)
+{
+	editorTemplate -beginScrollLayout;
+		AEtransformMain $nodeName;
+
+ 		editorTemplate -beginLayout "Sequences" -collapse 0;
+			editorTemplate -ccu "buildUISeqNew" "buildUISeqEdit" "";
+		editorTemplate -endLayout;	
+
+ 		editorTemplate -beginLayout "Basic Emitter Attributes" -collapse 0;
+			editorTemplate -addControl "LevelOfDetail";
+ 			editorTemplate -addControl "scaleRateByObjectSize";
+
+			editorTemplate -beginNoOptimize;
+			editorTemplate -label "Use Per-Point Rates (ratePP)" -addControl "useRatePP";
+			editorTemplate -label "Need Parent UV (NURBS surface only)" -addControl "needParentUV";
+			editorTemplate -endNoOptimize;
+			editorTemplate -addControl "cycleEmission" "dimCycleInterval";
+			editorTemplate -addControl "cycleInterval";
+		editorTemplate -endLayout;	
+	
+		editorTemplate -beginLayout "Distance/Direction Attributes" -collapse 0;
+			editorTemplate -addControl "minDistance";
+			editorTemplate -addControl "maxDistance";
+			editorTemplate -addControl "directionX";
+			editorTemplate -addControl "directionY";
+			editorTemplate -addControl "directionZ";
+			editorTemplate -addControl "spread";
+		editorTemplate -endLayout;
+
+		editorTemplate -beginLayout "Basic Emission Speed Attributes" -collapse 0;
+			editorTemplate -addControl "speed";
+			editorTemplate -addControl "speedRandom";
+			editorTemplate -addControl "tangentSpeed";
+			editorTemplate -addControl "normalSpeed";
+		editorTemplate -endLayout;
+
+		editorTemplate -beginLayout "Volume Emitter Attributes" -collapse 0;
+			editorTemplate -addControl "volumeShape" "dimVolumeAttributesByShape";
+			editorTemplate -addControl "volumeOffset";
+			editorTemplate -addControl "volumeSweep" ;
+			editorTemplate -addControl "sectionRadius" ;
+			// editorTemplate -addControl "volumeEfficiency" ;
+		editorTemplate -endLayout;
+
+		editorTemplate -beginLayout "Volume Speed Attributes" -collapse 0;
+			editorTemplate -addControl "awayFromCenter";
+			editorTemplate -addControl "awayFromAxis";
+			editorTemplate -addControl "alongAxis";
+			editorTemplate -addControl "aroundAxis";
+			editorTemplate -addControl "randomDirection";
+			editorTemplate -addControl "directionalSpeed";
+			editorTemplate -beginNoOptimize;
+			editorTemplate -addControl "scaleSpeedBySize";
+			editorTemplate -addControl "displaySpeed";
+			editorTemplate -endNoOptimize;
+		editorTemplate -endLayout;
+
+
+		editorTemplate -beginLayout "Texture Emission Attributes (Nurbs Surface only)" -collapse 0;
+			editorTemplate -addControl "particleColor";
+			editorTemplate -beginNoOptimize;
+			editorTemplate -addControl "inheritColor";
+			editorTemplate -addControl "inheritOpacity" "checkInheritOpacity";
+			editorTemplate -addControl "useLuminance";
+			editorTemplate -addControl "invertOpacity";
+			editorTemplate -endNoOptimize;
+			editorTemplate -addControl "textureRate";
+			editorTemplate -beginNoOptimize;
+			editorTemplate -addControl "enableTextureRate";
+			editorTemplate -addControl "emitFromDark";
+			editorTemplate -endNoOptimize;
+		editorTemplate -endLayout;
+
+		// Suppress attributes we don't want in the editor.
+		// 
+		editorTemplate -suppress useSceneTime;
+		editorTemplate -suppress randState;
+		editorTemplate -suppress currentTime;
+		editorTemplate -suppress isFull;
+		editorTemplate -suppress output;
+		editorTemplate -suppress direction;
+		editorTemplate -suppress ratePP;
+		editorTemplate -suppress inheritFactor;
+		editorTemplate -suppress outPositions;
+		editorTemplate -suppress outVelocities;
+		editorTemplate -suppress parentId;
+		editorTemplate -suppress deltaTimeCycle;
+		
+		// include/call base class/node attributes
+		AEdynBaseTemplate $nodeName;
+
+	editorTemplate -addExtraControls;
+	editorTemplate -endScrollLayout;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc offsetNew (string $attrName)
+{
+	rowLayout -numberOfColumns 2 -columnWidth2 280 100;
+		intFieldGrp -label "Scene offset" 
+			-extraLabel "frames" 
+			offsetCtrl;
+	connectControl -index 2 offsetCtrl $attrName;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc offsetReplace (string $attrName)
+{
+	connectControl -index 2 offsetCtrl $attrName;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc pathNew (string $attrName)
+{
+	rowLayout -numberOfColumns 1 -columnWidth1 280;
+		textFieldGrp -label "Path" 
+			-w 280
+			pathCtrl;
+	connectControl -index 2 pathCtrl $attrName;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc pathReplace (string $attrName)
+{
+	connectControl -index 2 pathCtrl $attrName;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc rangeNew (string $attrName1, string $attrName2, string $attrName3, string $attrName4)
+{
+	rowLayout -numberOfColumns 2 -columnWidth2 280 100;
+		intFieldGrp -numberOfFields 2
+			-label "Range"
+			range;
+		columnLayout -columnOffset "left" 0;
+			checkBox -label "Use Range"
+				-align "left" 
+				useRange;
+			checkBox -label "Clip Range"
+				-align "left" 
+				clipRange;
+			setParent..;
+	connectControl -index 2 range $attrName1;
+	connectControl -index 3 range $attrName2;
+	connectControl useRange $attrName3;
+	connectControl clipRange $attrName4;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+global proc rangeReplace (string $attrName1, string $attrName2, string $attrName3, string $attrName4)
+{
+	connectControl -index 2 range $attrName1;
+	connectControl -index 3 range $attrName2;
+	connectControl useRange $attrName3;
+	connectControl clipRange $attrName4;
+}
+
+///////////////////////////////////////////////////////////////////////////////

@@ -1,0 +1,606 @@
+//	Description:
+//	This script can add noise to animation curve .
+//	email: 	power_zzj@sina.com
+//	zhaozhongjie 赵仲捷
+//	2007.12.3
+
+global proc zzjCreateBumpNode()
+{
+		string $slGroundNames[]=`ls -sl -l`;
+	if (`size $slGroundNames`!=1)
+	{error "未选中场景地面，或者已选中多个物体";}
+
+		hyperShade -smn "";
+		string $groundNodeNames[]=`ls -sl -l`;
+	
+	if (!`objExists FootPrintCamera`){					
+	error "缺少相应的摄像机，请先选择需要的地面，点击确定。系统会自动创建摄像机";}
+	else {
+		
+	string $bump3dNames=`shadingNode -asUtility bump3d -n FootPrintBump3D`;
+	
+	setAttr ($bump3dNames+".bumpDepth") 8;
+	
+	string $fileNodeNames=`shadingNode -asTexture file -n BumpSequence`;
+	string $p2dTextureNames=`shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($p2dTextureNames+".coverage") ($fileNodeNames+".coverage");
+	connectAttr -f ($p2dTextureNames+".translateFrame") ($fileNodeNames+".translateFrame");
+	connectAttr -f ($p2dTextureNames+".rotateFrame") ($fileNodeNames+".rotateFrame");
+	connectAttr -f ($p2dTextureNames+".mirrorU") ($fileNodeNames+".mirrorU");
+	connectAttr -f ($p2dTextureNames+".mirrorV") ($fileNodeNames+".mirrorV");
+	connectAttr -f ($p2dTextureNames+".stagger") ($fileNodeNames+".stagger");
+	connectAttr -f ($p2dTextureNames+".wrapU") ($fileNodeNames+".wrapU");
+	connectAttr -f ($p2dTextureNames+".wrapV") ($fileNodeNames+".wrapV");
+	connectAttr -f ($p2dTextureNames+".repeatUV") ($fileNodeNames+".repeatUV");
+	connectAttr -f ($p2dTextureNames+".offset") ($fileNodeNames+".offset");
+	connectAttr -f ($p2dTextureNames+".rotateUV") ($fileNodeNames+".rotateUV");
+	connectAttr -f ($p2dTextureNames+".noiseUV") ($fileNodeNames+".noiseUV");
+	connectAttr -f ($p2dTextureNames+".vertexUvOne") ($fileNodeNames+".vertexUvOne");
+	connectAttr -f ($p2dTextureNames+".vertexUvTwo") ($fileNodeNames+".vertexUvTwo");
+	connectAttr -f ($p2dTextureNames+".vertexUvThree") ($fileNodeNames+".vertexUvThree");
+	connectAttr -f ($p2dTextureNames+".vertexCameraOne") ($fileNodeNames+".vertexCameraOne");
+	connectAttr ($p2dTextureNames+".outUV") ($fileNodeNames+".uv");
+	connectAttr ($p2dTextureNames+".outUvFilterSize") ($fileNodeNames+".uvFilterSize");
+	
+	setAttr ($p2dTextureNames+".wrapU") 0;
+	setAttr ($p2dTextureNames+".wrapV") 0;
+	setAttr ($fileNodeNames+".alphaOffset") 0.15;
+
+		
+	string $bumpProjectionName=`shadingNode -asUtility projection -n BumpProjection`;
+	connectAttr -f ($fileNodeNames+".outTransparency") ($bumpProjectionName+".image");
+	string $BumpP3d=`shadingNode -asUtility place3dTexture -n BumpP3d`;
+	
+	
+	
+	
+	
+	connectAttr -f ($BumpP3d+".worldInverseMatrix[0]") ($bumpProjectionName+".placementMatrix");
+	
+	connectAttr -f ($bumpProjectionName+".outAlpha") ($bump3dNames+".bumpValue");	
+	
+	setAttr ($BumpP3d+".rotateX") -90;
+	
+	setAttr ($BumpP3d+".translateX") `getAttr FootPrintCamera.translateX`;
+	setAttr ($BumpP3d+".translateY") `getAttr FootPrintCamera.translateY`;
+	setAttr ($BumpP3d+".translateZ") `getAttr FootPrintCamera.translateZ`;
+		setAttr -lock true ($BumpP3d+".translateX");
+		setAttr -lock true ($BumpP3d+".translateZ");
+	setAttr ($BumpP3d+".scaleX") `getAttr FootPrintCamera.bumpMapScale`;
+	setAttr ($BumpP3d+".scaleY") `getAttr FootPrintCamera.bumpMapScale`;
+	setAttr ($BumpP3d+".scaleZ") `getAttr FootPrintCamera.bumpMapScale`;
+		setAttr -lock true ($BumpP3d+".scaleX");
+		setAttr -lock true ($BumpP3d+".scaleY");
+		setAttr -lock true ($BumpP3d+".scaleZ");
+		
+	if (`objExists FootPrintTestLocator.bumpNodeName`)	deleteAttr -attribute "bumpNodeName" "FootPrintTestLocator";	
+	addAttr -ln bumpNodeName -dt "string"  |FootPrintTestLocator;
+	setAttr -e -keyable true |FootPrintTestLocator.bumpNodeName;
+	
+	string $temp=$bump3dNames+" "+$p2dTextureNames+" "+$fileNodeNames+" "+$p2dTextureNames+" "+$bumpProjectionName+" "+$BumpP3d+" ";
+	
+	setAttr -type "string" FootPrintTestLocator.bumpNodeName (`getAttr FootPrintTestLocator.bumpNodeName`+$temp);
+
+		for ($ttt in $groundNodeNames)
+		{
+			if (`attributeExists "normalCamera" $ttt`) 
+			{
+				string $groundBumpNames[]=`listConnections ($ttt+".normalCamera")`; 
+				if (`size $groundBumpNames`==1)
+				{connectAttr -f ($bump3dNames+".outNormal") ($groundBumpNames[0]+".normalCamera");}
+				else
+				{connectAttr -f ($bump3dNames+".outNormal") ($ttt+".normalCamera");}
+			}	
+		}
+}	
+
+}
+
+global proc zzjCreateEverything()
+{
+	if ((`objExists FootPrintTestLocator`)&&(`objExists FootPrintCamera`))
+	{
+		zzjCreateExp;
+		currentTime -e `playbackOptions -query -min`;
+		currentTime -e `playbackOptions -query -min`;
+		currentTime -e `playbackOptions -query -min`;
+		currentTime -e `playbackOptions -query -min`;
+		currentTime -e `playbackOptions -query -min`;
+			
+		playbackOptions -l once;
+		PlaybackToggle;
+					evalDeferred (				
+		"string $separateFaceName[]=stringToStringArray(`getAttr FootPrintTestLocator.finalRenderObj`,\" \");"+
+		"for ($cc in $separateFaceName) {if (`objExists $cc`) select -add $cc;} $separateFaceName=`ls -sl`;"+
+		"if (`objExists zzj_foot_print_dup_obj`)"+
+		"{for ($bb in $separateFaceName) {if (!isParentOf(\"zzj_foot_print_dup_obj\",$bb)) parent $bb zzj_foot_print_dup_obj;}}"+
+		"else {group -n zzj_foot_print_dup_obj;}"+
+		"if (`objExists FPTLexpression1`) delete FPTLexpression1;");
+	}
+}
+global proc zzjCreateExp()
+{
+		
+	float $dis =  `floatSliderGrp -q -value zzjFPFootHeightCtl`;
+	
+	string $stTosa[];
+	$stTosa = stringToStringArray(`getAttr FootPrintTestLocator.slFaceName`," ");	
+
+		if (`size $stTosa`>0)
+		{						
+			if (`objExists FPTLexpression1`) delete FPTLexpression1;
+			string $expressionName = `expression -s 	(			  "string $stTosa[];clear $stTosa;"			+"\n"																+"\n"
+		+ "$stTosa = stringToStringArray(`getAttr FootPrintTestLocator.slFaceName`,\" \" );"					+"\n"	
+		+ "$faceTransAtGs = `xform -q -bb -ws $stTosa`;"														+"\n"
+		+ "FootPrintTestLocator.translateX=($faceTransAtGs[0]+$faceTransAtGs[3])*0.5;"							+"\n"
+		+ "FootPrintTestLocator.translateZ=($faceTransAtGs[2]+$faceTransAtGs[5])*0.5; "							+"\n"				
+		+ "float $xx=($faceTransAtGs[0]+$faceTransAtGs[3])*0.5;"												+"\n"
+		+ "float $yy=($faceTransAtGs[1]+$faceTransAtGs[4])*0.5;"												+"\n"
+		+ "float $zz=($faceTransAtGs[2]+$faceTransAtGs[5])*0.5;"												+"\n"
+		+ "vector $facePos=<<$xx,$yy,$zz>>;"																	+"\n"
+		+ "vector $locatorPos=<<FootPrintTestLocator.tx,FootPrintTestLocator.ty,FootPrintTestLocator.tz>>;"		+"\n"
+		+ "float $dis=mag($locatorPos-$facePos);"																+"\n"
+		+ "if ($dis < "+$dis+") {zzjDuplicateSelFace;}"															+"\n"	
+		
+		) -o FootPrintTestLocator -ae 1 -uc all `;
+				rename $expressionName "FPTLexpression1";
+		}
+}	
+
+global proc string zzjCreateFootprintShader(int $offset)
+{	
+	int $currentTime=`currentTime -q`;
+	$shader = `shadingNode -asShader surfaceShader -n ("footprint_shader_"+$currentTime)`;
+	string $SG=`sets -renderable true -noSurfaceShader true -empty -name ($shader+"_SG")`;
+	connectAttr -f ($shader+".outMatteOpacity") ($SG+".surfaceShader");
+	string $abc=`getAttr FootPrintTestLocator.node`;
+	$abc+=$shader+" ";
+	setAttr -type "string" FootPrintTestLocator.node $abc;
+	
+	string $fpShaderFlag = "footprint_shader";
+	string $fpDelayAttrNameFlag = "delay";
+	string $fpBirthTimeFlag = "birth";
+	
+	addAttr -ln $fpBirthTimeFlag -at long $shader;
+	setAttr -e -keyable true ($shader+"."+$fpBirthTimeFlag);
+	
+	addAttr -ln $fpDelayAttrNameFlag -at long $shader;
+	setAttr -e -keyable true ($shader+"."+$fpDelayAttrNameFlag);
+	
+	addAttr -ln $fpShaderFlag -dt "string"  $shader;
+	setAttr -e -keyable false ($shader+"."+$fpShaderFlag);		
+	// retrieve this var from caller
+	setAttr ($shader+"."+$fpDelayAttrNameFlag) $offset;	
+//		setAttr ($shader+"."+$fpDelayAttrNameFlag) 100;		
+
+	setAttr ($shader+"."+$fpBirthTimeFlag) $currentTime;	
+	// set keyframes
+	setAttr ($shader+".outMatteOpacity") -type double3 1 1 1 ;
+	setKeyframe -t ($currentTime+1) ($shader+".outMatteOpacity");	
+	setAttr ($shader+".outMatteOpacity") -type double3 0 0 0 ;
+	setKeyframe -t ($currentTime+$offset) ($shader+".outMatteOpacity");
+	setAttr ($shader+".outMatteOpacity") -type double3 0 0 0 ;
+	setKeyframe -t ($currentTime-2) ($shader+".outMatteOpacity");	
+	return $SG;		
+}
+
+global proc zzjDeleteEverything()
+	
+{
+	if (`objExists FootPrintTestLocator`)
+	{
+		string $surfaceNodeName[] = stringToStringArray(`getAttr FootPrintTestLocator.node`," ");
+		for ($a in $surfaceNodeName)
+		{	
+			select $a;
+//			hyperShade -smn "";
+			string $temp[]=`ls -sl`;	
+			if (`size $temp`)
+			{
+				string $tmp[]=`listConnections $temp[0]`;
+				if (`size $tmp`>=1)	
+					{
+						for ($b in $tmp)
+							{
+								if (($b!="defaultShaderList1")&&($b!="initialParticleSE")&&($b!="initialShadingGroup")&&($b!="initialMaterialInfo")&&($b!="lambert1")&&(`objExists $b`))
+								{								
+								delete $b;
+								}
+							}					
+					}						
+			}
+			delete $temp;
+		}
+	if (`objExists FootPrintTestLocator.bumpNodeName`)			
+	{
+		string $delBumpName[]=stringToStringArray(`getAttr FootPrintTestLocator.bumpNodeName`," ");
+		delete $delBumpName;
+	}
+		if (`objExists FootPrintTestLocator`)	delete FootPrintTestLocator;
+		if (`objExists FootPrintCamera`)	delete FootPrintCamera;
+		if (`objExists zzj_foot_print_dup_obj`)	delete zzj_foot_print_dup_obj;
+	}
+}																	
+		
+
+
+
+
+
+
+
+
+
+
+
+global proc zzjDuplicateSelFace()
+{
+	string $finalRenderObj=`getAttr FootPrintTestLocator.finalRenderObj`;	
+	string $sendToLo;
+	string $separateFaceName[];clear $separateFaceName;
+	string $originalObjT[]=stringToStringArray(`getAttr FootPrintTestLocator.slFaceName`," ");
+	string $firstNameOfSlFace=$originalObjT[0];
+		string $buffer[];
+		tokenize $firstNameOfSlFace "." $buffer;
+		$firstNameOfSlFace = $buffer[0];
+	string $dupObjNameT[]=`duplicate $firstNameOfSlFace`;
+	string $zzjDupObjName=$dupObjNameT[0];
+	string $tmp[];clear $tmp;
+	for ($i=0;$i<`size $originalObjT`;$i++)
+	{
+		$tmp[$i]=$zzjDupObjName+"."+`fileExtension $originalObjT[$i]`;
+	}
+	select $tmp;
+	polyChipOff -ch 1 -kft 1 -dup 1  -tx 0 -ty 0 -tz 0 -rx 0 -ry 0 -rz 0 
+		-sx 1 -sy 1 -sz 1 -ran 0 -off 0 -ltz 0 -ws 1 -ltx 0 -lty 0 -lrx 0 
+		-lry 0 -lrz 0 -lsx 1 -lsy 1 -lsz 1 -ldx 1 -ldy 0 -ldz 0 -w 0 -gx 0 
+		-gy -1 -gz 0 -att 0 -mx 0 -my 0 -mz 0 $tmp;
+
+	string $separateObj[]=`polySeparate -ch 0 $zzjDupObjName`;
+	delete $separateObj[0];
+	string $abc[];clear $abc;
+	$abc=`ls -sl -l`;
+	if(`size $abc`>1)
+		{
+			$separateFaceName = `polyUnite $abc`;
+			DeleteHistory;
+			$sendToLo = `getAttr FootPrintTestLocator.finalRenderObj`;
+			$sendToLo += $separateFaceName[0] + " ";
+
+		}		
+	if(`size $abc`==1)
+		{
+			$separateFaceName = `ls -sl -l`;
+			string $tmpParent[]=`listRelatives -p`;			
+			parent -w;
+			delete $tmpParent[0];			
+			$sendToLo = `getAttr FootPrintTestLocator.finalRenderObj`;
+			$sendToLo += $separateFaceName[0] + " ";				
+		}
+	$abc=`ls -sl`;
+	$finalRenderObj+=" "+$abc[0];	
+	setAttr -type "string" FootPrintTestLocator.finalRenderObj $finalRenderObj;				
+		int $offset = `floatSliderGrp -q -v zzjFPFootOffsetCtl`;
+		string $sg = zzjCreateFootprintShader($offset);
+		
+		select $abc[0];		
+		print "=========\n";
+		print ($abc[0] + "  --->   " + $sg);
+		print "=========\n";		
+		sets  -e -forceElement $sg;	
+		
+		
+		
+		
+}
+
+global proc zzjRecordGround()
+{		
+		string $groundName[] =`ls -sl -l`;
+		if (`size $groundName`==0) error "请选择地面";
+		textFieldButtonGrp -e -text $groundName[0] zzjFPGetGroundCtl;
+		if (!`objExists FootPrintTestLocator`)//delete FootPrintTestLocator;						
+		{string $c[]=`spaceLocator`;rename $c[0] "FootPrintTestLocator";}
+		
+		if (!`objExists FootPrintTestLocator.groundName`)//deleteAttr -attribute "groundName" "FootPrintTestLocator";	
+		{addAttr -ln groundName -dt "string"  FootPrintTestLocator;}
+		
+		if (!`objExists FootPrintTestLocator.slFaceName`)//deleteAttr -attribute "slFaceName" "FootPrintTestLocator";
+		{addAttr -ln slFaceName -dt "string"  FootPrintTestLocator;}						
+		
+		if (!`objExists FootPrintTestLocator.finalRenderObj`)//deleteAttr -attribute "finalRenderObj" "FootPrintTestLocator";
+		{addAttr -ln finalRenderObj -dt "string"  FootPrintTestLocator;}
+		
+		if (!`objExists FootPrintTestLocator.node`)//deleteAttr -attribute "node" "FootPrintTestLocator";
+		{addAttr -ln node -dt "string"  FootPrintTestLocator;}
+				
+		if (`objExists FootPrintTestLocator.dis`){deleteAttr -attribute "dis" "FootPrintTestLocator";}
+			addAttr -ln dis -at double  |FootPrintTestLocator;
+			setAttr -e -keyable true |FootPrintTestLocator.dis;	
+//			float $dis=`floatSliderGrp -q -value zzjFPFootHeightCtl`;
+//			setAttr "FootPrintTestLocator.dis" $dis;
+				
+//		if (`objExists FootPrintTestLocator.ttt`)
+//		{deleteAttr -attribute "ttt" "FootPrintTestLocator";}
+//		addAttr -ln ttt -at long  "FootPrintTestLocator";
+//		setAttr -e -keyable true |FootPrintTestLocator.ttt;		
+		
+		geometryConstraint -w 10 $groundName "FootPrintTestLocator";
+		
+		select $groundName[0];
+		setAttr -type "string" FootPrintTestLocator.groundName $groundName[0];
+		setAttr -type "string" FootPrintTestLocator.groundName $groundName[0];
+//		ConvertSelectionToFaces;
+//		string $groundFaceName[]=`ls -sl -l`;
+//		polyProjection -ch 1 -type Planar -ibd on -icx 0.5 -icy 0.5 -ra 0 -isu 1 -isv 1 -kir  -md y  $groundFaceName;
+//		select $groundName[0];
+		
+		
+//		CreateCamera;
+		
+		
+	string $getGroundName=`getAttr FootPrintTestLocator.groundName`;
+	if (`objExists FootPrintCamera` ) delete FootPrintCamera;
+	string $cameraName[] =`camera -centerOfInterest 5 -focalLength 35 -lensSqueezeRatio 1
+							-cameraScale 1 -horizontalFilmAperture 1.41732 -horizontalFilmOffset 0 
+							-verticalFilmAperture 0.94488 -verticalFilmOffset 0 -filmFit Fill 
+							-overscan 1 -motionBlur 0 -shutterAngle 144 -nearClipPlane 0.01 
+							-farClipPlane 1000 -orthographic 1 -orthographicWidth 30`;
+	rename $cameraName[0] "FootPrintCamera";
+	setAttr "FootPrintCamera.rotateX" -90;
+	setAttr "FootPrintCamera.translateY" 600; 	
+	string $groundNameExtX = $getGroundName + ".boundingBoxCenterX";
+	string $groundNameExtZ = $getGroundName + ".boundingBoxCenterZ";	
+	connectAttr -f $groundNameExtX "FootPrintCamera.translateX";
+	connectAttr -f $groundNameExtZ "FootPrintCamera.translateZ";		
+	float $boundingBoxTemp[]=`xform -q -bb $getGroundName`;
+	float $xAdd = abs($boundingBoxTemp[0] - $boundingBoxTemp[3]);				
+	float $zAdd = abs($boundingBoxTemp[2] - $boundingBoxTemp[5]);
+	float $cameraOrthographicWidth = max($xAdd,$zAdd);
+	setAttr "FootPrintCameraShape.orthographicWidth" $cameraOrthographicWidth;
+	
+	addAttr -ln bumpMapScale -at double  |FootPrintCamera;
+	setAttr -e -keyable true |FootPrintCamera.bumpMapScale;
+	setAttr "FootPrintCamera.bumpMapScale" ($cameraOrthographicWidth*0.5);	
+	setAttr -lock true "FootPrintCamera.bumpMapScale";
+	
+	setAttr -l true "FootPrintCameraShape.orthographicWidth";
+	camera -e -filmFit overscan FootPrintCamera;
+			
+}
+
+global proc zzjRecordSlFace()
+{
+	string $slFaceAdd ="";
+	string $slFace[]=`ls -sl -l`;
+	if (`size $slFace`==0){error "请选择脚面";}
+	
+	textFieldButtonGrp -e -text "face selected" zzjFPGetFootFaceCtl;
+
+	for ($a in $slFace){$slFaceAdd += $a+" ";}
+	
+	
+	if (!`objExists FootPrintTestLocator`)//delete FootPrintTestLocator;						
+	{string $c[]=`spaceLocator`;rename $c[0] "FootPrintTestLocator";}
+	
+	if (!`objExists FootPrintTestLocator.groundName`)//deleteAttr -attribute "groundName" "FootPrintTestLocator";	
+	{addAttr -ln groundName -dt "string"  FootPrintTestLocator;}
+	
+	if (`objExists FootPrintTestLocator.slFaceName`)	deleteAttr -attribute "slFaceName" "FootPrintTestLocator";
+	addAttr -ln slFaceName -dt "string"  FootPrintTestLocator;					
+	
+	if (!`objExists FootPrintTestLocator.finalRenderObj`)//deleteAttr -attribute "finalRenderObj" "FootPrintTestLocator";
+	{addAttr -ln finalRenderObj -dt "string"  FootPrintTestLocator;}
+		
+	if (!`objExists FootPrintTestLocator.node`)//deleteAttr -attribute "node" "FootPrintTestLocator";
+	{addAttr -ln node -dt "string"  FootPrintTestLocator;}
+				
+//	if (`objExists FootPrintTestLocator.ttt`)
+//	{deleteAttr -attribute "ttt" "FootPrintTestLocator";}
+//	addAttr -ln ttt -at long  "FootPrintTestLocator";
+//	setAttr -e -keyable true |FootPrintTestLocator.ttt;	
+
+	if (`objExists FootPrintTestLocator.dis`)
+	{deleteAttr -attribute "dis" "FootPrintTestLocator";}
+	addAttr -ln dis -at double  |FootPrintTestLocator;
+	setAttr -e -keyable true |FootPrintTestLocator.dis;		
+
+	setAttr -type "string" FootPrintTestLocator.slFaceName $slFaceAdd;
+
+	
+	select $slFace;
+	
+	string $stTosa[];
+	$stTosa = stringToStringArray(`getAttr FootPrintTestLocator.slFaceName`," ");	
+	
+	
+}
+
+
+
+
+
+
+
+
+
+global proc zzjFootprintCreator()
+{
+
+if (`window -exists zzjUIFootprintCreatorWnd`)showWindow zzjUIFootprintCreatorWnd;
+
+	if (!`window -exists zzjUIFootprintCreatorWnd`){
+	//	deleteUI zzjUIFootprintCreatorWnd;
+
+	window -title "脚印贴图创建 1.0" 
+		zzjUIFootprintCreatorWnd;
+
+	frameLayout -label "" 
+		-labelAlign "top"
+ 		-borderStyle "etchedOut"
+		-mw 5
+		-mh 0
+		;
+		
+		columnLayout;
+	
+		frameLayout -label "" 
+			-labelAlign "bottom"
+	 		-borderStyle "etchedOut"
+			;
+
+			columnLayout 
+				-cat "left" 0
+				;
+			
+		 	string $getGroundCtl=
+				`textFieldButtonGrp -label "" 
+				-text "提示:请先选择地面" 
+				-buttonLabel "      确定       "
+				-adj 1
+				-cw 1 1
+				-cw 2 220
+				-cw 3 150
+				zzjFPGetGroundCtl`
+				;
+		
+			separator -height 15 -style "in" -w 900;
+				
+			string $getFootHeightCtl=
+		 	`floatSliderGrp 
+				-cw 1 148
+				-cw 2 45
+				-cw 3 120
+				-adj 3
+				-precision 3
+				-label "脚面和地面的距离容差" 
+				-field true
+				-minValue 0 
+				-maxValue 10.0
+				-fieldMinValue 	0
+				-fieldMaxValue 1000.0
+				-value 0.8
+				zzjFPFootHeightCtl`
+				;
+			
+			separator -height 15 -style "in" -w 900;
+			
+		
+			string $getFootFaceCtl=
+			`textFieldButtonGrp -label "" 
+				-text "提示:请选择需要的脚面(元素级别)" 
+				-buttonLabel " 确认选择"
+				-adj 1
+				-cw 1 1
+				-cw 2 220
+				-cw 3 150
+				//-cat 3 "left" 0
+				zzjFPGetFootFaceCtl`
+				;
+			
+			separator -height 15 -style "in" -w 900;
+
+			
+			string $getFootOffsetCtl=
+			`floatSliderGrp 
+				-cw 1 100
+				-cw 2 45
+				-cw 3 150
+				-adj 3
+				-precision 1
+				-label "脚印显示长度" 
+				-field true
+				-minValue 0
+				-maxValue 40.0
+				-fieldMinValue 	0 
+				-fieldMaxValue 10000.0
+				-value 100
+				zzjFPFootOffsetCtl`
+				;
+			
+	
+	setParent .. ;
+	setParent .. ;
+	
+	separator -height 5 -style "none" -w 900;
+	
+	rowLayout -nc 1
+		-cw 1 300
+		-cat 1 left 7
+		;
+		button -label "                     创建脚印(务必解算到动画结束)" -w 300 zzjFPMakeBtn;	
+	setParent ..;		
+
+	
+		rowLayout -nc 2
+			-cw 1 120
+			-cat 1 left 35	
+			-cat 2 left 35
+			;
+			button -label "       创建bump节点" -w 120 zzjFPBumpNodeBtn;
+			button -label "        创建渲染层" -w 120 zzjCreateRenderLayerBtn;
+	setParent ..;
+	
+	
+		rowLayout -nc 1
+			-cw 1 120
+			-cat 1 left 80
+			;
+			button -label "              删 除 脚 印" -w 150 zzjFPDelBtn;	
+	setParent ..;		
+		
+	
+	
+	// link ui control to function
+		
+	textFieldButtonGrp -e 
+		-bc "zzjRecordGround;"
+		$getGroundCtl;
+	
+	textFieldButtonGrp -e 
+		-bc "zzjRecordSlFace;"
+		$getFootFaceCtl;
+		
+	button -e -c "zzjCreateEverything();" zzjFPMakeBtn;
+	
+	button -e -c "zzjCreateBumpNode();" zzjFPBumpNodeBtn;
+	
+	button -e -c "zzjCreateRenderLayer();"	zzjCreateRenderLayerBtn;
+		
+	button -e -c "zzjDeleteEverything();" zzjFPDelBtn;
+
+	window -e -wh 336 266 zzjUIFootprintCreatorWnd;
+
+	showWindow;
+}
+}
+
+global proc zzjCreateRenderLayer()
+{
+	if (`objExists zzj_foot_print_dup_obj`)	
+	{		
+		select zzj_foot_print_dup_obj;
+		string $createLayerCommand= "createRenderLayer -name \"footPrint\" -number 1 -noRecurse `ls -selection`";
+		string $layerName=`eval $createLayerCommand`;
+		editRenderLayerGlobals -currentRenderLayer footPrint;	
+		evalDeferred ("layerEditorLayerButtonSelect 0 "+$layerName);	
+		evalDeferred ("editRenderLayerAdjustment \"defaultResolution.width\"");
+		evalDeferred ("editRenderLayerAdjustment \"defaultResolution.height\"");
+		evalDeferred ("setAttr defaultResolution.width 2048");
+		evalDeferred ("setAttr defaultResolution.height 2048");
+		evalDeferred ("editRenderLayerAdjustment \"defaultRenderGlobals.extensionPadding\"");
+		evalDeferred ("setAttr defaultRenderGlobals.extensionPadding 1");
+	}
+
+	if (`objExists zzj_foot_print_dup_obj`)			
+	{
+		string $camNames[]=`ls -type camera -l`;
+		for ($cac in $camNames)
+		{
+			setAttr ($cac+".renderable") 0;	
+		}
+	setAttr "FootPrintCameraShape.renderable" 1;
+	}	
+	
+
+}

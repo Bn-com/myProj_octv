@@ -1,0 +1,462 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ³ÂÖÙ
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//-----------------------------------------------------------------------
+//
+//  Creation Date:  August 3rd, 2006
+//
+//  Procedure Name:
+//      czTrackVertex
+//
+//  Description:
+//
+//		This is for maya users to create Hair Constraint and 
+//		make it follow the step of certain vertex.
+//
+//	
+//  Usage:
+//		Select a surface object(multi-selection is allowed)
+//		and a hair curve or a hair-follicles.
+//
+//  Input Arguments: none
+//
+//  Return Value: None.
+//
+//----------------------------------------------------------------------
+
+global proc czTrackVertex()
+{
+	// build the user UI
+	if ( `window -ex trackVertexUI` )
+	{
+		deleteUI trackVertexUI ;
+	}  	
+	window -t "Hair Constraint Vertex"
+			-wh 370 150
+			-maximizeButton 0 
+			-sizeable 0
+			-resizeToFitChildren 1
+			trackVertexUI;
+	
+	// window -q -wh trackVertexUI;
+	// window -e -wh 400 220 trackVertexUI;
+	// windowPref -remove trackVertexUI;
+	
+	formLayout mainTrackForm;
+	separator -style "in" -h 10 -w 200 sep1;
+	
+	radioButtonGrp -columnAlign 1 center 
+				   -numberOfRadioButtons 2 
+				   -select 2 -label "Position Control" 
+				   -labelArray2 "Random" "Average" 
+				   -onCommand "logicInside"
+				   ctrlRbtnGrp;
+
+
+	// vertexes arrangement
+	optionMenuGrp -l "HairConstrait : Vertex " -cal 1 right hVOptionMenu;
+		menuItem -label "   1   :   1   ";
+		menuItem -label "   1   :   2   ";
+		menuItem -label "   1   :   3   ";
+		menuItem -label "   1   :   4   ";
+
+	// randam settings
+	floatSliderGrp -enable 0 
+				   -label "Ratio(contrait/vertex)" 
+				   -field true 
+				   -cal 1 right
+				   -minValue 0.0 -maxValue 1.0 
+				   -fieldMinValue 0.0 -fieldMaxValue 1.0 
+				   -value 0.4
+				   ratioFSGrp;
+	
+	floatFieldGrp  -enable 0 
+				   -label "Seed"
+				   -cal 1 right
+				   -value1 0 seedFSGrp;
+
+		
+	// excution button
+	separator -style "none" -h 10 -w 200 sep2;
+	
+	button -w 130 -h 30 
+			-al "center" 
+			-l "Create"
+			-c ("trackVertexDo;deleteUI trackVertexUI") goTrackingBtn; 
+	button -w 130 -h 30 
+			-al "center" 
+			-l "Apply"
+			-c ("trackVertexDo") applyTrackingBtn; 
+	button -w 130 -h 30 
+			-al "center" 
+			-l "Close"
+			-c ("deleteUI trackVertexUI") closeBtn; 
+
+	// formLayout setting
+	formLayout -e 
+	
+		-af sep1 "top" 1
+		-af sep1 "left" 1
+		-af sep1 "right" 1
+		
+		-ac ctrlRbtnGrp "top" 8 sep1
+		-af ctrlRbtnGrp "left" 1
+		-af ctrlRbtnGrp "right" 1
+		
+		-ac hVOptionMenu "top" 15 ctrlRbtnGrp
+		-af hVOptionMenu "left" 1
+		-af hVOptionMenu "right" 1
+
+		-ac ratioFSGrp "top" 15 hVOptionMenu
+		-af ratioFSGrp "left" 1
+		-af  ratioFSGrp"right" 1	
+		
+		-ac seedFSGrp "top" 2 ratioFSGrp
+		-af seedFSGrp "left" 1
+		-af seedFSGrp "right" 1	
+		
+		-ac sep2 "top" 5 seedFSGrp
+		-af sep2 "left" 1
+		-af sep2 "right" 1	
+		
+		-ac goTrackingBtn "top" 5 sep2
+		-af goTrackingBtn "left" 1
+		-af goTrackingBtn "bottom" 10
+
+		-ac applyTrackingBtn "top" 5 sep2
+		-ac applyTrackingBtn "left" 3 goTrackingBtn
+		-af applyTrackingBtn "bottom" 10
+
+		-ac closeBtn "top" 5 sep2
+		-ac closeBtn "left" 3 applyTrackingBtn
+		-af closeBtn "right" 1
+		-af closeBtn "bottom" 10
+		mainTrackForm;
+
+	showWindow trackVertexUI; 
+}
+
+global proc trackVertexDo()
+{
+	// there must be some hair curve selected
+	string $hairCurve[] = `getSelectedHairCurves`;
+
+	string $temp[] = `ls -l $hairCurve[0]`;
+	tokenize $temp[0] "|" $temp;
+	select -d $temp[0];
+	
+	string $buffer[] = `ls -sl`;
+	string $manager;
+
+	// group management
+	if (!`objExists "hairConstraintGRP"`)
+	{
+		$manager = `group -em -n hairContraitGRP`;
+	}
+
+	select -r $buffer;
+
+	if (size($hairCurve))
+	{
+	 	// user selection		
+		int $flag = `radioButtonGrp -q -select ctrlRbtnGrp`;			
+			
+		// processing mode
+		if ($flag%2==0)
+		{
+			// average mode, goObjectMode
+			int $flat = `optionMenuGrp -q -select hVOptionMenu`;
+			print ("\nProcessing in average mode...\n");
+			averageMode($flat,$hairCurve[0],$manager);
+
+		}
+		else
+		{	// random mode, goVertexMode
+			float $percent = `floatSliderGrp -q -value ratioFSGrp`;
+			float $seed = `floatFieldGrp -q -value1 seedFSGrp`;
+			int $mod = `objType`;
+			print ("\nProcessing in random mode...\n");
+			randomMode($hairCurve[0],$percent,$seed,$mod,$manager);
+		}
+
+	}
+	else
+	{
+		error("createHairConstraint: no hair curves selected to constrain");
+	}
+
+}
+
+
+global proc string createHairConstraintUpdate(int $mode)
+{
+	// note:
+	//	this is from the Maya internal script
+	//	modification that make it return the 
+	//	name of new-created hair constrain.
+
+	string $hsys[];
+	string $hpin;
+	int $ind[] = selectedHairSystemIndices( $hsys );
+	int $numInd = size($ind);
+	if( $numInd == 0 ){
+		warning( "createHairConstraint: no hair curves selected to constrain");
+		return "";
+	} 
+	int $numPinInputs = `getAttr -size ($hsys[0] + ".inputHairPin" )`;
+	float $bb[];
+	int $positionAtMidpoint = true;
+	if( $positionAtMidpoint ){
+		string $htform[] = `listTransforms $hsys[0]`;
+		if( size($htform) > 0 ){
+			select -d $htform[0];
+		}
+		$bb= `exactWorldBoundingBox`;
+	}
+	$hpin = `createNode hairConstraint`;
+	if( $positionAtMidpoint ){
+		move (($bb[0] + $bb[3])*0.5) 
+			 (($bb[1] + $bb[4])*0.5) 
+			 (($bb[2] + $bb[5])*0.5) $hpin;
+	}
+	setAttr ($hpin + ".constraintMethod") ($mode+1);
+	int $ci;
+	for( $ci = 0; $ci < $numInd; $ci++ ){
+		setAttr ($hpin + ".curveIndices[" + $ci + "]") ($ind[ $ci ]);
+	}
+	int $pinInd;
+	for( $pinInd = 0; $pinInd <= $numPinInputs; $pinInd++ ){
+		string $input = ($hsys[0] + ".inputHairPin[" + $pinInd +"]");
+		if( $pinInd < $numPinInputs ){
+			string $con = `connectionInfo -sfd $input`;
+			if( size( $con ) > 0 ){
+				// already connected, keep looking
+				continue;
+			}
+		}
+		connectAttr ($hpin + ".outPin[0]") $input;
+		break;
+	}
+	string $conStrain[] = `listRelatives -parent $hpin`;
+	$hpin = $conStrain[0];
+	return $hpin;
+}
+
+
+global proc logicInside()
+{
+	// query processing mode
+	int $flag = `radioButtonGrp -q -select ctrlRbtnGrp`;
+
+	// way to go
+	if ($flag%2)
+	{
+		optionMenuGrp -e -enable 0 hVOptionMenu;
+		floatSliderGrp -e -enable 1 ratioFSGrp;
+		floatFieldGrp  -e -enable 1 seedFSGrp;
+
+	}
+	else
+	{
+		optionMenuGrp -e -enable 1 hVOptionMenu;
+		floatSliderGrp -e -enable 0 ratioFSGrp;
+		floatFieldGrp  -e -enable 0 seedFSGrp;
+	}
+}
+
+global proc averageMode(int $flat, string $hairCurve, string $manager)
+{	
+	// need vertex on surface
+	string $userSel[] = `ls -sl -s -dag -ni`;
+
+	// 1st loop: vertex info
+	for ($sel in $userSel)
+	{
+		if (`nodeType $sel`=="mesh")
+		{
+			int $vtexNum[] = `polyEvaluate -v $sel`;
+			
+			if (size($vtexNum))
+			{
+				// 2nd loop: vertex position
+				for ($i =0;$i<($vtexNum[0]);$i++)
+				{
+					if ($i%$flat==0)
+					{
+						// position info of vertex
+						float $vPosition[] = `pointPosition -w ($sel+".vtx["+$i+"]")`;						
+						
+						// create a hairConstraint for each vertex
+						select -r $hairCurve;
+						string $hairConstraint = `createHairConstraintUpdate(5)`;
+
+						// repositoin the  hair constraint
+						setAttr ($hairConstraint+".tx") $vPosition[0];
+						setAttr ($hairConstraint+".ty") $vPosition[1];
+						setAttr ($hairConstraint+".tz") $vPosition[2];
+
+						// and scale down a little bit
+						setAttr ($hairConstraint+".scaleX") 0.3;
+						setAttr ($hairConstraint+".scaleY") 0.3;
+						setAttr ($hairConstraint+".scaleZ") 0.3;
+						
+
+						// embed the expression for current constraint
+						string $exp ="float $posWorld[] = `xform -ws -q -t "+$sel+".vtx["+$i+"]"+"`;\n"
+							     +$hairConstraint+".translateX = $posWorld[0];\n"
+							     +$hairConstraint+".translateY = $posWorld[1];\n"
+							     +$hairConstraint+".translateZ = $posWorld[2];\n";
+
+						expression -s $exp -o "" -name ("vtrackExp"+$i) -ae 1 -uc all;	
+
+						// group them together						
+						makeIdentity -apply false -t 1 -r 1 $hairConstraint;
+						parent $hairConstraint $manager;
+					}
+
+				}
+			}
+		}
+		else
+		{
+			warning("Polys Only. Skipping " + $sel);
+		}
+	}
+}
+
+global proc randomMode(string $hairCurve, float $percentage, float $seed, int $mod, string $manager)
+{
+	if ($mod)
+	{
+		// need vertex on surface
+		string $userSel[] = `ls -sl -s -dag -ni`;
+
+		for ($sel in $userSel)
+		{
+			int $vtxNum[] = `polyEvaluate -v $sel`;		
+			if (size($vtxNum))
+			{
+				// 2nd loop: vertex position
+				int $j = 0;
+				seed($seed);
+				for ($i =0;$i<($vtxNum[0]);$i++)
+				{
+					
+					if (rand(1)<=$percentage)
+					{
+						
+
+						// position info of vertex
+						float $vPosition[] = `pointPosition -w ($sel+".vtx["+$i+"]")`;						
+						
+						// create a hairConstraint for each vertex
+						select -r $hairCurve;
+						string $hairConstraint = `createHairConstraintUpdate(5)`;
+
+						// repositoin the  hair constraint
+						setAttr ($hairConstraint+".tx") $vPosition[0];
+						setAttr ($hairConstraint+".ty") $vPosition[1];
+						setAttr ($hairConstraint+".tz") $vPosition[2];
+
+						// and scale down a little bit
+						setAttr ($hairConstraint+".scaleX") 0.3;
+						setAttr ($hairConstraint+".scaleY") 0.3;
+						setAttr ($hairConstraint+".scaleZ") 0.3;
+						
+
+						// embed the expression for current constraint
+						string $exp ="float $posWorld[] = `xform -ws -q -t "+$sel+".vtx["+$i+"]"+"`;\n"
+							     +$hairConstraint+".translateX = $posWorld[0];\n"
+							     +$hairConstraint+".translateY = $posWorld[1];\n"
+							     +$hairConstraint+".translateZ = $posWorld[2];\n";
+
+						expression -s $exp -o "" -name ("vtrackExp"+$j) -ae 1 -uc all;	
+
+						// group them together
+						makeIdentity -apply false -t 1 -r 1 $hairConstraint;
+						parent $hairConstraint $manager;
+						$j++;
+					}
+				}
+			}
+		}
+	}
+	else
+	{				
+		// need vertex on surface
+		string $userSel[] = `ls -sl -fl`;
+
+		// 1st loop: vertex info
+		seed($seed);
+		for ($vtx in $userSel)
+		{
+			if (rand(1)<=$percentage)
+			{
+				int $i = 0;
+				// position info of vertex
+				float $vPosition[] = `pointPosition -w $vtx`;						
+				
+				// create a hairConstraint for each vertex
+				select -r $hairCurve;
+				string $hairConstraint = `createHairConstraintUpdate(5)`;
+
+				// repositoin the  hair constraint
+				setAttr ($hairConstraint+".tx") $vPosition[0];
+				setAttr ($hairConstraint+".ty") $vPosition[1];
+				setAttr ($hairConstraint+".tz") $vPosition[2];
+
+				// and scale down a little bit
+				setAttr ($hairConstraint+".scaleX") 0.3;
+				setAttr ($hairConstraint+".scaleY") 0.3;
+				setAttr ($hairConstraint+".scaleZ") 0.3;
+				
+
+				// embed the expression for current constraint
+				string $exp ="float $posWorld[] = `xform -ws -q -t "+$vtx+"`;\n"
+					     +$hairConstraint+".translateX = $posWorld[0];\n"
+					     +$hairConstraint+".translateY = $posWorld[1];\n"
+					     +$hairConstraint+".translateZ = $posWorld[2];\n";
+		
+				expression -s $exp -o "" -name ("vtrackExp"+$i) -ae 1 -uc all;	
+
+				// group them together
+				makeIdentity -apply false -t 1 -r 1 $hairConstraint;
+				parent $hairConstraint $manager;
+				$i++;
+			}
+		}
+	}
+}
+
+
+global proc int objType()
+{
+	string $usel[] = `ls -sl`;
+	int $mod;
+	if (size($usel))
+	{
+		if (`gmatch $usel[0] "*.vtx*"`)
+		{
+			print "Processing in vertex mode...";
+			$mod = 0;
+		}
+		else
+		{
+			print "Processing in mesh mode...";
+			$mod = 1;
+		}
+	}
+	else
+	{
+		print "\nOnly poly and vertex will do!";
+	}
+	
+	return $mod;
+}

@@ -1,0 +1,141 @@
+// submitMaya.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Submits a maya process to the farm, optionally using rfxmaya
+Use:
+	template arg
+
+Arguments:
+	arg (string)	- some argument
+
+Returns:
+	
+Dependancies:
+
+	getPath
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	01/08/07
+Revisions:	01/01/06	Rev 1.0
+		- Revision description
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// 
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc int submitMaya(
+	string $jobName,	// name of the job
+	int $numCpus,		// number of cpus to use - only meaningful if range is set to something
+	int $priority,		// priority to submit at
+	string $range,		// range for jobs which have sub-jobs, e.g. Point Cache export
+	string $cluster,	// cluster to submit to
+	string $preCallback,	// qube pre-exec callback
+	string $postCallback,	// qube post-exec callback
+	string $extraQubeArgs,	// any extra qube args to add
+	int $useRfxMaya,	// use rfxmaya?
+	int $mayaRender,	// use the maya Render command
+	string $extraRfxMayaArgs,// any extra args to send to rfxmaya
+	string $mayaArgs	// maya arg string including command, scene, but not including project, or -batch
+) 
+{
+	// get project and make sure it is Linux friendly
+	string $proj = `workspace -q -act`;
+	$proj = getPath ("LinuxPath",{$proj});
+
+	// get Maya version
+	string $mayaVersion = `about -version`;
+	$mayaVersion = match ("[0-9]\.[0-9]",$mayaVersion);
+
+	// build the qbsub part of the command
+	//string $qbsubCmd = (`about -linux`)?"/diskx/film/apps/pfx/qube-5.0-0-SUSE-10.0/bin/qbsub ":"qbsub ";
+	string $qbsubCmd = (`about -linux`)?`getenv "QBDIR"`+"/bin/qbsub ":"qbsub ";
+	// string $qbsubCmd = (`about -linux`)?"/film/apps/pfx/qube-4.0-suse9.3/bin/qbsub ":"qbsub ";
+	//string $qbsubCmd = "qbsub ";
+
+	$qbsubCmd += "--user render ";
+	$qbsubCmd += "--priority "+$priority+" ";
+	$qbsubCmd += "--name "+$jobName+" ";
+
+	// callbacks
+	if ($preCallback != "")
+		$qbsubCmd	+= "--preexec \""+$preCallback+"\" ";	
+	if ($postCallback != "")
+		$qbsubCmd	+= "--postexec \""+$postCallback+"\" ";
+
+	// if this job has multiple sub-jobs
+	if ($range != "")
+	{
+		// range - a string in the form of, for ex, 1-100. The following works too: 1-4,6,9-10,12
+		$qbsubCmd += "--range "+$range+" ";
+		$qbsubCmd += "--cpus "+$numCpus+" ";
+		$qbsubCmd += "--padding 4 ";
+	}
+
+	// cluster
+	if ($cluster != "")
+	{
+		$qbsubCmd += "--cluster /"+$cluster+" ";
+		$qbsubCmd += "--requirements host."+$cluster+"=1 ";	
+	}
+
+	// any extra qube args...
+	if ($extraQubeArgs != "")
+	{
+		$qbsubCmd += $extraQubeArgs+" ";
+	}
+
+	// build the maya part of the command
+	if ($useRfxMaya)
+	{
+		// use explicit path to rfxmaya, so we don't rely on the paths being set on the farm machines
+		$qbsubCmd += "/diskx/film/apps/reelfx/apps/linux/rfxmaya "+$mayaVersion+" "+$proj+" ";
+		if ($mayaRender)
+			$qbsubCmd += "--render ";
+		if ($extraRfxMayaArgs != "")
+			$qbsubCmd += $extraRfxMayaArgs+" ";
+	}
+	else
+	{
+		if ($mayaRender)
+			$qbsubCmd += "Render ";
+		else
+			$qbsubCmd += "maya ";
+		$qbsubCmd += "-proj "+$proj+" ";
+	}
+
+	if (!$mayaRender)
+	{
+		$qbsubCmd += "-batch ";	// this is implied, since we are submitting to the farm. Unless we are using "Render" command
+	}
+	$qbsubCmd += $mayaArgs;	// includes -file if appropriate, and -command, etc...
+	
+	print ($qbsubCmd+"\n");
+	string $jobNumberStr = system ($qbsubCmd);
+	$jobNumberStr = match ("[0-9]+",$jobNumberStr);
+	
+	return ($jobNumberStr=="")?0:(int)$jobNumberStr;
+}

@@ -1,0 +1,200 @@
+//#=step 003 =====================checkin cleanup
+string $args[] = $parameters;
+eval "source zwCopyTextureImage.mel";
+eval "source zwSysFile.mel";
+eval "source zwNamespace.mel";
+
+string $project;		// 项目
+string $filename;		// 上传后的文件名
+string $destFolder;		// 上传目录
+int $copyMaps;			// 是否上传本机贴图
+int $copyCache;			// 是否上传hair cache, particle cache
+int $optimizeImagePlane;	// 是否删除所有imagePlane
+int $progress;			// 进度
+int $optimize = true;		// Optimize Scene Size
+string $mode = "";
+string $asset_type = "";
+
+$project		= $args[0];
+$filename		= $args[1];
+$destFolder		= $args[2];
+$copyMaps		= $args[3];
+$copyCache		= $args[4];
+$optimizeImagePlane	= $args[5];
+$progress		= $args[6];
+$optimize		= $args[7];
+$mode			= $args[8];
+$destMapFolder		= $args[9];
+$asset_type		= $args[10];
+$attached		= $args[11];
+$desc			= `strip $args[12]`;
+
+
+string $fileExt = fileExtension($filename);
+
+//判断是否有"D:/octvTemp"目录，无就创建此目录
+string $tempDir = "D:/octvTemp";
+if (!`filetest -d $tempDir`)
+    sysFile -makeDir $tempDir;
+
+string $version = `about -version`;
+$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+
+//连接后缀名相同的置换贴图
+string $buf[];
+clear $buf;
+//警告有同名的物体
+check_same_name();
+//警告有多余的显示层
+check_Display();
+// 检查 - 动画
+// 只能参考master 文件，不能参考rigging 文件
+zwCheckinCheckReferenceRigging;
+zwCheckinCheckTextureCompareMaster;
+if ($mode == "anim" || $mode == "layout")
+{
+    zwCheckinCheckAnimReference;		// 只能参考master/al 文件
+    zwCheckTopReference;			// 不能嵌套参考
+    //CheckStandardNamespace;			// 检查namespace
+}
+
+// 检查cache
+if (($mode == "simulation" || $mode == "effect") || $mode == "render")
+{
+    //zwCheckinCheckCache $filename $project;
+}
+
+// 检查 - 项目
+// 检查时间条
+if ($project == "xx" && $mode == "anim")
+{
+    zwCheckinCheckTimeLine;
+}
+
+// 优化
+// 将所有hairSystem 的simulationMethod 设为static
+if ($mode == "texture" ||  $mode == "rigging")
+{
+    zwSetIntAttrAll "hairSystem" "simulationMethod" 1;
+}
+
+
+// 前期文件去除namespace
+if ($asset_type != "")
+{
+    zjRemoveNamespace;
+}
+
+//string $allDisplacement[]=`ls -type "displacementShader"`;
+//if(size($allDisplacement)>0){
+    //confirmDialog -title "displacementShader" -message ("文件中存在置换节点(displacementShader),请清除置换节点！");
+    //error("文件中存在置换节点(displacementShader),请清除文件中所有的置换节点！");
+//}
+
+// 优化 - 动画
+// 删除渲染层
+//if ($mode == "anim" || $mode == "simulation" )
+if ($mode == "anim" || $mode == "simulation" || $mode =="master" || $mode =="model")
+{
+    zwCheckinDelRenderLayer;
+}
+
+// nCloth.isDynamic -> false; nucleus.enable -> false
+if ($mode == "anim" || $mode == "cache" || $mode == "simulation")
+{
+    zwSetIntAttrAll "nCloth" "isDynamic" false;
+    zwSetIntAttrAll "nucleus" "enable" false;
+}
+
+// file -lockFile false
+if ($asset_type == "sets" || $asset_type == "props")
+{
+//	eval "file -lockFile false";
+}
+
+
+// 不能有指向本机的Reference
+string $scenes = zwGetPath("scenes", "");
+string $pattern = `substitute "/scenes$" $scenes "/*"`;
+/**/
+
+string $Shpattern = `substitute ("/" + $project + "/") $pattern ("/" + "SHARED" + "/")`;	//each project can reference content form shared project
+
+//2016.4.5新添加了一个群众通用元素作为参考
+string $Gepattern=`substitute ("/" + $project + "/") $pattern ("/" + "GENERAL" + "/")`;
+
+//常德CDFKBS、CDMSS、CDSGFC参考可以用到柳州的FKBS、MSS、SGFC
+//只能动画章海燕，赵春红，刘峰三人的机器上传
+
+string $usename=`getenv username`;
+string $nameArrays[] = {"zhanghaiyan", "zhaochh", "liuf","zhangben"};
+int $flagCD = stringArrayContains($usename, $nameArrays);
+string $pattern_CD;
+//print $project;
+
+if($project == "CDFKBS" && $flagCD == 1){
+    $pattern_CD = `substitute ("/" + $project + "/") $pattern ("/" + "FKBS" + "/")`;
+}else if($project == "CDMSS" && $flagCD == 1){
+    $pattern_CD = `substitute ("/" + $project + "/") $pattern ("/" + "MSS" + "/")`;
+}else if($project == "CDSGFC" && $flagCD == 1){
+    $pattern_CD = `substitute ("/" + $project + "/") $pattern ("/" + "SGFC" + "/")`;
+}
+
+$pattern = tolower($pattern);
+$Shpattern = tolower($Shpattern);
+$Gepattern=tolower($Gepattern);
+
+$pattern_CD = tolower($pattern_CD);
+string $pattern1=`substitute "//octvision.com/cg" $pattern "z:"`;
+string $Shpattern1=`substitute "//octvision.com/cg" $Shpattern "z:"`;
+string $Gepattern1=`substitute "//octvision.com/cg" $Gepattern "z:"`;
+
+string $pattern_CD_z=`substitute "//octvision.com/cg" $pattern_CD "z:"`;
+$buf = `file -query -reference`;
+for ($file in $buf)
+{
+    //$file = "//octvision.com/CG/Themes/CDSGFC/Project/scenes/characters/ch002001BallMan/master/CDSGFC_ch002001BallMan_h_msAnim.mb";
+    string $str = $file;
+    $str = `substituteAllString $str "\\" "/"`;
+    $str = tolower($str);
+    if (!(`gmatch $str $pattern`||`gmatch $str $Shpattern`||`gmatch $str $Gepattern`||`gmatch $str $pattern1`||`gmatch $str $Shpattern1`||`gmatch $str $Gepattern1` || `gmatch $str $pattern_CD`||`gmatch $str $pattern_CD_z`))
+    {
+        print(" reference path issue :::::" + $file +"===================\n");
+        error ("只能参考" + $scenes + "或者"+ $Shpattern +"或者"+ $Gepattern + "或者" + $pattern1 + "或者"+ $Shpattern1 +"或者"+ $Gepattern1 + "里面的文件\n" + $file);
+    }
+}
+
+
+setAttr -lock false defaultRenderGlobals.byFrameStep;
+setAttr defaultRenderGlobals.byFrameStep 1;
+
+//删除"D:/octvTemp"目录下的当前文件名
+string $temp = $tempDir + "/" + $filename;
+sysFile -delete $temp;
+file -rename $temp;
+
+
+if ($optimizeImagePlane)	// 删imagePlane
+{
+    $buf = `ls -type "imagePlane"`;
+    for ($imagePlane in $buf)
+    {
+        if (!`reference -isNodeReferenced $imagePlane`)
+        {
+            lockNode -lock false $imagePlane;	// 文件有时候节点被锁了
+            delete $imagePlane;
+        }
+    }
+}
+
+if ($optimize)
+{
+    cleanUpScene 0;
+}
+
+//检查没有赋材质的物体
+checkingNoAnyMat();
+
+
+
+

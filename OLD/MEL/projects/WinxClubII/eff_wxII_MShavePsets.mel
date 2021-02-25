@@ -1,0 +1,162 @@
+global proc ShavePrgroup(string $name,string $RreAttr)
+{
+string $path ="//file-cluster/GDC/Resource/Support/Maya/projects/WinxClubII/import/ShavePresets/";
+$exampleFileName =$path+$name;
+$fileId=`fopen $exampleFileName "r"`;
+string $nextLine = `fgetline $fileId`;
+string $Shavetxt;
+while ( size( $nextLine ) > 0 ) {
+
+	$Shavetxt+=$nextLine;
+	setAttr -type "string" $RreAttr $Shavetxt;
+	$nextLine =`fgetline $fileId`;
+}
+fclose $fileId;
+}
+
+global proc MshaveNodeset()
+{
+string $shaveDisplayShapeItem[] = `ls -dag -s "*shaveDisplayGroup" "*:*shaveDisplayGroup"`;
+string $shaveDisplayItem[];
+for ($i=0;$i<size($shaveDisplayShapeItem);$i++) {
+	string $temp[] = `listRelatives -parent $shaveDisplayShapeItem[$i]`;
+	$shaveDisplayItem[$i] = $temp[0];
+}
+
+string $RIBlocaset[]=`ls -type "MayaManAttributes"`;
+for ($n in $shaveDisplayItem )
+{
+
+
+if (`attributeExists "shavePartName" $n`)
+{
+string $partName = "";
+$partName = `getAttr ($n + ".shavePartName")`;
+for ($m in $RIBlocaset)
+{
+string $buffer[];
+$numTokens = `tokenize $m ":" $buffer`;
+if (`gmatch $buffer[size($buffer)-1] ("*"+$partName+"*")`==1)
+{
+//print $buffer[size($buffer)-1];
+setAttr ($m+".mmma_ReadArchive") 1;
+setAttr -type "string" ($m+".mmma_ReadArchiveFilename") ("D:/MAYAMAN/RIB/85/mayaman/exported/$(SCENENAME)/$(FRAME)/"+ $partName + "_$(FRAME).rib");
+}
+
+}
+}
+
+}
+}
+
+global proc eff_wxII_removeShaveBlockCache()
+{
+	select`ls -type transform -dag "shaveDisplayGroup"`;
+	catchQuiet(`deleteGeometryCache`);
+
+	select`ls -type transform -dag "shave_importArchive_group"`;
+	catchQuiet(`deleteGeometryCache`);
+
+	select`ls -type transform -dag "shave_importArchive_GROUP"`;
+	catchQuiet(`deleteGeometryCache`);
+//	*************************************************************************
+	string $deforms[]=`ls -type mesh "shave?isplay*Deformed*"`;
+	if (`size $deforms`)	delete $deforms;
+	string $shavedisShape[]=`ls -type mesh "shave*isplay*"`;
+	for ($a in $shavedisShape)
+	{
+		setAttr ($a+".intermediateObject") 0;
+	}
+//	*************************************************************************
+	string $deforms[]=`ls -type mesh "shave*_importArchive_*eformed*"`;
+	if (`size $deforms`)	delete $deforms;
+	string $shavedisShape[]=`ls -type mesh "shave*_importArchive_*"`;
+	for ($a in $shavedisShape)
+	{
+		setAttr ($a+".intermediateObject") 0;
+		setAttr ($a+".lodVisibility") 0;
+	}
+//	*************************************************************************
+
+}
+global proc eff_wxII_MShavePsetsU()
+{
+
+string $fileSelect[]=`file -q -r`;
+string $infile[]    ={"*kiko*.mb*","*peg*.mb"};
+string $chactername=`shavegroup`;
+for ($f in $infile)
+{
+if (`gmatch $fileSelect[0] $f`==1 )
+{
+string $infile[]=`file -importReference $fileSelect[0]`;
+zjRemoveNamespace;
+eff_wxII_removeShaveBlockCache;
+}
+}
+MshaveNodeset;
+//设置毛发渲染属性
+string $scencename=`file -query -shortName -sceneName`;
+string $buffer[];
+$numTokens = `tokenize $scencename "." $buffer`;
+string $rendererNamesGUI[] = `MayaManInfo -rendererguinames`;
+setAttr -type "string" "MayaManNugget.UserRibOptions" "Hider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.5]" ;
+//setAttr -type "string" "MayaManNugget.PostScript" "if exist \"D:/MAYAMAN/RIB/85/mayaman/exported/$(SCENENAME)/$(FRAME)\" del /q \"D:/MAYAMAN/RIB/85/mayaman/exported/$(SCENENAME)/$(FRAME)\"";
+setAttr "MayaManNugget.Renderer" -type "string" $rendererNamesGUI[10];
+setAttr "MayaManNugget.RibBase" -type "string" $buffer[0];
+setAttr "MayaManNugget.PixelSamplesX" 6;
+setAttr "MayaManNugget.PixelSamplesY" 6;
+setAttr "MayaManNugget.PixelFilter" 3;
+setAttr "MayaManNugget.PixelFilterX" 2.2;
+setAttr "MayaManNugget.PixelFilterY" 2.2;
+ShavePrgroup($chactername+"_PreFrameShave.txt","MayaManNugget.PreFrameScript");
+print ($chactername+"_PreFrameShave.txt"+"\n");
+ShavePrgroup("PreScriptShave.txt","MayaManNugget.PreRenderScript");
+
+//ShavePrgroup("PoseFrameShave.txt","MayaManNugget.PostFrameScript");
+print "MayaMan设置Shave渲染设置完成";
+}
+
+
+
+
+global proc shavesel()
+{
+checkBoxGrp -e -value2 0  shavesel;
+
+
+}
+global proc  shavesel1()
+{
+checkBoxGrp -e -value1 0  shavesel;
+
+}
+
+global proc string shavegroup()
+{
+int $one=`checkBoxGrp -q -value1 shavesel`;
+int $two=`checkBoxGrp -q -value2 shavesel`;
+if ($one==1)
+{
+return "kiko";
+
+}
+else
+return "peg";
+}
+
+global proc eff_wxII_MShavePsets()
+{
+if (`window -q -exists MShavePsetsUI`) deleteUI MShavePsetsUI;
+string $myw=`window -width 400 -height 300 MShavePsetsUI`;
+columnLayout -adjustableColumn true;
+frameLayout -label "ShaveMayaMan渲染" -labelAlign "center" -borderStyle "etchedOut" ;
+columnLayout -adjustableColumn true;
+
+   checkBoxGrp -numberOfCheckBoxes 2 -changeCommand1 shavesel -changeCommand2 shavesel1  -labelArray2 "kiko" "peg"  shavesel;
+   button -label "设置"  -align "center" -c eff_wxII_MShavePsetsU;
+  setParent ..;
+setParent ..;
+showWindow $myw;
+
+}

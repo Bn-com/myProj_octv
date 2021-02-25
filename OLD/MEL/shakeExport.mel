@@ -1,0 +1,479 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: анип╨Ц
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+/*  This file downloaded from Highend3d.com
+''  
+''  Highend3d.com File Information:
+''  
+''    Script Name: shakeExport v1.1
+''    Author: Sean Fennell
+''    Last Updated: April 30, 2002
+''    Update/Change this file at:
+''    http://www.highend3d.com/shake/tools/?section=Irix#1679
+''  
+''  History:
+''    shakeExport v1.0 on April 30, 2002 by Sean Fennell
+''    shakeExport v1.0 on April 29, 2002 by Sean Fennell
+''  
+''  Please do not alter any information above this line
+''  it is generated dynamically by Highend3d.com and will
+''  be changed automatically on any updates.
+*/
+
+
+
+
+
+/* 	shakeExport.mel v1.0
+	written by Sean Fennell
+	April 28, 2002
+	
+	I have to give credit to Rob Bredrow since I referenced his screenSpace.mel
+	file to get the math worked out properly in mel.
+	
+	Description:  This script will allow you to export any animated transform node
+			from Maya 3d to Shake 2d raster.  It will create a shake file that 
+			contains a tracker node.  You can then reference this tracker 
+			node's X and Y curves to apply to any node in shake.
+			
+	Usage:	Very self explanatory.  Create a button from the shakeExport command on a shelf.
+		When you run shakeExport a window will pop up letting you choose animation curve
+		type in shake and repeat behavior.  You can determine what image size to export to
+		and the time range to export.  Finally you can select the camera to source the 3d
+		position from.  Be sure you select an object before hitting Export.  Once your
+		settings are as you like them click export and choose where to save the file.
+		
+		NOTE:  add .shk to the end of your file name because it will not be added automatically.
+		
+	Bugs:  None that I know of yet.  If you find any please email atoolfan@aol.com and let me know
+	
+	Limitations: You cannot export to Hermite curve type.
+			You cannot set a by frame (I may add this functionality later).
+                        BIG: this script will only work on NT because of the fileBrowserDialog command.
+                                any help developing this script to be cross platform compatable extremely welcome.
+                                All that needs to be done is use a method to let the user set the file name and path
+                                through a file browser window other than using the fileBrowserDialog command.
+			
+	Enhancements: If you can think of any way to enhance this script please let me know.
+	
+	contact:  Sean Fennell, atoolfan@aol.com
+*/
+
+global proc shakeExport()
+{
+
+global int $startFrame;
+global int $endFrame;
+global int $width;
+global int $height;
+global int $curveBehavior;
+global string $objectName;
+global string $cameraName;
+global string $curveType;
+global string $fileName;
+global string $windowPath;
+global string $fileGuts;
+$windowPath = "shakeOptions|shakeColumnLayout|";
+
+// Main GUI
+	global int $width; 
+	global int $height; 
+	
+	
+	global string $fileName;
+	
+	if(`window -exists shakeOptions` != 0)
+		deleteUI -window shakeOptions;
+		
+	string $shakeOptions = `window -title "Export to Shake"
+		-iconName "Shake Export"
+		-widthHeight 300 400
+		shakeOptions`;
+		
+	columnLayout -rowSpacing 6
+	-columnAttach "left" 1
+		shakeColumnLayout;
+		
+// create curve type select menu
+	optionMenu -label "Curve Type:        "
+		curveType;
+		menuItem -label "Linear";
+ 		menuItem -label "CSpline";
+ 		menuItem -label "JSpline";
+ 		menuItem -label "NSpline";
+ 		menuItem -label "Step";
+
+// create curve start/end behavior select menu
+	optionMenu -label "Curve Start/End: "
+		curveBehavior;
+    		menuItem -label "KeepValue";
+    		menuItem -label "KeepSlope";
+    		menuItem -label "RepeatValue";
+    		menuItem -label "MirrorValue";
+    		menuItem -label "OffsetValue";
+    		
+// create playback type select menu
+	optionMenu -label "Playback Type:   " 
+		-changeCommand "rangeEnable 0"
+		playbackType;
+    		menuItem -label "Render Globals";
+    		menuItem -label "Timeline";
+    		menuItem -label "Start/End";
+
+// these fields only active if "Start/End" is selected
+    	intFieldGrp -label "Start" 
+    		-enable 0 
+    		-numberOfFields 1 
+    		-value 0 0 0 0 
+    		startRange;
+ 
+     	intFieldGrp -label "End" 
+     		-enable 0 
+     		-numberOfFields 1 
+     		-value 10 10 10 10 
+     		endRange;
+
+// create resolution select menu
+	optionMenu -label "Resolution:         " 
+		-changeCommand "rangeEnable 1" 
+		resolutionType;
+		menuItem -label "Render Globals";
+		menuItem -label "User Defined";
+
+// these fields only active if "User Defined" is selected
+	intFieldGrp -label "Image Width" 
+		-enable 0 
+		-numberOfFields 1 
+		-value `getAttr defaultResolution.width` 0 0 0
+		imgWidth;
+
+	intFieldGrp -label "Image Height" 
+		-enable 0 
+		-numberOfFields 1 
+		-value `getAttr defaultResolution.height` 0 0 0
+		imgHeight;
+
+// create camera select menu
+	$camList = `optionMenuGrp -label "Camera:" selectCameraGrp`;
+		
+	// create a for loop to add renderable cameras
+	string $cameras[];
+	$cameras = `listCameras -perspective`;
+	for($i = 0; $i < size($cameras); $i++)
+	{
+		menuItem -parent ($camList + "|OptionMenu") -label $cameras[$i];
+	}
+
+// do the export button
+	button -label "Export Object"
+		-command "GuiInfo"
+		exportButton;
+
+  	showWindow $shakeOptions;
+
+}
+// End Main GUI
+
+
+// this proc will execute the field enabling when appropriate option above is selected
+global proc rangeEnable(int $mode)
+{
+	global string $windowPath;
+	switch( $mode )
+	{
+		case 0:
+			$value = `optionMenu -query -value ($windowPath + "playbackType")`;
+ 			if($value == "Start/End")
+ 			{
+ 				intFieldGrp -edit -enable 1 ($windowPath + "startRange");
+ 				intFieldGrp -edit -enable 1 ($windowPath + "endRange");
+ 			}
+ 			else
+ 			{
+ 				intFieldGrp -edit -enable 0 ($windowPath + "startRange");
+ 				intFieldGrp -edit -enable 0 ($windowPath + "endRange");
+ 			}
+ 			break;
+ 		case 1:
+ 			$value = `optionMenu -query -value ($windowPath + "resolutionType")`;
+ 			if($value == "User Defined")
+ 			{
+ 				intFieldGrp -edit -enable 1 ($windowPath + "imgWidth");
+ 				intFieldGrp -edit -enable 1 ($windowPath + "imgHeight");
+ 			}
+ 			else
+ 			{
+ 				intFieldGrp -edit -enable 0 ($windowPath + "imgWidth");
+ 				intFieldGrp -edit -enable 0 ($windowPath + "imgHeight");
+ 			}
+ 			break;
+ 	}
+ }
+// End Gui Functionality
+
+// Info Gathering
+global proc GuiInfo()
+{
+	global int $startFrame;
+	global int $endFrame;
+	global int $width;
+	global int $height;
+	global int $curveBehavior;
+	global string $curveType;
+	global string $objectName;
+	global string $cameraName;
+	global string $fileName;
+	global string $windowPath;
+
+	// get start and end frame
+	string $mode = `optionMenu -query -value ($windowPath + "playbackType")`;
+	switch( $mode )
+	{
+		case "Render Globals":
+			$startFrame = `getAttr defaultRenderGlobals.startFrame`;
+			$endFrame = `getAttr defaultRenderGlobals.endFrame`;
+			break;
+		case "Timeline":
+			$startFrame = `playbackOptions -query -minTime`;
+			$endFrame = `playbackOptions -query -maxTime`;
+			break;
+		case "Start/End":
+			$temp = `intFieldGrp -query -value ($windowPath + "startRange")`;
+			$startFrame = $temp[0];
+			$temp = `intFieldGrp -query -value ($windowPath + "endRange")`;
+			$endFrame = $temp[0];
+			break;
+	}
+	
+	// get image dimentions
+	string $mode = `optionMenu -query -value ($windowPath + "resolutionType")`;
+	switch( $mode )
+	{
+		case "Render Globals":
+			$width = `getAttr defaultResolution.width`;
+			$height = `getAttr defaultResolution.height`;
+			break;
+		case "User Defined":
+			$temp = `intFieldGrp -query -value ($windowPath + "imgWidth")`;
+			$width = $temp[0];
+			$temp = `intFieldGrp -query -value ($windowPath + "imgHeight")`;
+			$height = $temp[0];
+			break;
+	}
+
+	// get output curve type for shake
+	$curveType = `optionMenu -query -value ($windowPath + "curveType")`;
+	$curveType +=  "(";
+	
+	// get output curve start/end behavior for shake
+	string $mode = `optionMenu -query -value ($windowPath + "curveBehavior")`;
+	switch( $mode )
+	{
+		case "KeepValue":
+			$curveBehavior = 0;
+			break;
+		case "KeepSlope":
+			$curveBehavior = 1;
+			break;
+		case "RepeateValue":
+			$curveBehavior = 2;
+			break;
+		case "MirrorValue":
+			$curveBehavior = 3;
+			break;
+		case "OffsetValue":
+			$curveBehavior = 4;
+			break;
+	}
+	
+	// get selected object name
+	$selObjs = `ls -sl`;
+	
+	if( size( $selObjs ) != 1 )
+	{
+		confirmDialog -title "Error..." -message "You must select one and only one object for export.";
+		error("Select only one object and try again.  Exited...");
+	}
+	$objectName = $selObjs[0];
+	
+	// get camera name
+	$cameraName = `optionMenuGrp -query -value ($windowPath + "selectCameraGrp")`;
+	
+	deleteUI -window shakeOptions;
+
+/*  this was for NT only
+	fileBrowserDialog -mode 1 
+		-fileCommand "exportShake" 
+		-fileType "shake" 
+		-actionName "Export";
+*/
+	// give file name to save
+	//         /command   /action /type /mode
+	fileBrowser exportShake Export shake 1;
+
+
+}
+// End Info Gathering
+
+// below here actually calculates information
+// Get a matrix
+proc matrix screenSpaceGetMatrix(string $attr){
+  float $v[]=`getAttr $attr`;
+  matrix $mat[4][4]=<<$v[0], $v[1], $v[2], $v[3]; 
+             $v[4], $v[5], $v[6], $v[7];
+             $v[8], $v[9], $v[10], $v[11];
+             $v[12], $v[13], $v[14], $v[15]>>;
+ return $mat;
+}
+
+// Multiply the vector v by the 4x4 matrix m, this is probably
+// already in mel but I cant find it.
+proc vector screenSpaceVecMult(vector $v, matrix $m){
+  matrix $v1[1][4]=<<$v.x, $v.y, $v.z, 1>>;
+  matrix $v2[1][4]=$v1*$m;
+  return <<$v2[0][0], $v2[0][1],  $v2[0][2]>>;
+}
+
+// this procedure will format the information per frame into shake syntax and store it
+ global proc string buildFileGuts()
+ {
+ 	global int $startFrame;
+	global int $endFrame;
+	global int $width;
+	global int $height;
+	global int $curveBehavior;
+	global string $objectName;
+	global string $cameraName;
+	global string $curveType;
+	global string $fileName;
+	global string $windowPath;
+
+ 	int $f;
+ 	string $curveX;
+ 	string $curveY;
+ 
+ 	// create progress window for cancelation
+ 	progressWindow
+        	  -title "Exporting Object Data"
+        	  -min $startFrame
+        	  -progress $startFrame
+        	  -status ("Exporting: " + $startFrame + " of " + $endFrame)
+        	  -max $endFrame
+        	  -isInterruptable true;
+        	  
+ 	// this will build the gut structure:
+ 	for ($f=$startFrame;$f<=$endFrame;$f++)
+ 	{
+		currentTime $f;
+		
+		if ( `progressWindow -query -isCancelled` ) 
+			break;	//check to see if cancel has been pressed
+		  
+		//update progress window
+		progressWindow -edit
+			-progress $f
+			-status ("Exporting: " + $f +" of " + $endFrame);
+        	    
+		// get the world space position of the point into a vector
+		float $ptPosWs[] = `xform -q -ws -t $objectName`;
+		vector $ptVecWs = <<$ptPosWs[0],$ptPosWs[1],$ptPosWs[2]>>;
+
+    		// Grab the worldInverseMatrix from camera
+    		matrix $cam_mat[4][4] = screenSpaceGetMatrix(($cameraName + ".worldInverseMatrix"));
+
+    		// Multiply the point by that matrix
+    		vector $ptVecCs = screenSpaceVecMult($ptVecWs,$cam_mat);
+
+    		// Adjust the point's position for the camera perspective
+    		float $hfv = `camera -q -hfv $cameraName`;
+    		float $ptx = ( ( ( $ptVecCs.x/( -$ptVecCs.z ) )/tand( $hfv/2 ) )/2.0+.5 ) * $width;
+    		float $vfv = `camera -q -vfv $cameraName`;
+    		float $pty = (( ( $ptVecCs.y/( -$ptVecCs.z ) )/tand( $vfv/2 ) )/2.0+.5 ) * $height;
+
+    		float $ptz = $ptVecCs.z;
+
+    		$curveX += $curveBehavior + $ptx + "@" + $f; 
+    		if($f < $endFrame )
+    			$curveX += ",\n";
+    		$curveY += $curveBehavior + $pty + "@" + $f;
+    		if($f < $endFrame )
+    			$curveY += ",\n";
+	}
+	
+	progressWindow -endProgress; //Close progress window 
+
+ 	$fileGuts = "// File built with Maya 6.0 for Nothing Real Shake v2.4x \n\
+ 			\n// Written referencing a resolution of " + $width + " by " + $height + "\n\
+ 			// Processing nodes\n\n\
+ 			" + $objectName + "_tracker = Tracker(0, \"1\", \"1/16\", \"luminance\", 0.75, \"use start frame\", \
+    			0.5, \"stop\", 1, 11, " + $objectName + ", " + $curveType + $curveBehavior + "," + $curveX + "), " + $curveType + $curveBehavior + "," + $curveY + "), \
+			1, width/2-height/30, width/2+height/30, height/2-height/30, \
+			height/2+height/30, width/2-height/15, width/2+height/15, \
+			height/2-height/15, height/2+height/15, width/2, \
+			height/2, 1, 1)\;\n\
+			\n\
+			// End of file.";
+
+
+   	return $fileGuts;
+}
+
+// This is the guts of writing information to disk in shake format
+global proc int DOexport(string $fileName)
+{
+	global string $fileGuts;
+	int $file = fopen( $fileName, "w" );
+ 	if ( $file == 0 ) 
+ 	{
+        	print( "failed to open file "+$fileName+" for writing\n" );
+        	return -1;
+	}
+	
+	fprint( $file, `buildFileGuts`);
+	fclose $file;
+	return 1;
+
+}
+// end file write
+
+
+// vehicle to file write
+global proc int exportShake(string $fileExport, string $fileType)
+{
+	DOexport($fileExport);
+	return 1;
+}
+
+/*
+	usefull stuff:
+	
+ use this command to get the camera from options:
+ optionMenuGrp -query -value shakeOptions|shakeColumnLayout|selectCameraGrp;
+
+
+ shake tracker syntax
+ Tracker1 = Tracker(0, \"1\", \"1/16\", \"luminance\", 0.75, \"use start frame\", \
+    0.5, \"stop\", 1, 11, "track1", Linear(0,480@1,246@11), Linear(0,213@1,332@11), \
+    1, width/2-height/30, width/2+height/30, height/2-height/30, \
+    height/2+height/30, width/2-height/15, width/2+height/15, \
+    height/2-height/15, height/2+height/15, width/2, \
+    height/2, 1, 1)\;
+  
+  
+UI object names:
+curveType	"Linear" "CSpline" "JSpline" "NSpline" "Step"
+curveBehavior	"KeepValue" = 0 "KeepSlope" = 1 "RepeatValue" = 2 "MirrorValue" = 3 "OffsetValue" = 4
+playbackType
+	startRange
+	endRange
+resolutionType
+	imgWidth
+	imgHeight
+*/

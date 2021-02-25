@@ -1,0 +1,302 @@
+//Goomoo Edit polygon Copyright(C) Goomoo Studio 2002/5/1-2002/6/21 China
+
+//zjsEditPolygon.mel
+
+global proc zjsEditPolygon()
+{	;	}	//do nothing
+
+//Extrude plg along path===================================================================
+global proc zjsXtrudAlngCurveUI()
+{	zjsXtrudAlgCurve(0.9,0.9,8);
+	if(`window -ex zjsXtrudAlngCurveWindow`) deleteUI zjsXtrudAlngCurveWindow;
+	window -t "Extrude Polygon Along Curve" zjsXtrudAlngCurveWindow;
+	columnLayout -adj 1;
+		floatSliderGrp -l "X Scale:" -f 1 -min 0.5 -max 2 -fmn 0.1 -fmx 10 -v 0.9 xScale;
+		floatSliderGrp -l "Y Scale:" -f 1 -min 0.5 -max 2 -fmn 0.1 -fmx 10 -v 0.9 yScale;
+		intSliderGrp -l "Segments:" -f 1 -min 1 -max 16 -fmx 100 -v 8 seg;
+		floatSliderGrp -e -cc "undo;float $xScale=`floatSliderGrp -q -v xScale`;float $yScale=`floatSliderGrp -q -v yScale`;int $seg=`intSliderGrp -q -v seg`;zjsXtrudAlgCurve($xScale,$yScale,$seg);"xScale;floatSliderGrp -e -cc "undo;float $xScale=`floatSliderGrp -q -v xScale`;float $yScale=`floatSliderGrp -q -v yScale`;int $seg=`intSliderGrp -q -v seg`;zjsXtrudAlgCurve($xScale,$yScale,$seg);"yScale;intSliderGrp -e -cc "undo;float $xScale=`floatSliderGrp -q -v xScale`;float $yScale=`floatSliderGrp -q -v yScale`;int $seg=`intSliderGrp -q -v seg`;zjsXtrudAlgCurve($xScale,$yScale,$seg);"seg;showWindow zjsXtrudAlngCurveWindow;
+}
+global proc zjsXtrudAlgCurve(float $lsx,float $lsy,int $segment)	//lsx:local scale X
+{	
+	string $curve[]=`filterExpand -sm 9`;			//get current seletion
+	string $faces[]=`filterExpand -sm 34`;
+	if($curve[0]==""||$faces[0]=="")
+		error "Please select polygon facets and a curve first.";
+	string $curveShape[]=`listRelatives -s $curve[0]`;
+	float $curveMinMaxValue[]=`eval("getAttr "+$curveShape[0]+".minMaxValue")`;
+	float $u_inc=($curveMinMaxValue[1]-$curveMinMaxValue[0])/$segment;
+	
+	int $i,$j,$k;	float $u=$curveMinMaxValue[0],$a,$b,$c;
+	vector $thisPos,$nextPos,$detaPos;	vector $thisTangent,$nextTangent,$detaAngle;
+	float $tmpPos[],$tmpTangent[],$thisAngleX,$thisAngleY,$thisAngleZ,$nextAngleX,$nextAngleY,$nextAngleZ;
+	select -r $faces;
+	for($i=0;$i<$segment;$i++)
+	{	$tmpPos=`eval("pointPosition "+$curve[0]+".u["+$u+"]")`;
+		$thisPos=<<$tmpPos[0],$tmpPos[1],$tmpPos[2]>>;
+		$tmpTangent=`eval("pointOnCurve -t -pr "+$u+" "+$curve[0])`;
+		$thisTangent=<<$tmpTangent[0],$tmpTangent[1],$tmpTangent[2]>>;
+		$thisAngleX=angle($thisTangent,<<1,0,0>>);		//the angle of first tangent between 3 axies.
+		$thisAngleY=angle($thisTangent,<<0,1,0>>);
+		$thisAngleZ=angle($thisTangent,<<0,0,1>>);
+
+		$u+=$u_inc;
+		$tmpPos=`eval("pointPosition "+$curve[0]+".u["+$u+"]")`;
+		$nextPos=<<$tmpPos[0],$tmpPos[1],$tmpPos[2]>>;
+		$tmpTangent=`eval("pointOnCurve -t -pr "+$u+" "+$curve[0])`;
+		$nextTangent=<<$tmpTangent[0],$tmpTangent[1],$tmpTangent[2]>>;
+		$detaPos=$nextPos-$thisPos;
+		$nextAngleX=angle($nextTangent,<<1,0,0>>);		//the angle of second tangent between 3 axies.
+		$nextAngleY=angle($nextTangent,<<0,1,0>>);
+		$nextAngleZ=angle($nextTangent,<<0,0,1>>);
+		$detaAngle=<<$nextAngleX-$thisAngleX,$nextAngleY-$thisAngleY,$nextAngleZ-$thisAngleZ>>;		//angle increment
+
+		$detaAngle=<<rad_to_deg($detaAngle.x),rad_to_deg($detaAngle.y),rad_to_deg($detaAngle.z)>>;	// convert to degree
+
+		polyExtrudeFacet -kft 1 -t ($detaPos.x) ($detaPos.y) ($detaPos.z)
+					-lr ($detaAngle.x) ($detaAngle.y) ($detaAngle.z)
+					-lsx $lsx -lsy $lsy;
+	}
+}
+
+//zjsGreeble===========================================================================================
+global proc zjsGreebleUI()
+{	zjsGreeble(0.5,1.0,0.2,0.4,0.9,1.0,0.2,0.4,1.0,3);
+	if(`window -ex zjsGreebleWindow`) deleteUI zjsGreebleWindow;
+	window -t "Random Extrude" zjsGreebleWindow;	columnLayout -adj 1;
+		floatFieldGrp -numberOfFields 2 -l "L1 Min Max Height:" -v1 0.5 -v2 1.0 L1Height;
+		floatFieldGrp -numberOfFields 2 -l "L2 Min Max Height:" -v1 0.2 -v2 0.4 L2Height;
+		floatFieldGrp -numberOfFields 2 -l "L1 Min Max Scale:" -v1 0.9 -v2 1.0 L1Scale;
+		floatFieldGrp -numberOfFields 2 -l "L2 Min Max Scale:" -v1 0.2 -v2 0.4 L2Scale;
+		floatSliderGrp -l "L2 Max Position Offset:" -f 1 -min 0.0 -max 10.0 -fmx 50 -v 1.0 L2Offset;
+		intSliderGrp -l "Max Num Bricks Per Face:" -f 1 -min 1 -max 10 -fmx 50 -v 3 maxNumPerFace;
+		button -l "Update" -c "undo;float $L1Height[]=`floatFieldGrp -q -v L1Height`;float $L2Height[]=`floatFieldGrp -q -v L2Height`;float $L1Scale[]=`floatFieldGrp -q -v L1Scale`;float $L2Scale[]=`floatFieldGrp -q -v L2Scale`;float $L2Offset=`floatSliderGrp -q -v L2Offset`;int $maxNumPerFace=`intSliderGrp -q -v maxNumPerFace`;zjsGreeble(	$L1Height[0],$L1Height[1],$L2Height[0],$L2Height[1],$L1Scale[0],$L1Scale[1],$L2Scale[0],$L2Scale[1],$L2Offset,$maxNumPerFace);";showWindow zjsGreebleWindow;
+}
+global proc zjsGreeble(	float $L1MinHeight,float $L1MaxHeight,
+			float $L2MinHeight,float $L2MaxHeight,
+			float $L1MinScaleRatio,float $L1MaxScaleRatio,
+			float $L2MinScaleRatio,float $L2MaxScaleRatio,
+			float $L2MaxOffset,
+			int $maxNumPerFace)
+{	
+	string $selection[]=`filterExpand -sm 12`;
+	if(size($selection)==0)
+		$selection=`filterExpand -sm 34`;
+	if(size($selection)==0)
+		error "Please select polygon or polygon facets.";
+	string $tmpString[];
+	int $n=`tokenize $selection[0] "." $tmpString`;		//polygon or face?
+	string $object=$tmpString[0];
+	int $i,$j,$k,$size;	float $tmpHeight,$tmpScaleRatio;
+	if($n==1)						//polygon
+	{	int $faceNum[]=`polyEvaluate -f $selection[0]`;
+		for($i=0;$i<$faceNum[0];$i++)
+		{	eval("select -r "+$selection[0]+".f["+$i+"]");
+			$tmpHeight=rand($L1MinHeight,$L1MaxHeight);
+			$tmpScaleRatio=rand($L1MinScaleRatio,$L1MaxScaleRatio);
+			polyExtrudeFacet -ch 1 -kft 0 -ltz $tmpHeight -lsx $tmpScaleRatio -lsy $tmpScaleRatio;
+			$k=rand($maxNumPerFace);
+			for($j=0;$j<$k;$j++)
+			{	eval("select -r "+$selection[0]+".f["+$i+"]");
+				$tmpScaleRatio=rand($L2MinScaleRatio,$L2MaxScaleRatio);
+				polyChipOff -ch 1 -kft 0 -dup 1 -lsx $tmpScaleRatio -lsy $tmpScaleRatio -ltx (rand(-$L2MaxOffset,$L2MaxOffset)) -lty (rand(-$L2MaxOffset,$L2MaxOffset));
+				$tmpHeight=rand($L2MinHeight,$L2MaxHeight);
+				polyExtrudeFacet -ch 1 -kft 0 -ltz $tmpHeight;
+				delete -ch $object;
+			}
+		}
+		select -r $object;
+	}
+	else if($n==2)						//face
+	{	$size=size($selection);
+		for($i=0;$i<$size;$i++)
+		{	select -r $selection[$i];
+			$tmpHeight=rand($L1MinHeight,$L1MaxHeight);
+			$tmpScaleRatio=rand($L1MinScaleRatio,$L1MaxScaleRatio);
+			polyExtrudeFacet -ch 1 -kft 0 -ltz $tmpHeight -lsx $tmpScaleRatio -lsy $tmpScaleRatio;
+			$k=rand($maxNumPerFace);
+			for($j=0;$j<$k;$j++)
+			{	select -r $selection[$i];
+				$tmpScaleRatio=rand($L2MinScaleRatio,$L2MaxScaleRatio);
+				polyChipOff -ch 1 -kft 0 -dup 1 -lsx $tmpScaleRatio -lsy $tmpScaleRatio -ltx (rand(-$L2MaxOffset,$L2MaxOffset)) -lty (rand(-$L2MaxOffset,$L2MaxOffset));
+				$tmpHeight=rand($L2MinHeight,$L2MaxHeight);
+				polyExtrudeFacet -ch 1 -kft 0 -ltz $tmpHeight;
+				delete -ch $object;
+			}
+		}
+		select -r $object;
+	}
+}
+
+//zjsPolygonSmoothProxy==========================================================================
+global proc zjsPolygonSmoothProxyUI()
+{	zjsPolygonSmoothProxy(0,1);
+	if(`window -ex zjsPolygonSmoothProxyWindow`) deleteUI zjsPolygonSmoothProxyWindow;
+	window -t "Polygon Smooth Proxy" zjsPolygonSmoothProxyWindow;
+	columnLayout -adj 1;
+		checkBox -label "Mirror" mirror;
+		radioButtonGrp -en 0 -nrb 3 -l "Mirror Axis:" -la3 "+x" "+y" "+z" -sl 1 axiasA;
+		radioButtonGrp -en 0 -nrb 3 -l "" -la3 "-x" "-y" "-z" axiasB;
+		checkBox -e -onc "undo;zjsPolygonSmoothProxy(1,1);radioButtonGrp -e -en 1 axiasA;radioButtonGrp -e -en 1 axiasB;"-ofc"undo;zjsPolygonSmoothProxy(0,1);radioButtonGrp -e -en 0 axiasA;radioButtonGrp -e -en 0 axiasB;"mirror;radioButtonGrp -e -on1"undo;zjsPolygonSmoothProxy(1,1);"-on2"undo;zjsPolygonSmoothProxy(1,2);"-on3"undo;zjsPolygonSmoothProxy(1,3);"axiasA;radioButtonGrp -e -on1 "undo;zjsPolygonSmoothProxy(1,4);"-on2"undo;zjsPolygonSmoothProxy(1,5);"-on3"undo;zjsPolygonSmoothProxy(1,6);"axiasB;showWindow zjsPolygonSmoothProxyWindow;
+}
+//---------------------------------------------------------------
+global proc zjsPolygonSmoothProxy(int $mirror,int $mirrorAxias)
+{	string $selections[]=`filterExpand -sm 12`;
+	if($selections[0]=="")	error "Please select a polygon object.";
+	string $polygon=$selections[0];
+	string $tmpName=$polygon+"_smoothedCopy";
+	if(`objExists $tmpName`)	error "The selection is already a polygon smooth proxy.";
+	select -r $polygon;
+	polyDuplicateAndConnect;
+	string $polygonCopy=$polygon+"_smoothedCopy";
+	rename $polygonCopy;
+	select -r $polygonCopy;
+	string $temp[]=`eval("polySmooth  -dv 1 -c 1 -kb 0 -ksb 1 -kt 1 -ch 1 "+$polygonCopy+".f[0:32768]")`;
+	string $polygonSmoothNode=$temp[0];
+	setAttr ($polygonSmoothNode+".inputComponents") -type "componentList" 1 "f[*]";
+
+	select -r $polygon;
+	$temp=`listRelatives -s $polygon`;
+	string $polygonShape=$temp[0];
+	setAttr ($polygonShape+".overrideEnabled") 1;
+	setAttr ($polygonShape+".overrideShading") 0;
+	setAttr ($polygonShape+".primaryVisibility") 0;
+	setAttr ($polygonShape+".castsShadows") 0;
+	addAttr -ln showSmoothedCopy -sn ssc -at bool -dv 1;		//showSmoothedCopy---------
+	eval("setAttr -e -keyable true "+$polygon+".showSmoothedCopy");
+	addAttr -ln shade  -at bool -dv 0;				//shade----------------
+	eval("setAttr -e -keyable true "+$polygon+".shade");
+	addAttr -ln divisions -at long  -min 1 -max 4 -dv 1; 	//divisions----------
+	eval("setAttr -e -keyable true "+$polygon+".divisions");
+	addAttr -ln copyDisplayType -at "enum" -en "Normal:Template:Reference:" -dv 2;	//copyDisplayType--------
+	eval("setAttr -e -keyable true "+$polygon+".copyDisplayType");
+
+	select -r $polygon $polygonCopy;
+	pointConstraint -weight 1;		//lock position and rotate
+	orientConstraint -weight 1;
+
+	select -r $polygonCopy;
+	$tmp=`listRelatives -s $polygonCopy`;
+	string $polygonCopyShape=$tmp[0];
+	setAttr ($polygonCopyShape+".overrideEnabled") 1;
+	setAttr ($polygonCopyShape+".overrideDisplayType") 2;
+
+	eval("connectAttr -f "+$polygon+".showSmoothedCopy "+$polygonCopyShape+".overrideVisibility");
+	eval("connectAttr -f "+$polygon+".shade "+$polygonShape+".overrideShading");
+	eval("connectAttr -f "+$polygon+".divisions "+$polygonSmoothNode+".divisions");
+	eval("connectAttr -f "+$polygon+".copyDisplayType "+$polygonCopyShape+".overrideDisplayType");
+
+	if($mirror)
+	{	float $BBoxMin[]=eval("getAttr "+$polygonShape+".boundingBoxMin");
+		float $BBoxMax[]=eval("getAttr "+$polygonShape+".boundingBoxMax");
+		$temp=`instance $polygonCopy`;
+		select -r $temp[0];
+		string $polygonCopyMirrored=`rename ($polygonCopy+"_Mirrored")`;
+		switch($mirrorAxias)
+		{	case 1:
+				scale -r -1 1 1;
+				move -r ($BBoxMax[0]-$BBoxMin[0]) 0 0;
+				break;
+			case 2:
+				scale -r 1 -1 1;
+				move -r 0 ($BBoxMax[1]-$BBoxMin[1]) 0;
+				break;
+			case 3:
+				scale -r 1 1 -1;
+				move -r 0 0 ($BBoxMax[2]-$BBoxMin[2]);
+				break;
+			case 4:
+				scale -r -1 1 1;
+				move -r (-($BBoxMax[0]-$BBoxMin[0])) 0 0;
+				break;
+			case 5:
+				scale -r 1 -1 1;
+				move -r 0 (-($BBoxMax[1]-$BBoxMin[1])) 0;
+				break;
+			case 6:
+				scale -r 1 1 -1;
+				move -r 0 0 (-($BBoxMax[2]-$BBoxMin[2]));
+				break;
+		}
+		select -r $polygonCopyMirrored $polygon;
+		parent;
+	}
+	select -r $polygon;
+}
+
+//zjsNoiseUI  //////////////////////////////////////////////////////////
+//This procedure effect the selected objects' points randomly to ///////
+//get a random look. You can select Polygons,nurbs,Polygon Vertices/////
+//nurbs CVs ,then execute the command.//////////////////////////////////
+global proc zjsNoiseUI()
+{	zjsNoise(0,1,0,1);
+	if(`window -ex zjsNoiseWindow`) deleteUI zjsNoiseWindow;
+	window -t "Randomize" zjsNoiseWindow; columnLayout -adj 1;
+	floatSliderGrp -l "Strength X" -f 1 -min 0 -max 10 -fmx 1000 -v 0 xStrength;
+	floatSliderGrp -l "Strength Y" -f 1 -min 0 -max 10 -fmx 1000 -v 1 yStrength;
+	floatSliderGrp -l "Strength Z" -f 1 -min 0 -max 10 -fmx 1000 -v 0 zStrength;
+	intSliderGrp -l "Per ? points" -f 1 -min 1 -max 10 -fmx 1000 -v 1 perPoint;
+	button -l "Update" -c "undo;float $xStrength=`floatSliderGrp -q -v xStrength`;float $yStrength=`floatSliderGrp -q -v yStrength`;float $zStrength=`floatSliderGrp -q -v zStrength`;int $perPoint=`intSliderGrp -q -v perPoint`;zjsNoise($xStrength,$yStrength,$zStrength,$perPoint);";showWindow zjsNoiseWindow;
+}
+//zjsNoise-------------------------------------------------------------
+global proc zjsNoise(float $xStrength,float $yStrength,float $zStrength,int $perPoint)
+{	string $polygons[]=`filterExpand -sm 12`;
+	string $nurbs[]=`filterExpand -sm 10`;
+	string $vertices[]=`filterExpand -sm 31`;
+	string $cvs[]=`filterExpand -sm 28`;
+	
+	int $n_polygons,$n_nurbs,$n_vertices,$n_cvs;
+	$n_polygons=size($polygons);
+	$n_nurbs=size($nurbs);
+	$n_vertices=size($vertices);
+	$n_cvs=size($cvs);
+	if(($n_polygons+$n_nurbs+$n_vertices+$n_cvs)==0)
+		error "None selected.";
+
+	if($n_polygons!=0)
+	{	select -r $polygons;
+		ConvertSelectionToVertices;
+		string $tmp_vertices[]=`ls -sl -fl`;
+		zjsPerformNoise($xStrength,$yStrength,$zStrength,$perPoint,$tmp_vertices);
+	}
+
+	if($n_nurbs!=0)
+	{	string $shape[]=`listRelatives -s $nurbs[0]`;
+		int $spansuv[]=`eval("getAttr "+$shape[0]+".spansUV")`;
+		int $degreeuv[]=`eval("getAttr "+$shape[0]+".degreeUV")`;
+		int $maxu=$spansuv[0]+$degreeuv[0]-1;
+		int $maxv=$spansuv[1]+$degreeuv[1]-1;
+		int $i,$j,$k;
+		string $tmp_cvs[];
+		for($i=0;$i<=$maxu;$i++)
+		{	for($j=0;$j<=$maxv;$j++)
+			{	$tmp_cvs[$k]=$nurbs[0]+".cv["+$i+"]["+$j+"]";
+				$k++;
+			}
+		}
+		zjsPerformNoise($xStrength,$yStrength,$zStrength,$perPoint,$tmp_cvs);
+	}
+
+	if($n_vertices!=0)
+	{	zjsPerformNoise($xStrength,$yStrength,$zStrength,$perPoint,$vertices);
+	}
+
+	if($n_cvs!=0)
+	{	zjsPerformNoise($xStrength,$yStrength,$zStrength,$perPoint,$cvs);
+	}
+}
+//zjsPerformNoise  -----------------------------------------------------
+global proc zjsPerformNoise(float $xStrength,float $yStrength,float $zStrength,int $perPoint,string $points[])
+{	int $n,$i,$j;
+	$n=size($points);
+	$i+=int(rand(1,$perPoint));
+	for(;$i<$n;)
+	{	move -r (rand(-$xStrength,$xStrength)) 
+			(rand(-$yStrength,$yStrength)) 
+			(rand(-$zStrength,$zStrength)) $points[$i];
+		$i+=int(rand(1,$perPoint));
+
+	}
+}
+
+
+//end of zjsEditPolygon.mel=======================================================================

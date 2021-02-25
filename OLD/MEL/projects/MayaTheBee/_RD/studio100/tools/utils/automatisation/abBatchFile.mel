@@ -1,0 +1,645 @@
+/* This file downloaded from Highend3d.com
+''  
+''  Highend3d.com File Information:
+''  
+''    Script Name: abBatchFile
+''    Author: crumbly 
+''    Last Updated: Jul 30, 2009
+''    Update/Change this file at:
+''    http://Highend3d.com/maya/downloads/mel_scripts/utility_external/misc/3232.html
+''  
+''  Please do not alter any information above this line
+''  it is generated dynamically by Highend3d.com and will
+''  be changed automatically on any updates.
+*/
+/*
+abBatchFile.mel 1.2
+brendan ross 05.07.2009
+www.supercrumbly.com
+
+use:
+
+A handy little script that allows you to run mel commands on one or many Maya scene files (.ma or .mb).  Once the specified script is run on a file, it can be saved (or not saved) in a variety of ways.
+
+For directions see the website.
+
+*/
+
+
+
+global proc abBatchFile(){
+	
+	global string $abBFGlobals[];
+	global string $abBFBatchFiles[];
+	global string $abBFScript;       
+	
+	if (size($abBFGlobals) == 0) abBFGlobals();
+	
+	int $saveFile = int(abBFGetGlobal("saveFileAfterScriptIsRun"));
+	int $incSave = int(abBFGetGlobal("incrementalSave"));
+	int $saveToNewDir = int(abBFGetGlobal("saveToNewDir"));
+	string $newSaveDir = abBFGetGlobal("newSaveDir");
+	
+	if (`window -exists abBFWin`){
+		deleteUI -window abBFWin;
+	}
+	window -t ("abBatchFile "+abBFGetGlobal("scriptVersion")) -w 750 -h 350 -menuBar true -minimizeButton false -maximizeButton false abBFWin;
+		
+	formLayout -numberOfDivisions 100 abBFForm;
+	
+	text -l "Files:" abBFFilesTxt;
+	text -l "Mel To Run:" abBFScriptTxt;
+	
+	textScrollList -allowMultiSelection true abBFFileTxtScrollList;
+	scrollField -tx $abBFScript -wordWrap false -editable true -cc "abBFUpdateScrollGlobal();" -ec "abBFUpdateScrollGlobal();" abBFFileScrollFld;
+	
+	button -l "<" -c "abBFLayoutMainUI(0);" abBFWinSplitLeftBn;
+	button -l "::" -c "abBFLayoutMainUI(50);" abBFWinSplitMidBn;  
+	button -l ">" -c "abBFLayoutMainUI(90);" abBFWinSplitRightBn;
+	
+	checkBox -l "Save File" -v $saveFile -cc "int $gInt=`checkBox -q -v abBFSaveChkBx`; int $gInt2 = `checkBox -q -v abBFUseSaveDirChkBx`; abBFSetGlobal(\"saveFileAfterScriptIsRun\", $gInt); checkBox -e -en $gInt abBFIncSaveChkBx; checkBox -e -en $gInt abBFUseSaveDirChkBx; textField -e -en ($gInt && $gInt2) abBFSaveDirTxtFld; button -e -en ($gInt && $gInt2) abBFSelSaveDirBn;" abBFSaveChkBx;
+	checkBox -l "Incremental Save" -en $saveFile -v $incSave -cc "abBFSetGlobal(\"incrementalSave\", (string(`checkBox -q -v abBFIncSaveChkBx`)));" abBFIncSaveChkBx;
+	checkBox -l "Save To New Directory" -en $saveFile -v $saveToNewDir -cc "int $gInt=`checkBox -q -v abBFUseSaveDirChkBx`; textField -e -enable $gInt abBFSaveDirTxtFld; button -e -enable $gInt abBFSelSaveDirBn; abBFSetGlobal(\"saveToNewDir\", (string(`checkBox -q -v abBFUseSaveDirChkBx`)));"  abBFUseSaveDirChkBx;
+	textField -tx $newSaveDir -enable ($saveToNewDir && $saveFile) -ed false abBFSaveDirTxtFld;
+	button -l "   Select Save Directory   " -enable ($saveToNewDir && $saveFile) -c "abBFSelSaveDirDialog();" abBFSelSaveDirBn;
+	
+	separator abBFSep1;
+	separator abBFSep2;
+	
+	popupMenu -button 3 -pmc "int $gInt = (`textScrollList -q -nsi abBFFileTxtScrollList` > 0); menuItem -e -en $gInt abBFTxtScrllLstRmSelMnIt; int $gInt = (`textScrollList -q -ni abBFFileTxtScrollList` > 0); menuItem -e -en $gInt abBFTxtScrllLstRmAllMnIt;" -parent abBFFileTxtScrollList;
+	menuItem -label "Remove Selected" -command "abBFServiceFileListPopUp(0);" abBFTxtScrllLstRmSelMnIt;
+	menuItem -label "Remove All" -command "abBFServiceFileListPopUp(1);" abBFTxtScrllLstRmAllMnIt;
+	setParent ..;
+	
+	popupMenu -button 3 -pmc "int $gInt = (`scrollField -q -tx abBFFileScrollFld` != \"\"); menuItem -e -en $gInt abBFScrllFldEntScriptMnIt; menuItem -e -en $gInt abBFScrllFldRmScriptMnIt;" -parent abBFFileScrollFld;
+	menuItem -label "Enter Script" -command "abBFUpdateScrollGlobal();" abBFScrllFldEntScriptMnIt;
+	menuItem -label "Remove Script" -command "scrollField -e -tx \"\" abBFFileScrollFld;" abBFScrllFldRmScriptMnIt;
+	setParent ..;
+	
+	button -label "Add File To Batch" -c "abBFAddFileDialog(0);" abBFAddFilesBn;
+	button -label "Add Directory To Batch" -c "abBFAddFileDialog(1);" abBFAddDirBn;
+	button -label "Save Batch" -h 28 -command "abBFSaveBatchFileDialog();" abBFSaveBatchBn;
+	button -label "Run Batch" -h 28 -command "abBFRunBatchFileDialog();" abBFRunBatchBn;
+	
+	abBFLayoutMainUI(50);
+	
+	showWindow abBFWin;
+	
+	abBFRefreshFileList();
+	
+}
+
+
+global proc abBFLayoutMainUI(int $splitPos){
+	// creates layout for main UI; splitPos is the position of the window split between the file and script windows
+	
+	int $lmargin = 3;
+	int $rmargin = 3;
+	
+	formLayout -e
+	
+	-af abBFSaveBatchBn "bottom" 4
+	-af abBFSaveBatchBn "left" $lmargin
+	-ap abBFSaveBatchBn "right" $rmargin 50
+	
+	-af abBFRunBatchBn "bottom" 4
+	-ac abBFRunBatchBn "left" $lmargin abBFSaveBatchBn
+	-af abBFRunBatchBn "right" $rmargin
+	
+	-af abBFSep1 "left" $lmargin
+	-af abBFSep1 "right" $rmargin
+	-ac abBFSep1 "bottom" 4 abBFRunBatchBn
+	
+	-af abBFSaveChkBx "left" ($lmargin*2)
+	-ac abBFSaveChkBx "bottom" 7 abBFSep1
+	
+	-ac abBFIncSaveChkBx "left" ($lmargin*4) abBFSaveChkBx
+	-ac abBFIncSaveChkBx "bottom" 7 abBFSep1
+	
+	-ac abBFUseSaveDirChkBx "left" ($lmargin*4) abBFIncSaveChkBx
+	-ac abBFUseSaveDirChkBx "bottom" 7 abBFSep1
+	
+	-af abBFSelSaveDirBn "right" $rmargin
+	-ac abBFSelSaveDirBn "bottom" 4 abBFSep1
+	
+	-ac abBFSaveDirTxtFld "left" ($lmargin*2) abBFUseSaveDirChkBx
+	-ac abBFSaveDirTxtFld "right" $rmargin abBFSelSaveDirBn
+	-ac abBFSaveDirTxtFld "bottom" 4 abBFSep1
+	
+	-af abBFSep2 "left" $lmargin
+	-af abBFSep2 "right" $rmargin
+	-ac abBFSep2 "bottom" 4 abBFSaveDirTxtFld
+	
+	-af abBFAddDirBn "left" $lmargin
+	-ap abBFAddDirBn "right" ($rmargin*2) (int($splitPos/2))
+	-ac abBFAddDirBn "bottom" 5 abBFSep2
+	
+	-ac abBFAddFilesBn "left" $lmargin abBFAddDirBn
+	-ap abBFAddFilesBn "right" ($rmargin*2) $splitPos
+	-ac abBFAddFilesBn "bottom" 5 abBFSep2
+	
+	-ac abBFFileTxtScrollList "top" 3 abBFFilesTxt
+	-af abBFFileTxtScrollList "left" $lmargin
+	-ap abBFFileTxtScrollList "right" ($rmargin*2) $splitPos
+	-ac abBFFileTxtScrollList "bottom" 5 abBFAddFilesBn
+	
+	-ap abBFWinSplitMidBn "top" 24 25
+	-ac abBFWinSplitMidBn "left" $lmargin abBFFileTxtScrollList
+	-ap abBFWinSplitMidBn "bottom" 77 75
+	
+	-ac abBFWinSplitLeftBn "top" 3 abBFFilesTxt
+	-ac abBFWinSplitLeftBn "left" $lmargin abBFFileTxtScrollList
+	-ac abBFWinSplitLeftBn "bottom" 0 abBFWinSplitMidBn
+	
+	-ac abBFWinSplitRightBn "top" 0 abBFWinSplitMidBn
+	-ac abBFWinSplitRightBn "left" $lmargin abBFFileTxtScrollList
+	-ac abBFWinSplitRightBn "bottom" 5 abBFSep2
+	
+	-ac abBFFileScrollFld "top" 3 abBFScriptTxt
+	-ac abBFFileScrollFld "left" $lmargin abBFWinSplitMidBn
+	-af abBFFileScrollFld "right" $rmargin
+	-ac abBFFileScrollFld "bottom" 5 abBFSep2
+	
+	-af abBFFilesTxt "top" 5
+	-af abBFFilesTxt "left" ($lmargin*2)
+	
+	-af abBFScriptTxt "top" 5
+	-ac abBFScriptTxt "left" ($lmargin*2) abBFWinSplitMidBn
+	
+	abBFForm
+	;
+	
+	// hide files label when win split position is 0
+	if ($splitPos == 0){
+		text -e -manage false abBFFilesTxt;
+	}else{
+		text -e -manage true abBFFilesTxt;
+	}
+	
+}
+
+
+global proc abBFUpdateScrollGlobal(){
+	// updates the scrollFieldText global var
+	
+	global string $abBFScript;
+	
+	$abBFScript = `scrollField -q -tx abBFFileScrollFld`;
+	
+}
+
+
+global proc abBFGlobals(){
+	// init globals
+	
+	global string $abBFBatchFiles[];
+	global string $abBFScript;
+	global string $abBFGlobals[];
+	
+	$abBFGlobals[0] = "incrementalSave"; $abBFGlobals[1] = "0";
+	$abBFGlobals[2] = "saveToNewDir"; $abBFGlobals[3] = "0";
+	$abBFGlobals[4] = "newSaveDir"; $abBFGlobals[5] = "";
+	$abBFGlobals[6] = "scriptVersion"; $abBFGlobals[7] = "1.2";
+	$abBFGlobals[8] = "existingFileSuffix"; $abBFGlobals[9] = "_abBatchFile_Name_Overlap"; // appended to filename when incremental save is enabled and a file with the save filename already exists
+	$abBFGlobals[10] = "tempFileName"; $abBFGlobals[11] = "abBatchFile_temp.mb";
+	$abBFGlobals[12] = "saveFileAfterScriptIsRun"; $abBFGlobals[13] = "0"; // will save a batch file after it's opened and the script is run; otherwise will run the script but not save the file.
+	
+}
+
+
+global proc string abBFGetGlobal(string $globalName){
+	
+	global string $abBFGlobals[];
+	
+	string $ret;
+	int $i;
+	
+	for ($i=0;$i<size($abBFGlobals);$i+=2){
+		if ($abBFGlobals[$i] == $globalName){
+			$ret = $abBFGlobals[$i+1];
+			break;
+		}
+	}
+	
+	return $ret;
+	
+}
+
+
+global proc abBFSetGlobal(string $globalName, string $value){
+	
+	global string $abBFGlobals[];
+	
+	int $i;
+	
+	for ($i=0;$i<size($abBFGlobals);$i+=2){
+		if ($abBFGlobals[$i] == $globalName){
+			$abBFGlobals[$i+1] = $value;
+			break;
+		}
+	}
+	
+}
+
+
+global proc abBFRunBatchFileDialog(){
+	// runs a batch file
+	
+	string $cmd, $preCmd, $postCmd, $result;
+	int $modified;
+	
+	abBFUpdateScrollGlobal();
+	
+	$cmd = abBFBuildBatchCmd();
+	if ($cmd == "") return;
+	
+	$modified = `file -q -amf`;
+	
+	if ($modified){
+		$result = `confirmDialog -title "Confirm" -message "Any unsaved changes in the current scene will be lost.\nAre you sure you want to continue?" -button "Yes" -button "No" -defaultButton "Yes" -cancelButton "No" -dismissString "No"`;
+	}else{
+		$result = "Yes";
+	}
+	
+	if ($result == "Yes") eval($cmd);
+	
+}
+
+
+global proc string abBFBuildBatchCmd(){
+	// creates the batch file mel command; returns a string
+	
+	global string $abBFBatchFiles[];
+	global string $abBFScript;
+	
+	string $file, $cmd, $saveFile, $type, $preCmd, $postCmd, $header, $script, $aStr[];
+	int $i;
+	
+	int $saveAfterScriptIsRun = int(abBFGetGlobal("saveFileAfterScriptIsRun"));
+	string $saveAfterScriptIsRunStr = ($saveAfterScriptIsRun) ? "true" : "false";
+	string $tempFile = (`internalVar -userWorkspaceDir`) + abBFGetGlobal("tempFileName");
+	
+	if (size($abBFBatchFiles) == 0){
+		warning "There are no scripts to run.";
+		return "";
+	}
+	
+	if ($abBFScript == ""){
+		warning "The script field is empty.  Enter some mel and try again.";
+		return "";
+	}
+	
+	$script = substituteAllString($abBFScript,"\\","\\\\");
+	$script = substituteAllString($script,"\"","\\\"");
+	$aStr = stringToStringArray($script, "\n");
+	for ($i=0;$i<size($aStr);$i++) $aStr[$i] = strip($aStr[$i]);
+	$script = stringArrayToString($aStr, " ");
+	
+	
+	for ($file in $abBFBatchFiles){
+		
+		if (match("\.mb$", $file) == ".mb"){
+			$type = "mayaBinary";
+		}else if (match("\.ma$", $file) == ".ma"){
+			$type = "mayaAscii";
+		}else{
+			warning ("Ignoring file: "+$file+".  Unknown type.");
+			continue;
+		}
+		
+		if (`file -q -ex $file`){
+			
+			$saveFile = abBFGetFileName($file);
+			
+			if ($saveFile == ""){
+				warning ("Unable to process "+$file+".  If \"Save to New Directory\" is enabled, make sure the files won't overwrite themselves (save directory != file source directory).");
+				continue;
+			}
+			
+			$cmd += "\n//----------------------------------| "+$file+" Begin |----------------------------------\\\\\n\n";
+			$cmd += "$gSaveBatchFile = "+$saveAfterScriptIsRunStr+";\n\n";
+			$cmd += "file -open \""+$file+"\";\n";
+			
+			$cmd += "\nint $gBatchErr = catchQuiet(eval(\""+$script+"\"));\n\n";
+			
+			$cmd += "if ($gSaveBatchFile && !$gBatchErr){\n\n";
+			
+			// add rename command
+			if ($saveFile != $file) $cmd += "	file -rename \""+$saveFile+"\";\n";
+			
+			$cmd += "	file -save -type \""+$type+"\";\n";
+			
+			if ($file != $saveFile){
+				$cmd += "	$aLog[size($aLog)] = \"File Processed: "+$file+".  Saved As: "+$saveFile+"\";\n\n";
+			}else{
+				$cmd += "	$aLog[size($aLog)] = \"File Processed: "+$file+".\";\n\n";
+			}
+			
+			$cmd += "}else{\n\n";
+			$cmd += "	file -f -new;\n";
+			$cmd += "	file -rename \""+$tempFile+"\";\n";
+			$cmd += "	file -save -prompt 0 -type \"mayaBinary\";\n\n";
+			$cmd += "	if ($gBatchErr){\n";
+			$cmd += "		$aLog[size($aLog)] = \"File Failed: "+$file+".  Moving On.\";\n";
+			$cmd += "	}else{\n";
+			$cmd += "		$aLog[size($aLog)] = \"File Processed: "+$file+".  Not saved.\";\n";
+			$cmd += "	}\n";
+			$cmd += "}\n\n";
+			
+			$cmd += "//----------------------------------| "+$file+" End |----------------------------------\\\\\n\n";
+			
+		}else{
+			warning ("file \""+$file+"\" no longer exists.");
+		}
+	}
+	
+	if ($cmd != ""){
+		
+		// add extra stuff to the cmd
+		$header = "// -----------------------------------------: Script created with abBatchFile "+abBFGetGlobal("scriptVersion")+" :-----------------------------------------\\\\\n\n";
+		$preCmd = "// Start with a new file\nfile -f -new;\nfile -rename \""+$tempFile+"\";\nfile -save -prompt 0 -type \"mayaBinary\";\n\n// Create log array\nstring $aLog[] = {};\n\n";
+		$postCmd = "\n// Open up a new file\nfile -f -new;\n\n// Delete TempFile\nif (`file -q -ex \""+$tempFile+"\"`) sysFile -delete \""+$tempFile+"\";\n\n// Print log, and we're done\nprint \"\\n\\n\";\nprint $aLog;\nprint \"\\n\\n\";\nprint\"Task completed!\\n\";";
+		
+		$cmd = $header + $preCmd + $cmd + $postCmd;
+		
+	}
+	
+	return $cmd;
+	
+}
+
+
+global proc string abBFGetFileName(string $fileName){
+	// returns a filename based on selections in the script UI; returns "" on fail
+	
+	string $newDir, $newFileName, $baseName, $newBaseName, $path, $newPath, $match, $cNumStr, $suffix, $newFileNameNoSuffix;
+	int $cNum, $i, $addZeros;
+	
+	int $pad = 3;
+	int $incSave = int(abBFGetGlobal("incrementalSave"));
+	int $useNewDir = int(abBFGetGlobal("saveToNewDir"));
+	if ($useNewDir) $newDir = abBFGetGlobal("newSaveDir");
+	
+	if (match("\.mb$", $fileName) == ".mb"){
+		$suffix = ".mb";
+		$baseName = basename($fileName, $suffix);
+	}else if (match("\.ma$", $fileName) == ".ma"){
+		$suffix = ".ma";
+		$baseName = basename($fileName, $suffix);
+	}else{
+		return "";
+	}
+	
+	
+	$path = dirname($fileName);
+	
+	if (!$incSave && !$useNewDir) return $fileName;
+	
+	if ($incSave){
+		// increment filename
+		
+		$match = `match "[0-9]+$" $baseName`;
+		if ($match != ""){
+			
+			$cNum = int($match);
+			$cNum += 1;
+			$cNumStr = string($cNum);
+			$addZeros = size($match) - size($cNumStr);
+			
+			if ($addZeros > 0){
+				// need to add leading zeros to get back to the same size as the orig match
+				for ($i=0;$i<$addZeros;$i++) $cNumStr = "0"+$cNumStr;
+			}
+			
+			$newBaseName = substitute("[0-9]+$", $baseName, $cNumStr);
+			
+		}else{
+			
+			$cNumStr = "1";
+			$addZeros = $pad - 1;
+			if ($addZeros > 0){
+				// need to add leading zeros to get back to the same size as the orig match
+				for ($i=0;$i<$addZeros;$i++) $cNumStr = "0"+$cNumStr;
+			}
+			
+			$newBaseName = $baseName + $cNumStr;
+		}
+		
+	}
+	
+	if ($useNewDir && $newDir != "") $newPath = $newDir;
+	
+	$newFileName = ($newPath != "") ? $newPath : $path;
+	$newFileName += "/";
+	$newFileName += ($newBaseName != "") ? $newBaseName : $baseName;
+	$newFileNameNoSuffix = $newFileName;
+	$newFileName += $suffix;
+	
+	// check if a file with the new basename already exists
+	if ($incSave && `file -q -ex $newFileName`) $newFileName = $newFileNameNoSuffix + abBFGetGlobal("existingFileSuffix") + $suffix;
+	
+	// if save to new directory is enabled but the newFileName is the same as the old fileName, then don't allow the save (return an empty fileName)
+	if ($useNewDir && $newDir != "" && $newFileName == $fileName) $newFileName = "";
+	
+	return $newFileName;
+	
+}
+
+
+global proc abBFSelSaveDirDialog(){
+	// called when sel save dir button is pressed; calls abBFSelSaveDir()
+	
+	fileBrowserDialog -mode 4 -fileCommand "abBFSelSaveDir" -actionName "Select Save Directory";
+
+}
+
+
+global proc abBFSelSaveDir(string $fileName, string $fileType){
+	// selects a new save directory
+	
+	abBFSetGlobal("newSaveDir", $fileName);
+	textField -e -tx (abBFGetGlobal("newSaveDir")) abBFSaveDirTxtFld;
+	
+}
+
+
+global proc abBFSaveBatchFileDialog(){
+	// calls file dialog and if a valid file is selected calls abBFSaveBatchFile()
+	
+	fileBrowserWithFilter("abBFSaveBatchFile","Save","Save Batch File", "mel (*.mel)", 1, {"mel (*.mel),*.mel"}, `internalVar -userScriptDir`);
+	
+}
+
+
+global proc abBFSaveBatchFile(string $fileName, string $fileType){
+	// saves batch file to $fileName
+	
+	string $cmd, $header;
+	int $fileId;
+	
+	abBFUpdateScrollGlobal();
+	
+	// add .mel suffix
+	if (`match "\.mel$" $fileName` != ".mel") $fileName += ".mel";
+	
+	// create command
+	$cmd = abBFBuildBatchCmd();
+	
+	// save file
+	$fileId = `fopen $fileName "w"`;
+	fprint $fileId $header;
+	fprint $fileId $cmd;
+	fclose $fileId;
+	
+	// print saved
+	print "File saved.\n";
+	
+	//mayaBatch -prompt
+
+}
+
+
+global proc abBFAddFileDialog(int $type){
+	// calls file dialog and if a valid file is selected calls abBFAddFile(); $type is 0 for files, 1 for directory
+	
+	if ($type == 0){
+		fileBrowserWithFilter("abBFAddFile","Select File","Add File To Batch List", "mayaBinary", 0, {"mayaBinary,*.mb","mayaAscii,*.ma"}, "");
+	}else{
+		fileBrowserDialog -mode 4 -fileCommand "abBFAddDir" -actionName "Select Directory";
+	}
+	
+}
+
+
+global proc abBFAddFile(string $fileName, string $fileType){
+	// adds files to file textScrollList
+	
+	global string $abBFBatchFiles[];
+	
+	string $file;
+	
+	for ($file in $abBFBatchFiles){
+		
+		if ($file == $fileName){
+			print ("The file is already in the batch.\n");
+			return;
+		}
+		
+	}
+	
+	$abBFBatchFiles[size($abBFBatchFiles)] = $fileName;
+	abBFRefreshFileList();
+	
+}
+
+
+global proc abBFAddDir(string $dir, string $fileType){
+	// adds all files in directory (.ma and .mb) to textScrollList
+	
+	global string $abBFBatchFiles[];
+	
+	string $aMaFiles[], $aMbFiles[], $aFiles[], $file, $exFile, $scriptPath, $filePath;
+	int $skip;
+	
+	string $slash = (`about -windows`) ? "/" : "\\";
+	$scriptPath = $dir + $slash;
+	
+	$aMaFiles = `getFileList -folder $scriptPath -filespec "*.ma"`;
+	$aMbFiles = `getFileList -folder $scriptPath -filespec "*.mb"`;
+	
+	$aFiles = stringArrayCatenate($aMaFiles, $aMbFiles);
+	
+	for ($file in $aFiles){
+		
+		$filePath = $scriptPath + $file;
+		
+		// make sure the file isn't already in the batch list
+		$skip = false;
+		for ($exFile in $abBFBatchFiles) if ($exFile == $filePath) $skip = true;
+		
+		if (!$skip) $abBFBatchFiles[size($abBFBatchFiles)] = $filePath;
+		
+	}
+	
+	abBFRefreshFileList();
+	
+}
+
+
+global proc abBFRefreshFileList(){
+	// refreshes textScrollList abBFFileTxtScrollList with files in abBFBatchFiles
+	
+	global string $abBFBatchFiles[];
+	
+	string $file;
+	
+	textScrollList -e -ra abBFFileTxtScrollList;
+	
+	for ($file in $abBFBatchFiles) textScrollList -e -a $file abBFFileTxtScrollList;
+	
+}
+
+
+global proc abBFServiceFileListPopUp(int $action){
+	// services popUp menu in abBFFileTxtScrollList; $action 0: remove selected, 1: remove all
+	
+	global string $abBFBatchFiles[];
+	
+	string $file, $aSelFiles[];
+	
+	$aSelFiles = `textScrollList -q -si abBFFileTxtScrollList`;
+	
+	if ($action == 0){
+		// remove selected
+		$abBFBatchFiles = stringArrayRemove($aSelFiles, $abBFBatchFiles);
+		
+	}else if ($action == 1){
+		// remove all
+		clear($abBFBatchFiles);
+		
+	}
+	
+	abBFRefreshFileList();
+}
+
+
+global proc abBFSaveState(){
+	// outputs current vars to the script editor
+	
+	global string $abBFGlobals[];
+	global string $abBFBatchFiles[];
+	global string $abBFScript;
+	
+	string $cmd, $script, $aStr[];
+	int $i;
+	
+	string $preCmd = "\n\n\n-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------\n\n\n";
+	
+	abBFUpdateScrollGlobal();
+	
+	if (size($abBFGlobals) > 0) $cmd += "string $abBFGlobals[] = {\"" + stringArrayToString($abBFGlobals,"\",\"") + "\"};\n";
+	if (size($abBFBatchFiles) > 0) $cmd += "string $abBFBatchFiles[] = {\"" + stringArrayToString($abBFBatchFiles,"\",\"") + "\"};\n";
+	if ($abBFScript != ""){
+		$script = substituteAllString($abBFScript,"\\","\\\\");
+		$script = substituteAllString($script,"\"","\\\"");
+		$aStr = stringToStringArray($script, "\n");
+		for ($i=0;$i<size($aStr);$i++) $aStr[$i] = strip($aStr[$i]);
+		$script = stringArrayToString($aStr, "\\n");
+		$cmd += "string $abBFScript = \"" + $script + "\";\n";
+	}
+	
+	if ($cmd == ""){
+		$cmd += "\n\n\nSorry, nothing to show yet.  Try running the script first.\n";
+	}else{
+		$cmd += "if (`window -ex abBFWin`) deleteUI -window abBFWin;\nabBatchFile();\n";
+	}
+	
+	$cmd = $preCmd + $cmd;
+	
+	print $cmd;
+	
+}
+
+
+
+

@@ -1,0 +1,120 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc copyWeight(string $sourceVtx, string $destVtx, string $sourceSkinCluster, string $destSkinCluster)
+{
+	string $trans[] = `skinPercent -ib 0.00001 -q -t $sourceSkinCluster $sourceVtx`;
+	string $tran;
+
+	int $spacing = 0;
+
+	for ($tran in $trans)
+		if (`size $tran` > $spacing)
+			$spacing = `size $tran`;
+
+	$spacing = $spacing + 5;
+
+	int $v = 0;
+	string $val_list[];
+
+	for ($tran in $trans)
+		if (`size $tran` < $spacing)
+		{
+			float $val = `skinPercent -t $tran -q $sourceSkinCluster $sourceVtx`;
+
+			$val_list[$v] = $val;
+			$v++;
+		}
+
+	// set all the original joints' weights (not in the $trans list) to zero
+
+	string $destJoints[] = `skinPercent -ib 0.00001 -q -t $destSkinCluster $destVtx`;
+
+	for ($joint in $destJoints)
+	{
+		int $found = false;
+
+		for ($item in $trans)
+			if ($item == $joint)
+			{
+				$found = true;
+				break;
+			}
+
+		if (!$found)
+		{
+			$trans[size($trans)] = $joint;
+			$val_list[size($val_list)] = 0.0;
+		}
+	}
+
+	//COPY TO SECOND CV
+
+	string $cmd = "skinPercent ";
+
+	for ($i = 0; $i < size($val_list); $i++)
+		$cmd = ($cmd + "-tv " + $trans[$i] + " " + $val_list[$i] + " ");
+
+	$cmd = ($cmd + $destSkinCluster + " " + $destVtx);
+
+	eval $cmd;
+}
+
+global proc kcCopySkinWeightNearest()
+{
+	string $selected[] = `ls -selection`;
+
+	if (`size $selected` == 2)
+	{
+		// $selected[0] : source
+		// $selected[1] : destination
+
+		// check that both nodes have a skinCluster node
+
+		string $sourceSkinCluster = "";
+		string $destSkinCluster = "";
+
+		string $history[] = `listHistory $selected[0]`;
+
+		for ($item in $history)
+			if (`nodeType $item` == "skinCluster")
+				$sourceSkinCluster = $item;
+
+		string $history[] = `listHistory $selected[1]`;
+
+		for ($item in $history)
+			if (`nodeType $item` == "skinCluster")
+				$destSkinCluster = $item;
+
+
+		if (($sourceSkinCluster == "") || ($destSkinCluster == ""))
+			error("Make sure both source and destination skin have a skinCluster node.");
+
+
+		int $numVtx = `getAttr -size ($selected[1] + ".vrts")`;
+
+		for ($i = 0; $i < $numVtx; $i++)
+		{
+			// get weight
+
+			float $pos[] = `xform -q -worldSpace -translation ($selected[1] + ".vtx[" + $i + "]")`;
+
+			// invoke the plugin
+
+			float $nearestVtx = `computeNearestVtx $pos[0] $pos[1] $pos[2]`;
+
+			// assign weight
+			
+			copyWeight ($selected[0] + ".vtx[" + $nearestVtx + "]") ($selected[1] + ".vtx[" + $i + "]") $sourceSkinCluster $destSkinCluster;
+		}
+	}
+	else
+		error("Please select source and destination skin in that order.");
+}

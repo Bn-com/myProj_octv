@@ -1,0 +1,257 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WanShouLong
+//	Created: 2008-12-9
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slRepairReferenceUI_forDo3()
+{
+	if (`window -q -exists slRepairReferenceWin`)
+		deleteUI -window slRepairReferenceWin;
+
+	window -title "Batch Run" -resizeToFitChildren true -h 210 slRepairReferenceWin;
+		
+		columnLayout -adj true ;
+			text -label "FILES:";
+			textScrollList -numberOfRows 8 -allowMultiSelection true -w 400 slRepairReferenceWin_fileList;
+			string $form = `formLayout `;
+				string $butadd = `button -label "Add"  -command "slRepairReferenceAddFile_forDo3" `;
+				string $butrem = `button -label "Remove" -command "slRepairReferenceRemoveFile_forDo3" `;
+			setParent ..;
+			formLayout -edit
+			-af		$butadd		"left"	5
+			-ap		$butadd		"right"	0	49
+			-ac		$butrem		"left"	10	$butadd
+			-af		$butrem		"right"	5
+			$form;
+			separator -st "doubleDash" -h 10;
+			button -label "Run" -h 20 -command "do3_slRepairReferenceRun" ;
+		setParent ..;	
+	showWindow slRepairReferenceWin;
+}
+
+global proc slRepairReferenceAddFile_forDo3()
+{
+	string $buf[] = `idmtFileDialog -filter "Maya Scene (*.mb;*.ma)|*.mb;*.ma||" -m`;
+
+	string $objFiles[] = `textScrollList -q -ai slRepairReferenceWin_fileList`;
+	for ($item in $buf)
+	{
+		if (!stringArrayCount($item,$objFiles))
+		{
+			textScrollList -e -a $item slRepairReferenceWin_fileList;
+		}
+	}
+}
+
+global proc slRepairReferenceRemoveFile_forDo3()
+{
+	string $selected[] = `textScrollList -q -selectItem slRepairReferenceWin_fileList`;
+
+	for ($item in $selected)
+		textScrollList -edit -removeItem $item slRepairReferenceWin_fileList;
+}
+
+global proc do3_slRepairReferenceRun()
+{
+	string $allFiles[] = `textScrollList -q -ai slRepairReferenceWin_fileList`;
+	for ($file in $allFiles)
+	{
+		//string $sourStr = "\"source \\\"E:\\\\TD_folder\\\\script_folder\\\\do3_slRepairReference.mel\\\";do3_AnimCameraSequenceSplit_test()\"";
+		string $sourStr = "\"source \\\"//file-cluster/gdc/Resource/Support/Maya/projects/DODIII/do3_slRepairReference.mel\\\";do3_AnimCameraSequenceSplit()\"";
+		string $cmd = "\""+`getenv "MAYA_LOCATION"` +"/bin/mayabatch\" -file \"" 
+					 + $file
+					 + "\" -command " + $sourStr;
+
+	system("\""+$cmd+"\"");
+	}
+	
+	//sysFile -del ($WHOOempath+"WHOOem.mel");
+}
+
+//=============================================================================================================================================
+global proc do3_AnimCameraSequenceSplit_test()
+{
+	string $file = `file -q -sn -shn`;
+	string $newPath = "E:\\DOD4\\Layout_Split";
+	
+	file -rename ($newPath + "\\" +$file);
+	file -save;
+
+}
+//==================================
+global proc do3_AnimCameraSequenceSplit()
+{
+	string $source_file_name = `file -q -sn`;
+	string $source_file_shName = `file -q -sn -shn`;
+	
+	string $buff[]={};
+	int $num = `tokenize $source_file_shName "_" $buff`;
+	
+	string $es = $buff[0]+"_"+$buff[1]+"_";
+	string $newPath = "E:/DOD4/Layout_Split/episode_"+$buff[1]+"/";
+	sysFile -md $newPath;
+	
+	string $file_newName= $newPath +  $source_file_shName;
+
+	file -rename $file_newName;
+	string $referenceFiles[] = `file -q -r`;
+	for ($file in $referenceFiles )
+	{
+		string $referenceNode = `referenceQuery -rfn $file`;
+		file -loadReference  $referenceNode $file;
+	 }
+	file -save;
+	
+
+	string $shots[] = `ls -type shot`;
+	for ($shot in $shots)
+	{
+		string $sourStr = "\"source \\\"//file-cluster/gdc/Resource/Support/Maya/projects/DODIII/do3_slRepairReference.mel\\\";do3_AnimCameraSequence\\\"";
+        
+		string $cmd  = "\""
+					+`getenv "MAYA_LOCATION"` 
+					+ "/bin/mayabatch\" -file \""
+					+$file_newName+"\" -command " + $sourStr
+					+$shot+"\\\"\"";
+		system("\""+$cmd+"\"");
+		
+	}
+}
+global proc do3_AnimCameraSequence(string $shot)
+{
+	//string $shot = "shot27";	
+	string $fn = `file -q -sn -shn`;
+	string $sc[] = `listConnections -s 1 -d 0 ($shot+".currentCamera")`;
+	
+	string $buff[];
+	int $num = `tokenize $fn "_" $buff`;
+	string $es = $buff[0]+"_"+$buff[1]+"_";
+	
+	string $buff_shot[];
+	int $num_s = `tokenize $sc[0] "_" $buff_shot`;
+	string $ss = $buff_shot[$num_s -1];
+	string $path = "E:/DOD4/Layout_Split/episode_"+$buff[1]+"/scene_"+$ss  + "/";
+	sysFile -md $path;
+
+	string $filename = $es+$ss+"_ly_001.ma";
+
+	//frame range
+	float $sf = `getAttr ($shot+".startFrame")`;
+	float $ef = `getAttr ($shot+".endFrame")`;
+	playbackOptions -min $sf -max $ef;
+	currentTime $sf;
+
+	//delete other camera
+	string $cameras[] ={};//= `listRelatives "Camera_Group"`;
+	string $shots[] = `ls -type shot`;
+	for ($item in $shots)
+	{
+		string $itemsc[] = `listConnections -s 1 -d 0 ($item+".currentCamera")`;
+		$cameras[size($cameras)] = $itemsc[0];
+	}
+	$cameras = stringArrayRemove($sc,$cameras);
+	delete $cameras;
+
+	//delete other sequence shot
+	string $shots[] = `ls -type shot`;
+	$shots = stringArrayRemove({$shot},$shots);
+	delete $shots;
+	//bake camera 
+	
+	file -rename ($path+$filename);
+	//OptimizeScene;
+	select -r $sc[0];
+	source zwCameraImportExport.mel; zwBakeCamera;
+	//select -cl;
+	//remove other reference
+	//file -save;
+	do3_remove_unusedRefNode($sf,$ef);
+
+	file -save;
+}
+
+
+global proc do3_remove_unusedRefNode(int $startTime,int $endTime)
+{
+    
+    string $allRNLs[] = `ls -type "reference"`;
+    string $referenceFiles[];
+	for ($eachRN in $allRNLs)
+	{
+    		string $attrName = $eachRN + ".message";
+    		string $ref_rootGrp[] = `listConnections -d 1 $attrName`;
+		if(size($ref_rootGrp))
+		{
+			for ($group in $ref_rootGrp)
+			{
+			   // string $group = "do3_c0010O1OllyRNgroup";  
+			   
+			    string $visAttr = $group + ".visibility";
+			    string $visKeyAttr = $group + "_visibility";  
+			    			    
+			    string $timeRangeStr = ($startTime +":" + $endTime);
+		       
+			    if (`attributeExists "visibility" $group` && `getAttr $visAttr` == 0)
+			    {        
+					if (size(`keyframe -q -name $group`) != 0 && size(`keyframe  -time $timeRangeStr -query -valueChange  $visKeyAttr`) != 0 )
+					{
+						 continue;
+					}       
+					//else
+					//	{	
+					string $reffile = `referenceQuery -f $eachRN`;
+					string $refnode = `referenceQuery -rfn $eachRN`;
+					file -ur $refnode $reffile;
+					file -cr $refnode;
+					file -rr $reffile;
+					delete $ref_rootGrp;
+					//	}
+			    }
+			    
+			    			    
+			}
+		 }          
+	}
+}
+    
+   
+global proc do3_repareRefPath()
+{
+string $allRNLs[] = `ls -type "reference"`;
+	string $referenceFiles[];
+	for($referenceNode in $allRNLs)
+	{
+		if(size(`listConnections -d 1 ($referenceNode + ".message")`))
+		{
+			$referenceFiles[size($referenceFiles)]= `referenceQuery -f $referenceNode`;
+			string $file = `referenceQuery -f $referenceNode`;
+			string $unresolved = `referenceQuery -f -un $referenceNode`;
+			
+	    
+			string $buff[];
+			int $num = `tokenize $file "{}" $buff`;
+			//print $buff;
+			string $old = $buff[0];
+			//print $buff;		
+			
+			$num = `tokenize $old "\/" $buff`;
+			
+			string $fileName = $buff[$num-1];
+			
+			string $idmtFile =  $old;
+			if ($unresolved != $idmtFile)
+				{
+					file -lr $referenceNode $idmtFile;
+				}
+		}
+	}
+
+
+}

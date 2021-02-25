@@ -1,0 +1,193 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slParticleTools()
+{
+
+	if(`window -exists slParticleToolsUI`)
+		deleteUI slParticleToolsUI;
+	window -title "Combine Separate Particle Tool" -width 200 -height 74  slParticleToolsUI;
+		columnLayout -adjustableColumn true -cw 160;
+			checkBox -l "Keep Obj" slParticleToolsUI_keep;
+			button -l "Combine Particle" -c "slCombineParticle";
+			button -l "Separate Particle" -c "slSeparatParticle";
+			separator;
+			button -l "Create Locator " -c "slCreateLocWithParticle";
+			button -l "Move to Locator " -c "slMoveToLocator";
+
+	showWindow slParticleToolsUI;
+}
+
+
+global proc slCombineParticle()
+{
+	string $ls[] = `ls -dag -sl -type particle`;
+	string $trans[]={};
+
+	if (size($ls)>0)
+	{
+		//combine
+		string $cmd = "particle";
+		for ($particle in $ls)
+		{
+			int $count = `particle -query -count $particle`;
+			for ($i=0; $i<$count; $i++)
+			{
+				float $pos[] = `xform -q -worldSpace -translation ($particle + ".pt[" + $i + "]")`;	
+				$cmd +=" -position " + $pos[0] + " " + $pos[1] + " " + $pos[2]; 
+			}
+
+			$trans=stringArrayCatenate($trans,`listRelatives -f -p $particle`);
+
+		}
+
+		$cmd += " -name comParticle";
+		string $result[] = eval($cmd);
+		setAttr ($result[0] + ".particleRenderType") 4;		// set render type to sphere
+
+		//delete old
+		if (!`checkBox -q -v slParticleToolsUI_keep`)
+		{
+			delete $trans;
+		}
+	}
+	else
+		error "select particles";
+}
+
+global proc slSeparatParticle()
+{
+	string $sel[] = `ls -sl -fl`;
+	if (size($sel)>0 && nodeType($sel[0])=="particle")
+	{
+		string $buff[]=`listRelatives -p $sel[0]`;
+		string $oldParticle = $buff[0];
+		$buff = `listRelatives -p $oldParticle`;
+		string $oldTrans=$buff[0];
+		string $selID[]={};
+
+		//seprate selected
+		string $cmd = "particle";
+		for ($part in $sel)
+		{
+			float $pos[] = `xform -q -worldSpace -translation $part`;	
+			$cmd +=" -position " + $pos[0] + " " + $pos[1] + " " + $pos[2]; 
+			$buff = stringToStringArray($part,"[]");
+			$selID[size($selID)]=$buff[1];
+		}
+		$cmd += " -name "+$oldTrans+"_1";
+		string $result[] = eval($cmd);
+		setAttr ($result[0] + ".particleRenderType") 4;		
+
+		//seprate other
+		string $cmd = "particle";
+		int $count = `particle -query -count $oldParticle`;
+		for ($i=0; $i<$count; $i++)
+		{
+			if (!stringArrayCount($i,$selID))
+			{
+				float $pos[] = `xform -q -worldSpace -translation ($oldParticle + ".pt[" + $i + "]")`;	
+				$cmd +=" -position " + $pos[0] + " " + $pos[1] + " " + $pos[2]; 
+			}
+		}
+		$cmd += " -name "+$oldTrans+"_2";
+		string $result[] = eval($cmd);
+		setAttr ($result[0] + ".particleRenderType") 4;		
+
+		//delete old
+		if (!`checkBox -q -v slParticleToolsUI_keep`)
+		{
+			delete $oldTrans;
+		}
+	}
+	else
+		error "select particles parts";
+}
+
+global proc slCreateLocWithParticle()
+{
+	string $sel[] = `ls -dag -sl -type particle`;
+	if (size($sel))
+	{
+		string $group="particle_locator_group";
+		if (!objExists($group))
+			createNode transform -name particle_locator_group;
+		for ($particle in $sel)
+		{
+			int $count = `particle -query -count $particle`;
+			for ($i=0; $i<$count; $i++)
+			{
+				float $pos[] = `xform -q -worldSpace -translation ($particle + ".pt[" + $i + "]")`;	
+				string $locator[] = `spaceLocator -position 0 0 0`;
+				xform -worldSpace -translation $pos[0] $pos[1] $pos[2] $locator[0];
+				addAttr -ln "Particle"  -dt "string"  $locator[0];
+				setAttr -e-keyable true ($locator[0]+".Particle");
+				setAttr -type "string" ($locator[0]+".Particle") ($particle + ".pt[" + $i + "]");
+				parent $locator[0] $group;
+			}
+		}
+	}
+	else
+	{
+		string $sel[] = `ls -sl -fl`;
+		if (size($sel)>0 && nodeType($sel[0])=="particle")
+		{
+			string $group="particle_locator_group";
+			if (!objExists($group))
+				createNode transform -name particle_locator_group;
+			for ($part in $sel)
+			{
+				float $pos[] = `xform -q -worldSpace -translation $part`;	
+				string $locator[] = `spaceLocator -position 0 0 0`;
+				xform -worldSpace -translation $pos[0] $pos[1] $pos[2] $locator[0];
+				addAttr -ln "Particle"  -dt "string"  $locator[0];
+				setAttr -e-keyable true ($locator[0]+".Particle");
+				setAttr -type "string" ($locator[0]+".Particle") $part;
+				parent $locator[0] $group;
+			}
+		}
+		else 
+			error "select particles or parts";
+	}
+
+
+}
+
+global proc slMoveToLocator()
+{
+	string $group="particle_locator_group";
+	if (!objExists($group))
+		error "Need Create Locator firstly";
+	
+	string $locators[]  =`listRelatives -c $group`;
+	string $particle[]={};
+	for ($loc in $locators)
+	{
+		string $part = `getAttr ($loc+".Particle")`;
+		if (objExists($part))
+		{
+			float $pos[] = `xform -q -worldSpace -translation $loc`;
+
+			string $buff[] = stringToStringArray($part,".[]");
+			string $shape = $buff[0];
+			int $id = $buff[2];
+
+			particle -e -attribute position -id $id -vv $pos[0] $pos[1] $pos[2]  $shape;
+		}
+	}
+
+	if (!`checkBox -q -v slParticleToolsUI_keep`)
+	{
+		delete $group;
+	}
+}
+ 

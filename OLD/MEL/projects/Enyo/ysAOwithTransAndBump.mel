@@ -1,0 +1,128 @@
+// Create Ambient occlusion render layer 
+global proc ysAOwithTransAndBump()
+{
+
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -geometry`;
+	createRenderLayer -name "transAO" -makeCurrent -noRecurse $objShape;
+	
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	
+	editRenderLayerAdjustment "defaultResolution.width";
+	setAttr "defaultResolution.width" 960;
+	editRenderLayerAdjustment "defaultResolution.height";
+	setAttr "defaultResolution.height" 540;
+	
+	// AO shader
+	string $aoTex = `shadingNode -asTexture mib_amb_occlusion -name "aoTexture"`;
+	setAttr ($aoTex + ".samples" ) 128;
+	string $aoShader = `shadingNode -asShader surfaceShader -name "aoShader"`;
+	string $aoShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($aoShader+"SG")`;
+	connectAttr -force ($aoTex + ".outValue") ($aoShader + ".outColor");
+	connectAttr -force ($aoShader + ".outColor") ($aoShaderSG + ".surfaceShader");
+	
+	// Filtering material 
+	string $mats[] = `ls -materials`;
+	string $eliminate [] = {"lambert1", "particleCloud1", "shaderGlow1"};
+	string $matArray[] = stringArrayRemove ($eliminate, $mats);
+	global string $objs[];
+	global string $allObjs[];
+	for($item in $matArray)
+	{	
+		if((`objExists ($item+".normalCamera")`)&&(`objExists ($item+".transparency")`))
+		{
+			$bumpMap = `listConnections -plugs on ($item + ".normalCamera")`;
+			$bumpNode = $bumpMap;
+			$transMap = `listConnections -s on ($item+".transparency")`;
+			$transMapOut = `listConnections -plugs on ($item+".transparency")`;
+			$transNode = $transMap;
+			$transNodeOut = $transMapOut;
+			
+			
+			// Set up AO with bump map
+			if((size($bumpNode)!=0)&&(size($transNode)==0))
+			{
+				string $aoTexBump = `shadingNode -asTexture mib_amb_occlusion -name "aoTextureBump"`;
+				setAttr ($aoTexBump + ".samples" ) 128;
+				string $aoShaderBump = `shadingNode -asShader lambert -name "aoShaderBump"`;
+				string $aoShaderBumpSG = `sets -renderable true -noSurfaceShader true -empty -name aoShaderBumpSG`;
+				setAttr ($aoShaderBump+".diffuse") 0;
+				setAttr ($aoShaderBump+".color") -type double3 0 0 0; 
+				connectAttr -force  ($aoTexBump + ".outValue") ($aoShaderBump + ".incandescence");
+				connectAttr -force  ($aoShaderBump + ".outColor") ($aoShaderBumpSG + ".surfaceShader");
+				connectAttr -force $bumpNode ($aoShaderBump+".normalCamera");
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement  $aoShaderBumpSG;
+				select -cl;					 
+			}
+			
+			// Set up AO with transparency
+			if((size($transNode)!=0)&&(size($bumpNode)==0))
+			{
+				string $multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+				string $Reverse = `shadingNode -asUtility reverse`; 
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1X");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Y");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Z");
+				connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputX");
+				connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputY");
+				connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputZ");
+				
+				string $aoTexTrans = `shadingNode -asTexture mib_amb_occlusion -name "aoTextureTrans"`;
+				setAttr ($aoTexTrans + ".samples" ) 128;
+				string $aoShaderTrans = `shadingNode -asShader surfaceShader -name "aoShaderTrans"`;
+				string $aoShaderTransSG = `sets -renderable true -noSurfaceShader true -empty -name ($aoShaderTrans+"SG")`;
+				connectAttr -force  ($aoShaderTrans + ".outColor") ($aoShaderTransSG + ".surfaceShader");
+				connectAttr -force ($aoTexTrans + ".outValue") ($multiplyDivide + ".input2");
+				connectAttr -force ($multiplyDivide + ".output") ($aoShaderTrans + ".outColor");				
+				connectAttr -force ($Reverse + ".output") ($aoShaderTrans + ".outTransparency");
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement  $aoShaderTransSG;
+				select -cl;	
+			}
+			
+			// Setp up AO with transparency and bump
+			if((size($transNode)!=0)&&(size($bumpNode)!=0))
+			{
+				string $multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+				string $Reverse = `shadingNode -asUtility reverse`; 
+				if (`objExists ($transNode[0]+".outAlpha")`)
+				{
+					connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1X");
+					connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Y");
+					connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Z");
+					connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputX");
+					connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputY");
+					connectAttr -force ($transNode[0]+".outAlpha") ($Reverse+".input.inputZ");
+				}
+									
+				string $aoTransBump = `shadingNode -asTexture mib_amb_occlusion -name "aoTransBump"`;
+				setAttr ($aoTransBump + ".samples" ) 128;
+				string $aoTransBumpShader = `shadingNode -asShader lambert -name "aoTransBumpShader"`;
+				string $aoTransBumpShaderSG = `sets -renderable true -noSurfaceShader true -empty -name aoTransBumpShaderSG`;
+				setAttr ($aoTransBumpShader+".diffuse") 0;
+				setAttr ($aoTransBumpShader+".color") -type double3 0 0 0; 
+				connectAttr -force ($aoTransBump+".outValue") ($multiplyDivide+".input2");
+				connectAttr -force ($multiplyDivide+".output") ($aoTransBumpShader+".incandescence");
+				connectAttr -force ($Reverse + ".output") ($aoTransBumpShader+".transparency");
+				connectAttr -force  ($aoTransBumpShader + ".outColor") ($aoTransBumpShaderSG + ".surfaceShader");
+				connectAttr -force $bumpNode ($aoTransBumpShader+".normalCamera");
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement   $aoTransBumpShaderSG;
+				select -cl;		
+			}
+		}
+			
+		// AO for others 
+		string $objs[] = `hyperShade -objects $item`; 
+		sets -e -forceElement $aoShaderSG;
+		select -cl;	
+	}		
+}
+

@@ -1,0 +1,203 @@
+global proc copyCrowdUI()
+{
+  global string $files[];
+  global string $paths[];
+  clear $files;
+  clear $paths;
+  if(`window -exists Copy2DCrowdUI`)
+    	deleteUI Copy2DCrowdUI;
+  window -title "Copy 2D Crowd_虞丰盛"
+	     -mxb off
+	     -menuBarVisible 1
+		 -sizeable 1
+		 -wh 402 319
+  		 Copy2DCrowdUI;
+
+  string $collapseOff="window -e -h 79 Copy2DCrowdUI";
+  string $expandOn="window -e -h 319 Copy2DCrowdUI";
+  columnLayout -adj 1 mainCol;
+  formLayout mainForm;
+  frameLayout -l "Basic Settings"
+	  		  -collapsable 1
+			  -collapse 0
+			  -mh 2
+			  -cc $collapseOff
+			  -ec $expandOn
+			  -bs "etchedIn"
+			  -bv 1
+			  basicFrame;
+  		columnLayout -adj 1;
+				
+			text -l "Image Sequences Step";
+				  
+			textScrollList -w 150
+						   -h 150
+  						   -ams 0
+						   -aas 1
+						   fileList;
+			
+			rowLayout -nc 3
+					  -cat 1 "right" 5
+					  -cw 1 130
+					  -cw 2 130
+					  -cw 3 130;
+			button -l "Add image sequence" -al "center" -c CG_imageSequence -w 130 -h 20 addBut;
+			button -l "Delete Selected" -al "center" -c delSelButton -w 130 -h 20 delSelBut;
+			button -l "Delete ALL" -al "center" -c delAllButton -w 130 -h 20 delAllBut;
+								
+			setParent ..;
+			
+			separator -h 5;
+			
+			rowLayout -nc 2
+					  -cat 1 "right" 5
+					  -cw 1 150
+					  -cw 2 130;
+			text -l "First Frame";
+			intField -v 0
+					 firstFrame;
+			setParent ..;
+			
+			rowLayout -nc 2
+					  -cat 1 "right" 5
+					  -cw 1 150
+					  -cw 2 130;
+			text -l "Last Frame";
+			intField -v 100 lastFrame;
+			
+			setParent ..;
+		setParent ..;
+  setParent ..;
+  string $cC_button=`button -l "Copy Crowd!" -c copyCmd -w 150 -h 30 copy_button`;
+  formLayout -e
+	  		 -ac copy_button top 2 basicFrame
+  			 -af copy_button left 0
+			 -af copy_button right 0
+			 mainForm;
+  setParent..;	 
+  showWindow Copy2DCrowdUI;
+}
+
+global proc CG_imageSequence()
+{
+	global string $files[];
+	global string $paths[];
+	
+	string $tmp,$buffer[];
+	int $i,$numTokens,$index;
+	
+	$index=size($files);
+	$tmp=`fileDialog`;
+	$numTokens=`tokenize $tmp "/" $buffer`;
+	$files[$index]=$buffer[$numTokens-1];
+	textScrollList -e -a $files[size($files)-1] fileList;
+	textScrollList -e -sii (`textScrollList -q -ni fileList`) fileList;
+	for ($i=0;$i<($numTokens-1);$i++)
+	{
+		if($i==0)
+		{
+			$paths[$index]=$buffer[$i];
+		}
+		else
+			$paths[$index]=$paths[$index]+"/"+$buffer[$i];
+	}
+}
+
+global proc delSelButton()
+{
+ global string $files[];
+ global string $paths[];
+ int $selNumbers[]=`textScrollList -q -sii fileList`;
+ string $selTSL[]=`textScrollList -q -si fileList`;
+ string $removed[1]={$selTSL[0]};
+ int $delIndex=$selNumbers[0]-1;
+ $files=stringArrayRemove($removed,$files);
+ textScrollList -e -ri $selTSL[0] fileList;
+
+}
+global proc delAllButton()
+{
+	global string $files[];
+	global string $paths[];
+	string $i;
+	$i=`confirmDialog -title "Delete All Images" -message "Are you sure?"
+ 		-button "确定" -button "取消" -defaultButton "确定"`;
+	if($i=="确定")
+	{
+		textScrollList -e -ra fileList;
+		clear $files;
+		clear $paths;
+	}
+}
+
+global proc copyCmd()
+{
+	global string $files[];
+	global string $paths[];
+	string $buffer[];
+	string $selTSL[]=`textScrollList -q -si fileList`;
+	int $selIndex[]=`textScrollList -q -sii fileList`;
+	int $index=($selIndex[0]-1);
+	tokenize $selTSL[0] "." $buffer;
+	string $name=$buffer[0];
+	string $sel[]=`ls -sl`;
+	int $firstFrame=`intField -q -v firstFrame`;
+	int $lastFrame=`intField -q -v lastFrame`;
+	if(size($selTSL)<=0)
+		error "请选择物体!";
+	for($each in $sel)
+	   {
+		  string $object[]=`listRelatives -c $each`;
+		  int $offest=rand($firstFrame,$lastFrame+1);
+		  if(`nodeType $object[0]`!="mesh")
+			   error "请选择POLY物体!";
+		  else
+		  {
+			   if(size($selTSL)>0)
+	            {
+	  				string $fileNode=`createNode file -n ($name+"_CopyCowrdFile_1")`;
+	  				setAttr ($fileNode+".defaultColor") -type double3 0 0 0;
+	  				string $placement=`createNode place2dTexture -n ($name+"2dPlacement")`;
+	  				setAttr ($placement+".wrapU") 1;
+	  				setAttr ($placement+".wrapV") 1;
+	  				copy_connectPlaceFile($fileNode,$placement);
+	  				source "D:/Alias/MAYA701/scripts/AETemplates/AEfileTemplate.mel";
+	  				AEassignTextureCB  ($fileNode+".fileTextureName") ($paths[$index]+"/"+$files[$index]) "image";
+	  				setAttr ($fileNode+".useFrameExtension") 1;
+	  				string $expression_1="if((frame=="+$firstFrame+")||(frame==1))\r\n{"+$fileNode+".frameExtension="+$offest+";}\r\n";
+      				expression  -s ($expression_1+$fileNode+".frameExtension+=1;\r\n"+$fileNode+".frameExtension%="+$lastFrame+";\r");
+	  				//setAttr ($fileNode+".frameOffset") $offest;
+	  				string $shadeNode=`createNode lambert -n ($name+"Shader")`;
+	  				connectAttr -force ($fileNode+".outColor") ($shadeNode+".color");
+	  				connectAttr -force ($fileNode+".outTransparency") ($shadeNode+".transparency");
+			   		select -r $each;
+		       		hyperShade -assign $shadeNode;
+		      }
+		  	 else
+			  		error "请选择图片!";
+	    }
+	 }
+	
+	
+}
+global proc copy_connectPlaceFile(string $fileNode,string $placement)
+{
+	connectAttr -f ($placement + ".coverage") ($fileNode + ".coverage");
+	connectAttr -f ($placement + ".translateFrame") ($fileNode + ".translateFrame");
+	connectAttr -f ($placement + ".rotateFrame") ($fileNode + ".rotateFrame");
+	connectAttr -f ($placement + ".mirrorU") ($fileNode + ".mirrorU");
+	connectAttr -f ($placement + ".mirrorV") ($fileNode + ".mirrorV");
+	connectAttr -f ($placement + ".stagger") ($fileNode + ".stagger");
+	connectAttr -f ($placement + ".wrapU") ($fileNode + ".wrapU");
+	connectAttr -f ($placement + ".wrapV") ($fileNode + ".wrapV");
+	connectAttr -f ($placement + ".repeatUV") ($fileNode + ".repeatUV");
+	connectAttr -f ($placement + ".offset") ($fileNode + ".offset");
+	connectAttr -f ($placement + ".rotateUV") ($fileNode + ".rotateUV");
+	connectAttr -f ($placement + ".noiseUV") ($fileNode + ".noiseUV");
+	connectAttr -f ($placement + ".vertexUvOne") ($fileNode + ".vertexUvOne");
+	connectAttr -f ($placement + ".vertexUvTwo") ($fileNode + ".vertexUvTwo");
+	connectAttr -f ($placement + ".vertexUvThree") ($fileNode + ".vertexUvThree");
+	connectAttr -f ($placement + ".vertexCameraOne") ($fileNode + ".vertexCameraOne");
+	connectAttr ($placement + ".outUV") ($fileNode + ".uv");
+	connectAttr ($placement + ".outUvFilterSize") ($fileNode + ".uvFilterSize");		
+}

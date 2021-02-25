@@ -1,0 +1,93 @@
+global proc slAnimMirrorMainLayout()
+{
+	if(`window -exists window_slAnimMirror`)
+	{	
+		deleteUI window_slAnimMirror;
+	}
+	window -title "Mirror Tools" -mb true -mxb false -s true  window_slAnimMirror;
+		menu -label "Help";
+			menuItem -label "Help ... " -command "zjHelpCallback slAnimMirror";
+		
+		 columnLayout -adj true -rs 10;
+			frameLayout -label "" -labelAlign "top"  -borderStyle "etchedIn";
+				columnLayout -adjustableColumn true -rs 10 ;
+					radioButtonGrp  -numberOfRadioButtons 2	-columnWidth3 60  60 60  -labelArray3  "X" "Z"  ""
+					-select 1
+					-label ("轴向") window_slAnimMirror_axes;
+					button -label "镜像" -h 30 -c "slAnimMirrorAnimations" ;
+				setParent ..;
+			setParent ..;
+			button -label "反向" -h 30 -c "slAnimReverseKeys";
+			setParent ..;
+		setParent ..;
+	window -e -w 180 -h 200 window_slAnimMirror;
+	showWindow window_slAnimMirror;
+}
+
+global proc slAnimReverseKeys()
+{
+	float $min = `playbackOptions -q -min`;
+	float $max = `playbackOptions -q -max`;
+	
+	string $master[] = `ls -sl`;
+	if (!`objExists $master[0]` || !endsWith($master[0],"MASTER"))
+		error "请选择需要反向动画的角色的MASTER！";
+
+	string $pre = `substring $master[0] 1 (size($master[0])-6)`;
+	string $sets[];
+	if (!`objExists ($pre+"set")`)
+		error "角色不存在set或者命令不正确请检查！";
+	if (`objExists ($pre+"accessory_set")`)
+		$sets = `sets -q ($pre+"accessory_set") ($pre+"set")`;
+	else 
+		$sets = `sets -q ($pre+"set")`;
+		
+	for ($obj in $sets)
+	{
+		string $keys[] = `listAttr -k $obj`;
+		for ($key in $keys)
+		{
+			string $animCurv[] = `listConnections -s true -d false ($obj+"."+$key)`;
+			if (`objExists $animCurv[0]` && isAnimCurve($animCurv[0]))
+			{
+				scaleKey -scaleSpecifiedKeys 1 -timeScale -1 -timePivot $min -floatScale -1 -floatPivot 0 -valueScale 1 -valuePivot 0 ($obj+"."+$key);
+				keyframe -e -iub true -r -o over -tc ($max-$min) ($obj+"."+$key);
+			}
+		}
+	}
+}
+
+global proc slAnimMirrorAnimations()
+{
+		string $sels[] = `ls -sl`;
+		if (!`objExists $sels[0]`)
+			error "请选择需要镜像动画的角色！";
+		
+		int $type = `radioButtonGrp  -q -select  window_slAnimMirror_axes`;
+		string $group = `group -n iGroup $sels`;
+
+		string $iobjs[] = `listRelatives -ad $group`;
+		string $masters[] = `ls "*MASTER" "*:*MASTER" "*:*:*MASTER"`;
+		for ($mas in $masters )
+		{
+			if (stringArrayCount($mas,$iobjs))
+			{
+				float $piv[] = `xform -q -t $mas`;
+				xform -piv $piv[0] $piv[1] $piv[2] $group;
+				break;
+			}
+		}
+		
+		string $mgroup[] = `instance -n mGroup $group`;
+		switch ($type)
+		{
+			case 1 :
+				scale -r -1 1 1 $mgroup[0];
+				break;
+			case 2 :
+				scale -r 1 1 -1 $mgroup[0];
+				break;
+		}
+
+		setAttr ($group+".visibility") 0;
+}

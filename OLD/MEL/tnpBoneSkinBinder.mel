@@ -1,0 +1,104 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc string[] tnpFindRelatedBoneSkinDeformer(string $surface){
+	string $nodes[];
+	if(kcIsType($surface, "mesh")){
+		string $history[] = `listHistory -future false $surface`;
+		$nodes = `ls -type "tnpBoneSkinDeformer" $history`;
+	}		
+	return $nodes;
+}
+/////////////////////////////////////////////////////////////////////////////
+global proc string[] tnpFindRelatedBoneList(string $deformerNode){
+	string $boneList[] = `listConnections ($deformerNode + ".boneList")`;
+	return $boneList;
+}
+///////////////////////////////////////////////////////////////
+global proc int tnpBoneGetIndex(string $bone){
+// the bone must be connected to a boneSkinDeformer
+// and only one-to-one relationship is supported
+// 
+	string $boneSkinDeformers[] = `listConnections -type "tnpBoneSkinDeformer" ($bone + ".worldMesh")`;
+	if(size($boneSkinDeformers)==0){
+		warning($bone + " is not bound to any skin deformer");
+		return -1;
+	}
+	
+	string $dests[] = `connectionInfo -destinationFromSource ($bone + ".worldMesh")`;
+	string $temp[];
+	for($dest in $dests){
+		tokenize $dest "." $temp;
+		if($temp[size($temp)-2] == $boneSkinDeformers[0]){
+			tokenize $temp[size($temp)-1] "[" $temp;
+			tokenize $temp[1] "]" $temp;
+			// now get the index
+			return $temp[0];
+		}
+	}	
+	return -1;
+}
+///////////////////////////////////////////////////////////////
+global proc tnpBoneAdd(string $skin, string $bone, // poly bone 
+								   float $dropoff){
+// There's only one boneSkinDeformer for each skin
+// Therefore, if a deformer already exists, add the bone to the deformer
+// Otherwise, create a new boneSkinDeformer for the skin
+
+	if(!kcIsType($skin,"mesh") || !kcIsType($bone, "mesh"))
+		error( "skin or muscle is not of supported type"); 
+	if(size(`listConnections -type "tnpBoneSkinDeformer" ($bone + ".worldMesh")`)!=0)
+		error($bone + " is already connected to a boneSkinDeformer! ");
+
+	string $history[] = `listHistory -future false $skin`;
+	string $boneSkinDeformers[] = `ls -type "tnpBoneSkinDeformer" $history`;
+	
+	if(size($boneSkinDeformers)==0){ 
+		// create a new boneSkinDeformer for the mesh
+		$boneSkinDeformers[0] = $skin + "BoneSkinDeformer";
+		$boneSkinDeformers = `deformer -name $boneSkinDeformers[0] -type tnpBoneSkinDeformer $skin`;
+	}
+	
+	// connect the bone to the highest index
+	string $boneList[] = `listConnections ($boneSkinDeformers[0] + ".boneList")`;
+	int $boneIdx = -1;
+	if(size($boneList)==0) 
+		$boneIdx = 0;
+	else{
+		$boneIdx = `tnpBoneGetIndex ($boneList[size($boneList)-1])`;			
+		$boneIdx += 1; // advance to next highest index
+	}
+	if($boneIdx == -1)
+		error "AddMuscle::Unknown error";
+		
+	// make new connection
+	connectAttr ($bone + ".worldMesh") ($boneSkinDeformers[0] + ".boneList[" + $boneIdx + "]");
+	setAttr	($boneSkinDeformers[0] + ".enableList[" + $boneIdx + "]") 1;
+	setAttr	($boneSkinDeformers[0] + ".dropoffDistanceList[" + $boneIdx + "]") $dropoff;
+	
+	setAttr	($boneSkinDeformers[0] + ".reCompute") 1;
+}
+////////////////////////////////////////////////////////////////
+global proc tnpBoneRemove(string $bone){
+// remove the $muscle from the $skin
+	string $boneSkinDeformers[] = `listConnections -type "tnpBoneSkinDeformer" ($bone + ".worldMesh")`;
+	if(size($boneSkinDeformers)==0){
+		warning($bone + " is not bound to any boneSkinDeformer");
+		return;
+	}
+	
+	// break connection to the boneList
+	int $boneIdx = `tnpBoneGetIndex $bone`;
+	if($boneIdx == -1) 
+		error("RemoveBone::Unknown Error");
+	
+	disconnectAttr ($bone + ".worldMesh") ($boneSkinDeformers[0] + ".boneList[" + $boneIdx + "]");
+	setAttr ($boneSkinDeformers[0] + ".removeBoneIndex") $boneIdx;
+}

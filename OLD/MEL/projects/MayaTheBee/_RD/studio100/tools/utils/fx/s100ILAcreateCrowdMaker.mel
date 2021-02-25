@@ -1,0 +1,367 @@
+global proc s100ILAcreateCrowdMaker()
+{
+
+$sFollow = 0;
+
+$partcl = `textField -q -tx  s100ILAassignTxf`;
+$trgt = `textField -q -tx  s100ILAtargetTxf`;
+$srfce = `textField -q -tx  s100ILASurfaceTxf`;
+
+if(size($partcl) > 0 && size($trgt))
+	{
+		if(size($srfce) > 0 && `objExists $srfce`)
+		{
+			$sFollow = 1;
+			select $partcl $trgt $srfce;
+		}
+		else
+			select $partcl $trgt;
+
+		cMakerCreation($sFollow);
+		s100ILAcreateInstance($partcl,$sFollow);
+	}
+else
+warning "assign particle and target object";
+
+s100ILAlistParticle;
+}
+
+
+global proc s100ILAcreateInstance(string $prtcSel, int $sFollow)
+{
+	s100ILAprogressBar(0);
+	//string $prtcSel[];
+	//$prtcSel = `textScrollList -q -si s100ILAtextScrParticle`;
+	$prtcTab = stringToStringArray($prtcSel,":");
+	$prtc = $prtcTab[0];
+
+
+	$prtcShape = `listRelatives -type "particle" -type "nParticle" -s $prtc`;
+		if(`objExists $prtcShape[0]`)
+		{
+			s100ILAprogressBar(2);
+			if(!`attributeExists "instancerRandom0" $prtcShape[0]`){
+			addAttr -ln "instancerRandom0"  -dt vectorArray    $prtcShape[0];
+			addAttr -ln "instancerRandom"  -dt vectorArray    $prtcShape[0];
+			setAttr -e -keyable true ($prtcShape[0] + ".instancerRandom");
+			}
+
+			if(!`attributeExists "aimAxisPP" $prtcShape[0]`){
+			addAttr -ln "aimAxisPP0"   -dt vectorArray    $prtcShape[0];
+			addAttr -ln "aimAxisPP"  -dt vectorArray    $prtcShape[0];
+			setAttr -e -keyable true  ($prtcShape[0] + ".instancerRandom");
+			}
+
+			$timeIn = `playbackOptions -q -animationStartTime`;
+			if(`objectType -isType "nParticle" $prtcShape[0]`)
+			{
+				$nucleus = `listConnections -type "nucleus" $prtcShape[0]`;
+				setAttr ($nucleus[0] + ".startFrame") $timeIn;
+            }
+			else
+				setAttr ($prtcShape[0] + ".startFrame") $timeIn;
+
+			if(!`attributeExists "randomScaleValue" $prtcShape[0]`){
+			addAttr -ln "randomScaleValue0"  -dt vectorArray    $prtcShape[0];
+			addAttr -ln "randomScaleValue"  -dt vectorArray    $prtcShape[0];
+			setAttr -e -keyable true ($prtcShape[0] + ".randomScaleValue");
+			}
+
+			if(!`attributeExists "randomScaleMin" $prtc`){
+			//addAttr -ln "randomScale0"  -dt vectorArray    $prtcShape[0];
+			addAttr -ln "randomScaleMin"  -at double    $prtcShape[0];
+			setAttr -e -keyable true ($prtc + ".randomScaleMin");
+			setAttr ($prtc + ".randomScaleMin") 0.8;
+			}
+
+			if(!`attributeExists "randomScaleMax" $prtc`){
+			//addAttr -ln "randomScale0"  -dt vectorArray    $prtcShape[0];
+			addAttr -ln "randomScaleMax"  -at double    $prtcShape[0];
+			setAttr -e -keyable true ($prtc + ".randomScaleMax");
+			setAttr ($prtc + ".randomScaleMax") 1.2;
+			}
+
+			s100ILAprogressBar(4);
+
+
+
+
+			$exp = `dynExpression -q -c -s $prtcShape[0]`;
+			$exp = $exp + ("\r\n\r\n\r\n/////INTANCER RANDOM ///// \r\n  int $tmp = rand(0,4);\n\n" + $prtcShape[0] + ".instancerRandom = $tmp;\n\n" );
+			dynExpression -s $exp -c $prtcShape[0];
+
+
+			$exp = `dynExpression -q -c -s $prtcShape[0]`;
+
+			$exp = $exp + ("\r\n \r\n  float $tmpSc = rand((" + $prtc + ".randomScaleMin),(" + $prtc + ".randomScaleMax));\n\n"+ $prtcShape[0] + ".randomScaleValue = <<$tmpSc,$tmpSc,$tmpSc>>;\n\n" );
+			dynExpression -s $exp -c $prtcShape[0];
+
+			$exp = `dynExpression -q -c -s $prtcShape[0]`;
+			$exp = $exp + ("\r\n\r\n\r\n/////INSTANCER AIM ///// \r\n " + $prtcShape[0] + ".aimAxisPP = <<0,0,1>>;\n\n" );
+			dynExpression -s $exp -c $prtcShape[0];
+
+			$instance = `particleInstancer -name ($prtc + "Instancer_ist") -cycle "None" -cycleStep 1 -cycleStepUnits "Frames" -levelOfDetail "Geometry" -rotationUnits "Degrees" -rotationOrder "XYZ" -position "worldPosition" -age "age" $prtcShape[0]`;
+
+			$instancer = `particleInstancer -e -name $instance -aimDirection "worldVelocity"  -scale "randomScaleValue" -aimAxis "aimAxisPP" -objectIndex "instancerRandom" $prtcShape[0]`;
+			s100ILAprogressBar(6);
+
+			if(!`objExists "FX_particle_grp"`)
+				$particlefGrp = `createNode "transform" -n "FX_particle_grp"`;
+
+			$particleGrp = `createNode "transform" -n ($prtcTab[0] + "_grp")`;
+					parent $particleGrp "FX_particle_grp";
+					parent $prtcTab[0] $instancer $particleGrp;
+			s100ILAprogressBar(8);
+			s100ILAparticleSetAttr($prtcShape,$sFollow);
+			s100ILAprogressBar(10);
+			s100ILAprogressBar(0);
+
+        }
+}
+
+global proc s100ILAparticleSetAttr(string $partShape[], int $sFollow)
+{
+						////
+						setAttr ($partShape[0]+".cylinderLengthMin")10;
+
+						setAttr ($partShape[0]+".cylinderLengthMax")20;
+
+						setAttr ($partShape[0]+".cylinderRadiusMin")10;
+
+						setAttr ($partShape[0]+".cylinderRadiusMax")20;
+
+						setAttr ($partShape[0]+".rotationAngleMin")0.016;
+
+						setAttr ($partShape[0]+".rotationAngleMax")0.18;
+
+						////
+						setAttr ($partShape[0]+".sepVisRadiusMin")0.1;
+
+				  		setAttr ($partShape[0]+".sepVisRadiusMax")0.4;
+
+						////
+						setAttr ($partShape[0]+".alVisRadiusMin")4;
+
+						setAttr ($partShape[0]+".alVisRadiusMax")4.4;
+				  		////
+
+						setAttr ($partShape[0]+".seekFactorMin")4;
+
+				 		setAttr ($partShape[0]+".seekFactorMax")5;
+
+						setAttr ($partShape[0]+".alignmentFactorMin")2;
+
+				  		setAttr ($partShape[0]+".alignmentFactorMax")5;
+
+				  		setAttr ($partShape[0]+".separationFactorMin")0;
+
+				  		setAttr ($partShape[0]+".separationFactorMax")0;
+
+						if($sFollow == 0)
+						{
+				 		setAttr ($partShape[0]+".scaleValueMin")10;
+
+				  		setAttr ($partShape[0]+".scaleValueMax")20;
+						}
+
+						int $int = `objectType -isType "nParticle" $partShape[0]`;
+
+							if($int == 1)
+							{
+								setAttr ($partShape[0] + ".selfCollide")1;
+								setAttr ($partShape[0] + ".selfCollideWidthScale")1;
+								setAttr ($partShape[0]+ ".collideWidthScale") 16;
+								setAttr ($partShape[0]+".selfCollideWidthScale") 1;
+                            }
+
+
+
+
+}
+
+
+global proc s100ILAassignCrowdAnim()
+{
+	s100ILAprogressBar(0);
+	string $type = `optionMenu -q -v s100ILAattachMenu`;
+	string $ref[];
+
+	$prtcSel = `textScrollList -q -si s100ILAtextScrParticle`;
+	if(size($prtcSel) > 0)
+	{
+	$prtcSelT = stringToStringArray($prtcSel[0],":");
+	$prtc = $prtcSelT[0];
+	$shapePrt = `listRelatives -s $prtc`;
+	$instancer = `listConnections -type "instancer" $shapePrt[0]`;
+
+	s100ILAprogressBar(2);
+	$ref= `s100ILAimportCrowdAnim`;
+
+
+	for($i = 0; $i < size($ref); $i++)
+		{
+		if(`objExists ($ref[$i] + ":full_grp")`)
+				setAttr ($ref[$i] + ":full_grp.v") 0;
+
+		switch($type)
+			{
+				case "walk" :
+
+				if(`objExists ($ref[$i] + ":walk_grp")`)
+					connectAttr -f ($ref[$i] + ":walk_grp.matrix") ($instancer[0] + ".inputHierarchy[" + $i + "]");
+
+				break;
+				case "fly" :
+				if(`objExists ($ref[$i] + ":fly_grp")`)
+					connectAttr -f ($ref[$i] + ":fly_grp.matrix") ($instancer[0] + ".inputHierarchy[" + $i + "]");
+
+				break;
+
+            }
+
+        }
+
+	}
+	else
+	warning "select an assigned particle";
+
+}
+
+global proc string[] s100ILAimportCrowdAnim()
+{
+string $refTab[];
+$path = `textField -q -tx s100ILAtxfWayBaseChar`;
+
+$list = `textScrollList -q -allItems s100ILAtextScrollUsed`;
+		for($obj in $list)
+		{
+			$arrayObj = stringToStringArray($obj,":");
+			$pathO = ($path + $arrayObj[0] + "/_crowd/");
+			//print $path;
+
+			if(`filetest -d $pathO`)
+			{
+				$rig = `getFileList -fld $pathO -filespec "*.ma"`;
+				$rigTab = stringToStringArray($rig[0],".");
+			//	print $rig;
+				if(size($rig)> 0 && $arrayObj[1] != "none")
+					{
+					$ref = s100FMIACreateRefImport($pathO + $rig[0], $rigTab[0]);
+					s100ILAprogressBar(4);
+					$refTab[size($refTab)] = $ref;
+					s100ILAImportAnimation($ref,$obj);
+
+					s100ILAprogressBar(10);
+	s100ILAprogressBar(0);
+					}
+				else
+				warning "no reference file exist or no animation assigned";
+
+
+			}
+
+        }
+	return $refTab;
+}
+
+global proc s100ILAImportAnimation(string $nameSpace, string $anim)
+{
+
+$path = `textField -q -tx s100ILAtxfWayBaseChar`;
+$animTab = stringToStringArray($anim,":");
+	$path = ($path + $animTab[0] + "/_anim/");
+	$anim = $animTab[1];
+$animArray = stringToStringArray($anim,".");
+
+$prod = `s100TALgetprefixProd`;
+$type = `s100TALreturnType($animArray[1])`;
+
+
+$animName = ($prod + "_" + $type[1] + "_" + $animTab[0] + "_" + $animArray[0] );
+//print ("\n" + $animName + "\n");
+//print ("\n" + $path + "\n");
+
+	if(`filetest -e ($path + $animName+ "." + $animArray[1])`)
+	{
+	python("import s100_AM");
+	$fr = python("s100_AM.s100_AM().getKeyRange(\""+$path + $animName + "." + $animArray[1] +"\")");
+ 	$timeIn = `playbackOptions -q -animationStartTime`;
+	$timeIn = $timeIn + (rand(0,5));
+	$timeOut =  ($timeIn + ($fr[1] - $fr[0]));
+
+	$python = ("s100_AM.s100_AM().importKey(path=\\\""+ $path + $animName + ".anim"  + "\\\",cropIn=" + $fr[0] + ",cropOut=" + $fr[1] + ",placeIn=" +$timeIn+",placeOut="+ $timeOut +",action=\\\"delete\\\",namespace=\\\"" + $nameSpace + "\\\")");
+	$imp = "python(\"" + $python + "\")";
+
+	$eval = eval($imp);
+	s100ILAprogressBar(8);
+
+    }
+
+
+}
+
+
+
+global proc s100ILArefreshObstacle()
+{
+string $list[]= `ls -type transform ("CMObstacle_*")`;
+$tsl = `textScrollList -e -removeAll s100txScrObstacle`;
+for($obj in $list)
+	{
+		textScrollList -e -append $obj s100txScrObstacle;
+	}
+}
+
+global proc s100ILAremoveObstacle()
+{
+	$tsl = `textScrollList -q -selectItem s100txScrObstacle`;
+
+	for($obj in $tsl)
+	{
+		if(`objExists $obj`)
+			delete $obj;
+    }
+s100ILArefreshObstacle;
+}
+
+global proc s100ILAcreateObstacle(string $tf, string $window)
+{
+
+
+
+$name = `textField -q -tx $tf`;
+	if ( `window -exists $window` )
+	 {
+	 deleteUI $window;
+	}
+$ctr = `curve -d 1 -p 0 0 1 -p 0 0.5 0.866025 -p 0 0.866025 0.5 -p 0 1 0 -p 0 0.866025 -0.5 -p 0 0.5 -0.866025 -p 0 0 -1 -p 0 -0.5 -0.866025 -p 0 -0.866025 -0.5 -p 0 -1 0 -p 0 -0.866025 0.5 -p 0 -0.5 0.866025 -p 0 0 1 -p 0.707107 0 0.707107 -p 1 0 0 -p 0.707107 0 -0.707107 -p 0 0 -1 -p -0.707107 0 -0.707107 -p -1 0 0 -p -0.866025 0.5 0 -p -0.5 0.866025 0 -p 0 1 0 -p 0.5 0.866025 0 -p 0.866025 0.5 0 -p 1 0 0 -p 0.866025 -0.5 0 -p 0.5 -0.866025 0 -p 0 -1 0 -p -0.5 -0.866025 0 -p -0.866025 -0.5 0 -p -1 0 0 -p -0.707107 0 0.707107 -p 0 0 1 -k 0 -k 1 -k 2 -k 3 -k 4 -k 5 -k 6 -k 7 -k 8 -k 9 -k 10 -k 11 -k 12 -k 13 -k 14 -k 15 -k 16 -k 17 -k 18 -k 19 -k 20 -k 21 -k 22 -k 23 -k 24 -k 25 -k 26 -k 27 -k 28 -k 29 -k 30 -k 31 -k 32  `;
+
+addAttr -ln "radius"  -at "double"  $ctr;
+		setAttr -e -keyable true ($ctr +".radius");
+		setAttr ($ctr +".radius")1;
+
+if(!`objExists "FX_particle_grp"`)
+	$fx = `createNode "transform" -n "FX_particle_grp"`;
+
+$obsGrp = "FX_obstacle_grp";
+if(!`objExists "FX_obstacle_grp"`)
+	{
+	$obsGrp = `createNode "transform" -n "FX_obstacle_grp"`;
+	parent $obsGrp "FX_particle_grp";
+    }
+
+
+		$obj = `rename $ctr $name`;
+		connectAttr -f  ($obj +".radius") ($obj +".scaleX");
+		connectAttr -f ($obj +".scaleX") ($obj +".scaleY");
+		connectAttr -f ($obj +".scaleX") ($obj +".scaleZ");
+
+		setAttr -e -keyable false ($obj +".scaleX");
+		setAttr -e -keyable false ($obj +".scaleY");
+		setAttr -e -keyable false ($obj +".scaleZ");
+parent $obj $obsGrp;
+
+select $obj;
+cMakerAddObstacle;
+s100ILArefreshObstacle;
+}

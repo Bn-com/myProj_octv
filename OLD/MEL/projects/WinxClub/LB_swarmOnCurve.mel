@@ -1,0 +1,734 @@
+global string $loftName[];
+global string $instancer[];
+global string $copyInstance;
+global int $modeInst;
+global proc LB_swarmOnCurve()
+{	
+	if (`window -exists swarmOnCurve`) deleteUI swarmOnCurve;
+		window -title "LB_InsectsOnCurveFX" -wh 320 200 swarmOnCurve;
+		columnLayout -adjustableColumn 1;
+		frameLayout -label "Objects in FX" -cl false -cll true;
+			columnLayout -adjustableColumn 1 -columnAlign "left";
+				textFieldButtonGrp -label "Istance Object:" -columnWidth2 50 50 -buttonLabel "Pick" -bc pickInstancer _OBJ_instancer;
+				intSliderGrp -label "segment count" -min 0 -value 5 -field true _nSegment;
+				intSliderGrp -label "subsegment count" -min 0 -value 4 -field true _subSegment;
+				floatSliderGrp -label "speedOnCurve" -min 0 -step 0.001 -field true _speed;
+				$_modeInst_=`radioButtonGrp -numberOfRadioButtons 2 -columnWidth 1 100 -columnWidth 2 115 -columnAttach 2 "left" 35 -select 1 -label "Instancer" -onCommand disableINSTANCER -onCommand1 enableINSTANCER -labelArray2 "USE" "UNUSE" "mode"`;
+				text -label " ";
+			setParent..;
+		setParent..;
+		rowLayout -nc 2;
+	button -label "Create FX on Curve" -w 120 -c collectValue;
+	showWindow swarmOnCurve;
+}
+global proc disableINSTANCER()
+{
+	global int $modeInst;
+	$modeInst=0;
+	textFieldButtonGrp -e -enable 0 -enableButton 0 _OBJ_instancer;
+}
+global proc enableINSTANCER()
+{
+	global int $modeInst;
+	$modeInst=1;
+	textFieldButtonGrp -e -enable 1 -enableButton 1 _OBJ_instancer;
+}
+global proc pickInstancer()
+{
+	global string $instancer[];
+	$instancer=`ls -sl`;
+	textFieldButtonGrp -e -tx $instancer[0] _OBJ_instancer;
+}
+global proc collectValue()
+{
+	int $nSegment=`intSliderGrp -q -v _nSegment`;
+	int $subSegment=`intSliderGrp -q -v _subSegment`;
+	swarmAlongCurves "" $nSegment $subSegment 1 0 0.5 5 1;
+}
+includeEffectsGlobals();
+proc string swarmAlongCurve
+	( 
+	string $setName, 
+	string $curveName, 
+	int $controlSegmentCount, 
+	int $subSegmentCount, 
+	int $attachEmitterToCurve, 	
+	float $emitterRate, 		
+	float $randomMotionSpeed, 
+	float $lifespan, 		
+	float $goalWeight 			
+	)
+{
+	global string $loftName[];
+	int $showOutput = 0;
+	if( 1 )
+	{
+		$showOutput = 1;
+	}
+	string $setArray[];
+	clear($setArray);
+	string $controlLocatorArray[];
+	clear($controlLocatorArray);
+	string $subLocatorArray[];
+	clear($subLocatorArray);
+	string $paramLocatorArray[];
+	clear($paramLocatorArray);
+	string $scalableCircleArray[];
+	clear($scalableCircleArray);
+	string $controlCircleArray[];
+	clear($controlCircleArray);
+	string $subCircleArray[];
+	clear($subCircleArray);
+	string $circleArray[];
+	clear($circleArray);
+	if( $showOutput )
+	{
+		print("//\n");
+		print("// Applying the effect to \""+$curveName+"\"...\n");
+		print("//\n");
+	}
+	global string $setGroupName;
+	if( size($setName) == 0 )
+		$setGroupName = `group -empty -name ($curveName+"_SwarmGroup")`;
+	else
+		$setGroupName = `group -empty -name $setName`;
+	string $currentSelectedList[] = `ls -sl`;
+	string $setGroupPath = $currentSelectedList[0];
+	setAttr -keyable 0 ($setGroupPath+".tx");
+	setAttr -keyable 0 ($setGroupPath+".ty");
+	setAttr -keyable 0 ($setGroupPath+".tz");
+	setAttr -keyable 0 ($setGroupPath+".rx");
+	setAttr -keyable 0 ($setGroupPath+".ry");
+	setAttr -keyable 0 ($setGroupPath+".rz");
+	setAttr -keyable 0 ($setGroupPath+".sx");
+	setAttr -keyable 0 ($setGroupPath+".sy");
+	setAttr -keyable 0 ($setGroupPath+".sz");
+	string $pathNames[];
+	tokenize( $setGroupPath, "|", $pathNames );
+	$setGroupName = $pathNames[size($pathNames)-1];
+	float $curveStart = `getAttr ($curveName+".minValue")`;
+	string $curveStartStr = ($curveName+".minValue");
+	float $curveEnd = `getAttr ($curveName+".maxValue")`;
+	string $curveEndStr = ($curveName+".maxValue");
+	float $curveRange = $curveEnd - $curveStart;
+	string $curveRangeStr = ("( "+$curveEndStr+" - "+$curveStartStr+" )");
+	string $particleName;
+	string $particlePath;
+	{
+		if( $showOutput )
+		{
+			print("//    Creating the particle object...\n");
+		}
+		string $resultArray[] = `particle -name ($setGroupName+"_particle")`;
+		$particleName = $resultArray[1];
+		$particlePath = ("|"+$resultArray[0]+"|"+$particleName);
+		$setArray[size($setArray)] = ("|"+$resultArray[0]);
+		addAttr -ln "maxDistance" -dt doubleArray $particlePath;
+		addAttr -ln "maxDistance0" -dt doubleArray $particlePath;
+		addAttr -ln "curveOffset" -dt vectorArray $particlePath;
+		addAttr -ln "curveOffset0" -dt vectorArray $particlePath;
+		addAttr -ln "randomPosition" -dt vectorArray $particlePath;
+		addAttr -ln "randomPosition0" -dt vectorArray $particlePath;
+		addAttr -ln "goalOffset" -dt vectorArray $particlePath;
+		addAttr -ln "goalOffset0" -dt vectorArray $particlePath;
+		addAttr -ln "goalPP" -dt doubleArray $particlePath;
+		addAttr -ln "goalPP0" -dt doubleArray $particlePath;
+		addAttr -ln "goalU" -dt doubleArray $particlePath;
+		addAttr -ln "goalU0" -dt doubleArray $particlePath;
+		addAttr -ln "goalV" -dt doubleArray $particlePath;
+		addAttr -ln "goalV0" -dt doubleArray $particlePath;
+		addAttr -ln "rampValues" -dt vectorArray $particlePath;
+		addAttr -ln "rampValues0" -dt vectorArray $particlePath;
+		addAttr -ln "rgbPP" -dt vectorArray $particlePath;
+		addAttr -ln "rgbPP0" -dt vectorArray $particlePath;
+		setAttr ($particlePath+".lifespanMode") 1;
+		setAttr ($particlePath+".lifespan") $lifespan;
+		addAttr -ln "randomMotionSpeed" -min 0 -dv 0 $particlePath;
+		setAttr ($particlePath+".randomMotionSpeed") $randomMotionSpeed;
+		setAttr -keyable 1 ($particlePath+".randomMotionSpeed");
+	}
+	string $emitterPath;
+	{
+		if( $showOutput )
+		{
+			print("//    Creating the emitter...\n");
+		}
+		string $emitterNameArray[];
+		$emitterNameArray = `emitter -pos 0 0 0 -rate $emitterRate -speed 0 -type omni -name ($setGroupName+"_emitter")`;
+		string $emitterName = $emitterNameArray[0];
+		$emitterPath = ("|"+$emitterName);
+		setAttr ($emitterPath+".inheritsTransform") 0;
+		connectDynamic -em $emitterPath $particlePath;
+		$setArray[size($setArray)] = $emitterPath;
+	}
+	string $arrayMapperName;
+	string $distanceRampName;
+	{
+		string $arrayMapperNameArray[] = `arrayMapper -target $particlePath -destAttr maxDistance -inputV ageNormalized -type ramp`;
+		$arrayMapperName = $arrayMapperNameArray[0];
+		string $rampNameArray[] = `listConnections ($arrayMapperName+".computeNode")`;
+		select $rampNameArray[0];
+		rename ($setGroupName+"_distance");
+		$rampNameArray = `ls -sl`;
+		$distanceRampName = $rampNameArray[0];
+	}
+	string $positionRampName;
+	{
+		$arrayMapperNameArray = `arrayMapper -target $particlePath -destAttr rampValues -inputV ageNormalized -type ramp`;
+		$arrayMapperName = $arrayMapperNameArray[0];
+		$rampNameArray = `listConnections ($arrayMapperName+".computeNode")`;
+		select $rampNameArray[0];
+		rename ($setGroupName+"_position");
+		$rampNameArray = `ls -sl`;
+		$positionRampName = $rampNameArray[0];
+	}
+	string $goalLocatorPath = "";
+	{
+		string $goalLocatorName = ($setGroupName+"_goal");
+		createPrimitive nullObject;
+		$goalLocatorName = `rename $goalLocatorName`;
+		$goalLocatorPath = ("|"+$goalLocatorName);
+		setAttr ($goalLocatorPath+".inheritsTransform") 0;
+		goal -g $goalLocatorPath -weight $goalWeight $particlePath;
+		hide $goalLocatorPath;
+	}
+	{
+		if( $showOutput )
+		{
+			print("//    Adding controls to the main group...\n");
+		}
+		addAttr -ln "INSECTS" -at "enum" -en "______________________________________:"  |Swarm;
+		setAttr -e -keyable true |Swarm.INSECTS;
+		setAttr -lock true "Swarm.INSECTS";
+		addAttr -ln "attraction" -at double -min 0.001 -max 1000 -dv 1000 Swarm;
+		setAttr -e -keyable true "Swarm.attraction";
+		addAttr -ln "rate" -at double -min 0 -max 100000 -dv 500 Swarm; // Parametrizzare il rate
+		setAttr -e -keyable true "Swarm.rate";
+		addAttr -ln "maxCount" -at double -min -1 -max 100000 -dv 500 Swarm; // Parametrizzare il MaxCount
+		setAttr -e -keyable true "Swarm.maxCount";
+		addAttr -ln "globalOffset" -at double -min 0 -max 1000 -dv 2 Swarm;
+		setAttr -e -keyable true "Swarm.globalOffset";
+		addAttr -ln "distP_0" -at double -min 0 -max 1000 -dv 15 Swarm;
+		setAttr -e -keyable true "Swarm.distP_0";
+		addAttr -ln "distP_1" -at double -min 0 -max 1000 -dv 60 Swarm;
+		setAttr -e -keyable true "Swarm.distP_1";
+		addAttr -ln "distP_2" -at double -min 0 -max 1000 -dv 120 Swarm;
+		setAttr -e -keyable true "Swarm.distP_2";
+		addAttr -ln "confP_0" -at double -min 0 -max 10 -dv 0.5 Swarm;
+		setAttr -e -keyable true "Swarm.confP_0";
+		addAttr -ln "confP_1" -at double -min 0 -max 10 -dv 0.5 Swarm;
+		setAttr -e -keyable true "Swarm.confP_1";
+		addAttr -ln "confP_2" -at double -min 0 -max 10 -dv 0.5 Swarm;
+		setAttr -e -keyable true "Swarm.confP_2";
+		addAttr -ln "CURVE" -at "enum" -en "______________________________________:"  |Swarm;
+		setAttr -e -keyable true |Swarm.CURVE;
+		setAttr -lock true "Swarm.CURVE";
+		addAttr -ln "speedOnCurve" -at double -min 0 -dv 0 Swarm;
+		setAttr -e -keyable true "Swarm.speedOnCurve";
+		addAttr -ln "displaySubsegments" -at bool $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".displaySubsegments");
+		setAttr ($setGroupPath+".displaySubsegments") 0;
+		addAttr -ln "displayAllCircles" -at bool $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".displayAllCircles");
+		setAttr ($setGroupPath+".displayAllCircles") 0;
+		addAttr -ln "displayThickness" -at bool $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".displayThickness");
+		setAttr ($setGroupPath+".displayThickness") 0;
+		addAttr -ln "lifespan" -min 0 $setGroupPath;  // still correct in 3.0 and later
+		setAttr -keyable 1 ($setGroupPath+".lifespan");
+		setAttr ($setGroupPath+".lifespan") $lifespan;
+		connectAttr ($setGroupPath+".lifespan") ($particlePath+".lifespan");
+		addAttr -ln "goalWeight" -min 0 $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".goalWeight");
+		setAttr ($setGroupPath+".goalWeight") $goalWeight;
+		connectAttr ($setGroupPath+".goalWeight") ($particlePath+".goalWeight[0]");
+		addAttr -ln "randomMotionSpeed" $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".randomMotionSpeed");
+		setAttr ($setGroupPath+".randomMotionSpeed") $randomMotionSpeed;
+		connectAttr ($setGroupPath+".randomMotionSpeed") ($particlePath+".randomMotionSpeed");
+		addAttr -ln "emissionRate" $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".emissionRate");
+		setAttr ($setGroupPath+".emissionRate") $emitterRate;
+		connectAttr ($setGroupPath+".emissionRate") ($emitterPath+".rate");
+		addAttr -ln "curveMin" $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".curveMin");
+		connectAttr $curveStartStr ($setGroupPath+".curveMin");
+		setAttr -lock 1 ($setGroupPath+".curveMin");
+		addAttr -ln "curveMax" $setGroupPath;
+		setAttr -keyable 1 ($setGroupPath+".curveMax");
+		connectAttr $curveEndStr ($setGroupPath+".curveMax");
+		setAttr -lock 1 ($setGroupPath+".curveMax");
+	}
+	string $paramExpression = "";
+	string $scaleExpression = "";
+	{
+		if( $showOutput )
+		{
+			print("//    Creating control objects...\n");
+		}
+		$controlSegmentCount = max( $controlSegmentCount, 2 );
+		$subSegmentCount = max( $subSegmentCount, 2 );
+		int $controlLocatorCount = $controlSegmentCount + 1;
+		int $totalSubLocatorCount = $controlSegmentCount * $subSegmentCount + 1;
+		for( $i = 0; $i < $controlSegmentCount; $i ++ )
+		{
+			if( $showOutput )
+			{
+				print("//       Creating control segment "+$i+"...\n");
+			}
+			if( $i == 0 )
+			{
+				string $locatorName = ($setGroupName+"_controlLocator_0");
+				float $percent = 0.0;
+				paramLocator ($curveName+".u["+$curveStart+"]");
+				pickWalk -d up;
+				$locatorName = `rename $locatorName`;
+				$paramLocatorArray[size($paramLocatorArray)] = $locatorName;
+				addAttr -ln ("locator_0_pos") -min 0 $setGroupName;
+				setAttr -keyable true ($setGroupName+".locator_0_pos");
+				connectAttr ($setGroupName+".locator_0_pos") ($locatorName+".localPositionX");
+				setAttr ($setGroupName+".locator_0_pos") $curveStart;
+				int $subLocatorNumber = 0;
+				string $subLocatorName = ($setGroupName+"_locator_0_0");
+				createPrimitive nullObject;
+				$subLocatorName = `rename $subLocatorName`;
+				string $subLocatorPath = ("|"+$subLocatorName);
+				scale 2 2 2;
+				setAttr ($subLocatorPath+".inheritsTransform") 0;
+				$controlLocatorArray[size($controlLocatorArray)] = $subLocatorPath;
+				createPrimitive nullObject;
+				rename "SelectionLocal";
+				string $sl[] = `ls -sl`;
+				string $localSelection = $sl[0];
+				parent $localSelection $subLocatorName;
+				$sl = `ls -sl`;
+				string $localSelection = $sl[0];
+				setAttr ($localSelection+".template") 1;
+				setAttr ($localSelection+".visibility") 0;
+				vector $randPos = sphrand(1);
+				setAttr ($localSelection+".translate") -type double3 ($randPos.x) ($randPos.y) ($randPos.z);
+				createPrimitive nullObject;
+				rename "SelectionLocator";
+				$sl = `ls -sl`;
+				string $selectionLocator = $sl[0];
+				setAttr ($selectionLocator+".template") 1;
+				setAttr ($selectionLocator+".visibility") 0;
+				setAttr ($selectionLocator+".inheritsTransform") 0;
+				$controlLocatorArray[size($controlLocatorArray)] = $selectionLocator;
+				select $localSelection $selectionLocator;
+				pointConstraint -weight 1;
+				setAttr ($setGroupPath+".displayHandle") 1;
+				connectAttr ($selectionLocator+".translate") ($setGroupPath+".selectHandle");
+				getAttr ($setGroupPath+".selectHandle");
+				string $subPocName = ($setGroupName+"_POC_0_0");
+				$subPocName = `createNode pointOnCurveInfo -name $subPocName`;
+				connectAttr ($curveName+".worldSpace[0]") ($subPocName+".inputCurve");
+				setAttr ($subPocName+".turnOnPercentage") 0;
+				connectAttr ($subPocName+".position") ($subLocatorPath+".translate");
+				if( $attachEmitterToCurve == 1 )
+				{
+					connectAttr ($subLocatorPath+".translate") ($emitterPath+".translate");
+				}
+				string $cCircleName[] = `circle -c 0 0 0 -nr 0 0 1 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 6 -ch 1 -name ("control_Circle_0")`;
+				select $subLocatorPath $cCircleName[0];
+				pointConstraint -weight 1;
+				select $curveName $cCircleName[0];
+				tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0;
+				setAttr -keyable 0 ($cCircleName[0]+".tx");
+				setAttr -keyable 0 ($cCircleName[0]+".ty");
+				setAttr -keyable 0 ($cCircleName[0]+".tz");
+				setAttr -keyable 0 ($cCircleName[0]+".rx");
+				setAttr -keyable 0 ($cCircleName[0]+".ry");
+				setAttr -keyable 0 ($cCircleName[0]+".rz");
+				setAttr -keyable 0 ($cCircleName[0]+".sy");
+				setAttr -keyable 0 ($cCircleName[0]+".sz");
+				setAttr -keyable 0 ($cCircleName[0]+".visibility");
+				setAttr -lock 1 ($cCircleName[0]+".visibility");
+				string $circleName[] = `circle -c 0 0 0 -nr 0 0 1 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 6 -ch 1 -name ($setGroupName+"_circle_0_0")`;
+				select $subLocatorPath $circleName[0];
+				pointConstraint -weight 1;
+				select $curveName $circleName[0];
+				tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0;
+				$controlCircleArray[size($controlCircleArray)] = $circleName[0];
+				$scalableCircleArray[size($scalableCircleArray)] = $cCircleName[0];
+				$circleArray[size($circleArray)] = $circleName[0];
+				float $percent = 0.0;
+				$paramExpression += ($subPocName+".parameter =\n");
+				$paramExpression += ("    "+($locatorName+".localPositionX")+";\n\n");
+				if( 1 )
+				{
+					$scaleExpression += ($circleName[0]+".scaleX =\n");
+					$scaleExpression += ("    "+$cCircleName[0]+".scaleX;\n\n");
+					$scaleExpression += ($cCircleName[0]+".scaleY =\n    "+$cCircleName[0]+".scaleZ =\n    "+$cCircleName[0]+".scaleX;\n");
+					$scaleExpression += ($circleName[0]+".scaleY =\n    "+$circleName[0]+".scaleZ =\n    "+$circleName[0]+".scaleX;\n");
+				}
+				else
+				{
+					connectAttr ($cCircleName[0]+".scaleX") ($circleName[0]+".scaleX");
+					connectAttr ($cCircleName[0]+".scaleX") ($cCircleName[0]+".scaleY");
+					connectAttr ($cCircleName[0]+".scaleX") ($cCircleName[0]+".scaleZ");
+					connectAttr ($circleName[0]+".scaleX") ($circleName[0]+".scaleY");
+					connectAttr ($circleName[0]+".scaleX") ($circleName[0]+".scaleZ");
+				}
+				setAttr ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].position") $percent;
+				setAttr -lock 1 ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].position");
+				connectAttr ($circleName[0]+".scaleX") ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].colorR");
+				setAttr ($positionRampName+".colorEntryList["+$subLocatorNumber+"].position") $percent;
+				setAttr -lock 1 ($positionRampName+".colorEntryList["+$subLocatorNumber+"].position");
+				connectAttr ($subLocatorPath+".translate") ($positionRampName+".colorEntryList["+$subLocatorNumber+"].color");
+			}
+			int $controlLocatorNumber = $i + 1;
+			string $locatorName = ($setGroupName+"_controlLocator_"+$controlLocatorNumber);
+			string $previousPocName = ($setGroupName+"_controlLocator_"+$i);
+			string $PocName = ($setGroupName+"_controlLocator_"+$controlLocatorNumber);
+			float $endPercent = (float)$controlLocatorNumber/(float)($controlSegmentCount);
+			paramLocator ($curveName+".u["+($curveStart + $endPercent*$curveRange)+"]");
+			pickWalk -d up;
+			$PocName = `rename $PocName`;
+			$paramLocatorArray[size($paramLocatorArray)] = $PocName;
+			addAttr -ln ("locator_"+($controlLocatorNumber)+"_pos") -min 0 $setGroupName;
+			setAttr -keyable true ($setGroupName+".locator_"+($controlLocatorNumber)+"_pos");
+			connectAttr ($setGroupName+".locator_"+($controlLocatorNumber)+"_pos") ($locatorName+".localPositionX");
+			setAttr ($setGroupName+".locator_"+($controlLocatorNumber)+"_pos") ($curveStart + $endPercent * $curveRange);
+	
+			string $startValStr = ($previousPocName+".localPositionX");
+			string $endValStr = ($PocName+".localPositionX");
+	
+			string $cCircleName[] = `circle -c 0 0 0 -nr 0 0 1 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 6 -ch 1 -name ("control_Circle_"+$controlLocatorNumber)`;
+			string $previousCCircleName = ("control_Circle_"+$i);
+			string $startScaleStr = ("|"+$previousCCircleName+".scaleX");
+			string $endScaleStr = ($cCircleName[0]+".scaleX");
+
+			if( 1 )
+			{
+				$scaleExpression += ($cCircleName[0]+".scaleY =\n    "+$cCircleName[0]+".scaleZ =\n    "+$cCircleName[0]+".scaleX;\n");
+			}
+			else
+			{
+				connectAttr ($cCircleName[0]+".scaleX") ($cCircleName[0]+".scaleY");
+				connectAttr ($cCircleName[0]+".scaleX") ($cCircleName[0]+".scaleZ");
+			}
+			int $j;
+			for( $j = 1; $j <= $subSegmentCount; $j ++ )
+			{
+				int $subLocatorNumber = ( $i * $subSegmentCount ) + $j;
+				string $subLocatorName = ($setGroupName+"_locator_"+$i+"_"+$j);
+				createPrimitive nullObject;
+				$subLocatorName = `rename $subLocatorName`;
+				string $subLocatorPath = ("|"+$subLocatorName);
+	
+				string $circleName[] = `circle -c 0 0 0 -nr 0 0 1 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 6 -ch 1 -name ($setGroupName+"_circle_"+$i+"_"+$j)`;
+				select $subLocatorPath $circleName[0];
+				pointConstraint -weight 1;
+				select $curveName $circleName[0];
+				tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0;
+				if( $j == $subSegmentCount )
+				{
+					select $subLocatorPath $cCircleName[0];
+					pointConstraint -weight 1;
+					select $curveName $cCircleName[0];
+					tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0;
+					setAttr -keyable 0 ($cCircleName[0]+".tx");
+					setAttr -keyable 0 ($cCircleName[0]+".ty");
+					setAttr -keyable 0 ($cCircleName[0]+".tz");
+					setAttr -keyable 0 ($cCircleName[0]+".rx");
+					setAttr -keyable 0 ($cCircleName[0]+".ry");
+					setAttr -keyable 0 ($cCircleName[0]+".rz");
+					setAttr -keyable 0 ($cCircleName[0]+".sy");
+					setAttr -keyable 0 ($cCircleName[0]+".sz");
+					setAttr -keyable 0 ($cCircleName[0]+".visibility");
+					setAttr -lock 1 ($cCircleName[0]+".visibility");
+
+					select $subLocatorPath;
+					scale 2 2 2;
+					$controlLocatorArray[size($controlLocatorArray)] = $subLocatorPath;
+					$controlCircleArray[size($controlCircleArray)] = $circleName[0];
+					$scalableCircleArray[size($scalableCircleArray)] = $cCircleName[0];
+					$circleArray[size($circleArray)] = $circleName[0];
+				}
+				else
+				{
+					select $subLocatorPath;
+					scale .5 .5 .5;
+					$subLocatorArray[size($subLocatorArray)] = $subLocatorPath;
+					$subCircleArray[size($subCircleArray)] = $circleName[0];
+					$circleArray[size($circleArray)] = $circleName[0];
+				}
+				string $subPocName = ($setGroupName+"_controlLocator_"+$i+"_"+$j);
+				$subPocName = `createNode pointOnCurveInfo -name $subPocName`;
+				connectAttr ($curveName+".worldSpace[0]") ($subPocName+".inputCurve");
+				setAttr ($subPocName+".turnOnPercentage") 0;
+		
+				float $percent = (float)($j)/(float)($subSegmentCount);
+	
+				$paramExpression += ($subPocName+".parameter="+$startValStr+"+"+$percent+"*("+$endValStr+"-"+$startValStr+");\n");
+				$scaleExpression += ($circleName[0]+".scaleX="+$startScaleStr+"+"+$percent+"*("+$endScaleStr+"-"+$startScaleStr+");\n");
+				if( 1 )
+				{
+					$scaleExpression += ($circleName[0]+".scaleY ="+$circleName[0]+".scaleZ ="+$circleName[0]+".scaleX;\n");
+				}
+				else
+				{
+					connectAttr ($circleName[0]+".scaleX") ($circleName[0]+".scaleY");
+					connectAttr ($circleName[0]+".scaleX") ($circleName[0]+".scaleZ");
+				}
+	
+				connectAttr ($subPocName+".position") ($subLocatorPath+".translate");
+	
+				$percent = (float)$subLocatorNumber/(float)($totalSubLocatorCount - 1);
+	
+				setAttr ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].position") $percent;
+				setAttr -lock 1 ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].position");
+				connectAttr ($circleName[0]+".scaleX") ($distanceRampName+".colorEntryList["+$subLocatorNumber+"].colorR");
+	
+				setAttr ($positionRampName+".colorEntryList["+$subLocatorNumber+"].position") $percent;
+				setAttr -lock 1 ($positionRampName+".colorEntryList["+$subLocatorNumber+"].position");
+				connectAttr ($subLocatorPath+".translate") ($positionRampName+".colorEntryList["+$subLocatorNumber+"].color");
+				setAttr ($subLocatorPath+".inheritsTransform") 0;
+			}
+		}
+	}
+	if( $showOutput )
+	{
+		print("//    Compiling parameter expression.  This may take several minutes...");
+	}
+	expression -ae 0 -s $paramExpression -name ($setGroupName+"_parameterExpression");
+	if( $showOutput )
+	{
+		print("\n");
+	}
+	if( $showOutput )
+	{
+		print("//    Compiling scaling expression.  This may take several minutes...");
+	}
+	expression -ae 0 -s $scaleExpression -name ($setGroupName+"_scaleExpression");
+	if( $showOutput )
+	{
+		print("\n");
+	}
+	if( $showOutput )
+	{
+		print("//    Creating goal volume around the curve...\n");
+	}
+	select $circleArray;
+	string $loftName[] = `loft -ch 1 -u 1 -c 0 -ar 1 -d 1 -rn 0 -po 0 -name ($setGroupName+"_distanceShell")`;
+	if( $showOutput )
+	{
+		print("//    Grouping all of the objects together...\n");
+	}
+	select $scalableCircleArray;
+	string $scalableCircleGroupName = `group -name ($setGroupName+"_scalableCircles")`;
+	$scalableCircleGroupName = ("|"+$scalableCircleGroupName);
+	setAttr -lock 1 ($scalableCircleGroupName+".scale");
+	select $controlCircleArray;
+	string $controlCircleGroupName = `group -name ($setGroupName+"_controlCircles")`;
+	$controlCircleGroupName = ("|"+$controlCircleGroupName);
+	setAttr -lock 1 ($controlCircleGroupName+".scale");
+	select $subCircleArray;
+	string $subCircleGroupName = `group -name ($setGroupName+"_subCircles")`;
+	$subCircleGroupName = ("|"+$subCircleGroupName);
+	connectAttr ($setGroupPath+".displayAllCircles") ($subCircleGroupName+".visibility");
+	setAttr -lock 1 ($subCircleGroupName+".scale");
+	select $controlCircleGroupName $subCircleGroupName;
+	string $circleGroupName = `group -name ($setGroupName+"_circles")`;
+	$circleGroupName = ("|"+$circleGroupName);
+	setAttr -lock 1 ($circleGroupName+".scale");
+	setAttr ($circleGroupName+".template") 1;
+	select $circleGroupName $scalableCircleGroupName;
+	string $circlesName = `group -name "Circles"`;
+	string $sl[] = `ls -sl`;
+	$circlesName = $sl[0];
+	select $controlLocatorArray;
+	string $controlLocatorGroupName = `group -name ($setGroupName+"_controlLocators")`;
+	$controlLocatorGroupName = ("|"+$controlLocatorGroupName);
+	select $subLocatorArray;
+	string $subLocatorGroupName = `group -name ($setGroupName+"_subLocators")`;
+	$subLocatorGroupName = ("|"+$subLocatorGroupName);
+	connectAttr ($setGroupPath+".displaySubsegments") ($subLocatorGroupName+".visibility");
+	select $controlLocatorGroupName $subLocatorGroupName;
+	string $locatorGroupName = `group -name ($setGroupName+"_locators")`;
+	$locatorGroupName = ("|"+$locatorGroupName);
+	setAttr ($locatorGroupName+".template") 1;
+	select $locatorGroupName $goalLocatorPath;
+	string $locatorsName = `group -name "Locators"`;
+	$sl = `ls -sl`;
+	$locatorsName = $sl[0];
+	select $curveName $loftName[0] $locatorsName $circlesName;
+	string $controlObjects = `group -name "ControlObjects"`;
+	$sl = `ls -sl`;
+	$setArray[size($setArray)] = $sl[0];
+	select $setArray;
+	parent $setArray $setGroupPath;
+	select $setGroupPath;
+	setAttr ($setGroupPath+".inheritsTransform") 0;
+	getAttr ($setGroupPath+".selectHandle");
+	if( $showOutput )
+	{
+		print("// Done.\n");
+		print("//\n");
+	}
+	string $finalSelectionList[] = `ls -sl`;
+	return $finalSelectionList[0];
+}
+global proc string[] swarmAlongCurves( string $setName, int $controlSegmentCount, int $subSegmentCount, int $attachEmitterToCurve, float $emitterRate, float $randomMotionSpeed, float $lifespan, float $goalWeight )    // CAROL 5 4 1 20 .5 5 .5 //
+{
+	global string $setGroupName;
+	global string $loftName[];
+	string $resultArray[];
+	clear($resultArray);
+	string $curveArray[];
+	clear($curveArray);
+	if( `licenseCheck -type complete` == 0 )
+	{
+		warning("You are not licensed to use the Swarm Along Curves Effect.");
+		return $resultArray;
+	}
+	$setName = removeAllWhiteSpace( $setName );
+	string $currentSelection[] = `ls -sl`;
+	{
+		$curveArray = getSelectedList( "allCurves" );
+	
+		if( size($curveArray) == 0 )
+		{
+			warning("No curves selected.  Select one or more curves or the parent transforms of curves.");
+			return( $resultArray );
+		}
+	}
+	{
+		if( size($setName) == 0 )
+		{
+			$setName = "Swarm";
+		}
+		int $i;
+		for( $i = 0; $i < size($curveArray); $i ++ )
+		{
+			string $newCurve = "";
+			if( isObjectInUnderWorld( $curveArray[$i] ) == 1 )
+			{
+				string $duplicateCurve[] = `duplicateCurve -ch 1 -rn 0 -local 0 -name ($setName+"_SwarmCurve") $curveArray[$i]`;
+				$newCurve = $duplicateCurve[0];
+			}
+			else
+			{
+				string $duplicateCurve = superDuplicateCurve( $curveArray[$i] );
+				if( $duplicateCurve == "" )
+				{
+					continue;
+				}
+				$newCurve = $duplicateCurve;
+			}
+			$curveArray[$i] = $newCurve;
+			setAttr ($newCurve+".template") 1;
+			setAttr ($newCurve+".visibility") 0;
+		}
+	}
+	$controlSegmentCount = max( $controlSegmentCount, 2 );
+	$subSegmentCount = max( $subSegmentCount, 2 );
+	{
+		int $i;
+		for( $i = 0; $i < size($curveArray); $i ++ )
+		{
+			int $intermediate = isObjectIntermediate( $curveArray[$i] );
+			if( $intermediate == 1 )
+			{
+				warning("The curve \""+$curveArray[$i]+"\" is an intermediate object.  Not performing the effect for this curve.");
+				continue;
+			}
+			string $SwarmSet = swarmAlongCurve( $setName, $curveArray[$i], $controlSegmentCount, $subSegmentCount, $attachEmitterToCurve, $emitterRate, $randomMotionSpeed, $lifespan, $goalWeight );
+			$resultArray[size($resultArray)] = $SwarmSet;
+		}
+	}
+	select $resultArray;
+	createCurveFX;
+	return( $resultArray );
+}
+global proc createCurveFX()
+{
+	global float $pRate;
+	global string $setGroupName;
+	global string $loftName[];
+	global string $instancer[];
+	global int $modeInst;
+	$_xllx_=$loftName[0];
+	select -r $_xllx_;
+	emitter -type surface -name ("insectsEmitter"+"_"+$_xllx_) -r 500 -sro 0 -nuv 1 -cye none -cyi 1 -spd 1 -srn 0 -nsp 1 -tsp 0 -mxd 0 -mnd 0 -dx 1 -dy 0 -dz 0 -sp 0;	
+	particle -n ("insects"+"_"+$_xllx_);
+	connectDynamic -em ("insectsEmitter"+"_"+$_xllx_) ("insects"+"_"+$_xllx_);
+	goal -w 1 -utr 0 -g $_xllx_ ("insects"+"_"+$_xllx_);
+	addAttr -ln goalU -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln goalU0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln goalV -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln goalV0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln parentV -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln parentV0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln parentU -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln parentU0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln radiusPP -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln radiusPP0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln goalOffset -dt vectorArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln goalOffset0 -dt vectorArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln rgbPP -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	addAttr -ln rgbPP0 -dt doubleArray ("insects"+"_"+$_xllx_+"Shape");
+	string $xxrl=" ";
+	string $xxrlx=" ";
+	$xxrl+=("insects"+"_"+$_xllx_+"Shape.radiusPP = 20;\n");
+	$xxrl+=("insects"+"_"+$_xllx_+"Shape.goalU=0;\n");
+	$xxrl+=("insects"+"_"+$_xllx_+"Shape.goalV=insects"+"_"+$_xllx_+"Shape.parentV;\n");
+	$xxrl+=("insects"+"_"+$_xllx_+"Shape.goalOffset=sphrand(100);\n");
+	dynExpression -s $xxrl -c ("insects"+"_"+$_xllx_+"Shape");
+	$xxrlx+=("float $_xl=insects"+"_"+$_xllx_+"Shape.goalU;\n");
+	$xxrlx+=("vector $_xlxl;\n");
+	$xxrlx+=("vector $_xlxlxl;\n");
+	$xxrlx+=("vector $_xlxlxlxl;\n");
+	$xxrlx+=("float $xl_="+$setGroupName+".attraction;\n\n\n");
+
+	$xxrlx+=("float $xlxl_="+$setGroupName+".confP_0;\n");
+	$xxrlx+=("float $xlxlxl_="+$setGroupName+".confP_1;\n");
+	$xxrlx+=("float $xlxlxlxl_="+$setGroupName+".confP_2;\n\n\n");
+	
+	$xxrlx+=("float $xlxlxlxlxl_="+$setGroupName+".distP_0;\n");
+	$xxrlx+=("float $xlxlxlxlxlxl_="+$setGroupName+".distP_1;\n");
+	$xxrlx+=("float $xlxlxlxlxlxxll_="+$setGroupName+".distP_2;\n\n\n");
+	$xxrlx+=("float $xl_=1000;\n");
+	$xxrlx+=("seed(insects"+"_"+$_xllx_+"Shape.particleId);\n");
+	
+	$xxrlx+=("if (insects"+"_"+$_xllx_+"Shape.particleId%3==0)\n");
+	$xxrlx+="{\n\t";
+	$xxrlx+="vector $_xl_=<<1,0,0>>;\n\t";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.rgbPP=$_xl_;\n\t");
+	$xxrlx+=("$_xlxlxl=<<$xlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxl_),$xlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxl_),$xlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxl_)>>;\n");
+	$xxrlx+="}\n\n";
+
+	$xxrlx+=("if (insects"+"_"+$_xllx_+"Shape.particleId%3==1)\n\n");
+	$xxrlx+="{\n\t";
+	$xxrlx+="vector $_xl_=<<0,1,0>>;\n\t";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.rgbPP=$_xl_;\n\t");
+	$xxrlx+=("$_xlxlxl=<<$xlxlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxl_),$xlxlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxl_),$xlxlxlxlxlxl_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxl_)>>;\n");
+	$xxrlx+="}\n\n";
+	
+	$xxrlx+=("if (insects"+"_"+$_xllx_+"Shape.particleId%3==2)\n");
+	$xxrlx+="{\n\t";
+	$xxrlx+="vector $_xl_=<<0,0,0>>;\n\t";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.rgbPP=$_xl_;\n\t");
+	$xxrlx+=("$_xlxlxl=<<$xlxlxlxlxlxxll_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxlxl_),$xlxlxlxlxlxxll_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxlxl_),$xlxlxlxlxlxxll_*noise(insects"+"_"+$_xllx_+"Shape.particleId*rand(insects"+"_"+$_xllx_+"Shape.particleId)+time/$xlxlxlxl_)>>;\n");
+	$xxrlx+="}\n";
+	$xxrlx+=("$_xlxlxlxl=(insects"+"_"+$_xllx_+"Shape.position)/$xl_;\n");
+	$xxrlx+="$_xlxl=($_xlxlxl+$_xlxlxlxl/10);\n";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.goalOffset=$_xlxl*"+$setGroupName+".globalOffset;\n");
+	$xxrlx+=("if ($_xl>=1)\n");
+	$xxrlx+="{\n\t";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.lifespanPP=0;\n");
+	$xxrlx+="}\n";
+	$xxrlx+=("insects"+"_"+$_xllx_+"Shape.goalU+="+$setGroupName+".speedOnCurve;\n\n");
+	dynExpression -s $xxrlx -rbd ("insects"+"_"+$_xllx_+"Shape");
+	setAttr ($loftName[0]+".visibility") 0;
+	connectAttr -f ($setGroupName+".maxCount") insects_Swarm_distanceShellShape.maxCount;
+	connectAttr -f ($setGroupName+".rate") insectsEmitter_Swarm_distanceShell.rate;
+	setAttr ($setGroupName+".rate") 1000;
+	setAttr ($setGroupName+".maxCount") -1;
+	
+	if ($modeInst!=0)
+	{
+		particleInstancer -addObject -object $instancer[0] -cycle None -cycleStep 1 -cycleStepUnits Frames -levelOfDetail Geometry -rotationUnits Degrees -rotationOrder XYZ -position worldPosition -aimDirection worldVelocity -age age ("insects"+"_"+$_xllx_+"Shape");
+	}
+}

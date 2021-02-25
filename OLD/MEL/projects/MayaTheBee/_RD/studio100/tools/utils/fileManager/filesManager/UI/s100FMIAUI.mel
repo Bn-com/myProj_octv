@@ -1,0 +1,752 @@
+// Global vars for Instance/association work.
+// (QA addendum - may 2012)
+// Defined in s100FMassociateObjsWithRef.mel
+//
+// global var telling the name of attribute to add to object (possibly Instance) to "associate" them with ref :
+global string $gS100_associatedRefFileTag ;
+// and the one that's connected to that ref AFTER it's imported (and before Instance is deleted):
+global string $gS100_associatedRefImported ;
+// name of group to which instances are possibly parented when replacement with associated ref file didn't go well:
+global string $gS100_associatedRefSafeGroup ;
+
+
+global proc s100FMIAUI()
+{
+	global string  $base_script_path;
+	$path = substituteAllString ($base_script_path , ";","");
+
+	$tmp = stringToStringArray( `getenv XBMLANGPATH`,";") ;
+	$path += "/images/s100FilesManager/";
+	$thumbImage = ($tmp[0] + "/noImage_prev.bmp");
+
+	$layN = "s100FMIAFL" ;
+	$tab = "s100FileManagerUITLMain";
+	if(`formLayout -ex $layN `)
+		deleteUI -layout $layN ;
+
+	$w = 654 ;
+	$h = 455 ;
+	formLayout  -numberOfDivisions 100 -w $w -h $h  -p $tab $layN ;
+	$w3 = ($w -15 ) / 3 ;
+	tabLayout -e -tabLabel $layN "Import Asset" $tab ;
+
+	$h = 150 ;
+
+	$textFieldSearch = `textFieldButtonGrp -changeCommand s100FMIAsearch  -p $layN  -w  (420) -label "search :" -buttonCommand s100FMIAsearch -enableButton 1  -buttonLabel "search" s100FMIATextFieldSearch` ;
+	$buttonClear = `button -label "clear" -c  s100FMIAclear `;
+
+	$textPath = `text  -p $layN  -w 35 -font "tinyBoldLabelFont" -label "path :" ` ;
+	$textField = `textField   -p $layN  -en 0 -w ($w - 100) s100FMIATEXTFIELDPATH `;
+	$textBt = `button  -p $layN  -c s100FMIAopenFolder -l "open" ` ;
+
+	$textT = `text  -p $layN  -w 100 -font "tinyBoldLabelFont" -l "Type :" `;
+	$textN  = `text  -p $layN  -w 100 -font "tinyBoldLabelFont" -l "Sub :" `;
+	$textV = `text -p $layN   -w 100 -font "tinyBoldLabelFont" -l "Name :" `;
+	$scrollT = `textScrollList -ann "select a asset type"
+				-selectCommand s100FMIARefreshScrollSubDeleteTest -h $h -p $layN -w $w3  s100FMIASLType`;
+
+	$scrollN  = `textScrollList -ann "select a sub type"
+					-selectCommand s100FMIARefreshScrollName -h $h  -p $layN  -w $w3  s100FMIASLSub`;
+
+	$scrollV  = `textScrollList -ann "select a asset" -h $h   -p $layN -w $w3
+					-doubleClickCommand "warning \"DOUBLE-CLICK now Disabled here => please use UI buttons to import assets now!\";"
+					//s100FMIACreateRef
+				 	-selectCommand s100FMIARefreshScrollWhenNameSelected s100FMIASLName`;
+
+
+	$sep = ` separator -p $layN  -w $w `;
+	$textAsset = `text -p $layN  -w 35 -font "tinyBoldLabelFont" -label "asset :" ` ;
+	$iconT = `image -p $layN  -image $thumbImage   -w 150 -h 150 s100FMIAThumbnailImage`;
+
+
+	$textNumberOfReference  = `text  -p $layN  -label "number of reference :" `;
+	$intNumberOfReference  = `intField -min 1 -maxValue 50 -value 1 s100FMIAIntNumberOfReference`;
+	$buttNumberOfReference = `button -w 200 -label "create reference On Origin" -c s100FMIACreateRef s100FMIAButNumberOfReference`;
+	$buttNumberOfReferenceImport = `button -w 200 -label "import On Origin" -c s100FMIAImportProc s100FMIAImport`;
+
+	$left = 50 ;
+
+	$textOnSurface1 = `text -l "Reference And Try to move on surface: " `;
+	$textOnSurface2 = `text -l "Select A surface Object: " `;
+	$floatTranslateY = `floatFieldGrp -p $layN -label "translate Y :" s100FMIABRandomTY` ;
+	$floatRotate  = `floatFieldGrp -w 220 -columnWidth3 40 40 40 -nf 3 -p $layN  -v1 0 -v2 0 -v3 0   s100FMIABRandomRotate ` ;
+	$textRotate = `text  -label "rotate (XYZ) :"`;
+	$floatScale  = `floatFieldGrp -w 240 -columnWidth2 50 50  -nf 2 -p $layN  -v1 1 -v2 1  s100FMIABRandomScale` ;
+	$textScale = `text  -label "scale(min-max) :"`;
+	$buttRandomReference = `button -w 225 -label "create reference On Surface" -c s100FMIAImportOnSurfaceCheck s100FMIABRandomButton`;
+
+	$chRand = `checkBox -changeCommand s100FMIArefreshRandomCheck -label "random" s100FMIABRandomCheck ` ;
+	$chRotation = `checkBox -changeCommand s100FMIArefreshRandomCheck -label "ignore Rotation" s100FMIABRotationCheck ` ;
+
+	/*
+	$butt = `button -w 200 -label "create reference On Origin" -c s100FMIACreateRef s100FMIAButNumberOfReference`;
+	*/
+
+	$txOp = `text -w 35 -ann "Pick the 'Resolution' you want, if any" -font "tinyBoldLabelFont" -l "Res :" `;
+	$opt = `optionMenu  s100FMIAoptRes `;
+		menuItem -p $opt -label "Hi" ;
+		menuItem -p $opt -label "Lo" ;
+
+	$txSR = `text -w 35  -l "subRef :" `;
+	$optSR = `optionMenu  -cc s100FMIArefreshALL -ann "Pick the 'subRef' you want, if any" s100FMIAoptSbRf`; // optionMenu -e -en 1 s100FMIAoptSbRf
+		menuItem -p $optSR  -label "Master" s100FMIAoptSbRf_Ref ;
+		string $S100subRefsTypes[] = s100FM_exportSubRef_returnEveryPossibleSubRef();
+		for ($subRef in $S100subRefsTypes)
+			menuItem -p $optSR  -label $subRef ("s100FMIAoptSbRf_"+$subRef) ;
+
+
+	formLayout -e
+
+		-attachForm $textPath "top" 8
+		-attachForm $textField "top" 5
+
+		-attachControl $textField "left" 5 $textPath
+		-attachControl $textField "right" 5 $textBt
+
+		-attachForm $textBt "top" 5
+		-attachForm $textBt "right" 5
+
+		//
+		-attachControl $textT "top" 5 $textPath
+		-attachControl $textN "top" 5 $textPath
+		-attachControl $textV "top" 5 $textPath
+
+		-attachForm $textT "left" 5
+		-attachControl $textN "left" 5 $scrollT
+		-attachControl $textV "left" 5 $scrollN
+		//
+		-attachControl $scrollT "top" 0 $textT
+		-attachControl $scrollN "top" 0 $textT
+		-attachControl $scrollV "top" 0 $textT
+
+		-attachForm $scrollT "left" 5
+		-attachPosition  $scrollT "right" 0 32
+		-attachPosition  $scrollN "left" 0 34
+		-attachPosition  $scrollN "right" 0 65
+
+		-attachPosition  $scrollV "left" 0 66
+
+		//-attachControl $scrollV "left" 5 $scrollN
+		-attachForm $scrollV "right" 5
+		//
+
+		-attachControl $textFieldSearch "top" 5 $scrollT
+		-attachForm $textFieldSearch "left" -80
+		-attachControl  $buttonClear "top" 5  $scrollT
+		-attachControl  $buttonClear "left" 5  $textFieldSearch
+
+
+	// Subrefs and resolutions :
+		-attachControl $txSR "top" 8 $scrollT
+		-attachControl $txSR "right" 3 $optSR
+		-attachControl $optSR "top" 5 $scrollT
+		-attachControl  $optSR "right" 10 $txOp
+
+		-attachControl $txOp "top" 8 $scrollT
+		-attachControl $txOp "right" 3 $opt
+		-attachControl $opt "top" 5 $scrollT
+		-attachForm  $opt "right" 5
+
+
+
+	//asset
+		-attachControl $sep "top" 7 $textFieldSearch
+		-attachControl $textAsset "top" 5 $sep
+		-attachForm $textAsset "left" $left
+
+
+		-attachControl $iconT "top" 0 $textAsset
+		-attachForm $iconT "left" $left
+
+		-attachControl $textNumberOfReference "top" 3 $textAsset
+		-attachControl $textNumberOfReference "left" 20 $iconT
+
+		-attachControl $intNumberOfReference "top" 0 $textAsset
+		-attachControl $intNumberOfReference "left" 10 $textNumberOfReference
+
+		-attachControl $buttNumberOfReference "top" 10 $intNumberOfReference
+		-attachControl $buttNumberOfReference "left" 20 $iconT
+		-attachControl $buttNumberOfReferenceImport "top" 5 $buttNumberOfReference
+		-attachControl $buttNumberOfReferenceImport "left" 20 $iconT
+
+
+
+
+	// Move on surface
+		-attachControl $textOnSurface1 "top" 3 $textAsset
+		-attachControl $textOnSurface1 "left" 20 $buttNumberOfReference
+		-attachControl $textOnSurface2 "top" 3 $textOnSurface1
+		-attachControl $textOnSurface2 "left" 20 $buttNumberOfReference
+
+		-attachControl $chRand "top" 3 $textOnSurface2
+		-attachControl $chRand "left" 20 $buttNumberOfReference
+
+		-attachControl $floatTranslateY "top" 10 $chRand
+		-attachControl $floatTranslateY "left" 20 $buttNumberOfReference
+
+		-attachControl $floatRotate "top" 10 $floatTranslateY
+		-attachControl $floatRotate "left" 90 $buttNumberOfReference
+		-attachControl $textRotate "top" 10 $floatTranslateY
+		-attachControl $textRotate "left" 010 $buttNumberOfReference
+
+		-attachControl $floatScale "top" 10 $floatRotate
+		-attachControl $floatScale "left" 90 $buttNumberOfReference
+		-attachControl $textScale "top" 10 $floatRotate
+		-attachControl $textScale "left" 010 $buttNumberOfReference
+
+
+		-attachControl $chRotation "top" 10 $floatScale
+		-attachControl $chRotation "left" 010 $buttNumberOfReference
+
+		-attachControl $buttRandomReference "top" 10 $chRotation
+		-attachControl $buttRandomReference "left" 010 $buttNumberOfReference
+
+		$layN ;
+
+
+	s100FMIARefreshScrollT ;
+	s100FMIArefreshALL;
+	s100FMIArefreshRandomCheck ;
+}
+
+
+
+global proc s100FMIArefreshRandomCheck()
+{
+	$ch = `checkBox -q -v s100FMIABRandomCheck ` ;
+	floatFieldGrp -e -en $ch   s100FMIABRandomTY ;
+	floatFieldGrp -e -en $ch   s100FMIABRandomRotate  ;
+	floatFieldGrp  -e -en $ch    s100FMIABRandomScale ;
+}
+
+
+global proc string  s100FMIACreateRef()
+{
+	string $return = `s100FMIAImportAndReferenceProc("reference")`;
+	return $return ;
+}
+global proc string  s100FMIAImportProc()
+{
+	string $return = `s100FMIAImportAndReferenceProc("import")`;
+	return $return ;
+}
+
+global proc string  s100FMIACreateRefSolo()
+{
+	string $path =`textField -q -text  s100FMIATEXTFIELDPATH `;
+	string $name  ;
+	string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+
+	$en = `optionMenu -q -en s100FMIAoptRes `;
+	string $suf = "";
+
+	if($en == 1 )
+		$suf = ("_" +	`optionMenu -q -v s100FMIAoptRes `);
+
+	int $value = `intField -q -v   s100FMIAIntNumberOfReference`;
+
+	$name = $path + $nam[0] + $suf +".ma" ;
+	string $return ;
+	if(`filetest -e $name `)
+		$return = s100FMIACreateRefImport($name, $nam[0] )  ;
+	else
+		warning ("file " + 	$name + " doesn't exists !" );
+
+	return $return ;
+}
+
+
+global proc string [] s100FMIAImportAndReferenceGetPathAndSuffixesFromUI()
+{
+	string $basePath = `textField -q -text  s100FMIATEXTFIELDPATH `;
+
+	string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+
+	// Hi/Lo suffix depending on UI :
+	$en = `optionMenu -q -en s100FMIAoptRes `;
+	string $suf = "";
+	if( $en==1 )
+		$suf = ("_" +	`optionMenu -q -v s100FMIAoptRes `);
+
+	// subRef suffix and path depending on UI :
+	string $SRsuf = "";
+	$sr = `optionMenu -q -en s100FMIAoptSbRf `;
+	string $subDir = "";
+	if($sr == 1)
+	{
+		$SRsuf = `optionMenu -q -v s100FMIAoptSbRf `;
+		if ($SRsuf != "Master")
+		{
+			$subDir = "00_subRefs/";
+			$SRsuf = "_"+$SRsuf ;
+        }
+		else
+			$SRsuf = "";
+
+		// in case of instances we do not take care of the Lo/Hi anymore :
+		if ($SRsuf == "_INSTANCE")
+		{
+			$suf = "";
+        }
+    }
+
+	// full path :
+	string $path = $basePath + $subDir + $nam[0] + $SRsuf + $suf + ".ma" ;
+
+	return { $path, $suf, $nam[0] };
+}
+
+
+// proc pour importer ou mettre en ref les objects depuis l onglet dans le file manager
+// string $choice = "import";
+// string $choice = "reference";
+//
+global proc string  s100FMIAImportAndReferenceProc(string $choice)
+{
+	string $return ;
+
+	// number of occurences :
+	int $value = `intField -q -v s100FMIAIntNumberOfReference`;
+
+	// Path from UI :
+	string $fromUI[] = s100FMIAImportAndReferenceGetPathAndSuffixesFromUI();
+	string $path = $fromUI[0];
+	string $suf = $fromUI[1];
+	string $name = $fromUI[2];
+
+	// skipping namespace at importation if an INSTANCE subRef is asked:
+	string $sub = "";
+	string $subRef = s100FMAgetSubRefTypeFromName( $path);
+	if ($subRef != "INSTANCE")
+	{
+		// string $prevState = `optionMenu -q -v s100FMIAoptSbRf`;
+		string $start = startString($name ,2) ;
+		$sub = substituteAllString($name ,$start + "_" , "") ;
+    }
+
+	if(` filetest -e $path `)
+	{
+		for($i = 0 ; $i < $value ; $i++)
+			$return = FMimportOrRefWithArg( $path , ($sub+$suf), $choice )  ;
+    }
+	else
+		warning ("s100FMIAImportAndReferenceProc >> file \"" + 	$path + "\" doesn't exists !" );
+
+	return $return ;
+}
+
+
+
+
+global proc s100FMIArefreshALL()
+{
+	print ".. FileManager AssetImport : refresh UI ...\n";
+
+	s100FMIAgetThumbNail ;
+
+	string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+	int $en = 0 ;
+	if( size($nam) > 0)
+		$en = 1 ;
+
+	button -e  -en $en s100FMIAButNumberOfReference;
+	button -e  -en $en s100FMIAImport;
+	button -e  -en $en  s100FMIABRandomButton;
+
+	//block le multi import pour les locations
+	if(`gmatch $nam[0] "??_L_*"` || `gmatch $nam[0] "??_LM_*"`)
+	{
+		// QA : keep "create ref on origin" tho :
+		button -e  -en 1 s100FMIAButNumberOfReference;
+
+		button -e  -en 0 s100FMIABRandomButton;
+		intField -e -en 0 s100FMIAIntNumberOfReference;
+    }
+	else
+	{
+		button -e  -en 1 s100FMIABRandomButton;
+		intField -e -en 1 s100FMIAIntNumberOfReference;
+    }
+
+	string $namtype[] = `textScrollList -q -selectItem s100FMIASLType `;
+
+
+	// Resolution and SubRefs :
+	int $enSR = 1;
+	int $enRes = 0 ;
+	string $subreftypes[] = s100FM_exportSubRef_returnEveryPossibleSubRef();
+
+
+	// QA : lock "import on origin" button in case of Character/Vegetation or Props UNLESS an INSTANCE is asked :
+	if ( $namtype[0]=="04_Vegetations" || $namtype[0]=="03_Props" || $namtype[0]=="01_Characters" )
+		button -e -en 0 s100FMIAImport;
+
+
+	if ( size($nam) == 0 )
+	{
+		$enSR = 0;
+		for ($srt in $subreftypes)
+			menuItem -e -en 0 ("s100FMIAoptSbRf_"+$srt) ;
+		optionMenu -e -v "Master" s100FMIAoptSbRf;
+    }
+	else if ( $namtype[0]=="04_Vegetations" || $namtype[0]=="03_Props" || $namtype[0]=="01_Characters")
+	{
+		// activate Resolution (Hi/Lo) picker for vegetations :
+		if( $namtype[0] == "04_Vegetations" )
+			$enRes = 1 ;
+
+		// debug :
+		//print ("// 3 debug `optionMenu -q -v s100FMIAoptSbRf` : "+`optionMenu -q -v s100FMIAoptSbRf`+"\n");
+
+		// debug : keeping current state
+		string $prevState = `optionMenu -q -v s100FMIAoptSbRf`;
+
+		// QA : activate subRefs (LAYOUT/ANIM/ANIMCACHE/RENDER...) picker for any asset that has at least one :
+		string $path =`textField -q -text  s100FMIATEXTFIELDPATH `;
+		for ($srt in $subreftypes) // string $srt = $subreftypes[4]
+		{
+			string $subRefFile = ($path+"00_subRefs/"+$nam[0]+"_"+$srt+".ma") ;
+			if (`filetest -e $subRefFile `)
+			{
+				print ("// File \""+$subRefFile+"\" exists - updating UI...\n");
+				menuItem -e -en 1 ("s100FMIAoptSbRf_"+$srt) ;
+			}
+			else
+			{
+				print ("// File \""+$subRefFile+"\" doesn't exist - updating UI...\n");
+				menuItem -e -en 0 ("s100FMIAoptSbRf_"+$srt) ;
+				// checking if this absent subRef was current state of UI, if not, switching back to "Master" :
+				if ($srt==$prevState)
+				{
+					print ("// -> Cannot keep previous '"+$prevState+"' setting in UI : back to 'Master'.\n");
+					$prevState = "Master";
+                }
+			}
+		}
+		// forcing
+		optionMenu -e -v $prevState s100FMIAoptSbRf;
+
+		// in case we stay/switched to INSTANCE mode : only importation could be possible:
+		if (`optionMenu -q -v s100FMIAoptSbRf`=="INSTANCE")
+		{
+			print "// instance mode is asked : only enabling direct importation!!\n";
+			button -e  -en 0 s100FMIAButNumberOfReference;
+			button -e  -en 1 s100FMIAImport;
+		}
+		else
+		{
+			//print "// instance mode is NOT asked : disabling direct importation...\n";
+			button -e  -en 1 s100FMIAButNumberOfReference;
+			button -e  -en 0 s100FMIAImport;
+		}
+	}
+	else
+	{
+		for ($srt in $subreftypes)
+			menuItem -e -en 0 ("s100FMIAoptSbRf_"+$srt) ;
+		optionMenu -e -v "Master" s100FMIAoptSbRf;
+    }
+	optionMenu -e -en $enSR s100FMIAoptSbRf ;
+	optionMenu -e -en $enRes  s100FMIAoptRes ;
+}
+
+
+
+global proc s100FMIAclear()
+{
+	s100FMIARefreshScrollSub ;
+	textFieldButtonGrp -e -tx " " s100FMIATextFieldSearch;
+}
+
+global proc s100FMIAgetThumbNailAll()
+{
+	string $list[];
+	string $listWip[];
+	global string  $base_script_path;
+	$path = substituteAllString ($base_script_path , ";","");
+
+	$tmp = stringToStringArray( `getenv XBMLANGPATH`,";") ;
+	$path += "/images/s100FilesManager/";
+	$img = $thumbImage = ($tmp[0] + "/noImage_prev.bmp");
+
+	$pathTmp = `textField -q -text   s100FMIATEXTFIELDPATH `;
+
+	string $sub[] = `s100ListOnlyFolder( $pathTmp ) `;
+
+
+	for($i = 0 ; $i < size($sub) ; $i++)
+	{
+		$pathTmp2 = $pathTmp + $sub[$i]  + "/_Thumbnails/";
+		$getF = `getFileList -folder $pathTmp2 -filespec "*_prev.bmp"`;
+
+		if(size($getF) > 0)
+		{
+			$img = $pathTmp2 + $getF[0] ;
+			break ;
+        }
+    }
+
+	image  -e -image $img   s100FMIAThumbnailImage;
+}
+
+
+
+global proc s100FMIAgetThumbNail()
+{
+	string $list[];
+	string $listWip[];
+	global string  $base_script_path;
+	$path = substituteAllString ($base_script_path , ";","");
+
+	$tmp = stringToStringArray( `getenv XBMLANGPATH`,";") ;
+	$path += "/images/s100FilesManager/";
+	$img = $thumbImage = ($tmp[0] + "/noImage_prev.bmp");
+
+
+	$pathTmp = `textField -q -text   s100FMIATEXTFIELDPATH `;
+
+	string $img ;
+	$refPath = ($pathTmp +"_Thumbnails/");
+	string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+	$name = $nam[0] ;
+	if(`filetest -d ($refPath)`)
+	{
+		$imgT = ($refPath + $name + "_prev.bmp");
+		if(`filetest -e $imgT`)
+		{
+		$img = $imgT ;
+		}else{
+		$img = $thumbImage ;
+		}
+	}else{
+		$img = $thumbImage ;
+	}
+
+	image  -e -image $img  s100FMIAThumbnailImage;
+}
+
+
+
+global proc s100FMIAsearch()
+{
+	string $retu[] = `textScrollList -q -selectItem   s100FMIASLType  `;
+
+	if(size($retu ) == 0 )
+	{
+	textScrollList -e -selectIndexedItem 1 s100FMIASLType;
+    }
+	s100FMIARefreshScrollSub ;
+
+	global string $localAssetPath[] ;
+
+	string $list[] = `textScrollList -q  -allItems s100FMIASLSub `;
+	string $listR[] ;
+	string $localAssetPathR[] ;
+	string $textFieldSearch = `textFieldButtonGrp -q -tx s100FMIATextFieldSearch` ;
+	$j = 0 ;
+
+	if($textFieldSearch != "")
+	{
+		for($i = 0 ; $i < size($list) ; $i++)
+		{
+			$first = "*" + $textFieldSearch + "*" ;
+
+			if(`gmatch $list[$i] $first`)
+			{
+				//print ("\nmatch " + $list[$i]);
+				$listR[$j] = $list[$i] ;
+				$localAssetPathR[$j] = $localAssetPath[$i] ;
+				$j++ ;
+            }else{
+			//print ("\ndon't match " + $list[$i]);
+            }
+		}
+		textScrollList -e -removeAll  s100FMIASLSub ;
+		for($i = 0 ; $i < size($listR) ; $i++)
+		{
+		textScrollList -e -append $listR[$i]  s100FMIASLSub ;
+        }
+	$localAssetPath = $localAssetPathR ;
+    }else{
+	s100FMIARefreshScrollSub ;
+    }
+	//
+}
+
+global proc s100FMIARefreshScrollT()
+{
+	string $path = `s100FMIAgetProdPath`;
+	string $allCa[] = sort( `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($path)`);
+	textScrollList -e -removeAll  s100FMIASLType ;
+
+	textScrollList -e -append "All kind of Asset" s100FMIASLType ;
+	textScrollList -e -removeAll  s100FMIASLName ;
+
+	for($i = 0 ; $i < size($allCa) ; $i++)
+	{
+	textScrollList -e -append $allCa[$i] s100FMIASLType ;
+    }
+	s100FMIArefreshALL;
+}
+
+
+global proc s100FMIARefreshScrollSubDeleteTest()
+{
+	textFieldButtonGrp -e -tx " " s100FMIATextFieldSearch;
+	s100FMIARefreshScrollSub ;
+}
+
+global proc s100FMIARefreshScrollSub()
+{
+	textScrollList -e -removeAll  s100FMIASLName ;
+
+	string $path = `s100FMIAgetProdPath`;
+	string $retu[] = `textScrollList -q -selectItem   s100FMIASLType  `;
+
+	string  $pathToGet = $path + $retu[0] +"/" ;
+	string $toAdd[] ;
+	string $sort[] ;
+	string $annotations[];
+
+	string $toPath ;
+	if($retu[0] != "All kind of Asset")
+	{
+	$toPath = $path + $retu[0] +"/";
+    }else{
+	$toPath = $path ;
+    }
+
+	textField -e -text $toPath  s100FMIATEXTFIELDPATH ;
+
+	global string $localAssetPath[] ;
+	clear $localAssetPath ;
+	$z = 0 ;
+	if(`filetest -e $pathToGet`)
+	{
+		string $toAdd2[] = sort( `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($pathToGet)`);
+
+		for($i = 0 ; $i < size(	$toAdd2) ; $i++)
+		{
+			$toAdd[$z] = $toAdd2[$i] + ";" +$z ;
+			$localAssetPath[$i] = ($pathToGet + $toAdd2[$i] +"/;" +$z);
+			$z++;
+        }
+
+    }else
+	{
+		string $allCa[] = sort( `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($path)`);
+
+		string $tmp[] ;
+
+		string $tmpFolder[] ;
+		for($i = 0 ; $i < size($allCa) ; $i++)
+		{
+			clear $tmp ;
+			$pTmp = $path + $allCa[$i] +"/" ;
+			$tmp = sort( `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($pTmp)`);
+			for($j = 0 ; $j < size($tmp) ; $j++)
+			{
+			$localAssetPath[$z] = ($pTmp + $tmp[$j] +"/;" + $z );
+			$toAdd[$z] = ($tmp[$j] + ";" +$z )  ;
+			$z ++ ;
+            }
+        }
+    }
+
+
+	$toAdd = sort($toAdd) ;
+
+	string $paths[] ;
+	string $toAddP[] ;
+	int $toTest[] ;
+
+	for($i = 0 ; $i < size($toAdd) ;$i++)
+	{
+		$tmpA = stringToStringArray($toAdd[$i] ,";");
+		$toAddP[$i] = $tmpA[0] ;
+
+		for($j = 0 ; $j < size($localAssetPath) ; $j++)
+		{
+			$tmpAPath = stringToStringArray($localAssetPath[$j] ,";");
+			if($tmpAPath[1] == $tmpA[1] )
+			{
+			$paths[$i] = $tmpAPath[0];
+			break ;
+            }
+        }
+    }
+
+	clear $localAssetPath ;
+	$localAssetPath = $paths ;
+	textScrollList -e -removeAll  s100FMIASLSub ;
+	for($i = 0 ; $i < size($toAddP) ; $i++)
+	{
+		textScrollList -e   -append $toAddP[$i] s100FMIASLSub ;
+    }
+	s100FMIArefreshALL;
+}
+
+
+
+global proc s100FMIAopenFolder()
+{
+	$path = `textField -q -text  s100FMIATEXTFIELDPATH `;
+	system ("load " +$path) ;
+}
+
+
+global proc s100FMIARefreshScrollName()
+{
+	global string $localAssetPath[] ;
+
+	int $numb[]  =  `textScrollList -q -selectIndexedItem s100FMIASLSub `  ;
+
+	int $n = $numb[0] - 1 ;
+	textField -e -text $localAssetPath[$n]  s100FMIATEXTFIELDPATH ;
+
+	$tmp = sort( `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($localAssetPath[$n])`);
+	//print $tmp ;
+
+	textScrollList -e -removeAll  s100FMIASLName ;
+
+	for($i = 0 ; $i < size($tmp) ; $i++)
+	{
+		textScrollList -e -append $tmp[$i] s100FMIASLName ;
+    }
+	s100FMIArefreshALL;
+	s100FMIAgetThumbNailAll ;
+}
+
+
+global proc s100FMIARefreshScrollWhenNameSelected()
+{
+	global string $localAssetPath[] ;
+	int $numb[]  =  `textScrollList -q -selectIndexedItem s100FMIASLSub `  ;
+
+	int $n = $numb[0] - 1 ;
+	textField -e -text $localAssetPath[$n]  s100FMIATEXTFIELDPATH ;
+
+	string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+
+	$nPath = $localAssetPath[$n]  + $nam[0] + "/";
+	textField -e -text $nPath  s100FMIATEXTFIELDPATH ;
+	s100FMIArefreshALL;
+}
+
+
+
+global proc string s100FMIACreateRefImport(string $path, string $name)
+{
+	string $return ;
+	//check si l'asset est une location et si oui l'import
+	if(!`gmatch $name "*_L_*"`)
+	{
+		$return = FMimportOrRefWithArg($path, $name,"reference");
+    }
+	else
+	{
+		$return = FMimportOrRefWithArg($path, $name,"import");
+    }
+	return $return ;
+}
+

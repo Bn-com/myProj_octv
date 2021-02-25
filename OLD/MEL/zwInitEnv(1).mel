@@ -1,0 +1,280 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwInitEnv()
+{
+	//string $version = `about -version`;
+	string $version = `about -apiVersion` / 100;
+	$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+	if (`about -x64` && (int)$version < 2016)
+	{
+		$version += "-x64";
+	}
+
+// environment variables
+	string $office_location = `getenv "OFFICE_LOCATION"`;
+	string $office_location_new = $office_location;
+	if (`filetest -f "\\\\file-cluster\\GDC\\Resource\\Support\\idmt.ini"`)
+	{
+		$office_location_new = "fs";
+	}
+	putenv "OFFICE_LOCATION_NEW" $office_location_new;
+
+	string $dev_path, $IDMT_PROJECTS, $netrender_path;
+	switch ($office_location)
+	{
+	case "shenzhen":
+	case "shanghai":
+	default:
+		if (`about -windows`)
+		{
+			$dev_path = "//file-cluster/GDC/Resource/Support";
+		}
+		else
+		{
+			$dev_path = "/mnt/support";
+		}
+		$IDMT_PROJECTS = "//file-cluster/GDC/Projects";
+		$netrender_path = "//file-cluster/GDC/Netrender";
+		break;
+	}
+	putenv "DEV_PATH" $dev_path;
+	if (`getenv "IDMT_PROJECTS"` == "")
+	{
+		putenv "IDMT_PROJECTS" $IDMT_PROJECTS;
+	}
+	putenv "NETRENDER_PATH" $netrender_path;
+
+
+
+	// projects
+	string $MAYA_SCRIPT_PATH = `getenv "MAYA_SCRIPT_PATH"`;
+	//string $projects = $dev_path + "/Maya/projects";
+	//if (!`filetest -d $projects`)
+	//{
+	//	$projects = "//file-cluster/GDC/Resource/Development/Maya/GDC/Plug/Python/GDC/MEL/projects";
+	//}
+	string $projects = "//file-cluster/GDC/Resource/Support/Maya/projects";
+	string $buf[] = `getFileList -folder ($projects + "/")`;
+	for ($folder in $buf)
+	{
+		if ($folder == "WinxClubII" && $version != "8.5")
+		{
+			continue;
+		}
+		else if ($folder == "ROMA" && $version == "8.5")
+		{
+			continue;
+		}
+		if (`filetest -d ($projects + "/" + $folder)`)
+		{
+			if (`about -windows`)
+			{
+				$MAYA_SCRIPT_PATH += ";" + $projects + "/" + $folder;
+			}
+			else
+			{
+				$MAYA_SCRIPT_PATH += ":" + $projects + "" + $folder;
+			}
+		}
+	}
+	$projects = "//file-cluster/GDC/Resource/Development/Maya/GDC/Plug/Python/GDC/MEL/projects";
+	string $buf1[] = `getFileList -folder ($projects + "/")`;
+	for ($folder in $buf1)
+	{
+		int $find = false;
+		for ($folder1 in $buf)
+		{
+			if ($folder == $folder1)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+		if ($folder == "WinxClubII" && $version != "8.5")
+		{
+			continue;
+		}
+		else if ($folder == "ROMA" && $version == "8.5")
+		{
+			continue;
+		}
+		if (`filetest -d ($projects + "/" + $folder)`)
+		{
+			if (`about -windows`)
+			{
+				$MAYA_SCRIPT_PATH += ";" + $projects + "/" + $folder;
+			}
+			else
+			{
+				$MAYA_SCRIPT_PATH += ":" + $projects + "" + $folder;
+			}
+		}
+	}
+	putenv "MAYA_SCRIPT_PATH" $MAYA_SCRIPT_PATH;
+
+
+
+	// Maya.env
+	string $env = `internalVar -userAppDir` + $version + "/Maya.env";
+	string $config = `getenv "DEV_PATH"` + "/Maya/" + $version + "/config/" + `getenv "OFFICE_LOCATION"` + "/Maya.env";
+
+	int $latest = false;
+
+	if (!`filetest -f $env`)
+	{
+		sysFile -copy $env $config;
+		$latest = true;
+	}
+
+	$dest = `internalVar -userScriptDir` + "/userSetup.py";
+	string $RBW_pipeline = `internalVar -userScriptDir` + "/RBW_pipeline.pyc";
+	if ($version == "8.5" && `filetest -f $RBW_pipeline`)
+	{
+		$source = `getenv "DEV_PATH"` + "/Maya/modules/pipelineScripts/__setup/userSetup.py";
+		sysFile -copy $dest $source;
+	}
+//	else if (!`filetest -f $dest`)
+	else if(`about -windows`)
+	{
+		$source = `getenv "DEV_PATH"` + "/Maya/userSetup.py";
+		sysFile -copy $dest $source;
+	}
+
+//// RBW菜单，8.5 + 32bit + 深圳
+//	if ($version == "8.5" && !`about -x64` && `getenv "OFFICE_LOCATION"` == "shenzhen")
+//	{
+//		string $setup = "//file-cluster/GDC/Resource/Support/Maya/modules/pipelineScripts/__setup";
+//
+//		// userSetup.py
+//		$source = $setup + "/userSetup.py";
+//		$dest = `internalVar -userScriptDir` + "/userSetup.py";
+//		if (`filetest -f $dest`)
+//		{
+//			sysFile -copy $dest $source;
+//		}
+//
+//		// RBW_menus.pyc
+//		$source = $setup + "/RBW_menus.py";
+//		$dest = `internalVar -userScriptDir` + "/RBW_menus.py";
+//		if (`filetest -f $dest`)
+//		{
+//			sysFile -copy $dest $source;
+//		}
+//
+//		// RBW_pipeline.pyc
+//		string $source = $setup + "/RBW_pipeline.pyc";
+//		string $dest = `internalVar -userScriptDir` + "/RBW_pipeline.pyc";
+//		if (`filetest -f $dest`)
+//		{
+//			sysFile -copy $dest $source;
+//		}
+//	}
+
+//	// 检查是否需要重新配置maya
+//	string $computername = `getenv "COMPUTERNAME"`;
+//	string $username = `getenv "USERNAME"`;
+//	$username = tolower($username);
+//	if ($username == "musterservice")
+//	{
+//		string $baks[] = `getFileList -filespec ($env + ".*")`;
+//		for ($bak in $baks)
+//		{
+//			string $path = `internalVar -userAppDir` + $version + "/" + $bak;
+//			if (tolower($bak) != "maya.env" && `filetest -f $path`)
+//			{
+//				sysFile -del $path;
+//			}
+//		}
+//	}
+
+//	int $needConfig = false;
+//	if (!$latest)
+//	{
+//		string $CONFIG_VERSION = "20151029";
+//		if (strcmp($CONFIG_VERSION, `getenv "CONFIG_VERSION"`) == 1)
+//		{
+//			$needConfig = true;
+//
+//		//	if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+//		//	{
+//		//		int $fileId = `fopen "//file-cluster/GDC/Netrender/Maya_Even/V020/version.txt" "a"`;
+//		//		fprint $fileId ($computername + "\t" + $version + "\t" + `about -version` + "\t" + `getenv "CONFIG_VERSION"` + "\t" + `getenv "MAYA_LOCATION"` + "\r\n");
+//		//		fclose $fileId;
+//		//	}
+//		}
+//
+//		// 检查是否更新了pipelineScripts，否则需要重新配置maya
+//		if ($version == "8.5" && !`about -x64`) // && `getenv "OFFICE_LOCATION"` == "shenzhen"
+//		{
+//			string $PIPELINE_SCRIPTS_VERSION = `getenv "PIPELINE_SCRIPTS_VERSION"`;
+//			string $buf[] = `getFileList -filespec ($dev_path + "/Maya/modules/pipelineScripts_*")`;
+//			for ($pipelineScripts in $buf)
+//			{
+//				$pipelineScripts = `substitute "^pipelineScripts_" $pipelineScripts ""`;
+//				if (`strcmp $pipelineScripts $PIPELINE_SCRIPTS_VERSION` == 1)
+//				{
+//					$needConfig = true;
+//					break;
+//				}
+//			}
+//		}
+//	}
+//	if ($needConfig)
+//	{
+//		string $bak = `about -currentDate` + `about -currentTime`;
+//		$bak = `substituteAllString $bak "/" ""`;
+//		$bak = `substituteAllString $bak ":" ""`;
+//	//	if ($username != "musterservice")
+//	//	{
+//	//		sysFile -copy ($env + "." + $bak) $env;
+//	//	}
+//		sysFile -copy $env $config;
+//		$latest = true;
+//
+//	//	if (!`about -batch` && (!(`about -version` == "8.5" || `about -version` == "2008")))
+//	//	{
+//	//		putenv "CONFIG_VERSION" ((string)$CONFIG_VERSION);
+//	//		system ("shell " + `getenv "MAYA_LOCATION"` + "/bin/maya.exe");
+//	//		evalDeferred "quit -force";
+//	//	}
+//	}
+
+//	string $office_location = `getenv "OFFICE_LOCATION"`;
+//	if ($office_location == "")
+//	{
+//		system ("\\\\file-cluster\\GDC\\Resource\\Support\\bin\\idmtConfig.exe maya " + $version + " 1");
+//		if (!`about -batch`)
+//		{
+//			evalDeferred "quit";
+//		}
+//		$office_location = "shenzhen";
+//	}
+//	putenv "OFFICE_LOCATION" $office_location;
+
+
+// mentalray
+	string $MI_CUSTOM_SHADER_PATH = `getenv "MI_CUSTOM_SHADER_PATH"`;
+	if ($MI_CUSTOM_SHADER_PATH != "")
+	{
+		$MI_CUSTOM_SHADER_PATH += ";";
+	}
+	$MI_CUSTOM_SHADER_PATH += `getenv "DEV_PATH"` + "/Maya/" + $version;
+//	if (`about -x64`)
+//	{
+//		$MI_CUSTOM_SHADER_PATH += "-x64";
+//	}
+	$MI_CUSTOM_SHADER_PATH += "/mentalray";
+	putenv "MI_CUSTOM_SHADER_PATH" $MI_CUSTOM_SHADER_PATH;
+}

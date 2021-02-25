@@ -1,0 +1,809 @@
+// procs pour lire le CSV et genere des fichiers a partir de ceci
+
+// ex: string $files = "Y:/005_EPISODES/Ep015_PowderPower/MA_Ep015_PowderPower_TBDL_ForLayout.csv"
+
+// read csv file and gets
+// ex : s100PRCreadCSVAssetAndProdInfo( $files)
+// returns :
+// 	TBDL;MAY015;;;;;;;;
+//
+//	Scene;Duration;Sequence;PROPS;CHARACTERS;LOCATIONS;VEGETATIONS;MATTE;MICROVEGETATIONS;Comment
+//
+global proc string[] s100PRCreadCSVAssetAndProdInfo(string $files)
+{
+	// $files =  "E:\TBDL_#002.csv";
+	string $infoProd[] ;
+	$fileId=`fopen $files "r"`; // fclose $files
+	for ($i = 0 ; $i < 2 ;$i++)
+		$infoProd[$i] = `fgetline $fileId`;
+	fclose $fileId;
+	return $infoProd;
+}
+
+global proc string s100PRCreadCSVandGetProd(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[0],";") ;
+	$returnTmp   = startString($firstLine[1] ,3);
+	string $return ;
+	if($returnTmp == "MAY")
+		$return = "MA" ;
+    else
+	{
+		warning "unknow production";
+		$return ="UN";
+    }
+	return $return ;
+}
+
+//
+global proc string s100PRCreadCSVandGetProdFullName(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[0],";") ;
+	$returnTmp   = startString($firstLine[1] ,3);
+	string $return ;
+	if($returnTmp == "MAY")
+		$return = "Maya" ;
+    else
+	{
+		warning "unknow production";
+		$return ="Unknow";
+    }
+	return $return ;
+}
+
+global proc string s100PRCreadCSVandGetEP(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[0],";") ;
+	$returnTmp   = startString($firstLine[1] ,3);
+	$end = substituteAllString($firstLine[1],$returnTmp,"") ;
+	return $end ;
+}
+
+// check validity of csv file due to presence of "TBDL" string as 1rst line:
+//
+global proc int s100PRCreadCSVandGetIfConform(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[0],";") ;
+	$ch = 0 ;
+	if($firstLine[0] == "TBDL")
+	{
+		$ch=1;
+		print ("\n// File \""+$files+"\" seems valid.\n");
+    }
+	return $ch ;
+}
+
+global proc string[] s100PRCreadCSVandGetStep(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[1],";") ;
+	return $firstLine ;
+}
+
+global proc string[] s100PRCreadCSVandGetAllAssetsType(string $files)
+{
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	string $firstLine[] = stringToStringArray($retu[1],";") ;
+	$start = `s100PRCreadCSVandGetNumberInTheArrayForSceneStart($files) `;
+	$end = `s100PRCreadCSVandGetNumberInTheArrayForSceneEnd($files) `;
+	int $endInd = $end ;
+	//$endInd += 1 ;
+	string $newTab[] ;
+	for($i = 0 ; $i <= $endInd ; $i++)
+		$newTab[$i] = $firstLine[$i] ;
+
+	//print $newTab ;
+	int $endInt = $start ;
+	for($i = 0 ; $i <= $endInt ;$i++)
+		stringArrayRemoveAtIndex(0 ,$newTab) ;
+
+	//print $firstLine ;
+	return $newTab ;
+}
+
+global proc string s100PRCreadCSVandGetNumberInTheArrayForSceneStart(string $files)
+{
+	return 2;
+}
+
+global proc string s100PRCreadCSVandGetNumberInTheArrayForSceneEnd(string $files)
+{
+	return 9;
+}
+
+global proc string[] s100PRCreturnInfosFromAShot(int $shot,string $files)
+{
+	//$shot = 7
+	$fileId=`fopen $files "r"`;
+	string $nextLine = `fgetline $fileId`;
+
+	$chStart = 0 ;
+	$toRecup = $shot ;
+
+	string $recupArr[];
+	clear $recupArr ;
+	$i=0;
+
+	$j = 0 ;
+	while ( size( $nextLine ) > 0 )
+	{
+		//$j++;
+		 if( `gmatch $nextLine (";;;;;;;*")  `)
+		 {
+			//print ( $j + " match\n ");
+			if($chStart)
+				break;
+		 }
+		 else
+		 {
+			if($chStart ==0)
+			{
+				string $pad = padNumber($toRecup,3) ;
+				if(`gmatch $nextLine ($toRecup + ";*")  `)
+					$chStart = 1 ;
+				else if( `gmatch $nextLine ("\"" + $pad +"\";*")  `)
+						$chStart = 1 ;
+			}
+
+			if($chStart)
+			{
+				$recupArr[$i] = $nextLine;
+				if($nextLine == ";\n" )
+					break;
+				if($nextLine == ";;;;;;;*" )
+					break;
+				$i++;
+			}
+		 }
+		$nextLine = `fgetline $fileId`;
+	}
+	fclose $fileId;
+	//print $recupArr ;
+	return $recupArr ;
+}
+
+
+global proc int s100PRCCheckAndNumberByAsset(string $asset, int $shot , string $files)
+{
+	//$asset = $returnClean[0]
+	string $getB[] = s100PRCreturnInfosFromAShot($shot,$files) ;
+	string $newSt ;
+
+	$newSt = stringArrayToString( $getB , ";") ;
+	string $newAr[] ;
+	$newSt =substituteAllString($newSt,"|",";") ;
+	$newSt =substituteAllString($newSt,"\n",";") ;
+
+	$newAr = stringToStringArray($newSt, ";") ;
+	int $numb = 1 ;
+	$j= 0 ;
+
+	for($i = 0 ; $i < size($newAr) ; $i++)
+	{
+		if(`gmatch $newAr[$i] "N:*"`)
+		{
+			string $tmp = substituteAllString($newAr[$i],"N:","") ;
+			string $arrTmp[] = stringToStringArray($tmp,"=") ;
+			if(`gmatch $arrTmp[0] ("*" + $asset)`)
+			{
+				$numb = $arrTmp[1] ;
+				break ;
+            }
+        }
+    }
+	//print $numb ;
+	return $numb ;
+}
+
+global proc string[] s100PRCGetCommentByShot(int $shot , string $files)
+{
+	//$asset = $returnClean[0]
+	string $getB[] = s100PRCreturnInfosFromAShot($shot,$files) ;
+	string $newSt ;
+
+	$newSt = stringArrayToString( $getB , ";") ;
+	string $newAr[] ;
+	$newSt =substituteAllString($newSt,"|",";") ;
+	$newSt =substituteAllString($newSt,"\n",";") ;
+
+	$newAr = stringToStringArray($newSt, ";") ;
+	string $return[] ;
+	$j= 0 ;
+
+	for($i = 0 ; $i < size($newAr) ; $i++)
+	{
+		if(`gmatch $newAr[$i] "C:*"`)
+		{
+			string $tmp = substituteAllString($newAr[$i],"C:","") ;
+			$return[$j] = $tmp ;
+		}
+	}
+	return $return ;
+}
+
+global proc string[] s100PRCreturnInfosFromAShotByType(string $type,int $shot,string $files)
+{
+	/*
+	$shot = 7;
+	$files = $exampleFileName
+	$type = "CHARACTERS"
+	*/
+	string $getB[] = s100PRCreturnInfosFromAShot($shot,$files) ;
+	$allStep = `s100PRCreadCSVandGetStep( $files)`;
+	int $toGet ;
+	for($i = 0 ; $i < size($allStep) ; $i++)
+	{
+		if($allStep[$i] == $type)
+		{
+			$toGet = $i ;
+			break ;
+        }
+    }
+	//print $toGet ;
+	string $returnArr[] ;
+
+	for($i = 0 ; $i < size($getB) ; $i++)
+	{
+		$sub =substituteAllString($getB[$i],";","-;") ;
+		$arrT= stringToStringArray($sub,";") ;
+		if( $arrT[$toGet] != "" || $arrT[$toGet] != "-" )
+		{
+			$sub2 = substituteAllString($arrT[$toGet],"-","") ;
+			$tmpArr = stringToStringArray($sub2, "_") ;
+			$returnArr[$i] = substituteAllString( $sub2, ($tmpArr[0] +"_") ,"");
+        }
+    }
+
+	string $returnClean[];
+	$j = 0 ;
+	for($i = 0 ; $i < size($returnArr) ; $i++)
+	{
+		if(`gmatch $returnArr[$i] "*_*"`)
+		{
+			$returnClean[$j] =$returnArr[$i] ;
+			$j++;
+        }
+    }
+	string $returnCleanAndNumber[];
+	$k = 0 ;
+	for($i = 0 ; $i < size($returnClean) ;$i++)
+	{
+		int $numb = s100PRCCheckAndNumberByAsset( $returnClean[$i] , $shot, $files ) ;
+		print $returnClean[$i] ;
+		for($j = 0 ;$j < $numb ; $j++)
+		{
+			$returnCleanAndNumber[$k] =  $returnClean[$i];
+			$k++;
+        }
+    }
+	return $returnCleanAndNumber ;
+}
+
+global proc string[] s100PRCScanForAsset(string $prod, string $assetType)
+{
+	/*
+	$prod = "Maya";
+	$assetType = "CHARACTERS";
+	*/
+	$pathTab = s100assetManagerGetProdPath($prod);
+
+	string $getFileList[] = `s1KeepOnlyFolder($pathTab[0] + $pathTab[1] +"/")`;
+	string $filesList[] ;
+	for($i = 0 ; $i < size($getFileList); $i++)
+	{
+		string $array[] = stringToStringArray($getFileList[$i] , "_") ;
+		$last = size($array) -1 ;
+		$string = $array[$last] ;
+		$capi = `s100CapitalizeAllString($string)`;
+		if($capi ==  $assetType)
+		{
+			$filesList = s100ReturnAssetListForAPathWithLevel(($getFileList[$i] +"/"), 2) ;
+			break;
+        }
+    }
+	return $filesList ;
+}
+
+//importation et creation des refs ici
+
+
+global proc string s100PRCImportAssetAndCheckForASceneAndCheckMulti(string $files , string $shot, string $assetType)
+{
+	/*
+	Import Asset Needed in the given scene, but also check if there is many same asset and check the already imported one !
+	$assetType = "CHARACTERS";
+	$shot = 8 ;
+	*/
+	print ("\n------------\nimport for files " + $files + " shot " +  $shot +" asset " + $assetType ) ;
+
+	string $return =  ("\n - Asset Type : " + $assetType);
+	$prod = `s100PRCreadCSVandGetProdFullName($files)`;
+	string $assetAll[] = s100PRCScanForAsset($prod , $assetType ) ;
+	string $neededAsset[] ;
+	string $neededAssetTmp[] = s100PRCreturnInfosFromAShotByType($assetType , $shot , $files) ;
+	$neededAsset = $neededAssetTmp ;
+	$neededAsset = stringArrayRemoveDuplicates($neededAsset ) ;
+	if(size($neededAsset)> 0)
+	{
+		string $allRefInScene[]  ;
+		string $nameSpace[];
+
+		if($assetType == "LOCATIONS")
+			$nameSpace = `namespaceInfo -listNamespace`;
+        else
+			$allRefInScene = `s100findAllSceneReferences`;
+
+		//rajoute les namespaces des decors dans la liste des refs !
+		string $allLocInScene[] ;
+		clear $allLocInScene ;
+		$i = 0 ;
+		if($assetType == "LOCATIONS")
+		{
+			for($tmp in $nameSpace)
+			{
+				if(`gmatch $tmp "L_*"` ||`gmatch $tmp "LM_*"` )
+				{
+					string $tmp4 = "" ;
+					$arr = stringToStringArray($tmp ,"_");
+					for($i = 0 ; $i < size(	$arr ) - 1 ; $i++)
+					{
+						$tmp4 += $arr[$i] ;
+						if(	 size(	$arr ) -2 )
+							$tmp4 += "_";
+					}
+					$allLocInScene[$i]= $tmp4 ;
+					$i++;
+				}
+			}
+        }
+
+		$allLocInScene = stringArrayRemoveDuplicates($allLocInScene) ;
+
+		/*
+		print "\n -------------------$allRefInScene : \n " ;
+		print $allRefInScene ;
+		print "\n----------------------------------------";
+
+		print "\n -------------------$allLocInScene : \n " ;
+		print $allLocInScene ;
+		print "\n----------------------------------------";
+
+		print "\n -------------------$neededAssetTmp : \n " ;
+		print $neededAssetTmp ;
+		print "\n----------------------------------------";
+		*/
+		// check si la ref exists deja
+		for($i = 0 ; $i < size($neededAssetTmp) ; $i++)
+		{
+			if($assetType != "LOCATIONS")
+			{
+				for($j = 0 ; $j < size($allRefInScene) ; $j++)
+				{
+					if(`gmatch $allRefInScene[$j]  ("*/" + $neededAssetTmp[$i] +"/*" )`  )
+					{
+						//print ("\ndel :" + $allRefInScene[$j] );
+						stringArrayRemoveAtIndex( $i ,  $neededAsset) ;
+						stringArrayRemoveAtIndex( $i ,  $neededAssetTmp) ;
+						stringArrayRemoveAtIndex( $j ,  $allRefInScene) ;
+						//print ( "\nvi" + $j)  ;
+						$i -- ;
+						break ;
+					}
+				}
+			}else{
+				for($j = 0 ; $j < size($allLocInScene) ; $j++)
+				{
+					if( `gmatch $neededAssetTmp[$i]   ( "*" + $allLocInScene[$j]+"*" )  ` )
+					{
+						//print ("\ndel :" + $allRefInScene[$j] );
+						stringArrayRemoveAtIndex( $i ,  $neededAsset) ;
+						stringArrayRemoveAtIndex( $i ,  $neededAssetTmp) ;
+						stringArrayRemoveAtIndex( $j ,  $allRefInScene) ;
+						//print ( "\nvi" + $j)  ;
+						$i -- ;
+						break ;
+					}
+				}
+			}
+		}
+
+
+		//print $neededAsset
+		string $tmpRDup[];
+
+		clear $tmpRDup;
+		$tmpRDup  = stringArrayRemoveDuplicates($neededAsset) ;
+		int $count[] ;
+		clear $count ;
+		int $countRef[] ;
+
+		for($i = 0 ; $i < size($tmpRDup) ; $i++)
+		{
+			$count[$i] = 0 ;
+			for($j = 0 ; $j < size($neededAsset) ; $j++)
+			{
+				if($tmpRDup[$i] == $neededAsset[$j])
+					$count[$i] = $count[$i] + 1 ;
+			}
+		}
+
+		//print $count ;
+		string $allRef[] = `s100findAllSceneReferences`;
+		string $tmpRDupRef[]  = stringArrayRemoveDuplicates($allRef) ;
+
+		for($i = 0 ; $i < size($tmpRDupRef) ; $i++)
+		{
+			$countRef[$i] = 0 ;
+			for($j = 0 ; $j < size($allRef) ; $j++)
+			{
+				if($tmpRDupRef[$i] == $allRef[$j])
+					$countRef[$i] = $countRef[$i] + 1 ;
+			}
+		}
+
+		//size($tmpRDup)
+		//print $countRef ;
+		//print $tmpRDupRef ;
+
+		for($i = 0 ; $i < size($tmpRDup) ; $i++)
+		{
+			if($tmpRDup[$i] != "")
+			{
+				//print $i ;
+				//print $tmpRDup[$i]
+				//print $assetAll ;
+				string $toImport ="";
+				//print  $neededAsset[$i]
+				for($j = 0 ; $j < size($assetAll) ; $j++)
+				{
+					//print ("\ncheck si "  + $assetAll[$j]  + " match  a "  +"*" + $tmpRDup[$i] +"*" ) ;
+					if(`gmatch $assetAll[$j]  ("*" + $tmpRDup[$i] +"*" )  `)
+					{
+						$toImport =  $assetAll[$j] ;
+						break ;
+					}
+				}
+			// print $toImport
+			/*
+				for($j = 0 ; $j < size($tmpRDupRef) ; $j++)
+				{
+					if( $tmpRDupRef[$j] == $toImport )
+					$count[$i] = $count[$i] - $countRef[$j] ;
+				}
+			*/
+			//print $count[$i];
+				if($toImport != "")
+				{
+					for($j = 0 ; $j < $count[$i] ; $j++)
+					{
+						//add guillaume test si la version SUBREF LAYOUT Exist et la change
+						//choppe le nom de la sub ref
+						string $layoutFile = s100FMASGetSubRefPathForType( $toImport ,"LAYOUT") ;
+							if(`filetest -e $layoutFile`)
+									$toImport = $layoutFile;
+
+						print ("\n $tmpRDup = \"" +  $tmpRDup[$i] +"\" ...." ) ;
+						print ("\n $toImport =" +  $toImport +" ...." ) ;
+						s100FMIACreateRefImport($toImport, $tmpRDup[$i] )  ;
+						$return += ("\n"  + $tmpRDup[$i] + " was imported from file :" +$toImport) ;
+					}
+				}
+				else
+					$return += ("\nno references matching in the 3D Bank for asset " + $tmpRDup[$i]) ;
+			}
+		}
+    }
+	return $return ;
+}
+
+
+
+
+global proc string [] s100PRCImportAllAssetsForAShot(string $files, string $shot)
+{
+	string $allAsset[] = `s100PRCreadCSVandGetAllAssetsType($files) `;
+	string $return[] ;
+	$j = 0 ;
+	$return[$j] = ("\n\n Shot :" + $shot) ;
+	for($i = 0 ; $i < size($allAsset) ; $i++)
+	{
+		$j++;
+		$return[$j] =  s100PRCImportAssetAndCheckForASceneAndCheckMulti($files ,$shot, $allAsset[$i]) ;
+    }
+	return $return ;
+}
+
+
+// Ex : string $files = "Y:/005_EPISODES/Ep005_MayaRescue/MA_Ep005_MayaRescue_TBDL_ForLayout.csv"
+// string $choice = "Scene";
+//
+global proc string[] s100PRCgetAllSequencesOrScenesFromAFile(string $files,string $choice)
+{
+	//$choice = "Sequence" ; or $choice = "Scene"
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	$array = stringToStringArray($retu[1] , ";") ;
+	int $u;
+	for($i = 0 ; $i < size($array); $i++)
+	{
+		if($array[$i] ==  $choice)
+		 {
+			$u = $i ;
+			break ;
+         }
+    }
+
+	$fileId=`fopen $files "r"`;
+	string $nextLine = `fgetline $fileId`;
+	$chStart = 0 ;
+
+	string $nextLine = `fgetline $fileId`;
+
+	string $recupArr[];
+	clear $recupArr ;
+	$i=0;
+
+	while ( size( $nextLine ) > 0 )
+	{
+		$nextLine = `fgetline $fileId`;
+		$sub =substituteAllString($nextLine ,";","-;") ;
+		string $array[] = stringToStringArray($sub, ";");
+
+		$tmp  = substituteAllString($array[$u], "-","");
+		if($tmp != "" )
+		{
+			$sub = substituteAllString($tmp , "\"","");
+			string $tmpInt = $sub ;
+			$recupArr[$i] =$tmpInt ; // $recupArr[10]
+			$i++;
+		}
+	}
+
+	string $returnA[] = stringArrayRemoveDuplicates($recupArr) ;
+	string $returnInt[];
+	$j = 0 ;
+	for($i = 0 ; $i <size($returnA) ; $i++)
+	{
+		if($returnA[$i] != "0")
+		{
+			$returnInt[$j] = $returnA[$i];
+			$j++;
+        }
+    }
+
+	fclose $fileId;
+	//print $returnInt ;
+
+	return $returnInt ;
+}
+
+global proc string[] s100PRCgetAllSequencesFromAFile(string $files)
+{
+	string $returnA[] = s100PRCgetAllSequencesOrScenesFromAFile($files ,  "Sequence") ;
+	return $returnA ;
+}
+
+global proc string[] s100PRCgetAllScenesFromAFile(string $files)
+{
+	string $returnA[] = s100PRCgetAllSequencesOrScenesFromAFile($files ,  "Scene") ;
+	return $returnA ;
+}
+
+
+
+global proc string [] s100PRCImportAllAssetsForMultiShot(string $files, int $shotStart,int $shotEnd)
+{
+	global int  $s100PRCFileId;
+	/*
+	$files = $s100PRCFileId
+	$shotStart =  7
+	$shotEnd = 11
+	*/
+	string $return[];
+	string $tmpArray[] ;
+
+	for($i = $shotStart ; $i <= $shotEnd ; $i++)
+	{
+		clear $tmpArray ;
+		$tmpArray =  s100PRCImportAllAssetsForAShot($files , $i) ;
+		$return = stringArrayCatenate($return, $tmpArray) ;
+    }
+	print $return ;
+	for($j = 0 ; $j < size($return) ; $j++)
+		fprint $s100PRCFileId $return[$j]  ;
+	return $return ;
+}
+
+global proc string[] s100PRCreturnAssetFromGivenShots(string $files, int $startShot,int $endShot, string $type)
+{
+	string $return[] ;
+	string $return2[] ;
+	string $return3[] ;
+
+	for($i = $startShot; $i <= $endShot ; $i++)
+	{
+		$return =  s100PRCreturnInfosFromAShotByType($type , $i , $files) ;
+		$return2 = stringArrayCatenate($return2 , $return ) ;
+    }
+
+	$return3= stringArrayRemoveDuplicates($return2) ;
+	return $return3;
+}
+
+global proc string[] s100PRCreturnAllAssetFromGivenShots(string $files, int $startShot,int $endShot)
+{
+	/*
+	$startShot = 10 ;
+	$endShot = 50 ;
+	*/
+	string $typeA[] = `s100PRCreadCSVandGetAllAssetsType($files) `;
+
+	string $returnA[] ;
+	$j=0;
+
+	for($i = 0 ; $i <= size($typeA) ; $i++)
+	{
+		if($typeA[$i] != "")
+		{
+			$returnA[$j] = (" ");
+			$j++;
+			$returnA[$j] = ("----" + $typeA[$i] +"----");
+			$tmpArray =  s100PRCreturnAssetFromGivenShots($files,  $startShot, $endShot,  $typeA[$i] );
+			$returnA = stringArrayCatenate($returnA,$tmpArray) ;
+			$j = size($returnA) ;
+        }
+    }
+	return $returnA ;
+}
+
+global proc int s100PRCgetcolumnForScene()
+{
+	return 0 ;
+}
+
+global proc int s100PRCgetcolumnForSequence()
+{
+	return 2 ;
+}
+
+global proc string[] s100PRCreturnShotBySequences(string $files, string $seqs[])
+{
+	//$seqs[0] = 1 ;
+	//clear $shots2
+	$columnSh = `s100PRCgetcolumnForScene`;
+	$columnSq = `s100PRCgetcolumnForSequence`;
+	string $shots2[] ;
+	$fileId=`fopen $files "r"`;
+
+	string $nextLine = `fgetline $fileId`;
+	string $nextLine = `fgetline $fileId`;
+
+	$chStart = 0 ;
+
+	$sortSeqs = sort($seqs);
+
+	string $recupArr[];
+	clear $recupArr ;
+	$i=0;
+	$j = 0 ;
+	$k = 0 ;
+	while ( size( $nextLine ) > 0 )
+	{
+		$nextLine = `fgetline $fileId`;
+		$sub1 = substituteAllString($nextLine,";" ,"-;") ;
+		$arrayTmp = stringToStringArray($sub1,";") ;
+		$ch = 0 ;
+		//print ("\npassage = " +$k) ;
+		$k++;
+
+		if(size($arrayTmp) > 1 )
+		{
+			if($arrayTmp[$columnSq] != "-")
+			{
+				for($i = 0 ; $i < size($sortSeqs) ; $i++)
+				{
+					$fsub =substituteAllString($arrayTmp[$columnSq] , "-" ,"") ;
+					string $first =$fsub ;
+					//print ("\nfirst = " + $first) ;
+					string $sec =  $sortSeqs[$i] ;
+					//print ("\nsec = " + $sec) ;
+					if($first == $sec)
+					{
+						$sub = substituteAllString($arrayTmp[$columnSh],"\"","") ;
+						$sub = substituteAllString($sub,"-","") ;
+						string $tmpInt2 = $sub ;
+						$shots2[$j] =  $tmpInt2;
+						$j++;
+					}
+				}
+			}
+		}
+	}
+	fclose $fileId;
+	//print $shots2 ;
+	return $shots2;
+}
+
+global proc string  s100PRCgetAllInfoFromAFileByScene(string $files,int $scene,string $choice)
+{
+	//$files =
+	//$choice = "Duration"
+	//$scene = 40
+	string $retu[]= `s100PRCreadCSVAssetAndProdInfo($files)`;
+	$array = stringToStringArray($retu[1] , ";") ;
+	int $u;
+	for($i = 0 ; $i < size($array); $i++)
+	{
+		if($array[$i] ==  $choice)
+		 {
+		 	$u = $i ;
+			break ;
+         }
+    }
+
+	$fileId=`fopen $files "r"`;
+	string $nextLine = `fgetline $fileId`;
+	$chStart = 0 ;
+
+	string 	$nextLine = `fgetline $fileId`;
+			$nextLine = `fgetline $fileId`;
+
+	string $recupArr[];
+	clear $recupArr ;
+	$i=0;
+	string $return ;
+
+	while ( size( $nextLine ) > 0 )
+	{
+		$sub =substituteAllString($nextLine ,";","-;") ;
+		string $array[] = stringToStringArray($sub, ";");
+
+		$tmp  = substituteAllString($array[0], "-","");
+
+		$sub = substituteAllString($tmp ,"\"","") ;
+		int $SceneGet ;
+		if($sub != "" )
+			$SceneGet = $sub ;
+		else
+			$SceneGet = 0;
+
+		if($SceneGet == $scene)
+		{
+			$return = substituteAllString($array[$u], "-","");
+			break ;
+        }
+		else
+			$nextLine = `fgetline $fileId`;
+
+		/*
+		if($tmp != "" )
+		{
+			$sub = substituteAllString($tmp , "\"","");
+
+			int $tmpInt = $sub ;
+			$recupArr[$i] =$tmpInt ;
+			$i++;
+		}
+		*/
+	}
+
+	/*
+		string $returnA[] = stringArrayRemoveDuplicates($recupArr) ;
+		int $returnInt[];
+		$j = 0 ;
+		for($i = 0 ; $i <size($returnA) ; $i++)
+		{
+			if($returnA[$i] != "0")
+			{
+				$returnInt[$j] = $returnA[$i];
+				$j++;
+			}
+		}
+		fclose $fileId;
+		//print $recupArr ;
+	*/
+	return $return ;
+}

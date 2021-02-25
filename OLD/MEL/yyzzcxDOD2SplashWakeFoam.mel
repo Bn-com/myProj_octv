@@ -1,0 +1,1679 @@
+
+
+proc string  oceanNurbsPreviewPlane(int $xres, int $zres, string $oceanShader,string $charName)
+  {
+      float $planscale = 30;
+	string $char_plane = ($charName + "_plane");
+	string $result[] = `nurbsPlane -n $char_plane -w 1 -lr 1 -d 1 -u $xres -v $zres -ax 0 1 0 -ch 0 `;
+	string $plane = $result[0];
+	setAttr -l true ( $plane+".rotate");
+	setAttr -l true ( $plane+".scaleY");
+	setAttr ($plane+".scaleX") $planscale ;
+        setAttr ($plane+".scaleZ") $planscale ;
+	setAttr ($plane+".visibility") 0 ;
+	 
+	int $x,$y;
+	int $xSize = $xres+1;
+	int $zSize = $zres+1;
+	int $planeZ, $planeX;
+
+	string $exp = ( "float $u, $v;\n"
+			  + "float $minx = " +$plane+ ".scaleX * -0.5 + " + $plane + ".translateX;\n"
+			  + "float $maxx = " +$plane+ ".scaleX *  0.5 + " + $plane + ".translateX;\n"
+			  + "float $minz = " +$plane+ ".scaleZ * -0.5 + " + $plane + ".translateZ;\n"
+	  		  + "float $maxz = " +$plane+ ".scaleZ *  0.5 + " + $plane + ".translateZ;\n"
+                    + "float $disp[] = `colorAtPoint -o A -su "+$xSize+" -sv "+$zSize
+			      +" -mu $minx -mv $minz -xu $maxx -xv $maxz "+$oceanShader+"`;\n"
+      );
+	// unfold loop and use output connections 
+	int $i=0;
+	for( $x = 0; $x < $xSize; $x++ ){
+		$planeX = $x * $zSize;
+		for( $z = 0; $z < $zSize; $z++ ){
+			$planeZ= $zSize - $z - 1;
+			$exp +=  ($plane + ".cv[" + ($planeX + $planeZ) + "].yv = $disp["+$i+"];\n");
+			$i++;
+		}
+	}
+
+	expression -s $exp;
+	select ($plane+".cv[0][0]");
+	select $plane;
+     return($plane);
+   } ;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ // create main
+
+
+////////////////////////////////////////////////////////////////////
+
+global proc  splashwakefoam(int $collidesize,int $startframe, float $splashrate, float $splashspeed , float $splashspeed_random , float $spread ,float $levelOfDetail  , float $FEmitter_rate ,float $wake_intensity, float $foam_creation ,float $fluid_dropoff,float $fluids_scale,int $objApplyto )
+
+{
+
+//------------------------------------------------------------------------------------------------------------
+//input ocean
+//------------------------------------------------------------------------------------------------------------
+
+
+if($objApplyto == 1)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/FX/dod_ef/ocean_up/ocean_up_new3.mb";
+}
+
+
+if($objApplyto == 2)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/FX/dod_ef/ocean_up/undocean.mb";
+}
+
+if($objApplyto == 3)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/FX/dod_ef/ocean_up/oceaninroom.mb";
+}
+
+if($objApplyto == 4)
+{
+file -import -type "mayaBinary" -rpr "ocean" -options "v=0"  -pr "Z:/Projects/DiveollyDive2/DiveollyDive2_Scratch/FX/dod_ef/ocean_up/oceaninholl.mb";
+}
+
+select -cl  ;
+
+ 
+
+
+
+ 
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+string  $oceanShader = getCurrentOcean();	 //  定义当前海洋平面
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+
+ //创建角色组的控制器
+
+////////////////////////////////////////////////////////////////////////
+
+
+// addAttr -ln startframe -at double  -keyable true /* -dv $startframe*/ ef_fuild;	 关联到 ef_fuild
+
+
+string $getAllcharName[]=`ls "*:*_toef" "*:*:*_toef"`; 
+print $getAllcharName;
+for($getCharName in $getAllcharName)
+
+{
+   string $tempName[];					    //
+    $numTokens = `tokenize $getCharName ":" $tempName`;	    //
+    string $charName[];					    //         寻找角色名
+
+   $numTokens2 = `tokenize $tempName[1] "_" $charName`;	    //
+
+    if ($numTokens==3)
+	{
+		$charName[0]=$tempName[1];	
+	}
+    else if ($numTokens==2)
+	{
+		$charName[0]=$charName[0];	
+	}
+
+    string $charGrp = $charName[0] + "_G";		     //        创建角色组
+    print ($charName[0]+"\n");				    //
+
+   $gp = `objExists $charGrp`;				     //        排除以创建的角色组
+    if ($gp == 0) 
+  { 
+   group -em -n $charGrp;
+
+  setAttr -lock true ($charGrp + ".tx");
+  setAttr -lock true ($charGrp + ".ty");
+  setAttr -lock true ($charGrp + ".tz");
+  setAttr -lock true ($charGrp + ".rx");		       // 锁掉不用的属性
+  setAttr -lock true ($charGrp + ".ry");
+  setAttr -lock true ($charGrp + ".rz");
+  setAttr -lock true ($charGrp + ".sx");
+  setAttr -lock true ($charGrp + ".sy");
+  setAttr -lock true ($charGrp + ".sz");
+  setAttr -lock true ($charGrp + ".v");
+
+
+
+   addAttr -ln startframe -at double  -keyable true   -dv $startframe  $charGrp; 
+ 
+   addAttr -ln rate -at double  -min 0 -max 50000 -k true  -dv $splashrate   $charGrp;
+
+   addAttr -ln speed -at double  -min 0 -max 20 -k true   -dv $splashspeed   $charGrp;
+
+   addAttr -ln speed_random -at double  -min 0 -max 50 -k true   -dv $splashspeed_random  $charGrp;
+
+   addAttr -ln spread -at double  -min 0 -max 1 -k true   -dv $spread  $charGrp;
+
+   addAttr -ln levelOfDetail -at double  -min 0 -max 1 -k true   -dv $levelOfDetail  $charGrp;  
+
+   addAttr -ln FEmitter_rate  -at double  -k true   -dv $FEmitter_rate   $charGrp;
+
+   addAttr -ln wake_intensity -at double  -k true   -dv $wake_intensity  $charGrp;
+
+   addAttr -ln foam_creation -at double -k true  -dv $foam_creation  $charGrp;
+
+   addAttr -ln fluid_dropoff -at double  -k true  -dv $fluid_dropoff  $charGrp;
+
+     select -r $charGrp;
+   select -tgl ef_fluid;
+   parent ;
+    select -cl;
+
+  };
+
+
+
+ 
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+	   string  $oceanShader = getCurrentOcean();
+
+
+	oceanNurbsPreviewPlane( $collidesize,$collidesize, $oceanShader,$charName[0]);	  //创建nurbs海洋平面
+
+	string $char_plane = ($charName[0]+"_plane");
+	
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////beth
+
+if($charName[0] == "beth" )                                                          
+{
+string $getCharTorso[0] = `ls  "*beth*:torso" `;
+
+//选择	    Torso
+string $charName[]={ "beth" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              
+
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////olly
+if($charName[0] == "olly" )
+{
+string $getCharTorso[0] = `ls  "*olly*:torso" `;
+
+//选择	    Torso
+string $charName[]={ "olly" };                                                           
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////海马 
+
+if($charName[0] == "nefer" )
+{
+string $getCharTorso[0] = `ls  "*nefer*:shane_MASTER_" `;
+
+//选择	    Torso
+string $charName[]={ "nefer" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////////////摩托艇
+
+if($charName[0] == "walterscooter" )
+{
+string $getCharTorso[0] = `ls  "*walterscooter*:torso_ctrl" `;
+
+//选择	    Torso
+string $charName[]={ "walterscooter" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////水獭
+
+
+if($charName[0] == "bobsie" )                                               
+{
+string $getCharTorso[0] = `ls  "*bobsie*:upperBodyCon" `;
+
+//选择	    Torso
+string $charName[]={ "bobsie" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+if($charName[0] == "skid" )                                               
+{
+string $getCharTorso[0] = `ls  "*skid*:torso" `;
+
+//选择	    Torso
+string $charName[]={ "skid" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "theecho" )
+{
+string $getCharTorso[0] = `ls  "*theecho*:theecho_masterMove" `;
+
+//选择	    Torso
+string $charName[]={ "theecho" };
+string $char_plane = ($charName[0]+"_plane");
+
+setAttr ($char_plane+".scaleX" ) 280;
+setAttr ($char_plane+".scaleZ" ) 280;
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+//ci2110103femaleadultseal 海豹
+if($charName[0] == "femaleadultseal" )
+{
+string $getCharTorso[0] = `ls  "*femaleadultseal*:body_ctrl" `;
+
+//选择	    Torso
+string $charName[]={ "femaleadultseal" };                                                           
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+////////////////////////////////////////////////////////////////////////////////////////////////
+//ci2110103femaleadultseal 海豹
+if($charName[0] == "malesealadult" )
+{
+string $getCharTorso[0] = `ls  "*malesealadult*:Character" `;
+
+//选择	    Torso
+string $charName[]={ "malesealadult" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//c2120101dirkwithredmud
+if($charName[0] == "dirkwithredmud" )
+{
+string $getCharTorso[0] = `ls  "*dirkwithredmud*:Character" `;
+
+//选择	    Torso
+string $charName[]={ "dirkwithredmud" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//c2120101dirkwithredmud
+if($charName[0] == "subd" )
+{
+string $getCharTorso[0] = `ls  "*subd*:subd_torso" `;
+
+//选择	    Torso
+string $charName[]={ "subd" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+//ci2180101albatross1
+
+if($charName[0] == "albatross1" )
+{
+string $getCharTorso[0] = `ls  "*albatross1*:body_ctrl" `;
+
+//选择	    Torso
+string $charName[]={ "albatross1" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//ci2200202babypenguinmohawk
+if($charName[0] == "babypenguinmohawk" )
+{
+string $getCharTorso[0] = `ls  "*babypenguinmohawk*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "babypenguinmohawk" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//ci22002015xbabypenguins
+if($charName[0] == "xbabypenguins" )
+{
+string $getCharTorso[0] = `ls  "*xbabypenguins*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xbabypenguins" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "do2_c2290102ollyonbuoy" )
+{
+string $getCharTorso[0] = `ls  "*:*ollyonbuoy:buoy_ctrl" `;
+
+//选择	    Torso
+
+	string $charName[]={ "do2_c2290102ollyonbuoy" };
+	string $char_plane = ($charName[0]+"_plane");
+
+	string $ocean[] = `ls -tr "*ocean*"` ;
+
+	pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+	connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");         
+
+
+};
+
+if($charName[0] == "do2_c2290102ollyonbuoy_1" )
+{
+string $getCharTorso[0] = `ls  "*:*ollyonbuoy_1:buoy_ctrl" `;
+
+//选择	    Torso
+
+	string $charName[]={ "do2_c2290102ollyonbuoy_1" };
+	string $char_plane = ($charName[0]+"_plane");
+
+	string $ocean[] = `ls -tr "*ocean*"` ;
+
+	pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+	connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");         
+
+
+};
+
+if($charName[0] == "do2_p2290000allthebuoy" )
+{
+string $getCharTorso[0] = `ls  "*:*allthebuoy:MASTER" `;
+
+//选择	    Torso
+
+	string $charName[]={ "do2_p2290000allthebuoy" };
+	string $char_plane = ($charName[0]+"_plane");
+
+	string $ocean[] = `ls -tr "*ocean*"` ;
+
+	pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+	connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");         
+
+
+};
+
+if($charName[0] == "do2_p2290000allthebuoy_1" )
+{
+string $getCharTorso[0] = `ls  "*:*allthebuoy_1:MASTER" `;
+
+//选择	    Torso
+
+	string $charName[]={ "do2_p2290000allthebuoy_1" };
+	string $char_plane = ($charName[0]+"_plane");
+
+	string $ocean[] = `ls -tr "*ocean*"` ;
+
+	pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+	connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");         
+
+
+};
+if($charName[0] == "boatbumper" )
+{
+string $getCharTorso[0] = `ls  "*:*boatbumper:MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "boatbumper" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//ci2200101emperorpenguin
+if($charName[0] == "emperorpenguin" )
+{
+string $getCharTorso[0] = `ls  "*emperorpenguin*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "emperorpenguin" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+// x, xx, xxx is just for emperorpenguin
+if($charName[0] == "x" )
+{
+string $getCharTorso[0] = `ls  "*x*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "x" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xx" )
+{
+string $getCharTorso[0] = `ls  "*xx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxx" )
+{
+string $getCharTorso[0] = `ls  "*xxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+if($charName[0] == "xxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+if($charName[0] == "xxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+if($charName[0] == "xxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+
+};
+
+
+if($charName[0] == "xxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+if($charName[0] == "xxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+if($charName[0] == "xxxxxxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+if($charName[0] == "xxxxxxxxxxxxxxxxxxxxx" )
+{
+string $getCharTorso[0] = `ls  "*xxxxxxxxxxxxxxxxxxxxx*:Upper_Body" `;
+
+//选择	    Torso
+string $charName[]={ "xxxxxxxxxxxxxxxxxxxxx" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+///////////////////////////////////////////////////////////////////////////////////////////////////
+//p2210401scootermysteriousdiver
+if($charName[0] == "scootermysteriousdiver" )
+{
+string $getCharTorso[0] = `ls  "*scootermysteriousdiver*:MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "scootermysteriousdiver" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+//p2020201theechobridle
+if($charName[0] == "theechobridle" )
+{
+string $getCharTorso[0] = `ls  "*theechobridle*:theecho_offsetMove" `;
+
+//选择	    Torso
+string $charName[]={ "theechobridle" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+//ci2250101pearlsidefish
+if($charName[0] == "pearlsidefish" )
+{
+string $getCharTorso[0] = `ls  "*pearlsidefish*:MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "pearlsidefish" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+            //******************************************************************************//
+            //******************************************************************************//
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// EP 205
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+if($charName[0] == "dougald" )                                               
+{
+string $getCharTorso[0] = `ls  "*:shane_loBackB" `;
+
+//选择	    Torso
+string $charName[]={ "dougald" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+ if($charName[0] == "smalltrailer" )                                               
+{
+string $getCharTorso[0] = `ls  "*:smalltrailer_MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "smalltrailer" };
+string $char_plane = ($charName[0]+"_plane");
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// EP 206
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+ if($charName[0] == "dirk" )                                               
+{
+string $getCharTorso[0] = `ls  "*dirk:MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "dirk" };
+string $char_plane = ($charName[0]+"_plane");
+
+setAttr ($char_plane+".scaleX" ) 40;
+setAttr ($char_plane+".scaleZ" ) 40;
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+
+ if($charName[0] == "uma" )                                               
+{
+string $getCharTorso[0] = `ls  "*nua*:uma_torso" `;
+
+//选择	    Torso
+string $charName[]={ "uma" };
+string $char_plane = ($charName[0]+"_plane");
+
+setAttr ($char_plane+".scaleX" ) 40;
+setAttr ($char_plane+".scaleZ" ) 40;
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+ if($charName[0] == "beachball" )                                               
+{
+string $getCharTorso[0] = `ls  "*beachball*:beachball_ctrl" `;
+
+//选择	    Torso
+string $charName[]={ "beachball" };
+string $char_plane = ($charName[0]+"_plane");
+
+setAttr ($char_plane+".scaleX" ) 40;
+setAttr ($char_plane+".scaleZ" ) 40;
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+
+ if($charName[0] == "cruiseship" )                                               
+{
+string $getCharTorso[0] = `ls  "*cruiseship*:MASTER" `;
+
+//选择	    Torso
+string $charName[]={ "cruiseship" };
+string $char_plane = ($charName[0]+"_plane");
+
+setAttr ($char_plane+".scaleX" ) 40;
+setAttr ($char_plane+".scaleZ" ) 40;
+
+string $ocean[] = `ls -tr "*ocean*"` ;
+
+ pointConstraint -offset 0 0 0 -skip y -weight 1 $getCharTorso[0]  $char_plane;    
+ connectAttr -f ($ocean[0] + ".translateY")  ($char_plane + ".translateY");              //角色master控制器 关联
+
+};
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+string $char_nurbs="";
+  //create intersectCve
+   if ($numTokens==2)
+  {
+  $char_nurbs = "*:" + $charName[0] + "_toef" ; 
+  }
+  if ($numTokens==3)
+  {
+    string $charName[];					    //         寻找角色名
+
+	$numTokens2 = `tokenize $tempName[2] "_" $charName`;	 
+	$char_nurbs =  "*:"+$tempName[1]+":" + $charName[0] + "_toef" ; 
+
+  }
+  string $intersectCve[] = `intersect  -ch true -fs 0 -cos 0 -tol 0.01 $char_nurbs  $char_plane` ;
+  move -r 0 0.02 0 ;
+  select -r $char_plane;
+  //move -r -ls -wd 0 -0.15 0 ;
+  setAttr ($char_plane+".visibility") 0;
+  parent $char_plane $charGrp ;
+  parent $intersectCve[0] $charGrp ;
+
+//create emitter and particle
+  select -r ($intersectCve[0]+"_1"); 
+  string $emittername[] = `emitter -type curve -r 100 -sro 0 -nuv 0 -cye frame -cyi 5 -spd 1 -srn 12 -nsp 0.2 -tsp 0.12 -mxd 0 -mnd 0 -dx 0 -dy 1 -dz 0 -sp 0`;  
+  string $particlename[] = `particle`;
+  string $particlename2[] = `particle`;
+  parent $particlename[0] $charGrp ;
+  parent $particlename2[0] $charGrp ;  
+
+
+  connectDynamic -em $emittername[1] $particlename[0];
+  connectDynamic -em $emittername[1] $particlename2[0];
+
+ //set particle1
+    setAttr ($particlename[1]+".conserve") 0.98;
+    setAttr ($particlename[1]+".lifespanMode") 3;
+    setAttr ($particlename[1]+".particleRenderType") 9;
+    setAttr ($particlename[1]+".depthSort") 1;
+   // addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 3 $particlename[1];
+   // addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename[1];
+   // addAttr -is true -ln "multiRadius" -at "float" -min 0 -max 10 -dv 0.3 $particlename[1];
+   // addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename[1];
+
+    //addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 3 $particlename[1];
+    //addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename[1];
+
+    addAttr -is true -ln "radius0" -at "float" -min 0 -max 10 -dv 0.015 $particlename[1];
+    addAttr -is true -ln "radius1" -at "float" -min 0 -max 10 -dv 0.15 $particlename[1];
+    addAttr -is true -ln "tailSize" -at "float" -min 0 -max 10 -dv 1.00 $particlename[1];
+
+
+
+   //addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename[1];
+
+
+
+    //addAttr -ln "rgbPP" -dt vectorArray $particlename[1];
+    //addAttr -ln "rgbPP0" -dt vectorArray $particlename[1];
+    connectAttr -f ($charGrp+".levelOfDetail") ($particlename[1] +".levelOfDetail"); 
+    //connectAttr -f ($charGrp+".startframe") ($particlename[1] +".startFrame"); 
+
+    //create ramp
+    
+
+   /* string $arrayMap[] = `arrayMapper -target $particlename[1] -destAttr rgbPP -inputV ageNormalized -type ramp`;
+    string $ptcramp[] = `listConnections -source true -destination false $arrayMap[0]`;
+    setAttr ($ptcramp[0]+".colorEntryList[0].position") 0.01;
+    setAttr ($ptcramp[0]+".colorEntryList[0].color") -type double3 0.917 0.917 0.917 ;
+    setAttr ($ptcramp[0]+".colorEntryList[1].position") 0.25;
+    setAttr ($ptcramp[0]+".colorEntryList[1].color") -type double3 0 0.24661 0.42;
+    setAttr ($ptcramp[0]+".colorEntryList[2].position") 0.50;
+    setAttr ($ptcramp[0]+".colorEntryList[2].color") -type double3 1 1 1;
+    */
+
+
+    //create expressions
+
+
+
+ //      string $exp1 = $particlename[1]+".startFrame = "+$charGrp+".startframe;\r\n    ";   //
+
+
+    connectAttr -f   ($charGrp+ ".startframe") ($particlename[1]+".startFrame");
+
+
+    string  $exp1 = "    vector $pv = "+$particlename[1]+".position;\r\n    ";  
+       $exp1 += "float $x = $pv.x;\r\n    ";
+       $exp1 += "float $y = $pv.y;\r\n    ";
+       $exp1 += "float $z = $pv.z;\r\n    ";
+       //$exp1 += "float $h[] = `colorAtPoint -u $x -v $z "+$oceanShader+"`;\r\n\r\n    ";
+       $exp1 += "if( $y > (dod_oceanPlane1.translateY-2))\r\n\t";            //oceanPlane1  为场景内镜头海洋名
+       $exp1 += "{"+$particlename[1]+".lifespanPP  = rand(2,4);\r\n    ";
+       $exp1 += "} else {\r\n\t";
+       $exp1 += ""+$particlename[1]+".lifespanPP = 0;\r\n    ";
+       $exp1 += "}";
+
+    dynExpression -rbd -string $exp1 $particlename[1];
+
+     select -r $particlename[1];
+     sets -e -forceElement dod_splashCloud1SG;
+      
+
+
+//set particle2
+    setAttr ($particlename2[1]+".conserve") 0.99;
+    setAttr ($particlename2[1]+".lifespanMode") 3;
+    setAttr ($particlename2[1]+".particleRenderType") 9;
+    setAttr ($particlename2[1]+".depthSort") 1;
+    setAttr ($particlename2[1]+".maxCount") 500;
+    setAttr ($particlename2[1]+".seed[0]") 30;
+
+
+ //   addAttr -is true -ln "pointSize" -at long -min 1 -max 60 -dv 1 $particlename2[1];
+ //   addAttr -is true -ln "multiCount" -at long -min 1 -max 60 -dv 12 $particlename2[1];
+ //   addAttr -is true -ln "multiRadius" -at "float" -min 0 -max 10 -dv 0.2 $particlename2[1];
+ //   addAttr -is true -ln "normalDir" -at long -min 1 -max 3 -dv 2 $particlename2[1];
+
+    addAttr -is true -ln "radius0" -at "float" -min 0 -max 10 -dv 0.045 $particlename2[1];
+    addAttr -is true -ln "radius1" -at "float" -min 0 -max 10 -dv 0.15 $particlename2[1];
+    addAttr -is true -ln "tailSize" -at "float" -min 0 -max 10 -dv 1.50 $particlename2[1];
+
+
+
+
+
+
+//   addAttr -ln "rgbPP" -dt vectorArray $particlename2[1];
+//    addAttr -ln "rgbPP0" -dt vectorArray $particlename2[1];
+
+    //connectAttr -f ($charGrp+".levelOfDetail") ($particlename2[1] +".levelOfDetail"); 
+    //connectAttr -f ($charGrp+".startframe") ($particlename2[1] +".startFrame"); 
+
+    //create ramp
+    //string $cmd= "arrayMapper -target $particlename2[1] -destAttr rgbPP -inputV ageNormalized -type ramp";
+/*
+    string $arrayMap[] = `arrayMapper -target $particlename2[1] -destAttr rgbPP -inputV ageNormalized -type ramp`;
+    string $ptcramp[] = `listConnections -source true -destination false $arrayMap[0]`;
+    setAttr ($ptcramp[0]+".colorEntryList[0].position") 0.0;
+    setAttr ($ptcramp[0]+".colorEntryList[0].color") -type double3 0.544 0.615 0.692;
+    setAttr ($ptcramp[0]+".colorEntryList[1].position") 0.345;
+    setAttr ($ptcramp[0]+".colorEntryList[1].color") -type double3 1 1 1;
+    setAttr ($ptcramp[0]+".colorEntryList[2].position") 1;
+    setAttr ($ptcramp[0]+".colorEntryList[2].color") -type double3 1 1 1;
+*/
+
+
+    //create expressions
+//    string $exp1 = $particlename2[1]+".startFrame = "+$charGrp+".startframe;\r\n    ";
+
+    connectAttr -f   ($charGrp+ ".startframe") ($particlename2[1]+".startFrame");
+
+
+
+     string  $exp1 = "    vector $pv = "+$particlename2[1]+".position;\r\n    ";  
+       $exp1 += "float $x = $pv.x;\r\n    ";
+       $exp1 += "float $y = $pv.y;\r\n    ";
+       $exp1 += "float $z = $pv.z;\r\n    ";
+       $exp1 += "float $h[] = `colorAtPoint -u $x -v $z "+$oceanShader+"`;\r\n\r\n    ";
+       $exp1 += "if( $y > (dod_oceanPlane1.translateY-2))\r\n\t";
+       $exp1 += "{"+$particlename2[1]+".lifespanPP  = rand(2,4);\r\n    ";
+       $exp1 += "} else {\r\n\t";
+       $exp1 += ""+$particlename2[1]+".lifespanPP = 0;\r\n    ";
+       $exp1 += "}";
+
+    dynExpression -rbd -string $exp1 $particlename2[1];
+
+     select -r $particlename2[1];
+     sets -e -forceElement dod_splashCloud2SG;
+
+
+
+  select -r $emittername[1]   ;
+
+
+//================================
+
+//set enmitter
+select -r $emittername[1] ; 
+//addAttr -ln moveX -at double;
+//addAttr -ln moveY -at double;
+//addAttr -ln moveZ -at double;
+addAttr -ln velocity -at double;
+addAttr -ln startframe -at double;
+
+
+    //create expressions
+    //string $exp1 = "float $worldxyz1[] = `xform -q -ws -t " + $char_plane+ "`;\r\n"; 
+      
+     // string $exp1 = "$worldxyz = `xform -q -ws -t " + $charGrp+ "`;\r\n";  
+       string $exp1 = "float $worldxyz[] = `getAttr " + $char_plane+ ".translate`;\r\n";            
+       $exp1 += "if (" + $emittername[1] + ".startframe <= frame ) \r\n";           
+       $exp1 += "{\r\n  ";             
+
+
+       $exp1 += "float $fAx = " + $emittername[1] + ".translateX;\r\n ";             
+       $exp1 += "float $fAy = " + $emittername[1] + ".translateY;\r\n ";              
+       $exp1 += "float $fAz = " + $emittername[1] + ".translateZ;\r\n ";  
+       $exp1 += "float $fBx = $worldxyz[0] ;\r\n";
+       $exp1 += "float $fBy = $worldxyz[1] ;\r\n";
+       $exp1 += "float $fBz = $worldxyz[2] ;\r\n"; 
+       $exp1 += "float $wyx = abs($fBx-$fAx);\r\n";
+       $exp1 += "float $wyy = abs($fBy-$fAy);\r\n";
+       $exp1 += "float $wyz = abs($fBz-$fAz);\r\n";	 
+       $exp1 += "\r\n";			    
+       $exp1 += "vector $vel_temp1 = <<$wyx,$wyy,$wyz>>; \r\n";
+       $exp1 += "float $vel_temp2 = mag($vel_temp1);\t\n ";
+       $exp1 += $emittername[1] + ".velocity = linstep(1,2,$vel_temp2);\t\n" ;
+       $exp1 += "};";  
+
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ;  
+       
+
+    
+
+
+
+     $exp1 =  "float $stop;\n"
+            + "if("+$charGrp+ ".startframe <= frame)\t\n"
+            + "$stop = 1;\n"
+            + "else $stop = 0;\n"
+              + $emittername[1] + ".rate = " +$emittername[1] +".velocity*4*" + $charGrp+ ".rate * $stop;";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ; 
+
+
+
+
+
+
+    string $exp1 = $emittername[1] + ".speed = " +$emittername[1] +".velocity*" + $charGrp+ ".speed; ";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ;  
+    string $exp1 = $emittername[1] + ".speedRandom = " +$emittername[1] +".velocity*3.5*" + $charGrp+ ".speed_random";
+    expression -s $exp1 -o $emittername[1] -ae 1 -uc all ; 
+  
+    connectAttr -f ($charGrp+".startframe") ($emittername[1] +".startframe"); 
+    connectAttr -f ($charGrp+".spread ") ($emittername[1] +".spread");  
+
+//create  gravity 
+
+                                 
+    string $gravityname[] = `gravity -pos 0 0 0 -m 100 -att 0 -dx 0 -dy -1 -dz 0  -mxd -1  -vsh none -vex 0 -vof 0 0 0 -vsw 360 -tsr 0.5`;
+    connectDynamic -f $gravityname[0] $particlename[0];
+    connectDynamic -f $gravityname[0] $particlename2[0];
+    parent $gravityname[0] $charGrp;
+
+
+//create collide
+    collision -r 0.1 -f 0  $char_plane;
+    connectDynamic -c $char_plane $particlename[0];
+    collision -r 0.1 -f 0  $char_plane;
+    connectDynamic -c $char_plane $particlename2[0];
+    event -die 1 -count 3 $particlename[0];
+    event -die 1 -count 3 $particlename2[0]; 
+
+
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+
+//ceate fluidemitterde
+
+    select -r $char_nurbs;
+ 
+    string $fluidemitter[] = `fluidEmitter -type surface -der 0.05 -her 0.5 -fer 0.5 -fdr 0.5 -r 100.0 -cye none -cyi 1 -mxd 1 -mnd 0`;
+
+    connectDynamic -em $fluidemitter[1] fluidTexture3D1; 
+    connectDynamic -em $fluidemitter[1] fluidTexture3D2; 
+
+     connectAttr -f ($charGrp+".foam_creation") ($fluidemitter[1] +".fluidFuelEmission");
+     connectAttr -f ($charGrp+".fluid_dropoff") ($fluidemitter[1] +".fluidDropoff");
+
+   //create expressions
+   
+///////$exp1 =  $charGrp + ".FEmitter_rate = " + $fluidemitter[1] + ".rate ;\r \n 
+ /*
+   string $exp1 =  $fluidemitter[1] + ".rate = "+ $charGrp + ".FEmitter_rate ;\r \n   " ; 
+          $exp1 += $fluidemitter[1] + ".fluidDensityEmission = " + $charGrp + ".wake_intensity + (" + $emittername[1] + ".velocity /100.00);\r\n    "; 
+          $exp1 += $fluidemitter[1] + ".fluidHeatEmission = .2;\r\n    "; 
+          $exp1 += $fluidemitter[1] + ".fluidHeatEmission = " + $charGrp + ".foam_creation  * " + $emittername[1] + ".velocity;\r\n    "; 
+          $exp1 += "if (" + $fluidemitter[1] + ".fluidHeatEmission > 1)\r\n "; 
+          $exp1 += "{" + $fluidemitter[1] + ".fluidHeatEmission = 1;}\r\n    "; 
+          $exp1 += "if (" + $fluidemitter[1] + ".fluidHeatEmission < 0.2)\r\n    ";
+          $exp1 += "{" + $fluidemitter[1] + ".fluidHeatEmission = .2;}\r\n    "; 
+
+    expression -s $exp1 -o $fluidemitter[1] -ae 1 -uc all ;
+*/
+     connectAttr -f ($charGrp+".FEmitter_rate") ($fluidemitter[1] +".rate");
+     connectAttr -f ($charGrp+".wake_intensity") ($fluidemitter[1] +".fluidDensityEmission");
+     connectAttr -f ($charGrp+".foam_creation") ($fluidemitter[1] +".fluidHeatEmission");
+     //connectAttr -f ($charGrp+".fluid_dropoff") ($fluidemitter[1] +".fluidDropoff");
+}
+string $fluidEmitter[] = `ls -type fluidEmitter`;
+int $n;
+for ($n = 0; $n<size($fluidEmitter);$n++)
+{
+setAttr ($fluidEmitter[$n]+".fluidJitter") 0; 
+print ($fluidEmitter[$n]+"\n");
+}
+
+
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////
+
+
+//huojian 2006.5.10
+
+global proc jayeocean()
+{
+	if (!`pluginInfo -query -loaded "Mayatomr.mll"`) loadPlugin "Mayatomr.mll";
+	string $jayelist		[]	=`ls -geometry`;
+	string $hjparticle          []  =`ls -type "particle" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,$jayelist);
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	string $jayelistlights   []  =`ls -lights -tr "seaLight"`;
+	string $hjcrelayer			=`createRenderLayer -name "ocean" -number 1 -makeCurrent -noRecurse $jayestnurbers   $jayelistlight $jayelistlights	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	editRenderLayerAdjustment "defaultRenderQuality.enableRaytracing";
+	editRenderLayerAdjustment "defaultRenderQuality.reflections";
+	editRenderLayerAdjustment "defaultRenderQuality.refractions";
+	editRenderLayerAdjustment "defaultRenderQuality.shadows";
+	
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 	0;
+	setAttr "defaultRenderQuality.shadingSamples" 		2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 	8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 	1;
+	setAttr "defaultRenderQuality.pixelFilterType" 		2;
+	setAttr "defaultRenderQuality.redThreshold" 		0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 		0.3;
+	setAttr "defaultRenderQuality.blueThreshold"        0.6;
+	setAttr "defaultRenderQuality.enableRaytracing" 	1;
+	setAttr "defaultRenderQuality.reflections" 			6;
+	setAttr "defaultRenderQuality.refractions" 			6;
+	setAttr "defaultRenderQuality.shadows" 				0;
+	//string $GetLight[]=`ls  -lights -tr  "shadowslight*"`;
+	//select -r $GetLight[0];
+	editRenderLayerMembers -noRecurse ocean `ls -selection`;
+	//editRenderLayerAdjustment "shadowslightShape.useRayTraceShadows";
+	//setAttr "shadowslightShape.useRayTraceShadows" 0;
+	
+	yyRTOceanPost;
+	print "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh";
+	editRenderLayerMembers ocean light_G;
+
+}
+
+proc string jayeground()
+{
+	//create matter
+	string $jayematerma[]=`ls -materials "Matter"`;
+			if (`size $jayematerma`==0)
+			{
+			string $sdra = `shadingNode -asShader -name Matter lambert`;
+    		setAttr ($sdra+".color") -type float3 0.0 0.0 0.0;
+    		setAttr ($sdra+".matteOpacityMode") 0;
+    		string $set = `sets -renderable true -noSurfaceShader true -empty`;
+    		connectAttr ($sdra+".color") ($set+".surfaceShader");
+			
+			}
+	//create matter	
+	        string $jayemater[]=`ls -materials "noMatter"`;
+			if (`size $jayemater`==0)
+			{
+			string $sdra = `shadingNode -asShader -name noMatter lambert`;
+    		setAttr ($sdra+".color") -type float3 0.5 0.5 0.5;
+    		//setAttr ($sdra+".hideSource") 1;
+    		string $set = `sets -renderable true -noSurfaceShader true -empty`;
+    		connectAttr ($sdra+".color") ($set+".surfaceShader");
+			
+			}
+	
+	//create ground	
+	        string $jayemater[]=`ls -materials "Shadow_useBackground"`;
+			if (`size $jayemater`==0)
+			{
+			string 	$sdrblur 	= `shadingNode -asShader -name Shadow_useBackground useBackground`;
+			setAttr ($sdrblur+".specularColor") -type   double3 0.5 0.5 0.5;
+			setAttr ($sdrblur+".reflectivity") 	0.0;
+			string 	$setblur 	= `sets -name ShadowSG -renderable true -noSurfaceShader true -empty`;
+			connectAttr ($sdrblur+".outColor") ($setblur+".surfaceShader");
+			
+			}
+	
+	
+	
+   return "";
+}
+
+
+
+
+global proc jayeoceanm()
+{
+	
+
+	string $hjlist				[]	=`ls -dag -long -geometry `		;
+	string $hjlglist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	string $hjparticle          []  =`ls -long "particle*" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,	$hjlist);
+	string $jayestnurber 		[]	= stringArrayRemove($hjlglist,	$jayestnurbers);
+	string $jayematter          []  =`ls -materials "Matter"`;
+	string $jayematterocean     []  =`ls -materials "oceanShader*"`;
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	string $jayelistlights   []  =`ls -lights -tr "seaLight"`;
+	string $hjcrelayer				=`createRenderLayer -name "oceanM" -number 1 -makeCurrent -noRecurse $jayestnurbers $jayelistlight $jayelistlights 	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	
+	editRenderLayerAdjustment ($jayematterocean[0]+".transparency");
+	setAttr ($jayematterocean[0]+".transparency") -type double3 0.0 0.0 0.0 ;
+	select 				$jayestnurber 							;
+	hyperShade  -assign $jayematter[0] 							;
+	yyRTOceanMPost;
+	print "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh";
+//隐藏skid和walter的挡风玻璃
+
+
+}
+
+
+
+
+//set layershadow 
+global proc jayeshadowlayer()
+{
+
+	
+
+	string $GetObjectName[]=`ls "do2_s*RNgroup*" "do2_c*RNgroup*"`;
+	string $OceanPlane[]=`ls -tr "dod_oceanPlane*"`;
+	
+	string $hjlight				[]	=`ls  -lights -tr  "shadowslight*"`;
+	string $hjcrelayer				=`createRenderLayer -name "oceanShadow" -number 1 -makeCurrent -noRecurse $GetObjectName $OceanPlane $hjlight	`;
+	string $hjoceanlist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	
+	string $jayerenderlayoutls	[]	=`editRenderLayerMembers -q -fullNames $hjcrelayer`;
+	string $jayediffa			[] 	= stringArrayRemove($hjoceanlist, 	$jayerenderlayoutls);
+	string $jayediffb           []  = stringArrayRemove($hjlight, 	$jayediffa);
+	string $jayematter;
+	
+	string $jayenomatter        []  =`ls -materials "noMatter"`				;
+	string $jayeuseback[]			=`ls -materials "Shadow_useBackground"`;
+	
+	setAttr "defaultRenderLayer.renderable" 0						;
+	layerEditorLayerButtonSelect 0 $hjcrelayer						;
+	for ($jayematter in $jayediffb)
+	{
+		if (`attributeExists "primaryVisibility" $jayematter`) 
+		{
+		setAttr ($jayematter+".primaryVisibility") 0;
+		}
+		
+	}
+	
+	select 				$jayediffb  								;
+	hyperShade  -assign $jayenomatter[0] 							;
+	select -cl ;
+	select 				$hjoceanlist										;
+	hyperShade  -assign $jayeuseback[0] 							;
+	select -cl ;
+	editRenderLayerAdjustment "defaultRenderQuality.enableRaytracing";
+	editRenderLayerAdjustment "defaultRenderQuality.reflections";
+	editRenderLayerAdjustment "defaultRenderQuality.refractions";
+	editRenderLayerAdjustment "defaultRenderQuality.shadows";
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 	0;
+	setAttr "defaultRenderQuality.shadingSamples" 		2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 	8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 	1;
+	setAttr "defaultRenderQuality.pixelFilterType" 		2;
+	setAttr "defaultRenderQuality.redThreshold" 		0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 		0.3;
+	setAttr "defaultRenderQuality.blueThreshold"        0.6;
+	setAttr "defaultRenderQuality.enableRaytracing" 	1;
+	setAttr "defaultRenderQuality.reflections" 			0;
+	setAttr "defaultRenderQuality.refractions" 			0;
+	setAttr "defaultRenderQuality.shadows" 				3;
+	setAttr ($hjcrelayer+".beauty") 0;
+	setAttr ($hjcrelayer+".shadow") 1;
+
+
+
+}
+
+
+global proc string jayesetvis()
+{
+string $jayelayercurrect		=`editRenderLayerGlobals -q -currentRenderLayer`;
+int    $jayreturnlayer          =`gmatch $jayelayercurrect "ocean"`;
+if ($jayreturnlayer ==1)
+{	
+string $obj[] = `ls -dag -ap -sl`;
+int $siz = `size $obj`;
+for($i=0;$i<$siz;$i++)
+	{
+	if (`attributeExists "primaryVisibility" $obj[$i]`)
+		{
+		setAttr ($obj[$i]+".primaryVisibility") 0;
+		}
+
+	}	
+}
+else 
+{
+warning "请选择海面层";
+}
+	
+	return "";
+}
+
+global proc string jayepartic ()
+{
+	string $hjlist				[]	=`ls -dag -long -geometry `		;
+	string $hjlglist			[]	=`ls -shapes -long -tr "dod_oceanPlaneShape*" `	;
+	string $hjparticle          []  =`ls -long "particle*" `;
+	string $jayestnurbers 		[]	= stringArrayRemove($hjparticle,	$hjlist);
+	string $jayestnurber 		[]	= stringArrayRemove($hjlglist,	$jayestnurbers);
+
+	string $jayematter          []  =`ls -materials "Matter"`;
+	string $jayematterocean     []  =`ls -materials "oceanShader*"`;
+	string $jayelistlight   []  =`ls -lights -tr "otherLight"`;
+	
+	string $hjcrelayer =`createRenderLayer -name "Particle" -number 1 -makeCurrent -noRecurse $hjlist $jayelistlight  $hjparticle  	`;
+	setAttr "defaultRenderLayer.renderable" 0					;
+	layerEditorLayerButtonSelect 0 $hjcrelayer					;
+	
+	editRenderLayerAdjustment ($jayematterocean[0]+".transparency");
+	editRenderLayerAdjustment ($jayematterocean[0]+".matteOpacityMode ");
+	setAttr ($jayematterocean[0]+".transparency") -type double3 0.0 0.0 0.0 ;
+	setAttr ($jayematterocean[0]+".matteOpacityMode") 0 ;
+
+	yyRTParticlePost;
+	print "ppppppppppppppppppppppppppppppppppp";
+
+	select 				$jayestnurber 							;
+	hyperShade  -assign $jayematter[0] 							;
+	return $jayelistlight[0];
+}
+
+
+//
+
+
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//create window
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------
+global proc yyzzcxDOD2SplashWakeFoam()
+{
+
+python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkit.py\")");
+python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkitFunc.py\")");
+
+
+string $jayeshade=`jayeground`;
+$winexists  = `window -exists CearteSplashWakeFoam`;
+if ($winexists ==1)
+{deleteUI -window CearteSplashWakeFoam;}
+window CearteSplashWakeFoam; 
+columnLayout -adj true;
+menuBarLayout;
+menu -label "Help";
+menuItem -label "Help on RGBlayer " -command "zjHelpCallback hjRgbatranstion";
+setParent ..;	
+
+
+radioButtonGrp -numberOfRadioButtons 4 -label "select type" -labelArray4 "ocean""undocean""room""holl" -select 1 radioOfApl;
+
+intSliderGrp -l "splashcollidesize:" -field true -min 10 -max 30 -v 20 aSlider; 
+
+intSliderGrp -l "startframe:" -field true -min 0 -max 5000 -v 980 bSlider; 
+
+floatSliderGrp -l "splashrate:"	-precision 4 -field true -min 0 -max 50000 -v 3500 cSlider;
+
+floatSliderGrp -l "splashspeed:"	-precision 4 -field true -min 0.00 -max 20.00 -v 4 dSlider;
+
+floatSliderGrp -l "splashspeedrandom :"	-precision 4 -field true -min 0.00 -max 50 -v 10 eSlider;
+
+floatSliderGrp -l "splashspread:"	-precision 4 -field true -min 0.00 -max 1.00 -v 0.12 fSlider;
+
+floatSliderGrp -l " levelOfDetail  :"	-precision 4 -field true -min 0.00 -max 1.00 -v 1 gSlider;
+
+floatSliderGrp -l "wake intensity:"	-precision 4 -field true -min 0.00 -max 20.00 -v 0.1 hSlider;
+
+floatSliderGrp -l "foam creation :"	-precision 4 -field true -min 0.00 -max 20.00 -v 0.5 iSlider;
+
+floatSliderGrp -l "fluid dropoff:" 	-precision 4 -field true -min 0.00 -max 20.00 -v 0.5 jSlider;
+
+floatSliderGrp -l "fluids scale:" 	-precision 4 -field true -min 0.00 -max 200.00 -v 30 kSlider;
+
+floatSliderGrp -l " FEmitter_rate  :"	-precision 4 -field true -min 0.00 -max 1000.00 -v 100 lSlider;
+
+$objApplyto = `radioButtonGrp -q -select radioOfApl`; 
+
+       string $cwiondow =           " int $collidesize =`intSliderGrp -q -v aSlider`; ";   
+              $cwiondow +=          " int $startframe =`intSliderGrp -q -v bSlider`; ";
+              $cwiondow +=         "float $splashrate=`floatSliderGrp -q -v cSlider`;  "; 
+              $cwiondow +=         "float $splashspeed =`floatSliderGrp -q -v dSlider`; "; 
+              $cwiondow +=         "float $splashspeed_random =`floatSliderGrp -q -v eSlider`; "; 
+              $cwiondow +=         "float $spread  =`floatSliderGrp -q -v fSlider`; "; 
+              $cwiondow +=         "float $levelOfDetail  =`floatSliderGrp -q -v gSlider`;";
+              $cwiondow +=         "float $wake_intensity =`floatSliderGrp -q -v hSlider`;"; 
+              $cwiondow +=         "float $foam_creation =`floatSliderGrp -q -v iSlider`;"; 
+              $cwiondow +=         "float $fluid_dropoff =`floatSliderGrp -q -v jSlider`;"; 
+              $cwiondow +=         "float $fluids_scale =`floatSliderGrp -q -v kSlider`;"; 
+              $cwiondow +=         "float $FEmitter_rate =`floatSliderGrp -q -v lSlider`;";  
+              $cwiondow +=          " int $objApplyto = `radioButtonGrp -q -select radioOfApl`;"; 
+              $cwiondow +=         "splashwakefoam($collidesize,$startframe,$splashrate,$splashspeed,$splashspeed_random,$spread,$levelOfDetail,$FEmitter_rate,$wake_intensity,$foam_creation,$fluid_dropoff,$fluids_scale,$objApplyto );"; 
+
+
+		
+rowColumnLayout -numberOfColumns 4;
+button		-label "Smooth On"	-c yySmoothOn		-align "center" ;
+text -l "";
+text -l "";
+text -l "";
+button 		-l "splash wake foam" 	-c $cwiondow 		-align "center";
+button 		-label "Ocean" 			-c jayeocean		-align "center" ;
+button 		-label "OceanM"  		-c jayeoceanm 		-align "center" ;
+button 		-label "Patrticle"  	-c jayepartic 		-align "center" ;
+
+
+		setParent ..;
+	setParent ..;
+setParent ..;
+showWindow CearteSplashWakeFoam;
+
+};
+
+global proc yySmoothOn(){
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkitFunc.py\")");
+	python("yyDOD2Smooth1LevelForAll()");
+}
+
+global proc yyRTOceanPost(){
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkitForFX.py\")");
+	python("yyDOD2RTFXOceanLayerPost()");
+}
+
+global proc yyRTOceanMPost(){
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkitForFX.py\")");
+	python("yyDOD2RTFXOceanMLayerPost()");
+}
+
+global proc yyRTParticlePost(){
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/python/idmt/yyscripts/yyDOD2RenderToolkitForFX.py\")");
+	python("yyDOD2RTFXParticleLayerPost()");
+}

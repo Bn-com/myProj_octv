@@ -1,0 +1,761 @@
+global proc zwShanghaiCheckin()
+{
+	global int $zwShanghaiCheckinScriptJob;
+
+	optionVar -intValue "zwShanghaiCheckinProgress" 100;
+
+	string $buf[];
+
+	if($zwShanghaiCheckinScriptJob == 0)
+		$zwShanghaiCheckinScriptJob =`scriptJob -event "SceneOpened" "zwShanghaiCheckinSceneOpened"`;
+
+	if(`window -exists zwShanghaiCheckin`)
+		deleteUI zwShanghaiCheckin;
+	window -title "Checkin Tool for Shanghai" -width 640 -height 480 zwShanghaiCheckin;
+		string $formLayout = `formLayout`;
+			string $tabLayout = `tabLayout`;
+				formLayout;
+					setParent..;
+				formLayout;
+					setParent..;
+				setParent..;
+			string $tabLayout1 = `tabLayout -childResizable true -scrollable true -tabsVisible false`;
+				columnLayout -adjustableColumn true -rowSpacing 4;
+					string $formLayout1 = `formLayout`;
+						setParent..;
+					frameLayout -labelAlign "center" -marginHeight 5 -marginWidth 5 -label "Progress" -borderStyle "etchedOut";
+						columnLayout -adjustableColumn true -rowSpacing 2;
+							intSliderGrp -value `optionVar -query "zwShanghaiCheckinProgress"` -columnWidth 1 70 -adjustableColumn 3 -field true -label "Progress:" -minValue 0 -maxValue 100 -changeCommand "optionVar -intValue \"zwShanghaiCheckinProgress\" `intSliderGrp -query -value \"intSliderGrpProgress\"`" intSliderGrpProgress;
+							setParent ..;
+						setParent ..;
+					frameLayout -labelAlign "center" -marginHeight 5 -marginWidth 5 -label "Optimize" -borderStyle "etchedOut";
+						columnLayout -adjustableColumn true -rowSpacing 2;
+							rowLayout -numberOfColumns 2 -columnWidth2 120 120;
+								checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "Copy Local Maps" -onCommand1 "optionVar -intValue \"zwShanghaiCheckinCopyLocalMaps\" 1; optionVar -intValue \"zwShanghaiCheckinConvertToIff\" 1; checkBoxGrp -edit -value1 1 -enable1 1 \"checkBoxGrpConvertToIff\";" -offCommand1 "optionVar -intValue \"zwShanghaiCheckinCopyLocalMaps\" 0; optionVar -intValue \"zwShanghaiCheckinConvertToIff\" 0; checkBoxGrp -edit -value1 0 -enable1 0 \"checkBoxGrpConvertToIff\";" -columnWidth 1 8 -adjustableColumn 2 checkBoxGrpCopyLocalMaps;
+								checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "Convert to iff" -onCommand1 "optionVar -intValue \"zwShanghaiCheckinConvertToIff\" 1" -offCommand1 "optionVar -intValue \"zwShanghaiCheckinConvertToIff\" 0" -columnWidth 1 8 -adjustableColumn 2 checkBoxGrpConvertToIff;
+								setParent ..;
+							checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "Remove All ImagePlanes" -onCommand1 "optionVar -intValue \"zwShanghaiCheckinRemoveAllImagePlanes\" 1" -offCommand1 "optionVar -intValue \"zwShanghaiCheckinRemoveAllImagePlanes\" 0" -columnWidth 1 8 -adjustableColumn 2 checkBoxGrpRemoveAllImagePlanes;
+							checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "Copy Cache" -onCommand1 "optionVar -intValue \"zwShanghaiCheckinCopyCache\" 1" -offCommand1 "optionVar -intValue \"zwShanghaiCheckinCopyCache\" 0" -columnWidth 1 8 -adjustableColumn 2 checkBoxGrpCopyCache;
+							setParent ..;
+						setParent ..;
+					frameLayout -labelAlign "center" -marginHeight 5 -marginWidth 5 -label "Rendered Images" -borderStyle "etchedOut";
+						columnLayout -adjustableColumn true -rowSpacing 2;
+							string $textScrollList = `textScrollList -numberOfRows 6 -allowMultiSelection true`;
+							string $formLayout3 = `formLayout`;
+								string $button1 = `button -label "Add" -command ("zwShanghaiCheckinAdd \"" + $textScrollList + "\"")`;
+								string $button2 = `button -label "Remove" -command ("zwShanghaiCheckinRemove \"" + $textScrollList + "\"")`;
+								string $button3 = `button -label "Clear" -command ("textScrollList -edit -removeAll \"" + $textScrollList + "\"")`;
+								setParent ..;
+							setParent ..;
+						setParent ..;
+					frameLayout -labelAlign "center" -marginHeight 5 -marginWidth 5 -label "Comments" -borderStyle "etchedOut";
+						scrollField -wordWrap true scrollFieldComments;
+						setParent ..;
+					setParent..;
+				setParent..;
+			string $button = `button -label "Checkin"`;
+
+	formLayout -edit
+		-attachForm	$button1	"left"		0
+		-attachPosition	$button1	"right"		2	33
+
+		-attachControl	$button2	"left"		4	$button1
+		-attachPosition	$button2	"right"		2	67
+
+		-attachControl	$button3	"left"		4	$button2
+		-attachForm	$button3	"right"		0
+	$formLayout3;
+
+	formLayout -edit
+		-attachForm	$tabLayout	"top"		0
+		-attachForm	$tabLayout	"left"		0
+		-attachForm	$tabLayout	"right"		0
+
+		-attachControl	$tabLayout1	"top"		4	$tabLayout
+		-attachForm	$tabLayout1	"left"		0
+		-attachControl	$tabLayout1	"bottom"	4	$button
+		-attachForm	$tabLayout1	"right"		0
+
+		-attachForm	$button		"left"		2
+		-attachForm	$button		"bottom"	2
+		-attachForm	$button		"right"		2
+	$formLayout;
+
+	tabLayout -edit -tabLabelIndex 1 "Asset" -tabLabelIndex 2 "Animation" -changeCommand ("zwShanghaiCheckinType \"" + $tabLayout + "\" \"" + $formLayout1 + "\" \"" + $button + "\"") $tabLayout;
+	textScrollList -edit -deleteKeyCommand ("zwShanghaiCheckinRemove \"" + $textScrollList + "\"") $textScrollList;
+	button -edit -command ("zwShanghaiCheckinProc \"" + $tabLayout + "\" \"" + $formLayout1 + "\" \"" + $textScrollList + "\" \"" + $button + "\"") $button;
+
+	zwShanghaiCheckinSetOptimize "";
+
+	showWindow zwShanghaiCheckin;
+
+	string $sceneName = `file -query -sceneName`;
+	tokenize $sceneName "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	if (`gmatch $filename "*_[a-z]_[a-z][a-z]_*"`)
+	{
+		tabLayout -edit -selectTabIndex 1 $tabLayout;
+	}
+	else if (`gmatch $filename "*_[a-z][a-z]_*"`)
+	{
+		tabLayout -edit -selectTabIndex 2 $tabLayout;
+	}
+	zwShanghaiCheckinType $tabLayout $formLayout1 $button;
+}
+
+global proc zwShanghaiCheckinSceneOpened()
+{
+	if(`window -exists zwShanghaiCheckin`)
+		deleteUI zwShanghaiCheckin;
+}
+
+global proc zwShanghaiCheckinAdd(string $textScrollList)
+{
+	string $buf[] = `idmtFileDialog -filter "image (*.avi; *.iff; *.tga; *.jpg)|*.avi;*.iff;*.tga;*.jpg|||" -m`;
+
+	string $folder = `optionVar -query "zwShanghaiCheckinRenderedImageDir"`;
+	if (!`filetest -d $folder`)
+		$folder = "";
+
+	string $allItems[] = `textScrollList -query -allItems $textScrollList`;
+	for($file in $buf)
+	{
+		$file = `strip $file`;
+		if(!`stringArrayCount $file $allItems`)
+			textScrollList -edit -append $file $textScrollList;
+	}
+	if (`size $buf`)
+	{
+		if(`tokenize $buf[0] "\\" $allItems` > 1)
+		{
+			$folder = `substring $buf[0] 1 (size($buf[0]) - size($allItems[size($allItems)-1]) - 1)`;
+			if(`filetest -d $folder`)
+				optionVar -stringValue "zwShanghaiCheckinRenderedImageDir" $folder;
+		}
+	}
+}
+
+global proc zwShanghaiCheckinRemove(string $textScrollList)
+{
+	string $buf[] = `textScrollList -query -selectItem $textScrollList`;
+	int $index[] = `textScrollList -query -selectIndexedItem $textScrollList`;
+	for ($file in $buf)
+		textScrollList -edit -removeItem $file $textScrollList;
+	int $num = `textScrollList -query -numberOfItems $textScrollList`;
+	if ($num < $index[0])
+		$index[0] = $num;
+	if ($index[0] > 0)
+		textScrollList -edit -selectIndexedItem $index[0] $textScrollList;
+}
+
+global proc string[] zwShanghaiCheckinType(string $tabLayout, string $formLayout, string $button)
+{
+	string $buf[];
+
+	int $selectTabIndex = `tabLayout -query -selectTabIndex $tabLayout`;
+	if ($selectTabIndex == 1)
+		$buf = `zwShanghaiCheckinAseetFilename $formLayout $button`;
+	else if ($selectTabIndex == 2)
+		$buf = `zwShanghaiCheckinAnimationFilename $formLayout $button`;
+	
+	return $buf;
+}
+
+global proc string[] zwShanghaiCheckinAseetFilename(string $formLayout, string $button)
+{
+	string $asset, $description, $zwShanghaiCheckinDestFolder, $mode;
+
+	button -edit -enable false -label "Checkin" $button;
+
+	string $buf[] = `formLayout -query -childArray $formLayout`;
+	for ($child in $buf)
+		deleteUI $child;
+
+	setParent $formLayout;
+
+	string $textProject = `text -label "Project"`;
+	string $textAsset = `text -label "Asset"`;
+	string $textDescription = `text -label "Description"`;
+	string $textLod = `text -label "Lod"`;
+	string $textPp = `text -label "Pp"`;
+	string $textVersion = `text -label "Version"`;
+	string $textFilename = `text -label "Filename: "`;
+	string $textFieldProject = `textField -width 40 -editable false`;
+	string $textUnderline1 = `text -label "_"`;
+	string $textFieldAsset = `textField -editable false`;
+	string $textUnderline2 = `text -label "_"`;
+	string $textFieldDescription = `textField -editable false`;
+	string $textUnderline3 = `text -label "_"`;
+	string $textFieldLod = `textField -width 40 -editable false`;
+	string $textUnderline4 = `text -label "_"`;
+	string $textFieldPp = `textField -width 40 -editable false`;
+	string $textUnderline5 = `text -label "_"`;
+	string $textFieldVersion = `textField -width 40 -editable false`;
+	string $textExt = `text -label ".mb"`;
+
+	formLayout -edit
+		-attachOppositeControl	$textProject		"left"		0	$textFieldProject
+		-attachControl		$textProject		"bottom"	0	$textFieldProject
+
+		-attachOppositeControl	$textAsset		"left"		0	$textFieldAsset
+		-attachControl		$textAsset		"bottom"	0	$textFieldAsset
+
+		-attachOppositeControl	$textDescription	"left"		0	$textFieldDescription
+		-attachControl		$textDescription	"bottom"	0	$textFieldDescription
+
+		-attachOppositeControl	$textLod		"left"		0	$textFieldLod
+		-attachControl		$textLod		"bottom"	0	$textFieldLod
+
+		-attachOppositeControl	$textPp			"left"		0	$textFieldPp
+		-attachControl		$textPp			"bottom"	0	$textFieldPp
+
+		-attachOppositeControl	$textVersion		"left"		0	$textFieldVersion
+		-attachControl		$textVersion		"bottom"	0	$textFieldVersion
+
+		-attachOppositeControl	$textFilename		"bottom"	0	$textFieldProject
+		-attachControl		$textFilename		"right"		0	$textFieldProject
+
+		-attachForm		$textFieldProject	"left"		120
+		-attachForm		$textFieldProject	"bottom"	0
+
+		-attachControl		$textUnderline1		"left"		2	$textFieldProject
+		-attachOppositeControl	$textUnderline1		"bottom"	0	$textFieldProject
+
+		-attachControl		$textFieldAsset		"left"		0	$textUnderline1
+		-attachForm		$textFieldAsset		"bottom"	0
+		-attachPosition		$textFieldAsset		"right"		0	50
+
+		-attachControl		$textUnderline2		"left"		2	$textFieldAsset
+		-attachOppositeControl	$textUnderline2		"bottom"	0	$textFieldProject
+
+		-attachControl		$textFieldDescription	"left"		0	$textUnderline2
+		-attachOppositeControl	$textFieldDescription	"bottom"	0	$textFieldProject
+		-attachControl		$textFieldDescription	"right"		2	$textUnderline3
+
+		-attachOppositeControl	$textUnderline3		"bottom"	0	$textFieldProject
+		-attachControl		$textUnderline3		"right"		0	$textFieldLod
+
+		-attachOppositeControl	$textFieldLod		"bottom"	0	$textFieldProject
+		-attachControl		$textFieldLod		"right"		2	$textUnderline4
+
+		-attachOppositeControl	$textUnderline4		"bottom"	0	$textFieldProject
+		-attachControl		$textUnderline4		"right"		0	$textFieldPp
+
+		-attachOppositeControl	$textFieldPp		"bottom"	0	$textFieldProject
+		-attachControl		$textFieldPp		"right"		2	$textUnderline5
+
+		-attachOppositeControl	$textUnderline5		"bottom"	0	$textFieldProject
+		-attachControl		$textUnderline5		"right"		0	$textFieldVersion
+
+		-attachOppositeControl	$textFieldVersion	"bottom"	0	$textFieldProject
+		-attachForm		$textFieldVersion	"right"		40
+
+		-attachControl		$textExt		"left"		0	$textFieldVersion
+		-attachOppositeControl	$textExt		"bottom"	0	$textFieldProject
+	$formLayout;
+
+	string $sceneName = `file -query -sceneName`;
+	if ($sceneName == "")
+		error "请先打开需要Checkin 的场景";
+
+	if (!`filetest -f $sceneName`)
+		error ("文件不存在：" + $sceneName);
+
+	tokenize $sceneName "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	
+	string $ext = `match "[.]mb$" $filename`;
+	if ($ext == "")
+		error "必须是mb 或者ma 文件";
+	text -edit -label $ext $textExt;
+
+	if (`size $filename` == `size $ext`)
+		error "文件名应该类似于Project_Asset_Description_Lod_Pp_version.mb";
+
+	string $str = `substring $filename 1 (size($filename) - size($ext))`;
+	int $size = `tokenize $str "_" $buf`;
+	if($size != 5 && $size != 6 && $size != 7)
+		error "文件名应该类似于Project_Asset_Description_Lod_Pp_version.mb";
+		
+	string $project = $buf[0];
+	if($project !=  "br")
+		error "Project 应该为br 代表Bratz";
+	textField -edit -text $project $textFieldProject;
+
+	string $pp = $buf[size($buf)-2];
+	if ($pp == "ef")
+		$mode = "3deffect";
+	else if ($pp == "mo")
+		$mode = "model";
+	else if ($pp == "ik")
+		$mode = "setup";
+	else if ($pp == "tx")
+		$mode = "texture";
+	else if ($pp == "ms")
+		$mode = "master";
+	else
+		error "Pp 应该为ef、mo、ik、tx 或者ms";
+	textField -edit -text $pp $textFieldPp;
+
+	if ($size == 5)
+	{
+		$asset = $buf[1];
+		$description = "";
+		$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/background/" + $asset + "/" + $mode;
+		if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+		{
+			$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/character/" + $asset + "/" + $mode;
+			if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+			{
+				$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/prop/" + $asset + "/" + $mode;
+				if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+					error "找不到相对应的目录";
+			}
+		}
+	}
+	else if ($size == 6)
+	{
+		$asset = $buf[1] + "_" + $buf[2];
+		$description = "";
+		$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/background/" + $asset + "/" + $mode;
+		if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+		{
+			$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/character/" + $asset + "/" + $mode;
+			if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+			{
+				$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/prop/" + $asset + "/" + $mode;
+				if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+				{
+					$asset = $buf[1];
+					$description = $buf[2];
+					$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/background/" + $asset + "/" + $mode;
+					if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+					{
+						$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/character/" + $asset + "/" + $mode;
+						if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+						{
+							$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/prop/" + $asset + "/" + $mode;
+							if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+								error "找不到相对应的目录";
+						}
+					}
+				}
+			}
+		}
+	}
+	else if ($size == 7)
+	{
+		$asset = $buf[1] + "_" + $buf[2];
+		$description = $buf[3];
+		$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/background/" + $asset + "/" + $mode;
+		if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+		{
+			$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/character/" + $asset + "/" + $mode;
+			if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+			{
+				$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Asset/prop/" + $asset + "/" + $mode;
+				if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+					error "找不到相对应的目录";
+			}
+		}
+	}
+
+	if ($mode == "master" && (`gmatch (tolower($zwShanghaiCheckinDestFolder)) "*/background/*"` || `gmatch (tolower($zwShanghaiCheckinDestFolder)) "*/character/*"`))
+	{
+		error "master 文件是系统自动生成的，请Checkin 相对应的mo 或者tx文件";
+	}
+
+	if(`match "[a-z0-9_]+" $asset` !=  $asset)
+		error "Asset 只能由小写字母和数字组成，中间可以又一个下划线";
+	textField -edit -text $asset $textFieldAsset;
+
+	if(`match "[a-zA-Z0-9]+" $description` !=  $description)
+		error "Description 只能由字母和数字组成";
+	textField -edit -text $description $textFieldDescription;
+	
+	string $lod = $buf[size($buf)-3];
+	if($lod != "l" && $lod != "m" && $lod != "h" && $lod != "a" && $lod != "c" && $lod != "f" && $lod != "y")
+		error "Lod 应该为l、m、h、a、c、f 或者y";
+	textField -edit -text $lod $textFieldLod;
+	
+	string $version = $buf[size($buf)-1];
+	if(`match "[0-9][0-9][0-9]" $version` !=  $version)
+		error "Version 应该由三位数字组成";
+	textField -edit -text $version $textFieldVersion;
+
+	$filename = `zwShanghaiCheckinVersion $zwShanghaiCheckinDestFolder $filename`;
+	button -edit -enable true -label ("Checkin -> " + $filename) $button;
+
+	zwShanghaiCheckinSetOptimize $pp;
+
+	return {$sceneName, $filename, $zwShanghaiCheckinDestFolder};
+}
+
+global proc string[] zwShanghaiCheckinAnimationFilename(string $formLayout, string $button)
+{
+	string $zwShanghaiCheckinDestFolder, $mode;
+
+	button -edit -enable false -label "Checkin" $button;
+
+	string $buf[] = `formLayout -query -childArray $formLayout`;
+	for ($child in $buf)
+		deleteUI $child;
+
+	setParent $formLayout;
+
+	string $textProject = `text -label "Project"`;
+	string $textEpisode = `text -label "Episode"`;
+	string $textScene = `text -label "Scene"`;
+	string $textDescription = `text -label "Description"`;
+	string $textPp = `text -label "Pp"`;
+	string $textVersion = `text -label "Version"`;
+	string $textFilename = `text -label "Filename: "`;
+	string $textFieldProject = `textField -width 40 -editable false`;
+	string $textUnderline1 = `text -label "_"`;
+	string $textFieldEpisode = `textField -editable false`;
+	string $textUnderline2 = `text -label "_"`;
+	string $textFieldScene = `textField -editable false`;
+	string $textUnderline3 = `text -label "_"`;
+	string $textFieldDescription = `textField -editable false`;
+	string $textUnderline4 = `text -label "_"`;
+	string $textFieldPp = `textField -width 40 -editable false`;
+	string $textUnderline5 = `text -label "_"`;
+	string $textFieldVersion = `textField -width 40 -editable false`;
+	string $textExt = `text -label ".mb"`;
+
+	formLayout -edit
+		-attachOppositeControl	$textProject		"left"		0	$textFieldProject
+		-attachControl		$textProject		"bottom"	0	$textFieldProject
+
+		-attachOppositeControl	$textEpisode		"left"		0	$textFieldEpisode
+		-attachControl		$textEpisode		"bottom"	0	$textFieldEpisode
+
+		-attachOppositeControl	$textScene		"left"		0	$textFieldScene
+		-attachControl		$textScene		"bottom"	0	$textFieldScene
+
+		-attachOppositeControl	$textDescription	"left"		0	$textFieldDescription
+		-attachControl		$textDescription	"bottom"	0	$textFieldDescription
+
+		-attachOppositeControl	$textPp			"left"		0	$textFieldPp
+		-attachControl		$textPp			"bottom"	0	$textFieldPp
+
+		-attachOppositeControl	$textVersion		"left"		0	$textFieldVersion
+		-attachControl		$textVersion		"bottom"	0	$textFieldVersion
+
+		-attachOppositeControl	$textFilename		"bottom"	0	$textFieldProject
+		-attachControl		$textFilename		"right"		0	$textFieldProject
+
+		-attachForm		$textFieldProject	"left"		120
+		-attachForm		$textFieldProject	"bottom"	0
+
+		-attachControl		$textUnderline1		"left"		2	$textFieldProject
+		-attachOppositeControl	$textUnderline1		"bottom"	0	$textFieldProject
+
+		-attachControl		$textFieldEpisode	"left"		0	$textUnderline1
+		-attachForm		$textFieldEpisode	"bottom"	0
+		-attachPosition		$textFieldEpisode	"right"		0	40
+
+		-attachControl		$textUnderline2		"left"		2	$textFieldEpisode
+		-attachOppositeControl	$textUnderline2		"bottom"	0	$textFieldProject
+
+		-attachControl		$textFieldScene		"left"		0	$textUnderline2
+		-attachOppositeControl	$textFieldScene		"bottom"	0	$textFieldProject
+		-attachPosition		$textFieldScene		"right"		0	60
+
+		-attachControl		$textUnderline3		"left"		2	$textFieldScene
+		-attachOppositeControl	$textUnderline3		"bottom"	0	$textFieldProject
+
+		-attachControl		$textFieldDescription	"left"		0	$textUnderline3
+		-attachOppositeControl	$textFieldDescription	"bottom"	0	$textFieldProject
+		-attachControl		$textFieldDescription	"right"		2	$textUnderline4
+
+		-attachOppositeControl	$textUnderline4		"bottom"	0	$textFieldProject
+		-attachControl		$textUnderline4		"right"		0	$textFieldPp
+
+		-attachOppositeControl	$textFieldPp		"bottom"	0	$textFieldProject
+		-attachControl		$textFieldPp		"right"		2	$textUnderline5
+
+		-attachOppositeControl	$textUnderline5		"bottom"	0	$textFieldProject
+		-attachControl		$textUnderline5		"right"		0	$textFieldVersion
+
+		-attachOppositeControl	$textFieldVersion	"bottom"	0	$textFieldProject
+		-attachForm		$textFieldVersion	"right"		40
+
+		-attachControl		$textExt		"left"		0	$textFieldVersion
+		-attachOppositeControl	$textExt		"bottom"	0	$textFieldProject
+	$formLayout;
+
+	string $sceneName = `file -query -sceneName`;
+	if ($sceneName == "")
+		error "请先打开需要Checkin 的场景";
+
+	if (!`filetest -f $sceneName`)
+		error ("文件不存在：" + $sceneName);
+
+	tokenize $sceneName "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	
+	string $ext = `match "[.]mb$" $filename`;
+	if ($ext == "")
+		error "必须是mb 或者ma 文件";
+	text -edit -label $ext $textExt;
+
+	if (`size $filename` == `size $ext`)
+		error "文件名应该类似于Project_Episode_Scene_Description_Pp_version.mb";
+
+	string $str = `substring $filename 1 (size($filename) - size($ext))`;
+	int $size = `tokenize $str "_" $buf`;
+	if($size != 5 && $size != 6)
+		error "文件名应该类似于Project_Episode_Scene_Description_Pp_version.mb";
+		
+	string $project = $buf[0];
+	if($project !=  "br")
+		error "Project 应该为ps 代表Bratz";
+	textField -edit -text $project $textFieldProject;
+
+	string $episode = $buf[1];
+//	if(`match "[0-9][0-9][0-9]" $episode` !=  $episode && `match "[0-9][0-9][0-9][a-z]" $episode` !=  $episode)
+//		error "Episode 应该为三位数字或者三位数字加一个小写字母";
+	textField -edit -text $episode $textFieldEpisode;
+
+	string $pp = $buf[size($buf)-2];
+	if ($pp == "an")
+		$mode = "anim";
+	else if ($pp == "ch")
+		$mode = "cloth";
+	else if ($pp == "ef")
+		$mode = "3deffect";
+	else if ($pp == "hr")
+		$mode = "hair";
+	else if ($pp == "lr")
+	{
+//		if (`gmatch $description "l[0-9][a-zA-Z0-9]*"`)
+//			$mode = "lr_layer";
+//		else
+			$mode = "lighting";
+	}
+	else if ($pp == "ly")
+		$mode = "layout";
+	else if ($pp == "td")
+		$mode = "td";
+	else if ($pp == "ln")
+		$mode = "line";
+	else
+		error "Pp 应该为ly、an、ch、ef、hr、lr、td 或者ln";
+	textField -edit -text $pp $textFieldPp;
+
+	string $scene = $buf[2];
+//	if ($pp == "ly")
+//	{
+//
+//
+//
+//	}
+//	else if(`match "[0-9][0-9][0-9]" $scene` !=  $scene && `match "[0-9][0-9][0-9][a-z]" $scene` !=  $scene)
+//	if(`match "[0-9][0-9][0-9]" $scene` !=  $scene && `match "[0-9][0-9][0-9][a-z]" $scene` !=  $scene)
+//		error "Scene 应该为三位数字或者三位数字加一个小写字母";
+	textField -edit -text $scene $textFieldScene;
+	
+	string $description = "";
+	if ($size == 6)
+		$description = $buf[3];
+	if(`match "[a-zA-Z0-9]+" $description` !=  $description)
+		error "Description 只能由字母和数字组成";
+	textField -edit -text $description $textFieldDescription;
+
+	if ($pp == "lr")
+	{
+		if (`gmatch $description "l[0-9][a-zA-Z0-9]*"`)
+			$mode = "lr_layer";
+		else
+			$mode = "lighting";
+	}
+	
+	string $version = $buf[size($buf)-1];
+	if(`match "[0-9][0-9][0-9]" $version` !=  $version)
+		error "Version 应该由三位数字组成";
+	textField -edit -text $version $textFieldVersion;
+
+	$zwShanghaiCheckinDestFolder = `getenv "IDMT_PROJECTS"` + "/Bratz/Production/Animation/episode_" + $episode + "/scene_" + $scene + "/" + $mode;
+	if (!`filetest -d $zwShanghaiCheckinDestFolder`)
+		error "找不到相对应的目录";
+ 
+	$filename = `zwShanghaiCheckinVersion $zwShanghaiCheckinDestFolder $filename`;
+	button -edit -enable true -label ("Checkin -> " + $filename) $button;
+
+	zwShanghaiCheckinSetOptimize $pp;
+
+	return {$sceneName, $filename, $zwShanghaiCheckinDestFolder};
+}
+
+global proc string zwShanghaiCheckinVersion(string $folder, string $fileName)
+{
+	string $ver, $buf[];
+	int $max;
+
+	tokenize $fileName "." $buf;
+	string $sourceName = $buf[0];
+	string $ext = `substitute $sourceName $fileName ""`;
+	$sourceName = `substring $sourceName 1 (size($sourceName) - 3)`;
+
+	$buf = `getFileList -filespec ($folder + "/" + "*" + $ext)`;
+	for ($file in $buf)
+	{
+		if (`size $file` == `size $fileName` + 1)
+		{
+			string $destName = `substitute ($ext + "$") $file ""`;
+			$ver = `match "_[cp][0-9][0-9][0-9]$" $destName`;
+			$destName = `substitute ($ver + "$") $destName ""` + "_";
+			if (`tolower $sourceName` == `tolower $destName` && $ver != "")
+			{
+				$ver = `match "[0-9][0-9][0-9]$" $ver`;
+				int $version = int($ver);
+				if ($version > $max)
+					$max = $version;
+			}
+		}
+	}
+	$max += 1;
+	if($max < 10)
+		$ver = "c00" + $max;
+	else if($max < 100)
+		$ver = "c0" + $max;
+	else
+		$ver = "c" + $max;
+
+	$fileName = $sourceName + $ver + $ext;
+
+	return $fileName;
+}
+
+global proc zwShanghaiCheckinProc(string $tabLayout, string $formLayout, string $textScrollList, string $button)
+{
+	string $buf[] = `zwShanghaiCheckinType $tabLayout $formLayout $button`;
+	string $sceneName = $buf[0];
+	string $filename = $buf[1];
+	string $zwShanghaiCheckinDestFolder = $buf[2];
+
+	int $avi = `zwShanghaiCheckinRenderedImage $textScrollList $zwShanghaiCheckinDestFolder $filename`;
+	if (`gmatch $filename "*_an_*"` && $avi == 0)
+	{
+		error "上传动画文件必须附带一个avi文件";
+	}
+
+	string $tempDir = `internalVar -userTmpDir`;
+	int $copyMaps = `optionVar -query "zwShanghaiCheckinCopyLocalMaps"`;
+	int $convert2iff = `optionVar -query "zwShanghaiCheckinConvertToIff"`;
+	int $copyHaircache = `optionVar -query "zwShanghaiCheckinCopyCache"`;
+	int $optimizeImagePlane = `optionVar -query "zwShanghaiCheckinRemoveAllImagePlanes"`;
+	int $renderBat = 0; 
+	int $progress = `optionVar -query "zwShanghaiCheckinProgress"`;
+
+	if (catch(zjCheckinClean($filename, $tempDir, $zwShanghaiCheckinDestFolder, $copyMaps, $convert2iff, $copyHaircache, $optimizeImagePlane, $renderBat, $progress)))
+	{
+		file -rename $sceneName;
+		return;
+	}
+	file -rename $sceneName;
+
+	string $rs = `zwSysFile "move" ($tempDir + $filename) ($zwShanghaiCheckinDestFolder + "/" + $filename) true`;
+	if (!`filetest -f ($zwShanghaiCheckinDestFolder + "/" + $filename)` || $rs != "")
+	{
+		error ("复制文件出错：" + $rs + "\nmove \"" + $tempDir + $filename + "\" \"" + $zwShanghaiCheckinDestFolder + "/" + $filename + "\"");
+	}
+
+	if ((`gmatch $filename "*_l_mo_*"` && `gmatch (tolower($zwShanghaiCheckinDestFolder)) "*/background/*"`) || (`gmatch $filename "*_tx_*"` && (`gmatch (tolower($zwShanghaiCheckinDestFolder)) "*/background/*"` || `gmatch (tolower($zwShanghaiCheckinDestFolder)) "*/character/*"`)))
+	{
+		string $reference = $zwShanghaiCheckinDestFolder + "/" + $filename;
+		if (`gmatch $filename "*_l_mo_*"`)
+		{
+			$reference = `substitute "/model/" $reference "/master/"`;
+			$reference = `substitute "_mo_c[0-9][0-9][0-9][.]" $reference "_ms_c000."`;
+		}
+		else if (`gmatch $filename "*_tx_*"`)
+		{
+			$reference = `substitute "/texture/" $reference "/master/"`;
+			$reference = `substitute "_tx_c[0-9][0-9][0-9][.]" $reference "_ms_c000."`;
+		}
+		$rs = `zwSysFile "copy" ($zwShanghaiCheckinDestFolder + "/" + $filename) $reference true`;
+		if (!`filetest -f $reference` || $rs != "")
+			error ("复制文件出错：" + $rs + "\ncopy \"" + $zwShanghaiCheckinDestFolder + "/" + $filename + "\" \"" + $reference + "\"");
+	}
+
+	string $comments = `scrollField -query -text "scrollFieldComments"`;
+	if (strip($comments) != "")
+	{
+		string $txt = `substitute "[^.]+$" $filename "txt"`;
+		int $fileId = `fopen ($tempDir + $txt) "w"`;
+		fprint $fileId $comments;
+		fclose $fileId;
+
+		zwSysFile "move" ($tempDir + $txt) ($zwShanghaiCheckinDestFolder + "/" + $txt) true;
+	}
+
+	zwShanghaiCheckinHistory $filename $zwShanghaiCheckinDestFolder;
+
+	confirmDialog -title "Checkin Tool for Shanghai" -message ("Checkin 成功\n" + $filename) -button "OK";
+	deleteUI zwShanghaiCheckin;
+}
+
+// ---------------------------------------------- Rendered Images -----------------------------------------------------------------------------------
+global proc int zwShanghaiCheckinRenderedImage(string $textScrollList, string $folder, string $mb)
+{
+	int $count = 0;;
+
+	string $ver, $buf1[];
+
+	$mb = `match "[^.]+" $mb`;
+	string $buf[] = `textScrollList -query -allItems $textScrollList`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		tokenize $buf[$i] "." $buf1;
+		string $ext = $buf1[size($buf1)-1];
+		$ext = `tolower $ext`;
+
+		int $index = $i + 1;
+		if($index < 10)
+			$ver = "000" + $index;
+		else if($index < 100)
+			$ver = "00" + $index;
+		else if($index < 10)
+			$ver = "0" + $index;
+		else
+			$ver = "" + $index;
+
+		string $fileName = $mb + "." + $ver + "." + $ext;
+
+		string $rs = `zwSysFile "copy" $buf[$i] ($folder + "/" + $fileName) true`;
+		if (!`filetest -f ($folder + "/" + $fileName)` || $rs != "")
+			error ("复制文件出错：" + $rs + "\ncopy \"" + $buf[$i] + "\" \"" + $folder + "/" + $fileName + "\"");
+
+		textScrollList -edit -removeItem $buf[$i] $textScrollList;
+
+		if ($ext == "avi")
+		{
+			$count ++;
+		}
+	}
+
+	return $count;
+}
+
+// ---------------------------------------------- History -------------------------------------------------------------------------------------------
+global proc zwShanghaiCheckinHistory(string $fileName, string $folder)
+{
+	string $path = substituteAllString($folder + "/" + $fileName, "/", "\\");
+	string $cmd = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\bin\\idmtHistory.exe \"" + $path + "\"";
+	system($cmd);
+}
+
+global proc zwShanghaiCheckinSetOptimize(string $mode)
+{
+	optionVar -intValue "zwShanghaiCheckinCopyLocalMaps" (!($mode == "an" || $mode == "ch" || $mode == "ef" || $mode == "ly" || $mode == "cp"));
+	optionVar -intValue "zwShanghaiCheckinConvertToIff" `optionVar -query "zwShanghaiCheckinCopyLocalMaps"`;
+	optionVar -intValue "zwShanghaiCheckinRemoveAllImagePlanes" 1;
+	optionVar -intValue "zwShanghaiCheckinCopyCache" ($mode == "ch" || $mode == "ef");
+
+	checkBoxGrp -edit -value1 `optionVar -query "zwShanghaiCheckinCopyLocalMaps"` checkBoxGrpCopyLocalMaps;
+	checkBoxGrp -edit -value1 `optionVar -query "zwShanghaiCheckinConvertToIff"` -enable1 `optionVar -query "zwShanghaiCheckinCopyLocalMaps"` checkBoxGrpConvertToIff;
+	checkBoxGrp -edit -value1 `optionVar -query "zwShanghaiCheckinRemoveAllImagePlanes"` checkBoxGrpRemoveAllImagePlanes;
+	checkBoxGrp -edit -value1 `optionVar -query "zwShanghaiCheckinCopyCache"` -enable1 `optionVar -query "zwShanghaiCheckinCopyCache"` checkBoxGrpCopyCache;
+}

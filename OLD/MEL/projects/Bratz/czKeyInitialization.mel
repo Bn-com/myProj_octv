@@ -1,0 +1,174 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ³ÂÖÙ
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//-----------------------------------------------------------------------
+//
+//  Creation Date:  August 3rd, 2006
+//
+//  Procedure Name:
+//      czKeyInitialization
+//
+//  Description:
+//
+//		This is for maya user to initialize all
+//		the keyframe.
+//
+//	
+//  Usage:
+//		None
+//
+//  Input Arguments: none
+//
+//  Return Value: None.
+//
+//----------------------------------------------------------------------
+
+// first all, get the character name
+global proc string[] getCharNames()
+{
+	int $i = 0;
+	string $charNames[];
+	string $buffer;
+
+	string $allChar[] = `ls -tr "*_MASTER" "*:*_MASTER" "*:*:*_MASTER"`;
+	for ($each in $allChar)
+	{
+		$buffer = `substring $each 1 (size($each)-7)`;
+		if (`objExists ($buffer+"_Facial_Curve")`)
+		{
+			$charNames[$i++] = $buffer;
+		}
+	}
+	return $charNames;	
+}
+
+global proc czKeyInitialization() 
+{	
+	// source slResetPose
+	source generateChannelMenu.mel;
+
+	// remove namespace if there is any
+	// catch(`zjRemoveNamespace`);
+
+	// turn off autoKeyframe
+	autoKeyframe -state false;
+
+	// character name
+	string $char[] = `getCharNames`;
+	
+	// char_set loop
+	for ($each in $char)
+	{
+		// select all set members
+		string $setMem[] = `sets -q ($each+"_set")`;	 
+
+		// unlock MASTER channels
+		if (!`referenceQuery -isNodeReferenced ($each+"_MASTER")`)
+		{
+			CBunlockAttr ($each+"_MASTER.tx");
+			CBunlockAttr ($each+"_MASTER.ty");
+			CBunlockAttr ($each+"_MASTER.tz");
+			CBunlockAttr ($each+"_MASTER.rx");
+			CBunlockAttr ($each+"_MASTER.ry");
+			CBunlockAttr ($each+"_MASTER.rz");
+			CBunlockAttr ($each+"_MASTER.sx");
+			CBunlockAttr ($each+"_MASTER.sy");
+			CBunlockAttr ($each+"_MASTER.sz");
+		}
+		// current time: 43 and setKeyfra
+		currentTime 43;
+		setKeyframe -time 43 -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 $setMem;
+
+		// time: 30 and setKeyframe settings
+		for($item in $setMem)
+		{
+			string $anCurve[] = `listConnections -type animCurve $item`;
+			for ($this in $anCurve)
+			{
+				if((`findKeyframe -time 29 $this`!=30)&&(`findKeyframe -time 42 -which next $this`==43));
+				{
+					selectKey -r -k -t 43 $this;
+					keyTangent -lock off;
+					selectKey -r -it -t 43 $this;
+					keyTangent -itt flat -ott flat;
+
+					float $temp[] = `keyframe -at $this -t 43 -q -eval`;
+					setKeyframe -time 30 -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 -v $temp[0] $this;
+					selectKey -r -k -t 30 $this;
+					keyTangent -lock off;
+					selectKey -r -ot -t 30 $this;
+					keyTangent -itt flat -ott flat;
+				}
+			}
+
+
+		}
+
+		// current time: 0
+		// reset to initial state and setKeyframe
+
+		select -r -ne ($each+"_set");
+		catch(`slResetPose`);
+		setKeyframe -time 0 -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 $setMem;
+
+		// current time: -31
+		// reset to initial state and setKeyframe
+		if (`findKeyframe -t -32 -which next ($each + "_MASTER")` == -31)
+			{
+				string $rem[] = {($each + "_MASTER")};
+				$setMem = stringArrayRemove($rem, $setMem);
+			}
+		select -r -ne ($each+"_set");
+		catch(`slResetPose`);
+		setKeyframe -time -31 -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 $setMem;
+
+		// operation on char-MASTER
+		string $anCurvMASTER[] = `listConnections -type animCurve ($each+"_MASTER")`;
+		for ($this in $anCurvMASTER)
+		{		
+			if(`findKeyframe -time 42 -which next $this`==43);
+			{
+					selectKey -r -k -t 43 $this;
+					keyTangent -lock off;
+					selectKey -r -it -t 43 $this;
+					keyTangent -itt flat -ott flat;
+
+					float $temp[] = `keyframe -at $this -t 43 -q -eval`;
+					setKeyframe -time 0 -breakdown 0 -hierarchy none -controlPoints 0 -shape 0 -v $temp[0] $this;
+					selectKey -r -k -t 0 $this;
+					keyTangent -lock off;
+					selectKey -r -ot -t 0 $this;
+					keyTangent -itt flat -ott flat;
+			}
+		}
+
+		// lock MASTER channels
+		if (!`referenceQuery -isNodeReferenced ($each+"_MASTER")`)
+		{
+			setAttr -lock true ($each+"_MASTER.tx");
+			setAttr -lock true ($each+"_MASTER.ty");
+			setAttr -lock true ($each+"_MASTER.tz");
+			setAttr -lock true ($each+"_MASTER.rx");
+			setAttr -lock true ($each+"_MASTER.ry");
+			setAttr -lock true ($each+"_MASTER.rz");
+			setAttr -lock true ($each+"_MASTER.sx");
+			setAttr -lock true ($each+"_MASTER.sy");
+			setAttr -lock true ($each+"_MASTER.sz");
+		}
+
+	}	
+	select -clear;
+
+	// go to frame 43
+	currentTime 43;
+
+	// turn autokeyframe on
+	autoKeyframe -state true;
+}

@@ -1,0 +1,86 @@
+global proc zwCheckinWinxLighting()
+{
+	string $path = `file -query -sceneName`;
+	$sceneName = `match "[^/\\]+$" $path`;
+
+	string $project = zwGetProject($sceneName);
+	string $mode = zwGetMode($sceneName);
+	string $destFolder = zwGetPath("scene", $sceneName);
+	if (!zwIsRainbowProject($project) || !($mode == "lighting" || $mode == "vfx") || $destFolder == "")
+	{
+		error "\n文件命名不规范！\n自动Checkin失败！";
+	}
+
+	if ($mode == "lighting")
+	{
+	// 修改为相对路径
+	string $workspace = `substitute "/scenes/.*" $destFolder ""`;
+	workspace -openWorkspace $workspace;
+	if (catch(`zwDeliveryFile "cacheFile" "cachePath" "data"`))	// Geometry Cache
+	{
+//		error "\n将Geometry Cache修改为相对路径失败！自动Checkin失败！";
+	}
+	}
+
+	string $doby = `getenv "USERNAME"`;
+	string $edition = `about -version`;
+
+	int $sizeByte = `idmtFile -size $path`;
+	int $size = $sizeByte / 1024;
+	if ($sizeByte % 1024 != 0)
+	{
+		$size ++;
+	}
+
+	string $argv = $sceneName + "|" + $doby + "|" + $edition + "|" + $size;
+
+	// 生成记录
+	putenv "IDMTPROXY_RETRY" "4";
+	string $rs = `idmtService "CheckinBatch" $argv`;
+	putenv "IDMTPROXY_RETRY" "1";
+
+	if ($rs == "")
+	{
+		error "\n生成数据库记录错误！自动Checkin失败！";
+	}
+
+	string $filename = `match "[^@]+$" $rs`;
+
+	if ($mode == "lighting")
+{
+	//	修改hair cache 为data\xxxxx
+	zjSetHaircache;
+}
+
+	// 存盘
+	string $temp = `internalVar -userTmpDir` + $filename;
+	sysFile -delete $temp;
+	file -rename $temp;
+	file -force -save;
+
+	if ($mode == "lighting")
+	{
+	// 上传头发cache
+	$workspace = `substitute "/scenes/.*" $path ""`;
+	workspace -openWorkspace $workspace;
+	eval "source \"zjCheckinClean.mel\"";
+	if (catch(`zwHairCacheEx $filename`))
+	{
+//		error "\n上传头发cache失败！自动Checkin失败！";
+	}
+}
+
+	// 上传
+	string $dest = $destFolder + "/" + $filename;
+	string $checkin = `zwSysFile "move" $temp $dest true`;
+	if ($checkin != "")
+	{
+		error "\n上传文件失败！自动Checkin失败！";
+	}
+
+	// tmp
+	string $history = zwGetPath("history", $sceneName) + "/" + $rs;
+	zwSysFile "copy" $dest $history true;
+
+	print "Checkin成功！";
+}

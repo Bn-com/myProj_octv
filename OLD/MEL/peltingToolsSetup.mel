@@ -1,0 +1,262 @@
+/* 
+PELTING TOOLS: UV UNWRAPPING FOR MAYA
+Copyright (C) 2005-2006  SUNIT PAREKH
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ */
+
+
+//**************************************************************************
+//
+//				PELTING TOOLS SETUP 
+//
+//**************************************************************************
+
+global proc string pts_pelting_tools_version()
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc returns the latest version 
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	return "1.5.1";
+}	
+
+global proc string pts_pelting_tools_date()
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc returns the latest version 
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	return "January 26th 2006";
+}
+
+
+proc int pts_pluginQuery(string $type)
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc checks that the proper plugins are loaded
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	switch ($type){
+		case "attractors":
+			if (!(`pluginInfo -q -l closestPointOnCurve`)){
+				warning "closestPointOnCurve plugin needs to be loaded for SPRING ATTRACTORS";
+				return 0;
+				}
+			break;
+		case "tweak":
+			if (!(`pluginInfo -q -l closestPointOnMesh`)){
+				warning "closestPointOnMesh plugin needs to be loaded for UV TWEAK!";
+				return 0;
+				}
+			if (!(`pluginInfo -q -l pointOnMeshInfo`)){
+				warning "pointOnMeshInfo plugin needs to be loaded for UV TWEAK!";
+				return 0;
+				}
+			break;
+		case "all":
+			pts_pluginQuery("tweak");
+			pts_pluginQuery("attractors");
+			break;
+		}
+return 1;
+}
+
+
+proc int pts_iconCheck()
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc checks that the proper icons are loaded
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	int $continue = 0;
+	string $found[];
+	string $sep;
+	
+	if (`about -nt`)
+		$sep = ";";
+	
+	if (`about -linux` || `about -mac`)
+		$sep = ":";
+	
+	string $icons[] = {	"peltingTools/pelt_default.xpm",
+				"peltingTools/pelt_icon.xpm",
+				"peltingTools/pelt_normals.xpm",
+				"peltingTools/pelt_down_arrow_default.xpm",
+				"peltingTools/pelt_right_arrow_default.xpm",
+				"peltingTools/Checker.png"};
+
+	string $env=`getenv XBMLANGPATH`;
+	string $paths[];
+	tokenize $env $sep $paths;
+	$paths[size($paths)] = `internalVar -ubd`;
+
+	for ($path in $paths){
+		if (`match "%B$" $path` != "")
+			$path = `substring $path 1 (size($path) - 2)`;
+		for ($icon in $icons){
+			if (`filetest -r ($path+"/"+$icon)`){
+				$found[size($found)] = $icon;
+				}
+			}
+			
+		}
+
+	for ($icon in $icons)
+		if (stringArrayCount($icon, $found) == 0)
+			return 0;
+	
+
+	return 1;
+	
+}
+
+proc int pts_scriptsCheck()
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc checks that the proper scripts exist
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	int $continue = 1;
+	string $sep;
+	string $scripts[]={	"peltingTools/peltingTools.mel",
+				"peltingTools/pts_uv_tools.mel", 
+				"peltingTools/pts_layout_tools.mel",
+				"peltingTools/pts_deletion_tools.mel",
+				"peltingTools/pts_selection_tools.mel",
+				"peltingTools/pts_omtoolbox.mel",
+				"peltingTools/pts_global_utilities.mel",
+				"peltingTools/pts_edge_tools.mel"	};	
+ 
+	string $found[];
+	
+	if (`about -nt`)
+		$sep = ";";
+	
+	if (`about -linux` || `about -mac`)
+		$sep = ":";
+	
+	string $internal = `internalVar -usd`;
+	string $env = `getenv "MAYA_SCRIPT_PATH"`;
+	string $paths[];
+	tokenize $env $sep $paths;
+	
+	$paths[size($paths)] = $internal;
+	
+	for ($path in $paths){
+		for ($script in $scripts)
+			if (`filetest -r ($path+"/"+$script)`){
+				$found[size($found)] = $script;
+				}
+			
+		}
+	
+		
+	for ($script in $scripts)
+		if (stringArrayCount($script, $found) == 0)
+			return 0;
+	
+	return 1;
+}
+
+global proc int pts_checkLoad(string $type)
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc checks some basic things when you run 
+//				peltingTools
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	switch ($type){
+		case "tweak":
+			return pts_pluginQuery($type);
+			break;
+		case "attractors":
+			return pts_pluginQuery($type);
+			break;
+		case "all":
+			return pts_pluginQuery($type);
+			break;
+		}
+}
+
+
+
+	
+global proc peltingToolsSetup()
+/////////////////////////////////////////////////////////////////////////////////////
+//
+//		Description: 	This proc sets up the shelf icons and check various 
+//				other paths
+//
+/////////////////////////////////////////////////////////////////////////////////////
+{
+	int $continue = 1;
+	if (pts_scriptsCheck() == 0){
+		warning "Please put pelting scripts folder into a scripts directory!";
+		return;
+		}
+	if (pts_iconCheck() == 0){
+		warning "Please put pelting icons into an icons directory!";
+		return;
+		}
+	if (pts_pluginQuery("all") == 0){
+		warning "Please put pelting plugins into a plugins directory!";
+		// return;
+		}
+
+	string $version = pts_pelting_tools_version();
+	string $currentAnn = "Pelting Tools "+$version+": by sunit parekh";
+	global string $gShelfTopLevel;
+
+	if (`tabLayout -exists $gShelfTopLevel`) {
+		string $ann;
+		string $currentShelf = `tabLayout -query -selectTab $gShelfTopLevel`;
+		setParent $currentShelf;
+		string $buttonList[] = `shelfLayout -q -childArray $currentShelf`;
+		for ($button in $buttonList){
+			$ann = `shelfButton -q -annotation $button`;
+			if (`gmatch $ann ("*Pelting Tools*")`){
+				if ($ann == $currentAnn){
+					shelfLayout -e -pos $button (size($buttonList)) $currentShelf;
+					print "Pelting Shelf Button already exists: Moving Pelting Button to end";
+					return;
+					}
+				else{
+					deleteUI -control $button;
+					print "Updating Pelting Tools with New One";
+					}
+				}
+			}
+			
+		shelfButton 
+			-command "source \"peltingTools/peltingTools.mel\";peltingTools;"
+			-label "Pelting Tools"
+			-annotation ("Pelting Tools "+$version+": by sunit parekh")
+			-image1 "peltingTools/pelt_shelf_icon.xpm"
+			-style `shelfLayout -query -style $currentShelf`
+			-width `shelfLayout -query -cellWidth $currentShelf`
+			-height `shelfLayout -query -cellHeight $currentShelf`;
+		print "Pelting Tools Successfully Setup";
+			
+		}
+	else
+		warning "Shelf Tabs not visible.  Failed to make Pelting Button!";
+}

@@ -1,0 +1,86 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc string kcCrowdSpeedMultiplier(string $input, float $speed)
+{
+	if ($input == "")
+		error("Please select a MASTER node.");
+
+	// create multiply divide node
+
+	string $multiply = `createNode -name crowdSpeedMultiply multiplyDivide`;
+
+	string $unitToTimeConversion = `createNode unitToTimeConversion`;
+	setAttr ($unitToTimeConversion + ".conversionFactor") 250;
+
+	connectAttr -force "time1.outTime" ($multiply + ".input1X");
+	connectAttr -force ($multiply + ".outputX") ($unitToTimeConversion + ".input"); 
+
+	//for ($item in $selected)
+	{
+		select -hierarchy $input;
+		string $nodes[] = `ls -selection`;
+
+		for ($node in $nodes)
+		{
+			string $history[] = `listHistory $node`;
+
+			for ($historyNode in $history)
+				if ((`nodeType $historyNode` == "animCurveTA") ||
+					(`nodeType $historyNode` == "animCurveTL") ||
+					(`nodeType $historyNode` == "animCurveTT") ||
+					(`nodeType $historyNode` == "animCurveTU"))
+				{
+					connectAttr -force ($unitToTimeConversion + ".output") ($historyNode + ".input");
+				}
+		}
+	}
+
+	// set the input attribute of the speed multiplier to 'speed'
+	setAttr ($multiply + ".input2X") $speed;
+
+	return $multiply;
+}
+
+global proc string[] tnpCrowdSpeedVariation(float $min, float $max){
+// select a set of MASTER nodes (order is important)
+// return an array of speedMultipliers
+
+	global string	$crowdParticle;
+	global string	$crowdSpeedMultipliers[];
+
+	string $multipliers[];
+
+	string $selected[] = `ls -selection`;
+
+	if(size($selected) == 0)
+		error "You must select at least a master node";
+	waitCursor -state on;
+	for($item in $selected){
+		print("PROCESS: " + $item + "\n");
+		float $speed = rand($min, $max);
+		$multipliers[size($multipliers)] = kcCrowdSpeedMultiplier($item, $speed);
+	}	
+	waitCursor -state off;
+
+	// save the new speed multipliers to the particle object
+	string $s_speeds;
+	for($i=0; $i<size($multipliers); $i++){
+		if ($i != size($multipliers) - 1) 
+			$s_speeds += $multipliers[$i] + ";";
+		else
+			$s_speeds += $multipliers[$i];
+	}
+	if(size($crowdParticle) !=0)
+		setAttr ($crowdParticle + ".crowdSpeedMultipliers") -type "string" $s_speeds;
+	
+	$crowdSpeedMultipliers = $multipliers;
+	return $crowdSpeedMultipliers;
+}

@@ -1,0 +1,399 @@
+//proc reference
+global proc string[] s100findAllReferenceNode()
+{
+	string $tmp2[] = sort(`s100findAllSceneReferences`);
+	string $return[] ;
+	for($i = 0 ; $i < size($tmp2) ; $i++)
+	{
+		$return[$i] = `file -q -referenceNode $tmp2[$i] `;
+    }
+	return $return ;
+}
+
+
+//remove this string from array
+global proc string [] s100removeClassicRefFromArray(string $array[])
+{
+	string $re2[] ;
+	string $re[]  = {"RefRN","*:*:RefRN","*:RefRN","UI","*:UI","*:*:UI","sharedReferenceNode","*:sharedReferenceNode","*:*:sharedReferenceNode","_UNKNOWN_REF_NODE_","*:_UNKNOWN_REF_NODE_"} ;
+	$j = 0 ;
+	for($i = 0 ; $i < size($array) ; $i++)
+	{
+		$ch = 0 ;
+		for($k = 0 ; $k < size($re) ; $k++)
+		{
+			if(`gmatch $array[$i] $re[$k]`)
+			{
+				$ch = 1 ;
+				break ;
+            }
+        }
+
+		if($ch == 0 )
+		{
+			$re2[$j] = $array[$i] ;
+			$j++;
+        }else{
+			//print ("\nno " + $array[$i] ) ;
+        }
+	}
+	string $lRe[] = stringArrayRemoveDuplicates($re2) ;
+	return $lRe ;
+}
+
+global proc s100conformRef()
+{
+	string $existingRefs[]  = sort(`s100findAllReferenceNode`);
+	string $allRefs[]  = `ls -type reference `;
+	string $allRefsClean[]= stringArrayRemoveExact({"sharedReferenceNode"} , $allRefs ) ;
+	string $toDelete[];
+	if(size($allRefsClean) > size($existingRefs) )
+	{
+		$toDelete = stringArrayRemoveExact( $existingRefs , $allRefsClean ) ;
+    }
+	//clear  $toDelete ;
+	print $toDelete ;
+	for($tmp in $toDelete)
+	{
+		if(`referenceQuery -isNodeReferenced $tmp `)
+		{
+			warning "bad reference is scene !";
+        } else{
+			lockNode -l 0 $tmp ;
+			delete $tmp ;
+        }
+    }
+}
+
+global proc string s100findReferenceNodeForRefPath(string $path )
+{
+	$refNode = `file -q -rfn $path ` ;
+	return $refNode ;
+}
+
+global proc string[] s100findAllSceneReferences()
+{
+	string $allReferences[];
+	string $topLevelReferences[] = `file -q -r`;
+	for ($eachReference in $topLevelReferences)
+	{
+		string $nestedReferencesForEachFile[] = `s100findContainedReferences $eachReference`;
+		$allReferences = `stringArrayCatenate  $allReferences $nestedReferencesForEachFile`;
+	}
+	return $allReferences;
+}
+
+
+global proc string[] s100findContainedReferences(string $file)
+{
+	// recursive
+	string $filesFoundSoFar[];
+	$filesFoundSoFar[`size $filesFoundSoFar`] = $file; //add file to results
+	string $nestedReferencesFromFile[] =  `file -q -r  $file`;
+	if (`size $nestedReferencesFromFile`)
+	{
+		for ($eachFile in  $nestedReferencesFromFile)
+		{
+			string $EachFileReferences[] = `s100findContainedReferences $eachFile`;
+			$filesFoundSoFar = `stringArrayCatenate $EachFileReferences $filesFoundSoFar`;
+		}
+	}
+	return  $filesFoundSoFar;
+}
+
+
+global proc string[] s100findAllLoadReferenceNode()
+{
+	string $ref[] = `s100findAllSceneReferences`;
+	string $refN[];
+	string $return[] ;
+	$j = 0 ;
+	for ($i = 0; $i < size($ref) ; $i++)
+	{
+		$refN[$i] = `s100findReferenceNodeForRefPath($ref[$i]) `;
+		if(!`file -q -deferReference  $ref[$i]  `)
+		{
+			$return[$j]  = 	$refN[$i] ;
+			$j++ ;
+        }
+    }
+	return $return ;
+}
+
+
+global proc string[] s100findAllLoadReferencePath()
+{
+	string $ref[] = `s100findAllSceneReferences`;
+	string $refN[];
+	string $return[] ;
+	$j = 0 ;
+	for ($i = 0; $i < size($ref) ; $i++)
+	{
+		$refN[$i] = `s100findReferenceNodeForRefPath($ref[$i]) `;
+		if(!`file -q -deferReference  $ref[$i]  `)
+		{
+			$return[$j]  = 	$ref[$i] ;
+			$j++ ;
+        }
+    }
+	return $return ;
+}
+
+
+global proc string[] s100findAllUnLoadReferenceNode()
+{
+	string $ref[] = `s100findAllSceneReferences`;
+	string $refN[];
+	string $return[] ;
+	$j = 0 ;
+	for ($i = 0; $i < size($ref) ; $i++)
+	{
+		$refN[$i] = `s100findReferenceNodeForRefPath($ref[$i]) `;
+		if(`file -q -deferReference  $ref[$i]  `)
+		{
+			$return[$j]  = 	$refN[$i] ;
+			$j++ ;
+        }
+    }
+	return $return ;
+}
+
+
+/* guillaume :old proc for get namespace work only for load ref
+global proc string[] s100findAllNamespaceForRef()
+{
+	string $var[] =  (`s100findAllLoadReferenceNode`) ;
+	string $return[] ;
+	$j = 0 ;
+	for($i = 0 ; $i < size($var ) ; $i ++)
+	{
+		string $tmpA[] = `referenceQuery  -nodes $var[$i] `;
+ 		if(size($tmpA) > 0)
+		{
+			string $arr[] = stringToStringArray($tmpA[0], ":") ;
+			$return[$i] = $arr[0]  ;
+        }else{
+			$return[$i] = "unknow";
+        }
+    }
+	//print $return ;
+	return $return ;
+}
+*/
+
+global proc string[] s100findAllNamespaceForRef()
+{
+	string $var[] =  (`s100findAllReferenceNode`) ;
+	string $return[] ;
+	$j = 0 ;
+	for($i = 0 ; $i < size($var ) ; $i ++)
+	{
+		string $file = `referenceQuery  -filename $var[$i] ` ;
+		$return[$i] = `file -referenceNode $file  -q -namespace  $file `;
+    }
+	//print $return ;
+	return $return ;
+}
+
+global proc string s100findNamespaceForOnlyOneRef(string $ref)
+{
+	string $file = `referenceQuery  -filename $ref ` ;
+	string $return = `file -referenceNode $file  -q -namespace  $file `;
+	string $tmp ;
+	string $arr[] = stringToStringArray($ref, ":" ) ;
+	if(size($arr) > 1)
+	{
+		for($i = 0 ; $i < size($arr) -1; $i++)
+		{
+			$tmp += $arr[$i] +":";
+        }
+		$return = $tmp + $return;
+    }
+	//print $return ;
+	return $return ;
+}
+
+
+global proc string[] s100findAllUnLoadReferencePath()
+{
+	string $ref[] = `s100findAllSceneReferences`;
+	string $refN[];
+	string $return[] ;
+	$j = 0 ;
+	for ($i = 0; $i < size($ref) ; $i++)
+	{
+		$refN[$i] = `s100findReferenceNodeForRefPath($ref[$i]) `;
+		if(`file -q -deferReference  $ref[$i]  `)
+		{
+			$return[$j]  = 	$ref[$i] ;
+			$j++ ;
+        }
+    }
+	return $return ;
+}
+
+global proc s100loadAllDeferedNode()
+{
+	string $def[] = `s100findAllUnLoadReferenceNode`;
+	for($tmp in $def)
+	{
+		string $file = `referenceQuery  -filename $tmp ` ;
+		file -loadReference $tmp $file;
+    }
+}
+
+
+//get back reference nodes for a Array
+//	s100getRefNodeForObject($nodeAsRef)
+// 	s100getRefNodeForObject({"C_WorkerMaOriginal_01_cache_07:full_grp"}); // string $objs[] = {"C_WorkerMaOriginal_01_cache_07:full_grp"};
+global proc string[] s100getRefNodeForObject(string $objs[])
+{
+	//$objs = $nodeAsRef
+	string $allRef[] = `s100findAllReferenceNode `;
+	string $returns[] ;
+	string $list[] ;
+	for($k = 0 ; $k < size( $objs) ; $k++)
+	{
+		$returns[$k] = "unknownRefNode";
+		if(`objExists $objs[$k]`)
+		{
+			//print "\nici";
+			for($j = 0 ; $j < size($allRef) ; $j++)
+			{
+				$ch = 0 ;
+				//print ("\n check "+$allRef[$j]) ;
+				$list = `referenceQuery -nodes $allRef[$j]` ;
+				for($tmp in $list)
+				{
+					if($tmp == $objs[$k] )
+					{
+						$ch = 1 ;
+						$returns[$k] = $allRef[$j];
+						break ;
+					}
+				}
+				if($ch)
+				{
+					break ;
+				}
+			}
+			if ($returns[$k] == "unknownRefNode")
+				warning ("Couldn't find what Reference Node is \""+$allRef[$j]+"\" one! Returned as 'unknownRefNode'...");
+        }
+		//print $returns[$k]  ;
+    }
+	return $returns ;
+}
+
+
+//load all ref
+global proc int s100_importRef_withChoice(int $toDO)
+{
+	//$toDO = 0 : imported loaded ref
+	//$toDO = 1 : imported load red and unloaded
+	string $ref[] ;
+	int $ch = 0 ;
+	if($toDO)
+	{
+		string $toLoad[] = `s100findAllUnLoadReferenceNode`;
+		string $toLoadPath[] = `s100findAllUnLoadReferencePath`;
+		while(size($toLoad) > 0)
+		{
+			for($i = 0 ; $i < size($toLoad) ; $i++ )
+			{
+				catch ( `file -loadReference $toLoad[$i] $toLoadPath[$i]`);
+				print ("\n-----load ref :" +  $toLoad[$i]  ) ;
+	        }
+			clear $toLoad ;
+			clear $toLoadPath ;
+			$toLoad =  `s100findAllUnLoadReferenceNode`;
+			$toLoadPath = `s100findAllUnLoadReferencePath`;
+        }
+    }
+	$ref = `referencesLoaded`;
+	while(size($ref) > 0)
+	{
+		for($tmp in $ref)
+		{
+			file -importReference $tmp ;
+			print ("\n----import : " + $tmp) ;
+        }
+		$ch = 1 ;
+		clear $ref ;
+		$ref =  `referencesLoaded`;
+    }
+	return $ch ;
+}
+
+global proc string[] referencesLoaded()
+{
+   string $referencesLoaded[];
+   int $numLoaded = 0;
+   string $refs[] = `file -q -r`;
+   for ( $ref in $refs )
+   {
+      // If Reference is not deferred, then it is loaded
+      if ( !`file -q -dr $ref` )
+         $referencesLoaded[$numLoaded++] = $ref;
+   }
+   return $referencesLoaded;
+}
+
+
+global proc s100deleteAllReferences()
+{
+	string $toDo[] = `referencesLoaded` ;
+	while(size($toDo)> 0)
+	{
+		for($i = 0 ; $i < size($toDo) ; $i++)
+		{
+			file -importReference $toDo[$i] ;
+        }
+		clear $toDo ;
+		$toDo = `referencesLoaded` ;
+    }
+}
+
+
+/*
+	proc string[] referencesLoaded()
+	{
+	   string $referencesLoaded[];
+	   int $numLoaded = 0;
+	   string $refs[] = `file -q -r`;
+	   for ( $ref in $refs )
+	   {
+		  // If Reference is not deferred, then it is loaded
+		  if ( !`file -q -dr $ref` )
+			 $referencesLoaded[$numLoaded++] = $ref;
+	   }
+	   return $referencesLoaded;
+	}
+
+	proc unloadReferences()
+	{
+	   string $referencesLoaded[] = referencesLoaded();
+	   string $refNode;
+	   for ( $refFile in $referencesLoaded )
+	   {
+		  // Need to get node that identifies reference
+		  $refNode = `file -q -rfn $refFile`;
+		  // Now you can unload it
+		  file -ur $refNode $refFile;
+	   }
+	}
+
+	proc deleteLoadedReferences()
+	{
+	   string $referencesLoaded[] = referencesLoaded();
+	   for ( $refFile in $referencesLoaded )
+		  file -rr $refFile;
+	}
+
+	proc deleteAllReferences()
+	{
+	   string $references = `file -q -r`;
+	   for ( $refFile in $references )
+		  file -rr $refFile;
+	}
+*/

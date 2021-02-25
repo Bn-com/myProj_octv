@@ -1,0 +1,1019 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÀîÕ×ÐË
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc string findRamp(string $particleShape, string $type)
+{
+    string $ramps[] = `listConnections -source true $particleShape`;
+    if ($type == "ramp")
+        $ramps = `listConnections -source true ($ramps[0] + ".computeNode")`;
+
+    return $ramps[0];
+}
+
+
+//  ====================== fireEffect ======================
+
+global proc string zxfireEffect()
+{
+	if( `licenseCheck -type complete` == 0 )
+	{
+		warning("You are not licensed to use the Fire Effect.");
+		return "";
+	}
+
+	// Not to start on too pessimistic a note, but save all objects created so
+	// far, so they can be deleted if we have to abort.
+	//
+	string $objectsCreated[];
+	int $objectsCreatedIndex = 0;
+
+	string $fireObject;
+
+	string $emitter = "";
+	string $fire = "";
+	string $fireShape = "";
+	string $gravity = "";
+	string $turbulence = "";
+	string $drag = "";
+	string $particleCloudShader = "";
+
+	int $componentsSelected = 0;
+	string $selectedList[];
+
+	$selectedList = `ls -sl`;
+
+	if (size($selectedList) == 0)
+
+		error "select an object to own the emitter and try again.";
+		
+
+	string $resultNames[];
+
+	// Create the fire particle.
+	//
+	$resultNames = createFireParticle();
+
+
+					fireEffectSetFireAttributes $resultNames[0] 1 50 .2 .5 0 1 0 1 0 1 1;
+
+
+	if (size($resultNames) == 0)
+	{
+		warning("Unable to create fire particle. Aborting creation of fire effect.");
+		return "";
+	}
+
+	$fire = $resultNames[0];
+	$fireShape = $resultNames[1];
+
+	$objectsCreated[$objectsCreatedIndex] = $fire;
+	$objectsCreatedIndex++;
+
+	// First, we need to reestablish the selection list, so the turbulence field will be
+	// added to the fire object or fire object components, or if there was nothing
+	// selected or named as fire object, zero out the selection list so a positional
+	// emitter will be created.
+	//
+	reSelectOriginalList($selectedList);
+
+	// Create the emitter that will emit the fire particle, set its default fire
+	// parameters, and create an expression to control its rate, spread  and
+	// direction from the fire dynamic attributes "fireDensity," "fireSpread" and
+	// "fireDirection".
+	// 
+	$emitter = createFireEmitter($fireShape);
+
+	if (size($emitter) == 0)
+	{
+		warning("Unable to create fire emitter. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$objectsCreated[$objectsCreatedIndex] = $emitter;
+	$objectsCreatedIndex++;
+
+	// Connect the emitter to the fire particle.  The emitter thus emits
+	// the fire.
+	//
+	connectDynamic -em $emitter $fireShape;
+
+	// Create the turbulence field and create an expression to have its "phase"
+	// attribute increase over time and to connect its "magnitude" to the particle
+	// shape's "fireTurbulence" attribute.
+	//
+	// First, we need to reestablish the selection list, so the turbulence field will be
+	// added to the fire object or fire object components, or if there was nothing
+	// selected or named as fire object, zero out the selection list so a positional
+	// emitter will be created.
+	//
+	reSelectOriginalList($selectedList);
+
+	$turbulence = createTurbulenceField($fireShape);
+
+	if (size($turbulence) == 0)
+	{
+		warning("Unable to create fire turbulence field. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$objectsCreated[$objectsCreatedIndex] = $turbulence;
+	$objectsCreatedIndex++;
+
+	// If there is no fire object, then parent the turbulence field to the point emitter.
+	//
+	if (size($selectedList) == 0)
+		parent $turbulence $emitter;
+
+	// Create a positional drag field, that will be used to keep the fire
+	// from getting out of control.
+	//
+	$resultNames = `drag -pos 0 0 0 -magnitude 10`;
+
+	if (size($resultNames) == 0)
+	{
+		warning("Unable to create fire drag field. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$drag = $resultNames[0];
+
+	$objectsCreated[$objectsCreatedIndex] = $drag;
+	$objectsCreatedIndex++;
+
+	// Create a volumeAxis field, that will be used to keep the fire
+
+	$resultNames = `volumeAxis -pos 0 0 0  -m 5 -att 0 -ia 0 -afc 1 -afx 1 -arx 0.5 -alx 1 -drs 0 -dx 1 -dy 0 -dz 0 -trb 0 -trs 0.2 -tfx 1 -tfy 1 -tfz 1 -tox 0 -toy 0 -toz 0 -dtr 0  -mxd -1  -vsh sphere -vof 0 0 0 -vsw 360 -tsr 0.5`;
+
+	if (size($resultNames) == 0)
+	{
+		warning("Unable to create fire drag field. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$volume = $resultNames[0];
+
+	$objectsCreated[$objectsCreatedIndex] = $drag;
+	$objectsCreatedIndex++;
+
+	parent $volume $selectedList[0];
+
+	// Create the gravity field, and connect its "magnitude" to the fire particle's
+	// "fireSpeed" and its direction the fire particle's "fireDirection".
+	//
+	$gravity = createGravityField($fireShape);
+
+	if (size($gravity) == 0)
+	{
+		warning("Unable to create fire gravity field. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$objectsCreated[$objectsCreatedIndex] = $gravity;
+	$objectsCreatedIndex++;
+
+	// Connect the turbulence, gravity and drag fields to the fire particle.
+	//
+	connectDynamic -f $turbulence -f $drag  -f $gravity $fireShape;
+
+	// Create a particle cloud shader, set some of the attributes, and connect
+	// it to the fire particle.
+	//
+	$particleCloudShader = createFireParticleCloudShader($fireShape);
+
+	if (size($particleCloudShader) == 0)
+	{
+		warning("Unable to create fire shader. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	$objectsCreated[$objectsCreatedIndex] = $particleCloudShader;
+	$objectsCreatedIndex++;
+
+	// Create the color, transparency and incandescence ramps for the fire
+	// particle and set some of their attributes.
+	// Return the names of the ramps and placement maps that have been created.
+	//
+	string $texObjs[];
+
+	// If there is an error in creating the ramps, since I can't return both the
+	// names of the ramps already created and an error signal, I will just delete
+	// any ramps already created in the proc and return an empty array.
+	//
+	$texObjs = createFireShaderRamps($particleCloudShader);
+
+	if (size($texObjs) == 0)
+	{
+		warning("Unable to create fire shader ramps. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	// Add the ramps and texture placement maps to the objectsCreated array.
+	//
+	int $texObjsIndex = 0;
+	int $endIndex = $objectsCreatedIndex + size($texObjs);
+
+	for ($objectsCreatedIndex; $objectsCreatedIndex < $endIndex; $objectsCreatedIndex++)
+	{
+		$objectsCreated[$objectsCreatedIndex] = $texObjs[$texObjsIndex];
+		$texObjsIndex++;
+	}
+	clear($texObjs);
+
+	// Create a crater 3D blob map texture for the fire shader and set some
+	// of its attributes.
+	//
+	$texObjs = createFireCraterBlobMap($particleCloudShader, $fireShape);
+
+	if (size($texObjs) == 0)
+	{
+		warning("Unable to create fire blob map. Aborting creation of fire effect.");
+		cleanupObjects($objectsCreated);
+		return "";
+	}
+
+	// Add the blob texture and texture placement map to the objectsCreated array.
+	//
+	$texObjsIndex = 0;
+	$endIndex = $objectsCreatedIndex + size($texObjs);
+
+	for ($objectsCreatedIndex; $objectsCreatedIndex < $endIndex; $objectsCreatedIndex++)
+	{
+		$objectsCreated[$objectsCreatedIndex] = $texObjs[$texObjsIndex];
+		$texObjsIndex++;
+	}
+
+
+	$gp_steam = `group -n steam_grpup $gravity $fire $drag`;
+
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".tx");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".ty");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".tz");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".rx");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".ry");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".rz");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".sx");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".sy");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".sz");
+	setAttr -keyable 0 -lock 1 ($gp_steam + ".visibility");
+
+	$gp_emitter = `group -em -n steam_emitter_group`;
+
+	$selparent = `listRelatives -p $selectedList[0]`;
+
+	pointConstraint -offset 0 0 0 -weight 1 $selparent $gp_emitter;
+
+	orientConstraint -offset 0 0 0 -weight 1 $selparent $gp_emitter;
+
+	parent -w $selectedList[0];
+
+	parent $selectedList[0] $gp_emitter;
+
+	$fx_group = `group -n fx_group_steam  $texObjs[4] $gp_emitter $gp_steam`;
+
+	setAttr -keyable 0 -lock 1 ($fx_group + ".tx");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".ty");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".tz");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".rx");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".ry");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".rz");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".sx");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".sy");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".sz");
+	setAttr -keyable 0 -lock 1 ($fx_group + ".visibility");
+/*
+	addAttr -ln fireScale -at double -min 0  -dv 1 $fx_group;
+	addAttr -ln fireSpeed -at double -min 0 -dv 1 $fx_group;
+	addAttr -ln fireDirectionX -at double -min -100  -dv 0 $fx_group;
+	addAttr -ln fireDirectionY -at double -min -100  -dv 1 $fx_group;
+	addAttr -ln fireDirectionZ -at double -min -100  -dv 0 $fx_group;
+	addAttr -ln fireSpread -at double -min 0 -max 1 -dv 1 $fx_group;
+	addAttr -ln fireTurbulence -at double -min 0  -dv 1 $fx_group;
+	addAttr -ln fireDensity -at double -min 0 -dv 50 $fx_group;
+	addAttr -ln flameMinRadius -at double -min 0  -dv .2 $fx_group;
+	addAttr -ln flameMaxRadius -at double -min 0  -dv .5 $fx_group;
+	addAttr -ln fireIntensity -at double -min 0 -max 1 -dv 0 $fx_group;
+	addAttr -ln fireLifespan -at double -min 0 -dv 4 $fx_group;
+
+	connectAttr -f ($fx_group + ".fireScale") ($fireShape + ".fireScale");
+
+*/
+
+	clear($texObjs);
+
+	// Make the fire particle the selected object.
+	//
+	select -r $fireShape;
+
+	return $fireShape;
+}
+
+
+//  ====================== createFireAttributes ======================
+//
+//
+global proc createFireAttributes(string $fire, string $fireShape)
+{
+	select -r $fireShape;
+
+	// Set lifespan mode to per-particle.
+	//
+	setAttr ($fireShape+".lifespanMode") 3;
+
+	addAttr -ln radiusPP -dt doubleArray $fireShape;
+	addAttr -ln radiusPP0 -dt doubleArray $fireShape;
+	addAttr -ln radiusPPCache -dt doubleArray $fireShape;
+
+	addAttr -ln "ageNormalized" -dt "doubleArray";
+
+	// Add attributes to control fire parameters.  These are added to make it
+	// easier for a user to control the fire in terms of desired effect,
+	// rather than through setting individual attributes on a variety of
+	// objects (fields and emitter).
+	//
+	addAttr -ln fireScale -at double -min 0  -dv 1 $fireShape;
+	addAttr -ln fireSpeed -at double -min 0 -dv 1 $fireShape;
+	addAttr -ln fireDirectionX -at double -min -100  -dv 0 $fireShape;
+	addAttr -ln fireDirectionY -at double -min -100  -dv 1 $fireShape;
+	addAttr -ln fireDirectionZ -at double -min -100  -dv 0 $fireShape;
+	addAttr -ln fireSpread -at double -min 0 -max 1 -dv 1 $fireShape;
+	addAttr -ln fireTurbulence -at double -min 0  -dv 1 $fireShape;
+	addAttr -ln fireDensity -at double -min 0 -dv 50 $fireShape;
+	addAttr -ln flameMinRadius -at double -min 0  -dv .2 $fireShape;
+	addAttr -ln flameMaxRadius -at double -min 0  -dv .5 $fireShape;
+	addAttr -ln fireIntensity -at double -min 0 -max 1 -dv 0 $fireShape;
+	addAttr -ln fireLifespan -at double -min 0 -dv 4 $fireShape;
+
+	setAttr -keyable on ($fireShape + ".fireScale");
+	setAttr -keyable on ($fireShape + ".fireSpeed");
+	setAttr -keyable on ($fireShape + ".fireDirectionX");
+	setAttr -keyable on ($fireShape + ".fireDirectionY");
+	setAttr -keyable on ($fireShape + ".fireDirectionZ");
+	setAttr -keyable on ($fireShape + ".fireSpread");
+	setAttr -keyable on ($fireShape + ".fireIntensity");
+	setAttr -keyable on ($fireShape + ".fireLifespan");
+	setAttr -keyable on ($fireShape + ".fireTurbulence");
+	setAttr -keyable on ($fireShape + ".fireDensity");
+	setAttr -keyable on ($fireShape + ".flameMinRadius");
+	setAttr -keyable on ($fireShape + ".flameMaxRadius");
+
+	// Set the fire particle render type to software cloud, and add the relevant
+	// attributes.
+	//
+	setAttr ($fireShape + ".particleRenderType") 8;
+
+	addAttr -is true -ln "betterIllumination" 
+			-at bool -dv false $fireShape;
+	addAttr -is true -ln "surfaceShading" 
+			-at "float" -min 0 -max 1 -dv 0 $fireShape;
+	addAttr -is true -ln "threshold" 
+			-at "float" -min 0 -max 1 -dv 0 $fireShape;
+	addAttr -is true -ln "radius" 
+			-at "float" -min 0 -max 20 -dv 1 $fireShape;
+
+	// Make an expression for particle lifespanPP.
+	//
+
+	$exprString = "float $myphase = -3*time;\n" ;
+	$exprString += $fireShape + ".lifespanPP = (dnoise(" + $fireShape + ".position * .5 * " + $fireShape + ".fireScale + $myphase) + .1) *" + $fireShape + ".fireLifespan;\n";
+	$exprString += $fireShape + ".radiusPP = rand(" + $fireShape + ".flameMinRadius" + " , " + $fireShape + ".flameMaxRadius);";
+
+
+	dynExpression -s $exprString -c -n ($fire + "FireRadiusPPExpr") $fireShape;
+
+}
+
+
+//  ====================== createFireParticle ======================
+//
+global proc string[] createFireParticle()
+{
+	// [0] will be the particle name; [1] will be the particle shape name.
+	//
+	string $resultNames[];
+
+		$resultNames = `particle`;
+
+	if (size($resultNames) == 0)
+		return $resultNames;
+
+	// Create and set the fire particle's dynamic attributes.
+	//
+	createFireAttributes($resultNames[0], $resultNames[1]);
+
+	return $resultNames;
+}
+
+//  ====================== createFireEmitter ======================
+//
+global proc string createFireEmitter(string $fireShape)
+{
+	// Create the emitter and let it get the default name.  Because we have selected
+	// the fire object, if there is one, the emitter will be added to it.
+	//
+	string $resultNames[];
+	string $emitter;
+
+	$resultNames = `emitter 
+		-type volume -dx 0 -dy 1 -dz 0 -rate 10 -vsh sphere -speed 1`;
+
+	if (size($resultNames) == 0)
+		return "";
+
+	// If the emitter is positional, its name will be the only one in the
+	// result string.  If it was added to an object, it will be the second
+	// name in the result string.
+	//
+	if (size($resultNames) == 1)
+		$emitter = $resultNames[0];
+	else
+		$emitter = $resultNames[1];
+
+	// Add an expression to set the emitter "rate" to the fire particle's "fireDensity",
+	// the emitter "spread" to the fire particle's "fireSpread", and the emitter
+	// "direction" to the fire particle's "direction".
+	//
+	expression -s 
+		("rate = " + $fireShape + ".fireDensity * " + $fireShape + ".fireScale;\n" + 
+		 "spread = " + $fireShape + ".fireSpread;\n" +
+		 "directionX = " + $fireShape + ".fireDirectionX;\n" +
+		 "directionY = " + $fireShape + ".fireDirectionY;\n" + 
+		 "directionZ = " + $fireShape + ".fireDirectionZ;") 
+		-o $emitter
+		-n ($emitter + "FireExpr");
+
+	return $emitter;
+}
+
+
+//  ====================== createGravityField ======================
+//
+global proc	string createGravityField(string $fireShape)
+{
+	int $failed;
+
+	string $resultNames[];
+
+	// catch returns 1 if command failed.
+	//
+	$failed = catch($resultNames = `gravity -pos 0 0 0 
+							-magnitude 85 
+							-directionX 0 -directionY 1 -directionZ 0`);
+
+	if ($failed || size($resultNames) == 0)
+		return "";
+
+	string $gravity = $resultNames[0];
+
+	// Make an expression to connect the fireSpeed attribute to the
+	// gravity magnitude, and the fireDirection attribute to the gravity direction.
+	//
+	expression -s 
+		("magnitude = " + $fireShape + ".fireSpeed * " + $fireShape + ".fireScale;\n"+
+		 "directionX = " + $fireShape + ".fireDirectionX;\n" +
+		 "directionY = " + $fireShape + ".fireDirectionY;\n" +
+		 "directionZ = " + $fireShape + ".fireDirectionZ;")
+		-name ($gravity + "FireExpr") 
+		-o $gravity;
+
+	return $gravity;
+}
+
+
+//  ====================== createTurbulenceField ======================
+//
+global proc string  createTurbulenceField(string $fireShape)
+{
+	int $failed;
+	string $resultNames[];
+	
+	// catch returns 1 if command failed.
+	//
+	$failed = catch( $resultNames= `turbulence 
+										-magnitude 240 
+										-attenuation 1.0 
+										-frequency 1.1`);
+
+	if ($failed || size($resultNames) == 0)
+		return "";
+
+	string $turbulence;
+
+	// If the turbulence field is a positional, the name will be the only one
+	// in the list, otherwise it will be the second item in the list.
+	//
+	if (size($resultNames) == 1)
+		$turbulence = $resultNames[0];
+	else
+		$turbulence = $resultNames[1];
+
+	// Add an expression to make the phase of the turbulence increase with
+	// time.  This will keep the fire from emitting/moving in too uniform
+	// a manner.  Also connect the magnitude to the particle's "fireTurbulence"
+	// attribute.
+	//
+	expression -s ("phaseZ = time * 3 * " + $fireShape + ".fireScale;\n" +
+				   "magnitude = " + $fireShape + ".fireTurbulence * " + $fireShape + ".fireScale;") 
+		-o $turbulence
+		-n ($turbulence + "FireExpr");
+
+	return $turbulence;
+}
+
+
+//  ====================== createFireParticleCloudShader ======================
+//
+global proc string createFireParticleCloudShader(string $fireShape)
+{
+ 	string $particleCloudShader;
+ 	
+ 	// catch returns 1 if command failed.
+ 
+ 	int $failed = catch( $particleCloudShader = `shadingNode -asShader particleCloud`);
+  
+ 	if ($failed || size($particleCloudShader) == 0)
+ 		return "";
+  
+  	string $particleCloudShaderSG = $particleCloudShader + "SG";
+  
+  	sets -renderable true -noSurfaceShader true -empty -name $particleCloudShaderSG;
+  
+  	connectAttr -f ($particleCloudShader + ".outColor") ($particleCloudShaderSG + ".volumeShader");
+ 
+  	setAttr ($particleCloudShader + ".density") 1;
+  	setAttr ($particleCloudShader + ".noise") 0;
+ 
+ 	//  Connect the particle cloud shader to the fire particle shape.
+ 	//
+ 	sets -e -forceElement $particleCloudShaderSG $fireShape;
+  
+ 	// Set this transparency attribute to total transparency, as we are going
+ 	// to add a transparency map to the particle cloud shader.
+ 	//
+ 	setAttr ($particleCloudShader + ".transparency") -type double3 1 1 1 ;
+  
+ 	// Connect glowIntensity to be driven by the fires's fireIntensity attribute.
+ 	//
+ 	expression -s ("glowIntensity = " + $fireShape + ".fireIntensity;")
+ 		-o $particleCloudShader
+ 		-n ($particleCloudShader + "FireIntensityExpr");
+ 
+	return $particleCloudShader;
+}
+
+
+//  ====================== createFireShaderRamps ======================
+//
+global proc string[] createFireShaderRamps(string $particleCloudShader)
+{
+
+ 	int $failed;
+ 
+ 	// Create a string array to return all created objects.
+ 	//
+ 	string $ramps[];
+ 	int $rampIndex = 0;
+ 
+ 	string $colorRamp;
+ 	string $colorPlaceTex;
+ 	string $ageMapper;
+ 
+ 	// Create a color ramp and particle age mapper for the fire, and make the
+ 	// necessary connections.
+ 	//
+ 	$failed = catch($colorRamp = `shadingNode -asTexture ramp`);
+ 
+ 	if ($failed || size($colorRamp) == 0)
+ 	{
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $colorRamp;
+ 	$rampIndex++;
+ 
+ 	$failed = catch($colorPlaceTex = `shadingNode -asUtility place2dTexture`);
+ 
+ 	if ($failed || size($colorPlaceTex) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $colorPlaceTex;
+ 	$rampIndex++;
+ 
+ 	$failed = catch($ageMapper = `shadingNode -at -asUtility particleAgeMapper`);
+ 
+ 	if ($failed || size($ageMapper) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $ageMapper;
+ 	$rampIndex++;
+ 
+ 	//connectAttr place2dTexture1.outUV ($colorRamp + ".uv");
+ 	//connectAttr place2dTexture1.outUvFilterSize ($colorRamp + ".uvFilterSize");
+
+ 	connectAttr ($colorPlaceTex+".outUV") ($colorRamp + ".uv");
+ 	connectAttr ($colorPlaceTex+".outUvFilterSize") ($colorRamp + ".uvFilterSize");
+ 	connectAttr -f ($ageMapper + ".outUvCoord") ($colorPlaceTex + ".uvCoord");
+ 	connectAttr -f ($colorRamp + ".outColor") ($particleCloudShader + ".color");
+ 
+ 	// Activate relativeAge.
+ 	//
+ 	setAttr ($ageMapper + ".relativeAge") 1;
+ 
+ 	// Set color and position attributes of the color ramp for fire.
+ 	//
+ 	setAttr ($colorRamp + ".colorEntryList[0].color") 
+ 	 		-type double3 0.574 0.540 0.526 ;
+ 	setAttr ($colorRamp + ".colorEntryList[0].position") 1.0;
+ 
+ 	setAttr ($colorRamp + ".colorEntryList[1].color") 
+ 	 		-type double3 0.675 0.632 0.579 ;	
+ 	setAttr ($colorRamp + ".colorEntryList[1].position") 0.425;
+ 
+ 	setAttr ($colorRamp +  ".colorEntryList[2].color") 
+ 	 		-type double3 0.739 0.709 0.645;
+ 	setAttr ($colorRamp + ".colorEntryList[2].position") 0.0;
+ 
+ 	// Create a transparency ramp for the fire, and make the necessary connections.
+ 	//
+ 	string $transparencyRamp;
+ 	string $transPlaceTex;
+ 	
+ 	$failed = catch($transparencyRamp = `shadingNode -asTexture ramp`);
+ 
+ 	if ($failed || size($transparencyRamp) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $transparencyRamp;
+ 	$rampIndex++;
+ 
+ 	$failed = catch($transPlaceTex = `shadingNode -asUtility place2dTexture`);
+ 
+ 	if ($failed || size($transPlaceTex) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $transPlaceTex;
+ 	$rampIndex++;
+ 
+ 	connectAttr ($transPlaceTex + ".outUV") ($transparencyRamp + ".uv");
+ 	connectAttr ($transPlaceTex + ".outUvFilterSize") ($transparencyRamp + ".uvFilterSize");
+ 	connectAttr -f ($ageMapper + ".outUvCoord") ($transPlaceTex + ".uvCoord");
+ 	connectAttr -f ($transparencyRamp + ".outColor") ($particleCloudShader + ".transparency");
+ 
+ 	// Set color and position attributes of the transparency ramp for fire.
+ 	//
+ 	setAttr ($transparencyRamp + ".colorEntryList[0].color") 
+ 			-type double3 1 1 1 ;
+ 	setAttr ($transparencyRamp + ".colorEntryList[0].position") 1.0;
+ 
+ 	setAttr ($transparencyRamp + ".colorEntryList[1].color") 
+ 			-type double3 .927 .927 .927 ;
+ 	setAttr ($transparencyRamp + ".colorEntryList[1].position") .845;
+
+ 	setAttr ($transparencyRamp + ".colorEntryList[2].color") 
+ 			-type double3 .9 .9 .9 ;
+ 	setAttr ($transparencyRamp + ".colorEntryList[2].position") .3;
+ 
+ 	setAttr ($transparencyRamp + ".colorEntryList[3].color") 
+ 			-type double3 1 1 1 ;
+ 	setAttr ($transparencyRamp + ".colorEntryList[3].position") 0;
+ 
+ 
+ 	// Create an incandescence ramp for the fire, and make the necessary connections.
+ 	//
+ 	string $incanRamp;
+ 	string $incanPlaceTex;
+ 	
+ 	$failed = catch($incanRamp = `shadingNode -asTexture ramp`);
+ 
+ 	if ($failed || size($incanRamp) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+ 
+ 	$ramps[$rampIndex] = $incanRamp;
+ 	$rampIndex++;
+ 
+ 	$failed = catch($incanPlaceTex = `shadingNode -asUtility place2dTexture`);
+ 
+ 	if ($failed || size($incanPlaceTex) == 0)
+ 	{
+ 		cleanupObjects($ramps);
+ 		clear($ramps);
+ 		return $ramps;
+ 	}
+
+ 	$ramps[$rampIndex] = $incanPlaceTex;
+ 	$rampIndex++;
+ 
+ 	connectAttr ($incanPlaceTex + ".outUV") ($incanRamp + ".uv");
+ 	connectAttr ($incanPlaceTex + ".outUvFilterSize") ($incanRamp + ".uvFilterSize");
+ 	connectAttr -f ($ageMapper + ".outUvCoord") ($incanPlaceTex + ".uvCoord");
+ 	connectAttr -f ($incanRamp + ".outColor") ($particleCloudShader + ".incandescence");
+ 
+ 	// Set color and position attributes of the incandescence ramp for fire.
+ 	//
+ 	setAttr ($incanRamp + ".colorEntryList[0].color") -type double3 0 0 0 ;
+ 	setAttr ($incanRamp + ".colorEntryList[0].position") 1.0;
+ 
+ 	setAttr ($incanRamp + ".colorEntryList[1].color") 
+ 			-type double3 .11 .084 .011 ;
+ 	setAttr ($incanRamp + ".colorEntryList[1].position") .855;
+ 
+ 	setAttr ($incanRamp + ".colorEntryList[2].color") 
+ 			-type double3 .756 .756 .756 ;
+ 	setAttr ($incanRamp + ".colorEntryList[2].position") .6;
+ 
+ 	setAttr ($incanRamp + ".colorEntryList[3].color") 
+ 			-type double3 .712 .712 .712 ;
+ 	setAttr ($incanRamp + ".colorEntryList[3].position") .405;
+ 
+ 	setAttr ($incanRamp + ".colorEntryList[4].color") -type double3 0 0 0 ;
+ 	setAttr ($incanRamp + ".colorEntryList[4].position") 0;
+ 
+ 	return $ramps;
+}
+
+
+//  ====================== createFireCraterBlobMap ======================
+//
+global proc string[] createFireCraterBlobMap(string $particleCloudShader, 
+												string $fireShape)
+{
+	int $failed;
+
+	// Create the texture and make the connections.
+	//
+ 	string $craterTex;
+	string $craterPlaceTex;
+
+	string $craterObjs[];
+	
+	$failed = catch($craterTex = `shadingNode -asTexture crater`);
+
+	if ($failed || size($craterTex) == 0)
+	{
+		clear($craterObjs);
+		return $craterObjs;
+	}
+
+	$craterObjs[0] = $craterTex;
+
+ 	$failed = catch($craterPlaceTex = `shadingNode -asUtility place3dTexture`);
+
+	if ($failed || size($craterPlaceTex) == 0)
+	{
+		cleanupObjects($craterObjs);
+		clear($craterObjs);
+		return $craterObjs;
+	}
+
+	$craterObjs[1] = $craterPlaceTex;
+
+
+ 	connectAttr ($craterPlaceTex + ".wim[0]") ($craterTex + ".pm");
+	connectAttr -f ($craterTex + ".outColor") ($particleCloudShader + ".blobMap");
+
+	// Set some default values for some of the attributes.
+	//
+ 	setAttr ($craterTex + ".shaker") 14.417;
+ 	setAttr ($craterTex + ".channel1") -type double3 .909 .895 .879 ;
+ 	setAttr ($craterTex + ".channel2") -type double3 .711 .698 .692 ;
+ 	setAttr ($craterTex + ".channel3") -type double3 .570 .559 .547 ;
+ 	setAttr ($craterTex + ".melt") 0.05;
+ 	setAttr ($craterTex + ".balance") 0.5691;
+ 	setAttr ($craterTex + ".frequency") 0.826;
+
+	setAttr ($craterPlaceTex + ".scaleX") 2;
+	setAttr ($craterPlaceTex + ".scaleY") 5;
+	setAttr ($craterPlaceTex + ".scaleZ") 2;
+	setAttr ($craterPlaceTex + ".inheritsTransform") 0;
+
+	// Create an expression to make the crater placement rise over time.  This
+	// will help keep the texture from being too "fixed" and creating a too
+	// uniform and still image of the fire.
+	//
+	string $textureExpr = "";
+	$textureExpr += "vector $fireDirection = <<"+$fireShape+".fireDirectionX,"+$fireShape+".fireDirectionY,"+$fireShape+".fireDirectionZ>>;\n";
+	$textureExpr += "$fireDirection = unit( $fireDirection );\n";
+	$textureExpr += "float $timeScale = time * 0.07 * "+$fireShape+".fireSpeed * "+$fireShape+".fireScale;\n";
+	$textureExpr += "translateX = $fireDirection.x * $timeScale;\n";
+	$textureExpr += "translateY = $fireDirection.y * $timeScale;\n";
+	$textureExpr += "translateZ = $fireDirection.z * $timeScale;\n";
+	expression -s $textureExpr
+		-name ($craterPlaceTex + "FireExpr") 
+		-o $craterPlaceTex;
+
+	//
+	// Create two locators that will be used to orient the
+	// scaled texture placement node in the "fireDirection".
+	//
+	string $fireDirectionLocator[] = `spaceLocator`;
+	rename $fireDirectionLocator[0] ($fireShape+"_fireDirection");
+	$fireDirectionLocator = `ls -sl`;
+	setAttr ".inheritsTransform" 0;
+	connectAttr ($fireShape+".fireDirectionX") ($fireDirectionLocator[0]+".translateX");
+	connectAttr ($fireShape+".fireDirectionY") ($fireDirectionLocator[0]+".translateY");
+	connectAttr ($fireShape+".fireDirectionZ") ($fireDirectionLocator[0]+".translateZ");
+	setAttr -lock 1 ".translateX";
+	setAttr -lock 1 ".translateY";
+	setAttr -lock 1 ".translateZ";
+	$craterObjs[2] = $fireDirectionLocator[0];
+
+	string $fireOrientationLocator[] = `spaceLocator`;
+	rename $fireOrientationLocator[0] ($fireShape+"_fireOrientation");
+	$fireOrientationLocator = `ls -sl`;
+	setAttr ".inheritsTransform" 0;
+	setAttr -lock 1 ".translateX";
+	setAttr -lock 1 ".translateY";
+	setAttr -lock 1 ".translateZ";
+	$craterObjs[3] = $fireOrientationLocator[0];
+
+	aimConstraint -weight 1 -aimVector 0 1 0 -upVector 0 1 0 -worldUpType "vector"
+		-worldUpVector 0 1 0 $fireDirectionLocator[0] $fireOrientationLocator[0];
+
+	connectAttr ($fireOrientationLocator[0]+".rotate") ($craterPlaceTex+".rotate");
+
+	group $craterPlaceTex $fireDirectionLocator $fireOrientationLocator;
+	string $textureGroup[] = `ls -sl`;
+	$craterObjs[4] = $textureGroup[0];
+
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".tx");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".ty");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".tz");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".rx");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".ry");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".rz");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".sx");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".sy");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".sz");
+	setAttr -keyable 0 -lock 1 ($textureGroup[0] + ".visibility");
+
+
+	// Hide the crater placement map and the locators.
+	//
+	hide $textureGroup[0];
+
+	return $craterObjs;
+}
+
+/*
+
+//  ====================== createFireRadiusRamp ======================
+//
+global proc	string createFireRadiusRamp(string $fireShape)
+{
+	int $failed = catch(`arrayMapper -target $fireShape -destAttr radiusPP 
+			-inputV ageNormalized -type ramp`);
+
+	if ($failed)
+		return "";
+
+    string $fireRadiusRamp = 
+				findRamp(($fireShape + ".radiusPP"), "ramp");
+
+	if (size($fireRadiusRamp) == 0)
+		return "";
+
+	// Start the flame at 0 radius and quickly rise to 1 so the flames won't
+	// pop on; then taper off as the flame ages.  
+	//
+	setAttr ($fireRadiusRamp + ".colorEntryList[0].color") -type double3 0 0 0 ;
+	setAttr ($fireRadiusRamp + ".colorEntryList[0].position") 0.00;
+	setAttr ($fireRadiusRamp + ".colorEntryList[1].color") -type double3 1 1 1 ;
+	setAttr ($fireRadiusRamp + ".colorEntryList[1].position") 0.1;
+	setAttr ($fireRadiusRamp + ".colorEntryList[2].color") -type double3 0.4 0.4 0.4 ;
+	setAttr ($fireRadiusRamp + ".colorEntryList[2].position") 1.00;
+	setAttr ($fireRadiusRamp + ".noise") 0.0244;
+	setAttr ($fireRadiusRamp + ".noiseFreq") 0.6342;
+
+	// Create an expression to connect the fire particle's flameStartRadius to position 1
+	// value and flameEndRadius to position 2 value of the ramp.
+	//
+ 	expression -s ("float $startRadius = " + $fireShape + ".flameStartRadius * " + $fireShape + ".fireScale;\n" +
+ 					"float $endRadius = " + $fireShape + ".flameEndRadius * " + $fireShape + ".fireScale;\n" +
+					"colorEntryList[1].colorR =  $startRadius;\n" +
+					"colorEntryList[1].colorG =  $startRadius;\n" + 
+					"colorEntryList[1].colorB =  $startRadius;\n" +
+					"colorEntryList[2].colorR =  $endRadius;\n" +
+					"colorEntryList[2].colorG =  $endRadius;\n" + 
+					"colorEntryList[2].colorB =  $endRadius;\n") 
+ 		-o $fireRadiusRamp
+ 		-n ($fireRadiusRamp + "FlameRadiusExpr");
+ 
+
+
+
+
+	return $fireRadiusRamp;
+}
+
+*/
+
+//  ====================== reSelectOriginalList ======================
+//
+global proc	reSelectOriginalList(string $selectedList[])
+{
+	if (size($selectedList) == 0)
+	{
+		select -cl;
+	}
+	else if (size($selectedList) == 1)
+	{
+		select -r $selectedList[0];
+	}
+	else
+	{
+		int $i;
+		select -cl;
+		for ($i = 0; $i <  size($selectedList); $i++)
+			select -add $selectedList[$i];
+	}
+}
+
+
+//  ====================== fireEffectSetFireAttributes ======================
+//
+global proc fireEffectSetFireAttributes( 
+									string $fireParticleShapeName,
+									float $fireScale, 
+									float $fireDensity, 
+									float $fireMinRadius, 
+									float $fireMaxRadius, 
+									float $fireIntensity, 
+									float $fireSpeed,
+									float $fireDirectionX,
+									float $fireDirectionY,
+									float $fireDirectionZ,
+									float $fireSpread,
+									float $turbulence)
+									
+{
+	if( `licenseCheck -type complete` == 0 )
+	{
+		warning("You are not licensed to use the Fire Effect.");
+		return;
+	}
+
+    if (objExists($fireParticleShapeName))
+    {
+        setAttr ($fireParticleShapeName + ".fireScale") $fireScale;
+        setAttr ($fireParticleShapeName + ".fireDensity") $fireDensity;
+        setAttr ($fireParticleShapeName + ".flameMinRadius") $fireMinRadius;
+        setAttr ($fireParticleShapeName + ".flameMaxRadius") $fireMaxRadius;
+        setAttr ($fireParticleShapeName + ".fireIntensity") $fireIntensity;
+        setAttr ($fireParticleShapeName + ".fireSpeed") $fireSpeed;
+        setAttr ($fireParticleShapeName + ".fireDirectionX") $fireDirectionX;
+        setAttr ($fireParticleShapeName + ".fireDirectionY") $fireDirectionY;
+        setAttr ($fireParticleShapeName + ".fireDirectionZ") $fireDirectionZ;
+        setAttr ($fireParticleShapeName + ".fireSpread") $fireSpread;
+        setAttr ($fireParticleShapeName + ".fireTurbulence") $turbulence;
+
+    }
+    else
+    {
+        warning($fireParticleShapeName + " does not exist.");
+    }
+}
+
+
+proc cleanupObjects(string $objects[])
+{
+	int $i;
+	for ($i = 0; $i < size($objects); $i++)
+	{
+		if (size($objects[$i]) && objExists($objects[$i]))
+			delete $objects[$i];
+	}
+}

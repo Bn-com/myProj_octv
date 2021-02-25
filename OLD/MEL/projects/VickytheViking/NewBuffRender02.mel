@@ -1,0 +1,163 @@
+/////////////////////////////////////////////////////////////////////////////////
+//2014/09/03 modify by zhongming surport arnold     
+////////////////////////////////////////////////////////////////////////////////
+
+global proc NewBuffRender02(string $whichCam)
+{
+	
+	python("execfile(r'//file-cluster/gdc/Resource/Support/Maya/projects/VickytheViking/batchFilesBufferRender.py')");
+	string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+	int $all = false;
+	if ( $whichCam == "")
+	{
+		string $rs = `confirmDialog -title "Buffer Render V2.0 ͹-͹" -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -button "Batch Buffer Render" -button "Cancel" -defaultButton "Current Layer" -cancelButton "Cancel" -dismissString "Cancel" `;
+		if ($rs == "dismiss" || $rs=="Cancel")
+		{
+			return;
+		}else if($rs == "Batch Buffer Render"){
+			python("batchFilesBufferRender()");
+			return;
+		}
+		
+		$all = ($rs == "All Renderable Layers");
+	}
+
+	string $layers[];
+	if ($all || $whichCam != "")
+	{
+		for ($layer in $buf)
+		{
+			if (`getAttr ($layer + ".renderable")`)
+			{
+				$layers[size($layers)] = $layer;
+			}
+		}
+	}
+	else
+	{
+		$layers[size($layers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+	}
+
+
+
+	RenderViewWindow;
+	string $camL[]=`ls -type "transform" "*stereoCameraLeft"`;
+	string $camR[]=`ls -type "transform" "*stereoCameraRight"`;
+	
+	for ($layer in $layers)
+	{
+		string $bufWinRenderCom="renderWindowRender redoPreviousRender renderView";
+			
+		/*
+		string $stereoCams[]=`ls -type "stereoRigCamera"`;
+		if (size($stereoCams)>0){
+			$bufWinRenderCom="renderWindowRenderCamera render renderView stereoCameraLeft";
+			
+			string $bufCam[];
+			tokenize $layer "_" $bufCam;
+			
+			if ($bufCam[`size($bufCam)`-1]=="RX"){
+				$bufWinRenderCom="renderWindowRenderCamera render renderView stereoCameraRight";
+			}
+			
+		}
+		*/
+		
+		if ($whichCam != ""){
+			$bufWinRenderCom="renderWindowRenderCamera render renderView " + $whichCam;
+		}
+		
+		
+		
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != $layer)
+		{
+			editRenderLayerGlobals -currentRenderLayer $layer;
+			//renderLayerButton -edit -select false -current false $currentRenderLayer;
+			//renderLayerButton -edit -select true -current true $layer;
+		}
+
+		int $s = `getAttr defaultRenderGlobals.startFrame`;
+		int $e = `getAttr defaultRenderGlobals.endFrame`;
+		int $i;
+			
+		int $amount = 0;
+		
+	
+     progressWindow
+         -title "Buffer Render V2.0 ͹-͹"
+         -progress $amount
+         -status "Frame: 0%"
+	  -min $s
+	  -max $e
+         -isInterruptable true;
+
+     for ($i=$s; $i<=$e; $i++) {
+
+         // Check if the dialog has been cancelled
+         if ( `progressWindow -query -isCancelled` ) break;
+
+         // Check if end condition has been reached
+         if ( `progressWindow -query -progress` >$e ) break;
+
+         
+
+         progressWindow -edit
+             -progress $s
+             -status ("RenerLayer: " + $layer + "  --  Frame: "+$s);
+
+         currentTime $i ;
+
+			int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+			setAttr "defaultRenderGlobals.startFrame" $i;
+			string $tmpImages[] = `renderSettings -fpt -firstImageName`;
+			string $tmpImage = $tmpImages[0];
+			
+			string $desImages[] = `renderSettings -fp -firstImageName`;
+			string $desImage = $desImages[0];
+			
+
+			setAttr "defaultRenderGlobals.startFrame" $startFrame;
+			
+			
+            string $dirName = python("import os;os.path.dirname('" + $desImage + "')");
+            if (!python("os.path.isdir('" + $dirName + "')")){
+                sysFile -makeDir $dirName;
+            }
+			//renderWindowRender redoPreviousRender renderView;
+			//renderWindowRenderCamera render renderView  stereoCameraLeft;
+			
+			eval $bufWinRenderCom;
+			
+			//setAttr defaultRenderGlobals.imfkey -type "string" "";
+    
+			
+			//sysFile -delete ($path+".iff");
+			
+    		//renderWindowSaveImageCallback "renderView" $path "Maya IFF";	
+			
+			if (`getAttr "defaultRenderGlobals.currentRenderer"` != "arnold"){
+    			
+                sysFile -rename  $desImage $tmpImage; 
+    			
+    		}else{
+    		    
+    		    while(1){
+                    if (!python("import arnold;arnold.AiRendering()")){
+
+                        sysFile -rename  $desImage $tmpImage; 
+                        break;
+                }
+    }
+    
+    		    
+    		}
+			
+			print ("\nFinish Render -- " + $desImage + "\n");
+			$s++;
+     }
+
+     progressWindow -endProgress;
+
+	}
+}

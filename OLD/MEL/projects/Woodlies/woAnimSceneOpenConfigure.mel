@@ -1,0 +1,196 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc woAnimSceneOpenConfigure()
+{
+	//select Mask
+	woAnimSceneSelectMaskCreate();
+
+	//window position
+	woAnimSceneWindowPositionsCreate();
+
+	//ModelPanel Show
+	woAnimSceneCameraShowCreate();
+
+	//user define layout
+	woSaveCurrentAsNamedLayout;
+}
+
+global proc woAnimSceneSelectMaskCreate()
+{
+	//初始化
+	string $maskPref = `internalVar -upd` + "userSelectMaskPrefs.mel";
+	$fileID = `fopen $maskPref "w"`;
+	fprint $fileID "//user-defined\n";
+	fclose $fileID;
+
+	string $icon = "objButton";
+	for ($i=1;$i<9;$i++)
+	{
+		string $content;
+		int $value = `iconTextCheckBox -q -v ($icon+$i)`;
+		switch ($i)
+		{
+			case 1 :
+				$content = "setObjectPickMask \"Marker\" "+$value+";\n";
+				break;
+			case 2 :
+				$content = "setObjectPickMask \"Joint\" "+$value+";\n";
+				break;
+			case 3 :
+				$content = "setObjectPickMask \"Curve\" "+$value+";\n";
+				break;
+			case 4 :
+				$content = "setObjectPickMask \"Surface\" "+$value+";\n";
+				break;
+			case 5 :
+				$content = "setObjectPickMask \"Deformer\" "+$value+";\n";
+				break;
+			case 6 :
+				$content = "setObjectPickMask \"Dynamic\" "+$value+";\n";
+				break;
+			case 7 :
+				$content = "setObjectPickMask \"Rendering\" "+$value+";\n";
+				break;
+			case 8 :
+				$content = "setObjectPickMask \"Other\" "+$value+";\n";
+				break;
+		
+		}
+		//string $content = "iconTextCheckBox -e -v "+$value+" "+$icon+$i+";\n";
+
+		$fileID = `fopen $maskPref "a"`;
+		fprint $fileID $content;
+		fclose $fileID;
+	}
+}
+
+global proc woAnimSceneWindowPositionsCreate()
+{
+	//初始化
+	string $winPref = `internalVar -upd` + "userWindowPrefs.mel";
+	$fileID = `fopen $winPref "w"`;
+	fprint $fileID "//user-defined\n";
+	fclose $fileID;
+	
+	string $windows[] = `lsUI -windows`;
+	for ($win in $windows)
+	{
+		int $tlc[] = `windowPref -q -tlc $win`;
+		int $wh[] = `windowPref -q -wh $win`;
+
+		string $content = "windowPref -topLeftCorner "+(string)$tlc[0]+" "+(string)$tlc[1]+" -widthHeight "+(string)$wh[0]+" "+(string)$wh[1]+" -parentMain true "+$win+";\n";
+
+		$fileID = `fopen $winPref "a"`;
+		fprint $fileID $content;
+		fclose $fileID;
+	}
+}
+
+global proc woAnimSceneCameraShowCreate()
+{
+	string $dcsPref = `internalVar -upd` + "userDefaultCamShowPrefs.mel";
+	string $scsPref = `internalVar -upd` + "userSceneCamShowPrefs.mel";
+	
+	string $shows[] = {"nurbsCurves","nurbsSurfaces","polymeshes","subdivSurfaces","planes","lights","cameras","joints","ikHandles","deformers","dynamics","fluids","hairSystems",
+				    "follicles","nCloths","nParticles","nRigids","dynamicConstraints","locators","dimensions","pivots","handles","textures","strokes","manipulators","cv","hulls","grid","hud","sel"};
+	
+	string $defaultCam[] = {"persp","top","front","side"};
+	string $currentPanel = `getPanel -wf`;
+	if (size($currentPanel))
+	{
+		string $camPref;
+		string $currentCamera = `modelEditor -q -cam $currentPanel`;
+		int $default = 0;
+		for ($cam in $defaultCam)
+		{
+			if (match($currentCamera,$cam) == $cam)
+			{
+				$default =1;
+			}
+		}
+
+		if ($default)
+		{
+			$camPref = $dcsPref;
+		}
+		else
+		{
+			$camPref = $scsPref;
+		}
+
+		$fileID = `fopen $camPref "w"`;
+		fprint $fileID "//user-defined\n";
+		fclose $fileID;
+		
+		for ($s in $shows)
+		{
+			string $cmd = "modelEditor -q -"+$s+" "+$currentPanel;
+			string $value = eval($cmd);
+			string $content = "modelEditor -e -"+$s+" "+$value+" definePanel;\n";
+			$fileID = `fopen $camPref "a"`;
+			fprint $fileID $content;
+			fclose $fileID;
+		}
+
+	}
+}
+
+global proc woSaveCurrentAsNamedLayout() 
+{
+
+	global string $gMainPane;
+	global string $gPanelEditorWnd;
+
+	
+	panelEditor "Panels";
+	setParent $gPanelEditorWnd;
+
+	string $tsl = "PanelEditorLayoutsScrollList";
+
+	if (`panelConfiguration -ex userDefineLayout`)
+	{
+		deleteUI -panelConfig userDefineLayout;
+	}
+	
+	string $newConfigName = `panelConfiguration -sc false userDefineLayout`;
+	string $label = (localizedPanelLabel(interToUI($newConfigName)));
+	panelConfiguration -edit -label $label $newConfigName;
+	updatePanelLayoutFromCurrent $label;
+
+	//  special case for top,front,side,persp
+	//	    -make sure they always reset their state.
+	//
+	int    $i,$nArr;
+	string $labels[];
+
+	$labels = `panelConfiguration -query -labelStrings $newConfigName`;
+	
+	$nArr = size($labels);
+	for ($i = 0; $i < $nArr; $i++) {
+		if (localizedPanelLabel("Persp View") == $labels[$i] ||
+			localizedPanelLabel("Top View") == $labels[$i] ||
+			localizedPanelLabel("Side View") == $labels[$i] ||
+			localizedPanelLabel("Front View") == $labels[$i])
+		{
+			panelConfiguration -edit -replaceFixedState ($i+1) true $newConfigName;
+		}
+	}
+
+	//  update the rest of the dialog
+	//
+	panelEd_UpdateLayoutTab;
+	textScrollList -edit -selectItem $label $tsl;
+	panelEd_LayoutSelectionChanged;
+
+	deleteUI panelArrangementWin;
+}

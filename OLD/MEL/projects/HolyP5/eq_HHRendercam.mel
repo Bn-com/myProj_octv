@@ -1,0 +1,183 @@
+global proc eq_ImportRenderCam()
+{
+	string $longShotName=`file -q -sn `;
+	
+	string $shortShotName=`match "[^//]*$" $longShotName`;
+	string $shotName[]=stringToStringArray($shortShotName,"_");
+	string $cam_name=$shotName[0]+"_"+$shotName[1]+"_"+$shotName[2]+"_cam.ma";
+	string $bakedCam[] = `ls -type camera	"*bakedShape" "*:*bakedShape" "*:*:*bakedShape"`;
+	if (`size $bakedCam`)
+	{
+		for ($c in $bakedCam)
+		{
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				print "文件中已经存在正确的摄像机";
+				eq_ImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+	string $root_path= "//file-cluster/gdc/Projects/Earthquake/Project/scenes/Animation/"+"episode_"+$shotName[1]+"/episode_camera/";
+	string $file_list[]=`getFileList -fld $root_path -filespec "*.ma" `;
+	
+//	print $file_list;
+
+	
+	int $if_exist_cam = 0;
+	for ($cam in $file_list)
+	{
+		if ($cam == $cam_name)
+		{
+			$if_exist_cam=1;
+			break;
+		}	
+	}
+	
+	if ($if_exist_cam ==0 )	error "没有找到相应的摄像机，请检查maya文件名";
+	
+	string $cam_path = $root_path + $cam_name;
+//	print $cam_path;
+//	file -import -type "mayaAscii" -rpr $cam_name -options "v=0"  $cam_path;
+	file -r -type "mayaAscii" -namespace "CAM"  $cam_path;
+	
+	string $bakedCam[] = `ls -type camera	"*bakedShape" "*:*bakedShape" "*:*:*bakedShape"`;
+	if (`size $bakedCam`)
+	{
+		for ($c in $bakedCam)
+		{
+			string $bakedCam_split[]=stringToStringArray($c,"_");
+			int $bCS = `size $bakedCam_split`;
+			if ($bakedCam_split[$bCS-2]==$shotName[3] &&$bakedCam_split[$bCS-3]==$shotName[2] &&$bakedCam_split[$bCS-4]==$shotName[1])
+			{
+				eq_ImportRenderCam_RenderableSet($c);
+				return;
+			}
+		}
+	}
+
+	
+		
+}
+
+global proc eq_ImportRenderCam_RenderableSet(string $cam)
+{
+	string $allCam[] = `ls -type camera`;
+	for ($c in $allCam)
+	{
+		if ($c ==$cam)	setAttr ($c+".renderable") 1;
+		else setAttr ($c+".renderable") 0;
+	}
+}
+
+global proc eq_HHRendercam()
+{
+	eq_ImportRenderCam;
+	string $cams[]=`ls -ca`;
+	for ($cshape  in $cams )
+	{
+		if (`match "L02" $cshape`!="")
+		{
+			string $c[] =`listRelatives -p $cshape`;
+			select -r $c[0];
+			eq_HHCovRenderCam;
+			eq_HHCamSet;
+		}
+	}
+	setAttr "defaultRenderGlobals.modifyExtension" 0;
+	renderLayerEditorRenderable RenderLayerTab "defaultRenderLayer" "0";
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	setMayaSoftwareFrameExt(3, 0);
+
+}
+global proc eq_HHCamSet()
+{
+	string $cams[]=`ls -ca`;
+	for ($camshape in $cams)
+	{
+		string $camrenderable = $camshape+".renderable";
+
+		if (`match "RenderCAM" $camshape `!="")
+		{
+			string $cams[]=`listRelatives -p $camshape`;
+			string $camchildren[]=`listRelatives -c $cams[0]`;
+			for ($camc in $camchildren)
+			{
+				if(`match "stereo" $camc`!="")
+				{
+					string $camShapes[]=`listRelatives -s $camc`;
+					setAttr ($camShapes[0]+".renderable") 1;
+
+				}
+			}
+		}
+
+		else if (`match "stereoCamera" $camshape`=="")
+		{
+			setAttr $camrenderable 0;
+		}
+	}
+	
+}
+global proc eq_HHCovRenderCam()
+{
+	string $objselect[]=`ls -sl`;
+	python "import maya.app.stereo.stereoCameraRig";
+	python "maya.app.stereo.stereoCameraRig.createStereoCameraRig()";
+	string $buff[]=`ls -sl`;
+	string $filename=`file -q -sn -shn`;
+	string $buf[];
+	tokenize $filename "_" $buf;
+	string $fname=$buf[1]+"_"+$buf[2];
+	string $sterocamera="RenderCAM_"+$fname;
+	if(`objExists $sterocamera`==0)
+	{
+	    rename $buff[0] $sterocamera;
+	    string $s[]=`listRelatives -shapes $sterocamera`;
+		setAttr ($s[0]+".horizontalFilmAperture") 1;
+		setAttr ($s[0]+".verticalFilmAperture") 1;
+		setAttr ($s[0]+".focalLength") 21.997;
+		setAttr ($s[0]+".zeroParallax") 11;
+		setAttr ($s[0]+".interaxialSeparation") 0.08;
+		setAttr ($s[0]+".lensSqueezeRatio") 2.25;
+		setAttr ($s[0]+".displayResolution") 1;
+		setAttr ($s[0]+".displayGateMaskOpacity") 1;
+		setAttr ($s[0]+".displayGateMaskColor") -type double3 0 0 0;
+		setAttr ($s[0]+".overscan") 2.25;
+		setAttr ($s[0]+".stereo") 1;
+		setAttr ($s[0]+".farClipPlane") 10000000;
+	 
+    }
+	select $objselect;
+	string $buff[]=`ls -sl`;
+	for($obj in $buff)
+	{
+		if(`match "L02" $obj`!="")
+		{
+			select -cl  ;
+			select $obj;
+			select -add $sterocamera;
+			doCreatePointConstraintArgList 1 { "0","0","0","0","0","0","0","1","","1" };
+			pointConstraint -offset 0 0 0 -weight 1;
+			doCreateOrientConstraintArgList 1 { "0","0","0","0","0","0","0","1","","1" };
+			orientConstraint -offset 0 0 0 -weight 1;
+			select -cl  ;
+			
+		}
+		else
+		{
+			error "选择的相机不正确，请选择 camL02 相机";
+		}
+	}
+	setAttr defaultResolution.lockDeviceAspectRatio 0;
+	setAttr "defaultResolution.width" 2880;
+	setAttr "defaultResolution.height" 800;
+	setAttr "defaultResolution.pixelAspect" 1;
+	setAttr "defaultResolution.deviceAspectRatio" 3.6;
+}
+

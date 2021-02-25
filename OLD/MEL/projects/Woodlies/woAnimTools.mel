@@ -1,0 +1,110 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc woAnimTools()
+{
+	if (`window -ex woAnimToolsUI`)
+	{
+		deleteUI woAnimToolsUI;
+	}
+	
+	window -title "Anim Tools"  -mb true woAnimToolsUI;
+		menu -label "Help";
+			menuItem -label "使用说明" -command "";
+
+		string $column1 = `columnLayout -adj 1 `;
+			string $frame1 = `frameLayout -l "开始" -la "bottom" -bs "etchedIn"`;
+				string $row1 = `rowColumnLayout -nc 3`;
+					button -l "建相机" -c "slAnimSceneCamera";
+					button -l "电视框" -c "slAnimCamclip";
+					button -l "起始帧" -c "slAnimSceneTime";
+					button -l "导声音" -c "source \"ezLoadSoundTrackMainLayout.mel\";ezLoadSoundTrack;";
+				setParent ..;
+			setParent ..;
+		setParent ..;
+			string $frame2 = `frameLayout -l "制作ing" -la "bottom" -bs "etchedIn"`;
+				string $row2 = `rowColumnLayout -nc 3`;
+					button -l "导动画" -c "slAnimCopyAnimations";
+					button -l "Pose" -c "slAnimPoseLibraryNew";
+					button -l "透明" -c "string $currentPanel = `getPanel -wf`;togglePrimTransparencySorting 1 $currentPanel;";
+					button -l "presp" -c "source \"slCameraOrthographic.mel\"; slCameraOrthographic;";
+					button -l "选择显示" -c "IsolateSelectMel";
+					button -l "IK/FK" -c "execfile('//File-cluster/GDC/Resource/Support/Maya/Python/IDMT/RR/AnimIKFKUI.py')";
+				setParent ..;
+			setParent ..;
+		setParent ..;
+			string $frame3 = `frameLayout -l "完成" -la "bottom" -bs "etchedIn"`;
+				string $row3 = `rowColumnLayout -nc 3`;
+					button -l "bake相机" -c "source \"zwCameraImportExport.mel\"; zwBakeCamera;";
+					button -l "过渡帧" -c "source \"wxIITSMCtrlFromSet.mel\"; wxIITSMCtrlFromSet;";
+					button -l "优化" -c "OptimizeScene;";
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	showWindow;
+}
+
+global proc slAnimSceneCamera()
+{
+	string $episode = `zwGetPath "<Episode>" ""`;			//集数
+	string $scene = `zwGetPath "<Shot>" ""`;				//镜头
+	
+	
+	//建立对应镜头号的摄像机
+	string $cam = "cam_"+$episode+"_"+$scene;
+	if (!`objExists $cam`)
+	{
+		string $newcam[] = `camera`;
+		rename -is $newcam[0] $cam;
+		rename $newcam[1] ($cam+"Shape");
+	}
+	camera -edit  -nearClipPlane 0.1 -farClipPlane 1000000 -displayResolution true -displaySafeAction true -displaySafeTitle true $cam;
+	setAttr ($cam+"Shape.renderable") 1 ;
+	setAttr ($cam+"Shape.displayResolution") 1;
+	setAttr ($cam+"Shape.displaySafeAction") 1;
+	setAttr ($cam+"Shape.displaySafeTitle") 1;
+
+}
+
+global proc slAnimCamclip()
+{
+	string $episode = `zwGetPath "<Episode>" ""`;			//集数
+	string $scene = `zwGetPath "<Shot>" ""`;				//镜头
+	
+	
+	//建立对应镜头号的摄像机
+	string $cam = "cam_"+$episode+"_"+$scene;
+	if (!`objExists $cam`)
+		error "没有正确的相机!";
+	
+	string $cc[] = `ls -tr "*camclip"`;
+	if(size($cc)) delete $cc;
+	string $cs[] = `ls "camclipShader"`;
+	if(size($cs)) delete $cs;
+	file -import -type "mayaBinary" -rpr "camclip" -options "v=0"  -pr (`getenv "DEV_PATH"` + "/Maya/Import/camclip_sk.mb");
+	clear $cc;
+	string $cc[] = `ls -tr "*camclip"`;
+	string $pointposition[]=`pointConstraint  -offset 0 0 0 -weight 1 $cam $cc[0] `;
+	string $pointrotition[]=`orientConstraint  -offset 0 0 0 -weight 1  $cam $cc[0] `;
+	select -r $pointposition[0] $pointrotition[0] ;
+	delete;
+	parent $cc[0] $cam;
+	string $set="string $fo=`lookThru -q`;\r\nfloat $fovalue=`getAttr ($fo+\".focalLength\")`;"+$cc[0]+".translateZ=-0.00286154*($fovalue-35.0);";
+	expression -s $set -o $cc[0] -ae 1 -uc all ;
+}
+
+global proc slAnimSceneTime()
+{
+	//根据数据库设置时间栏
+	int $times[] = `idmtProject -timeLine -echo on`;
+	playbackOptions -minTime $times[0] -maxTime $times[1];
+}

@@ -1,0 +1,133 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 
+// COPYRIGHT (c) 2003 IDMT CHINA
+// 
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// 
+// Date: 22.08.2003
+// Last modified: 22.08.2003
+//
+// Description:
+//		Collision dectection for tnpCrowdCreator. The routine goes
+//	thru' the list of $crowdLocators to find intersections and 
+//	potential collisions between any pair of curves. If collision
+//	detected, a red sphere is put at that position.
+//
+// NOTE:
+//		- The order is important as I get the speed for each curve
+//	according to the particle associated with it!
+//
+// ChangeLog:
+//		- 21.08.2003: inter-collision detection for nurbsCurves!					
+//		- 24.08.2003: external collision avoidance with crowdObstacles
+//
+proc float tnpArcLength(string $nurbsCurve, float $uParam){
+	
+	string $arcDim = `arcLengthDimension ($nurbsCurve + ".u[" + $uParam + "]")`;
+
+	float $length = `getAttr ($arcDim + ".arcLength")`;
+	
+	$arcDim = `substitute "Shape" $arcDim ""`;
+	delete $arcDim;
+
+	return $length;
+}
+global proc tnpCrowdCollisionDetection(float $tolerance){
+	
+	global string $crowdLocators[];
+	global string $crowdParticle;
+	
+	float	$speedI;
+	float	$speedJ;
+	float	$length1;
+	float	$length2;
+	float	$time1;
+	float	$time2;
+	float	$pos[];
+
+	if(size($crowdLocators)==0 || size($crowdParticle)==0) return;
+
+	// CLEAN UP ALL THE COLLISION SPHERES IF ANY
+	string $sl[] = `ls "GroupCollisionSpheres"`;
+	if(size($sl)!=0) delete $sl[0];
+	if(exists("crowdCollisionLambert")) delete crowdCollisionLambert;
+
+	// INTER-COLLISION DETECTION
+	waitCursor -state on;
+	for($i=0; $i<size($crowdLocators); $i++){
+		
+		if (kcIsType($crowdLocators[$i], "locator")) continue; 
+	
+		// get the speed for curve i
+		float $temp[] = `particle -attribute speedPP -order $i -q $crowdParticle`;	
+		$speedI = $temp[0];
+		
+		for($j=$i+1; $j<size($crowdLocators); $j++){
+			
+			if (kcIsType($crowdLocators[$j], "locator")) continue;
+			
+			// get the speed for curve j
+			float $temp[] = `particle -attribute speedPP -order $j -q $crowdParticle`;	
+			$speedJ = $temp[0];	
+			//print ("CHECK COLLISION FOR " + $i + " <> " + $j + "\n");
+			string $intersectNode = `curveIntersect -ch on ($crowdLocators[$i]) ($crowdLocators[$j])`;			
+			float $uParam1[] = `getAttr ($intersectNode + ".p1")`;
+			float $uParam2[] = `getAttr ($intersectNode + ".p2")`;
+			delete $intersectNode;
+
+			if(size($uParam1)==0) continue;	// not intersect
+
+			// check these intersection points
+			for($k=0; $k<size($uParam1); $k++){
+				
+				$pos = `pointOnCurve -parameter ((float)$uParam1[$k]) $crowdLocators[$i]`;
+
+				$length1 = tnpArcLength($crowdLocators[$i], $uParam1[$k]);
+				$length2 = tnpArcLength($crowdLocators[$j], $uParam2[$k]);
+				
+				$time1 = $length1/$speedI;
+				$time2 = $length2/$speedJ;
+				
+				if ( $time1 >= ($time2 - $tolerance) && 
+					 $time1 <= ($time2 + $tolerance)){// collided
+					
+					// PUT A SPHERE THERE
+					// The spheres are named "crowdCollisionSphere*"
+					string $sphere[] = `sphere -radius 0.3 -name crowdCollisionSphere`;
+					xform -worldSpace -translation $pos[0] $pos[1] $pos[2]  $sphere[0];
+				}
+			} // end k loop
+		} // end j loop
+	} // end i loop
+
+	// MAKE COLLISION SPHERES RED
+	string $spheres[] = `ls -tr "crowdCollisionSphere*"`;
+	
+	if (size($spheres) !=0){
+		
+		string $lambert = `shadingNode -asShader -name crowdCollisionLambert lambert`;	
+		string $SG = `sets -renderable true -noSurfaceShader true -empty`;
+		connectAttr -f ( $lambert + ".outColor" ) ( $SG + ".surfaceShader" );
+		setAttr ($lambert + ".color") 1 0 0; // RED
+
+		for($item in $spheres){
+			// connect to the lambert node
+			sets -e -forceElement $SG $item;
+		}
+
+		// GROUPING
+		string $group = `group -em -n GroupCollisionSpheres`;
+		for($item in $spheres) parent $item $group;
+	}
+
+	waitCursor -state off;
+}

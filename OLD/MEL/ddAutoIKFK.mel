@@ -1,0 +1,147 @@
+/// Copyright (C) 2000-2006 IDMT. All rights reserved.
+/// reference:<mwWristSnap.mel>/Author: mw/Modify: JuliiFreeMAN
+
+/// Author: liang
+///
+/// Creation Date: 2007/01/23
+///
+/// Description: ik&fk互换器
+/// Modify: liang
+global proc ddAutoIKFK()
+{
+	////////////////////////////////////////////////////////////////////////////////
+	//获得三个部位的名字字符串
+	////$rePreFix 参考前缀
+	////$char 角色名(角色完成名字的最前字符串)
+	////$side 左右方位(角色完整名字的最后字符串)
+	string $selected[],$nameSpaces[],$nameParts[] ;
+
+
+	string $rePrefix = "";	//参考前缀
+	string $char = "";		//角色名
+	string $side = "";		//左右方位
+	int $tokNameSpace,$tokNameParts,$loop ;
+
+	$selected = `ls -sl` ;
+	if (size($selected) == 0)
+	{
+		return ;
+	}
+	float $oreint[3],$position[3],$frame ;
+
+	$frame = `currentTime -q`;//GET CURRENT FRAME
+	
+	$tokNameSpace = (tokenize($selected[0], ":", $nameSpaces));
+	
+	$tokNameParts = (tokenize($nameSpaces[$tokNameSpace-1], "_", $nameParts));
+	
+	//取得参考名字空间
+	for($loop=0;$loop < $tokNameSpace-1;$loop++)
+	{
+		$rePrefix = $rePrefix + $nameSpaces[$loop]+":" ;
+	}
+	
+	$char = $nameParts[0] ;
+	$side = $nameParts[$tokNameParts-1] ;
+//	print ("char = " + $char + "\n" + "side = " + $side + "\n" + "rePrefix = " + $rePrefix + "\n");
+	//print ("选择物体全名 = " + $rePrefix + $char + "_部件描述_" + $side);
+
+	if (`attributeExists "signIK" $selected[0]`)
+	{
+		if (`getAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable")` == false)
+		{
+			//fk控制转换ik控制分支
+		
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_wristCon_" + $side);
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+		
+			//调整极向量约束器的位置
+			$oreint = `getAttr ($char+"_arm_"+$side + ".rotate")` ;
+			setAttr ($char+"_armPoleVecterCon_"+$side + ".rx") $oreint[0] ;
+			setAttr ($char+"_armPoleVecterCon_"+$side + ".ry") $oreint[1] ;
+			setAttr ($char+"_armPoleVecterCon_"+$side + ".rz") $oreint[2] ;
+
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char+"_armPoleVecterCon_"+$side);
+			refresh;
+
+			//建立临时组tempGrp
+			group -em -n tempGrp;
+			parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+			makeIdentity -apply true -t 1 -r 1 -s 1 -n 0 tempGrp;
+
+			//临时调整层级关系//取得ik控制器的方位值后赋给fk控制器，并给fk控制器key帧
+			parent tempGrp ($rePrefix + $char + "_MASTER");
+			parent ($rePrefix + $char + "_world_wristCon_" + $side) tempGrp;
+		
+			//取得fk控制器的方向值后赋给ik控制器，并给ik控制器key帧
+			$oreint = `getAttr ($rePrefix + $char + "_wristCon_" + $side + ".r")` ;
+			setAttr ($rePrefix + $char + "_world_wristCon_" + $side + ".rx") $oreint[0] ;
+			setAttr ($rePrefix + $char + "_world_wristCon_" + $side + ".ry") $oreint[1] ;
+			setAttr ($rePrefix + $char + "_world_wristCon_" + $side + ".rz") $oreint[2] ;
+			parent ($rePrefix + $char + "_world_wristCon_" + $side) ($rePrefix + $char + "_world_wristConGrp_" + $side);		
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side );
+			delete tempGrp;
+		
+			//取得fk控制器的位绝对位置后赋给ik控制器，并给ik控制器key帧
+			$position = `xform -query -worldSpace -translation ($rePrefix + $char + "_wristCon_" + $side)` ;
+			xform -worldSpace -translation $position[0] $position[1] $position[2] ($rePrefix + $char + "_world_wristCon_" + $side)  ;
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side);
+
+			setAttr($rePrefix + $char + "_world_wristCon_" + $side + ".twist") 0;
+
+			//打开ik解算器
+			setAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable") 1;
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_wristCon_" + $side);
+			refresh;
+			select -replace $selected[0] ;
+		}
+	}
+	else if (`attributeExists "signFK" $selected[0]`)
+	{
+		if (`getAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable")` == true)
+		{
+			//ik控制转换fk控制分支
+
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_arm_" + $side);
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_elbow_" + $side);
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side);
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_armPoleVecterCon_" + $side);
+
+			//储存_world_wristCon_的rotate值
+			float $tempArray[] = `getAttr ($rePrefix + $char + "_world_wristCon_" + $side+".rotate")`;
+
+			//建立临时组tempGrp
+			group -em -n tempGrp;
+			parent tempGrp ($rePrefix + $char + "_wristCon_group_" + $side);
+			makeIdentity -apply true -t 1 -r 1 -s 1 -n 0 tempGrp;
+		
+			//临时调整层级关系
+			parent tempGrp ($rePrefix + $char + "_MASTER");
+			parent ($rePrefix + $char + "_world_wristCon_" + $side) tempGrp;
+
+			//取得ik控制器的方位值后赋给fk控制器，并给fk控制器key帧
+			$oreint = `getAttr ($rePrefix + $char + "_world_wristCon_" + $side + ".r")` ;
+			setAttr ($rePrefix + $char + "_wristCon_" + $side + ".rx") $oreint[0] ;
+			setAttr ($rePrefix + $char + "_wristCon_" + $side + ".ry") $oreint[1] ;
+			setAttr ($rePrefix + $char + "_wristCon_" + $side + ".rz") $oreint[2] ;
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_wristCon_" + $side);
+			
+			//清理临时物体并将临时层级关系还原
+			parent ($rePrefix + $char + "_world_wristCon_" + $side) ($rePrefix + $char + "_world_wristConGrp_" + $side);
+			delete tempGrp;
+			setAttr ($rePrefix + $char + "_world_wristCon_" + $side+".rotate") $tempArray[0] $tempArray[1] $tempArray[2];
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 ($rePrefix + $char + "_world_wristCon_" + $side);
+			
+			//关闭ik解算器
+			setAttr ($rePrefix + $char + "_wristCon_" + $side +".solverEnable") 0;
+			setKeyframe -time $frame -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" ($rePrefix + $char + "_wristCon_" + $side);
+			refresh;
+			select -replace $selected[0] ;
+		}
+
+	}
+
+}
+
+//End of file.

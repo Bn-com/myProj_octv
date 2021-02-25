@@ -1,0 +1,197 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: “¸Í…
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycAllJointScale(string $RootObj1)
+{
+	select $RootObj1;
+	string $AllobjList[]=`ls -dag -long -allPaths -sl`;
+	//print $AllobjList;
+	int $singleValue=0;
+	for ($i=0;$i<size($AllobjList);$i++)
+	{
+		string $SingleObjectBuffer[];
+		int $SingleHierNum=`tokenize $AllobjList[$i] "|" $SingleObjectBuffer`;
+		if ($SingleHierNum>$singleValue)
+		{
+			$singleValue=$SingleHierNum;
+		}
+	}
+
+	string $JointListAttrL[];
+	int $JointLockNum=0;
+	string $AllDag[]=`ls -dag -allPaths -sl`;
+
+	for ($i=0;$i<size($AllDag);$i++)
+	{
+		string $JLockA[]=`listAttr -l $AllDag[$i]`;
+		for ($j=0;$j<size($JLockA);$j++)
+		{
+			$JointListAttrL[$JointLockNum]=($AllDag[$i]+"."+$JLockA[$j]);
+			setAttr -lock 0 -k 1 ($AllDag[$i]+"."+$JLockA[$j]);
+			$JointLockNum++;
+		}
+	}
+	select $RootObj1;
+////////////////////////////////////////////////////////////////////////////////////////////////
+	string $JointList[]=`ls -dag -allPaths -type "joint" -sl`;
+
+	string $TempJoint[];
+	int $TempJointNum=0;
+	string $HierarchyArray[];
+	$HierarchyArray=`ls -dag -transforms -long -allPaths -sl`;
+
+	int $Level=0,$ParentParent=1,$Parent=2,$Object=3;
+	int $LevelValue=0;
+	string $HierThreeSplit[];
+	$HierThreeSplit[$Level]=1;
+	$HierThreeSplit[$ParentParent]="";
+	$HierThreeSplit[$Parent]="";
+	$HierThreeSplit[$Object]=$RootObj1;
+	for ($i=1;$i<size($HierarchyArray);$i++)
+	{
+		$Level+=4;
+		$ParentParent+=4;
+		$Parent+=4;
+		$Object+=4;
+		string $HierarchBuffer[];
+		int $HierarchNum = `tokenize $HierarchyArray[$i] "|" $HierarchBuffer`;
+		$HierThreeSplit[$Level]=$HierarchNum;
+		if ($HierarchNum-3<0)
+		{
+			$HierThreeSplit[$ParentParent]="";
+		}
+		else
+		{
+			$HierThreeSplit[$ParentParent]=$HierarchBuffer[$HierarchNum-3];
+		}
+		$HierThreeSplit[$Parent]=$HierarchBuffer[$HierarchNum-2];
+		$HierThreeSplit[$Object]=$HierarchBuffer[$HierarchNum-1];
+		if ($HierarchNum>$LevelValue)
+		{
+			$LevelValue=$HierarchNum;
+		}
+	}
+//-------------------------------------------------------------------------------------------------//
+	for ($i=0;$i<size($JointList);$i++)
+	{		
+		int $JudgeChildJoint=0;
+		string $JointArray[]={"joint"};
+		string $JointListChild[]=`listRelatives -c -fullPath $JointList[$i]`;
+	//	print $JointListChild;
+
+		for ($j=0;$j<size($JointListChild);$j++)
+		{
+			if (`nodeType $JointListChild[$j]`=="joint")
+			{
+				$JudgeChildJoint=1;
+			}
+			else
+			{
+				string $JointTwoChild[]=`listRelatives -c -fullPath  $JointListChild[$j]`;
+				//print $JointTwoChild;
+				for ($k=0;$k<size($JointTwoChild);$k++)
+				{
+					if (`nodeType $JointTwoChild[$k]`=="joint")
+					{
+						$JudgeChildJoint=1;
+					}
+				}
+			}
+		}
+
+		if ($JudgeChildJoint==0)
+		{
+			select -cl;
+			$TempJoint[$TempJointNum]=("yc_"+$JointList[$i]); 
+			joint -p 0 0 0 -n ("yc_"+$JointList[$i]);  
+			select ("yc_"+$JointList[$i]); 
+			select -add $JointList[$i];
+			//parent;
+			connectJoint -pm ;
+			$TempJointNum++;
+		}
+	}
+
+	int $LevelValueTemp=$LevelValue;
+
+	for ($k=0;$k<$LevelValue;$k++)
+	{
+		for ($i=4;$i<size($HierThreeSplit);$i=$i+4)
+		{
+			if ($HierThreeSplit[$i]==$LevelValueTemp)
+			{
+				if (`nodeType $HierThreeSplit[$i+3]`=="joint")
+				{
+					select 	$HierThreeSplit[$i+3];
+					if (`nodeType $HierThreeSplit[$i+2]`=="joint"||`nodeType $HierThreeSplit[$i+1]`=="joint")
+					{
+						DisconnectJoint;
+					}
+				}
+			}
+		}
+		$LevelValueTemp--;
+	}
+
+	for ($i=0;$i<size($JointList);$i++)
+	{
+		setAttr  ($JointList[$i]+".sx") 1;
+		setAttr  ($JointList[$i]+".sy") 1;
+		setAttr  ($JointList[$i]+".sz") 1;
+		setAttr  ($JointList[$i]+".rx") 0;
+		setAttr  ($JointList[$i]+".ry") 0;
+		setAttr  ($JointList[$i]+".rz") 0;
+	}
+
+	int $LevelValueTemp1=$LevelValue;
+
+	for ($k=1;$k<$LevelValue;$k++)
+	{
+		for ($i=4;$i<size($HierThreeSplit);$i=$i+4)
+		{
+			if ($HierThreeSplit[$i]==($k+1)&&`nodeType $HierThreeSplit[$i+3]`=="joint")
+			{
+				if (`nodeType $HierThreeSplit[$i+2]`=="joint")
+				{
+					select $HierThreeSplit[$i+3];
+					select -add $HierThreeSplit[$i+2];
+					connectJoint  -pm;
+				}
+				else
+				{
+					if (`nodeType $HierThreeSplit[$i+1]`=="joint")
+					{
+						select $HierThreeSplit[$i+3];
+						select -add $HierThreeSplit[$i+1];
+						connectJoint  -pm;
+						parent $HierThreeSplit[$i+3] $HierThreeSplit[$i+2];
+					}
+				}
+			}
+		}
+	}
+	select $RootObj1;
+	string $JointListNew[]=`ls -dag -allPaths -type "joint" -sl`;
+
+	for ($i=0;$i<size($JointListNew);$i++)
+	{
+		int $JointCount=stringArrayCount($JointListNew[$i], $JointList);
+		if ($JointCount==0)
+		{
+			delete $JointListNew[$i];
+		}
+	}
+
+	for ($i=0;$i<size($JointListAttrL);$i++)
+	{
+		setAttr -l 1 $JointListAttrL[$i];
+	}
+	select $RootObj1;
+}

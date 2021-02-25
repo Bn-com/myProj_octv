@@ -1,0 +1,206 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+
+global proc loadSyncFile(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _syncListPath_CST;
+}
+
+global proc string findFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4 -fileCommand "loadSyncFile"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+global proc writeShotReport(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _shotFrameTxtFile_CST;
+}
+
+global proc string WriteFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "writeShotReport"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+
+global proc int spaceCharTest(string $nextLine)
+{
+	string $cptx = $nextLine;
+	while($nextLine != ($nextLine = `substitute " " $nextLine ""`))
+		continue;
+	int $num = 0;
+	if($cptx != $nextLine)
+		$num = 1;
+	return $num;
+}
+
+
+
+global proc saveReport_CST()
+{
+	string $sourceFilePrefix = `textFieldButtonGrp -q -text _syncListPath_CST`;
+	string $destinFilePath = `textFieldButtonGrp -q -text _shotFrameTxtFile_CST`;
+	string $buffer[];
+	int $num = `tokenize $sourceFilePrefix "\\/_" $buffer`;
+	string $reportFileName = $destinFilePath + "/br_" + $buffer[$num-2] + "_syncReport.txt";
+	br_printshotFrames($reportFileName,$sourceFilePrefix);
+}
+
+global proc br_printshotFrames(string $txtFile,	string $sourcePath )
+{
+	string $fileExt ="*.txt";
+	string $syncFiles[] = `getFileList -filespec ($sourcePath+"/"+$fileExt)`;
+	string $txt = "";
+	$fileId = `fopen $txtFile "w"`;
+	fprint $fileId "shot";
+	fprint $fileId "\tlength\r\n";
+	for($f in $syncFiles)
+	{
+		string $nextLine = printShotFrames($sourcePath+"/"+$f);
+		fprint $fileId $nextLine;
+		fprint $fileId "\r\n";
+	}
+	fclose $fileId;
+}
+
+global proc string printShotFrames(string $fileName)
+{
+	string $buffer[];
+	$fileId = `fopen $fileName "r"`;
+	string $nextLine = `fgetline $fileId`;
+	int $lineNum = 1;
+	string $txt = "";
+	while($lineNum < 4)
+	{
+		$nextLine = `fgetline $fileId`;
+		$lineNum ++;
+		if($lineNum == 2)
+			{tokenize $nextLine "\n" $buffer;$txt = $buffer[0];}
+		else if ($lineNum == 3)
+			{tokenize $nextLine "\n" $buffer;$txt += "\t" + $buffer[0] ;}
+	}
+	fclose $fileId;
+	return $txt;
+}
+
+
+global proc slBrCheckSyncTxt()
+{
+	if(`window -exists w_br_CST`)
+		deleteUI w_br_CST;
+	window -title "Check sync txt files" w_br_CST;
+	string $form = `formLayout`;
+			textFieldButtonGrp -label "SyncFilePath" -text "" -buttonLabel "Browse" -cw3 90 240 100 -buttonCommand "findFilePath"  _syncListPath_CST;
+			textFieldButtonGrp -label "ReportTo" -text "" -buttonLabel "Browse" -cw3 90 240 100 -buttonCommand "WriteFilePath"  _shotFrameTxtFile_CST;
+			string $checkButton = `button -l "Check" -w 100 -command "getSyncTxtPath_CST()"`;
+			string $reportButton = `button -l "SaveReport" -w 100 -command "saveReport_CST()"`;
+			//string $distributeButton = `button -l "Distribute" -w 100 -vis true -command "distributeSyncFiles()"`;			
+	setParent ..;
+	formLayout -edit
+			-attachForm _syncListPath_CST						"top" 5
+			-attachControl _shotFrameTxtFile_CST					"top" 5 _syncListPath_CST
+			-attachControl $checkButton						"top" 5 _shotFrameTxtFile_CST
+			-attachForm $checkButton						"left" 10 
+			-attachPosition $checkButton						"right" 0 45
+			-attachControl $reportButton						"top" 5 _shotFrameTxtFile_CST
+			-attachControl $reportButton						"left" 10 $checkButton
+			-attachPosition $reportButton						"right" 0 95
+	$form;
+	showWindow w_br_CST;
+}
+
+
+global proc getSyncTxtPath_CST()
+{
+	string $path = `textFieldButtonGrp -q -text _syncListPath_CST`;
+	CheckSyncTxt($path);
+}
+
+global proc string slash(string $path)
+{
+	string $slash = "";
+	string $tokens[];
+	int $h = `tokenize $path "\\/" $tokens`;
+	string $slash = $tokens[0];
+	for($i=1;$i<$h;$i++)
+	{
+		$slash += ("/"+$tokens[$i]);
+	}
+	return $slash;
+}
+
+global proc CheckSyncTxt(string $path)
+{
+	
+	scriptEditorInfo -edit -clearHistory;
+
+	string $fileExt = slash($path)+"/*.txt";
+	string $listFiles[] = `getFileList -filespec ($fileExt)`;
+	if(`size $listFiles` != 0)
+	{
+		for($f in $listFiles)
+		{
+			string $fileName = $path+"/"+$f;
+			$fileId = `fopen $fileName "r"`;
+			string $nextLine = `fgetline $fileId`;
+			int $lineNum = 1;
+			int $factor = 0;
+			while(size($nextLine)>0)
+			{
+
+				$nextLine = `fgetline $fileId`;
+				$lineNum++;
+				string $removeLineEnter = `substitute "\n" $nextLine ""`;
+				if ($lineNum <4 && startString($nextLine,1) == "[")
+				{
+					if($factor == 0)
+					{
+						print ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;						
+					}
+					print ("第"+$lineNum+"行:"+"文件格式错误"+$nextLine+"被发现\n");	
+				}
+				else if ($lineNum > 4 && isValidString($removeLineEnter,"([0-9_ ]+)([A-IR])") == 0 &&  isValidString($removeLineEnter,"([0-90-9_ ]+)([A_IR])") == 0  && startString($nextLine,1) != "[" && $nextLine != "")
+				{
+					if($factor == 0)
+					{
+						print ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;
+					}
+					print ("第"+$lineNum+"行:"+"非法数据"+$nextLine+"被发现\n");	
+				}
+				/*------------------------------------------------------------------------------------------------------------------------
+				else if (`gmatch $nextLine "[J-Z]\n"` || `gmatch $nextLine "[j-z]\n"`)
+				{
+					if($factor == 0)
+					{
+						print ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;
+					}
+					print ("第"+$lineNum+"行:"+"非法字符"+$nextLine+"被发现\n");		
+				}
+				else if (spaceCharTest($nextLine))
+				{
+					if($factor == 0)
+					{
+						print ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;
+					}
+					print ("第"+$lineNum+"行:"+"非法字符空格被发现\n");						
+				}
+				--------------------------------------------------------------------------------------------------------------------------*/
+
+			}
+			fclose $fileId;
+		}
+	}
+}

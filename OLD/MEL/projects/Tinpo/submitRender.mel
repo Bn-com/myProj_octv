@@ -1,0 +1,201 @@
+// submitRender.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	submits a render - for use by ShotRender script
+Use:
+	submitRender 
+Options:
+	type (string)	- What type of scene - ani, lay, or lit
+	
+Dependancies:
+
+	submitMaya (Maya renders)
+	getPath
+	/diskx/film/apps/reelfx/python/mr_export_and_render.py (Mental Ray Renders)
+	rfxmaya
+	airExportAndRender (Air renders)
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	10/31/05
+Revisions:	02/12/06	Rev 1.0
+		- Added the global variable gOutputFormat to choose between sgi and openEXR formats
+		- Revision made
+		
+		01/12/07	Rev 1.1
+		- Replaced call to mrExportAndRender with mr_export_and_render.py (uses rfxmaya)
+		- Replaced Render call with call to submitMaya
+
+		01/18/07	Rev 1.3
+		- Maya renders only: If $submitRender_preRender is set to nothing, and "preRender" exists in the script path, make it the preRender command
+
+		01/19/07	Rev 1.4
+		- Added retrywork to qbsub command for air and mr renders.
+
+		01/26/07	Rev 1.5
+		- Added support for updated rfxMaya and mr_export_and_render which allow a plug-in/script/shader environment to be specified per seq/shot
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	
+}
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+global proc int submitRender(
+	string $renderer,
+	string	$jobName,
+	int	$numCpus,
+	int	$priority,
+	string	$range,
+	string 	$cluster,
+	string	$preCallback,
+	string	$postCallback,
+	string  $extraQubeArgs,
+	string	$imageName,
+	string	$scene
+) 
+{
+	// global variables set by calling process
+	global string $submitRender_preRender; //$submitRender_preRender is a mel commanded entered under the flag -preRender
+	global string $gExtraRendererArgs; // this can be set by the calling process. If not an empty string it is added to the renderer line
+	global string $gOutputFormat;
+	global string $gSequence;
+	global string $gShot;
+	
+	string $ext = ($gOutputFormat=="openEXR")?"exr":$gOutputFormat;
+	int $jobNumber;	// job number to return to calling process
+	string $qbsubCmd;	// qube command to execute (MR and Air only, submitMaya handles maya renders
+	
+	// get stuff linux friendly
+	$imageName = getPath ("LinuxPath",{$imageName});
+	$scene = getPath ("LinuxPath",{$scene});
+
+	if ($renderer == "air" || $renderer == "mentalRay")
+	{
+		string $proj = `workspace -q -act`;
+		$proj = getPath ("LinuxPath",{$proj});
+
+		// start building qbsub cmd
+		//$qbsubCmd = (`about -linux`)?"/diskx/film/apps/pfx/qube-5.0-0-SUSE-10.0/bin/qbsub ":"qbsub ";
+		string $qbsubCmd = (`about -linux`)?`getenv "QBDIR"`+"/bin/qbsub ":"qbsub ";
+		//$qbsubCmd = "qbsub ";
+		$qbsubCmd += "--padding 4 ";
+		$qbsubCmd += "--user render ";
+		//$qbsubCmd += "--retrywork 1 ";
+		if ($preCallback != "")
+			$qbsubCmd	+= "--preexec \""+$preCallback+"\" ";	
+		if ($postCallback != "")
+			$qbsubCmd	+= "--postexec \""+$postCallback+"\" ";
+		
+		// range - a string in the form of, for ex, 1-100. The following works too: 1-4,6,9-10,12
+		$qbsubCmd += "--range "+$range+" ";
+		// priority
+		$qbsubCmd += "--priority "+$priority+" ";
+		// number of cpus
+		$qbsubCmd += "--cpus "+$numCpus+" ";
+		// job name
+		$qbsubCmd += "--name "+$jobName+" ";
+		// cluster
+		if ($cluster != "")
+		{
+			$qbsubCmd += "--cluster /"+$cluster+" ";
+			$qbsubCmd += "--requirements host."+$cluster+"=1 ";	
+		}
+		if ($extraQubeArgs != "")
+		{
+			$qbsubCmd += $extraQubeArgs+" ";
+		}
+
+		// now build the wrapper command to qbsub
+		string $wrapperCmd = $proj+" "+$scene+" QB_FRAME_NUMBER "+$imageName+".QB_FRAME_NUMBER."+$ext;
+		if ($renderer == "air")
+		{
+			$wrapperCmd = "airExportAndRender "+$wrapperCmd;
+		}
+		else if ($renderer == "mentalRay")
+		{
+			$wrapperCmd = "/diskx/film/apps/reelfx/python/mr_export_and_render.py "+$wrapperCmd;
+			if (strip ($gSequence) != "")
+				$wrapperCmd += " --sequence "+$gSequence;
+			if (strip ($gShot) != "")
+				$wrapperCmd += " --shot "+$gShot;
+			if (strip ($gExtraRendererArgs) != "")
+				$wrapperCmd += " "+$gExtraRendererArgs;
+		}
+
+		$qbsubCmd += $wrapperCmd;
+
+		// submit it
+		string $jobNumberStr = `system ($qbsubCmd)`;
+		$jobNumberStr = match ("[0-9]+",$jobNumberStr);
+		$jobNumber = ($jobNumberStr=="")?0:(int)$jobNumberStr;
+	}
+	else
+	{
+		// maya render
+		string $mayaCmd = 	"-s QB_FRAME_NUMBER ";
+		$mayaCmd += 		"-e QB_FRAME_NUMBER ";
+		$mayaCmd +=		"-b 1 ";
+		$mayaCmd +=		"-pad 4 ";
+		$mayaCmd +=		"-rd "+dirname($imageName)+" ";
+		$mayaCmd +=		"-im "+basename($imageName,"")+" ";
+		$mayaCmd +=		"-of "+$ext+" ";
+		
+
+		if($submitRender_preRender!="")
+		{
+			$mayaCmd += 	"-preRender "+$submitRender_preRender+" ";
+			
+		}
+		else if (`exists "preRender"`)
+		{
+			$mayaCmd += 	"-preRender preRender ";
+		}
+
+		$mayaCmd +=		$scene;	
+		string $extraRfxMayaArgs = "";
+		if (strip ($gSequence) != "")
+			$extraRfxMayaArgs += " --sequence "+$gSequence;
+		if (strip ($gShot) != "")
+			$extraRfxMayaArgs += " --shot "+$gShot;
+		
+		$jobNumber = submitMaya (
+			$jobName,		// name of the job 
+			$numCpus,	// number of cpus to use - only meaningful if range is set to something
+			$priority,		// priority to submit at
+			$range,			// range for jobs which have sub-jobs, e.g. Point Cache export
+			$cluster,		// cluster to submit to
+			$preCallback,			// qube pre-exec callback
+			$postCallback,			// qube post-exec callback
+			"",			// any extra qube args to add
+			true,			// use rfxmaya?
+			true,			// use the maya Render command
+			$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+			$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+		);
+		
+	}
+	
+	return $jobNumber;
+		
+}

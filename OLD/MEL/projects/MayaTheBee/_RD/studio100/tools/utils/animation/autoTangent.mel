@@ -1,0 +1,474 @@
+// --------------------------------------------------------------------------
+// autoTangent.mel - MEL Script
+// --------------------------------------------------------------------------
+//
+// DESCRIPTION:
+//	Changes selected graph editor keys to be smooth but without overshoot.
+//	Kinda like 3DSMax's autoTangents.  The amount of softness can be 
+//	user set, so that the tangents will overshoot a little bit if desired.
+//
+//	This also has a built in UI to run all of this and to set the softness.
+//	The softness value is also remembered per session from the last one used.
+//
+// USAGE:
+//	source "autoTangent.mel"; autoTangent();
+//
+// AUTHORS:
+//	Michael B. Comet - comet@comet-cartoons.com - http://www.comet-cartoons.com/
+//	
+// COPYRIGHT:
+//	Copyright ©2003 Michael B. Comet - All Rights Reserved
+//
+// VERSIONS:
+//	1.00 - 09/06/2003 - Michael B. Comet - Initial Release
+//	1.01 - 10/16/2003 - comet - Made -cc for slider so more interactive.
+//	1.02 - 04/12/2005 - mcomet - Made "Flatten" for start/end keys option
+//			at bequest of Rob Dollase.  This will work truly flat when the 
+//			soften value is at 0.  When soften is higher the keys will 
+//			be rounder like the others tho still more towards flat.
+//
+// --------------------------------------------------------------------------
+
+/*
+ * Global Vars
+ */
+global string $aTan_version = "1.02";
+global string $tMach_version = "1.10";
+
+// --------------------------------------------------------------------------
+
+/*
+ * autoTangent() - Main Entry
+ */
+global proc autoTangentUI()
+{
+    global string $aTan_version ;
+ 	global string $tMach_version ;
+ 	
+ 	float $bias = 50.0 ;
+    if(`optionVar -ex "tMach_bias"`)
+	$bias = `optionVar -q "tMach_bias"` * 100;
+ 	
+ 	
+    if (`window -q -ex autoTangentWin`) deleteUI autoTangentWin ;
+
+	// Load Prefs
+    float $soft = 0.0 ;
+	int $bFlatten = 0 ;
+    if(`optionVar -ex "aTan_softness"`)
+		$soft = `optionVar -q "aTan_softness"` * 100.0 ;
+    if(`optionVar -ex "aTan_flatten"`)
+		$bFlatten = `optionVar -q "aTan_flatten"` ;
+
+
+	// Make Window
+    window -w 200 -h 175 -t ("autoTangent - "+$aTan_version) -in "autoTangent" autoTangentWin;
+    columnLayout ;
+    
+    separator -style "in" -w 200 -h 5 ; 
+	checkBox -l "Flatten Start/End Keys" -v $bFlatten cbFlatten ;
+    floatSliderGrp -label "Softness:" -field true -min 0.0 -max 100.0 -v $soft -adj 3 -cw3 60 40 90 -cc ("aTan_start();") fsgSoft;
+    button -l ("Auto Tangent Selected Keys") -al "center" -w 180 -c ("aTan_start();") btnTan;
+    separator -style "in" -w 200 -h 5 ; 
+    
+    floatSliderGrp -label "Pose bias:" -field true -min 0.0 -max 100.0 -v $bias -adj 3 -cw3 60 40 90 -cc ("tMach_start();") fsgBias;
+    separator -style "in" -w 200 -h 5 ; 
+   // button -l ("Tween Machine!") -al "center" -w 192 -c ("tMach_start();") btnTwn;
+    
+    
+    
+    text -l ("Copyright ©2003-2005 Michael B. Comet");
+    text -l ("All Rights Reserved") ;
+    
+ window -e -w 200 -h 120 autoTangentWin;
+    showWindow autoTangentWin ;
+
+}
+
+
+
+// --------------------------------------------------------------------------
+
+/*
+ * tweenMachine() - Main Entry
+ */
+ /*
+global proc tweenMachine()
+{
+   
+
+    if (`window -q -ex tweenMachineWin`)
+        {
+        showWindow tweenMachineWin ;
+        return ;
+        }
+
+
+	// Load Prefs
+
+
+
+	// Make Window
+    window -w 200 -h 55 -t ("tweenMachine - "+$tMach_version) -in "tweenMachine" tweenMachineWin;
+    columnLayout ;
+    
+   
+    
+    showWindow tweenMachineWin ;
+
+}
+*/
+
+
+
+// --------------------------------------------------------------------------
+
+/*
+ * aTan_start() - Wrapper for start from UI.
+ */
+global proc aTan_start()
+{
+    float $soft = `floatSliderGrp -q -v fsgSoft` / 100.0 ;
+	int $bFlatten = `checkBox -q -v cbFlatten` ;
+
+    // Store in option var too!
+    optionVar -fv "aTan_softness" $soft ;
+    optionVar -iv "aTan_flatten" $bFlatten ;
+
+    // Make it so!
+    aTan_smoothKeys_at($soft, $bFlatten) ;
+    
+}
+
+
+// --------------------------------------------------------------------------
+
+/*
+ * aTan_smoothKeys_at() - Does actual smooth work
+ */
+global proc aTan_smoothKeys_at(float $softness, int $bFlatten)
+{
+    string $curves[] = `keyframe -q -name -sl` ; // get all selected animCurve Nodes
+    string $crv ;
+    
+    waitCursor -state on ;
+    
+    	// For each curve...
+    for ($crv in $curves)
+        {
+        	// What key indexes 0..1..2..n for that curve are chosen?
+        	//
+        int $idxs[] = `keyframe -q -indexValue -sl $crv` ;
+        int $idx ;
+        
+        for ($idx in $idxs)
+            {
+			// How many keys on this curve?
+			int $total = `keyframe -q -keyframeCount $crv` ;
+			
+			// Figure current Time and Value
+			//
+			float $valCs[] = `keyframe -index $idx -q -valueChange $crv` ;
+			float $timeCs[] = `keyframe -index $idx -q -timeChange $crv` ;
+			
+			float $valPs[] = $valCs ;
+			float $valNs[] = $valCs ;
+			float $timePs[] = $timeCs ;
+			float $timeNs[] = $timeCs ;
+			
+			// Figure prev Time and Value
+			//
+			if ($idx > 0)
+				{
+			$valPs = `keyframe -index ($idx-1) -q -valueChange $crv` ;
+			$timePs = `keyframe -index ($idx-1) -q -timeChange $crv` ;
+			}
+			   
+			// Figure next Time and Value
+			//
+			if ($idx < $total-1)
+				{
+			$valNs = `keyframe -index ($idx+1) -q -valueChange $crv` ;
+			$timeNs = `keyframe -index ($idx+1) -q -timeChange $crv` ;
+			}
+			
+			float $valC = $valCs[0] ;
+			float $valP = $valPs[0] ;
+			float $valN = $valNs[0] ;
+			float $timeC = $timeCs[0] ;
+			float $timeP = $timePs[0] ;
+			float $timeN = $timeNs[0] ;
+			
+			// Make start/end keys nice and not flat
+			if ($idx == 0 && !$bFlatten)
+				{
+				$timeP = $timeC - ($timeN - $timeC) ;
+				$valP = $valC - ($valN - $valC) ;
+				}
+			else if ($idx == ($total-1) && !$bFlatten)
+				{
+				$timeN = $timeC + ($timeC - $timeP) ;
+				$valN = $valC + ($valC - $valP) ;
+				}
+				
+	
+			// Now we have all the basic data we need of current and prev and next
+			// key times and values... so use that to adjust the current tangents.
+			//
+	//	    print ("// valC="+$valC+" timeC="+$timeC+" //\n") ;
+	//	    print ("// valP="+$valP+" timeP="+$timeP+" //\n") ;
+	//	    print ("// valN="+$valN+" timeN="+$timeN+" //\n") ;
+	
+			// Compare changes in value
+			float $valIn = $valC - $valP ;
+			float $valOut = $valN - $valC ;
+	
+			// Compare changes in time
+			float $timeIn = $timeC - $timeP ;
+			float $timeOut = $timeN - $timeC ;
+			
+				// Figure slopes
+			float $slopeIn = 0 ;
+			float $slopeOut = 0 ;
+			if ($timeIn != 0)
+				$slopeIn = $valIn / $timeIn ;
+			if ($timeOut != 0)
+				$slopeOut = $valOut / $timeOut ;
+	
+	//	    print ("// slopeIn="+$slopeIn+" slopeOut="+$slopeOut+" //\n") ;	
+	
+			   // Now set power to be more of whichever one has LESS slope
+			float $powIn = 0.5, $powOut = 0.5;
+			
+			if ($slopeIn + $slopeOut != 0)
+				$powIn = 1.0 - ( abs($slopeIn) / ( abs($slopeIn) + abs($slopeOut) ) ) ;
+			$powOut = 1.0 - $powIn ;
+	
+			// Now use softness value so that as it goes to 1, we reset the
+			// weight power evenly to 0.5... so that it becomes more like smooth.
+			//
+			$powIn = ((1.0 - $softness) * $powIn ) + ($softness * 0.5) ;
+			$powOut = ((1.0 - $softness) * $powOut ) + ($softness * 0.5) ;
+	
+	//	    print ("// powIn="+$powIn+" powOut="+$powOut+" //\n") ;	
+		
+			float $newSlope = ( $powIn * $slopeIn ) + ( $powOut * $slopeOut ) ;
+	
+	//	    print ("// newSlope="+$newSlope+" //\n") ;	
+			
+			float $ang = atan( $newSlope ) * 180.0 / 3.14159 ;
+	
+	//	    print ("// ang="+$ang+" //\n") ;	
+			
+				// Update the tangents
+			keyTangent -itt spline -ott spline -time $timeC $crv ;
+			keyTangent -ia $ang -oa $ang -time $timeC $crv ;
+			
+				// Also does this use weighted tangents?
+			int $wts[] = `keyTangent -q -wt $crv` ;
+			if ($wts[0] == 1)
+				{
+				float $inWt = abs($timeIn) / 3.0 ;
+				float $outWt = abs($timeOut) / 3.0 ;
+				keyTangent -iw $inWt -ow $outWt -time $timeC $crv ;
+				}
+			}	// end of each idx
+    
+        } // end of each curve
+    
+    waitCursor -state off ;
+    
+    print ("// autoTangent Done. //\n") ;
+    
+}
+
+
+// --------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------
+// tweenMachine.mel - MEL Script
+// --------------------------------------------------------------------------
+//
+// DESCRIPTION:
+//	Creates a new key inbetween the previous and next keys, using a
+//	slider to adjust the "bias" or weight that each key has over the
+//	new key.  Requested/inspired by Doron Meir.  :)
+//
+// v1.01 - Bug fix
+//	When copying a key w/ a "fixed" tangent type, Maya does not allow
+//	"fixed" to be set on the 'tween key (don't know why).  TweenMachine
+//	will set the tangent type on the 'tween key based on the Maya default
+//	tangent type.
+//
+// v1.02 - Removed button
+//	To simplify usage of the tool, the 'tween key is now created when the
+//	slider is dragged and released, or the value is manually changed via the
+//	input field
+//
+// v1.03 - Restore focus
+// 	After the new 'tween key is created, focus is restored to the last Maya
+// 	panel accessed, so that the user can use keyboard shortcuts again to
+// 	toggle between frames, change manipulation modes, etc.
+//
+// v1.1 - Channel isolation
+//	When channels are selected in the channel box, new 'tween keys are
+//	only created for those channels.
+//
+//
+// USAGE:
+//	source "tweenMachine.mel"; tweenMachine;
+//
+// AUTHOR:
+//	Justin Barrett - http://www.justinanimator.com 
+//
+// COPYRIGHT:
+//	Copyright ©2005, 2006 Justin Barrett  - All Rights Reserved
+//
+// VERSIONS:
+//	1.00 - 10/01/2003 - Justin Barrett - Initial release
+//	1.01 - 10/02/2003 - Justin Barrett - Bug fix
+//	1.02 - 1/14/2006 - Justin Barrett - removed button
+//	1.03 - 1/23/2006 - Justin Barrett - Restore focus
+//	1.10 - 7/13/2006 - Justin Barrett - Attribute isolation
+//
+//
+
+global proc tMach_start()
+{
+    float $bias = `floatSliderGrp -q -v fsgBias` / 100;
+
+    // Store in option var too!
+    optionVar -fv "tMach_bias" $bias ;
+
+    // Make it so!
+    tween_Machine_at($bias) ;
+    
+}
+
+
+/*
+ * tween_Machine() - Adds the actual new in-between keys
+ */
+global proc tween_Machine_at(float $poseBias)
+{
+
+    string $curves[], $newCurves[], $attrs[], $crv, $attr; 
+    clear $curves;
+    clear $newCurves;
+
+    string $pf = `getPanel -wf`;
+
+    float $timeRng[] = `timeControl -q -ra timeControl1`;  // get selected range on timeline (as an array)
+    int $timeC = $timeRng[0]; // current keyframe, where new key will be added
+
+    $curves = `timeControl -q -acn timeControl1` ; // get names of all ticked Nodes
+    $attrs = `channelBox -q -sma "mainChannelBox"`; // get names of selected attributes in channel box
+
+    if (size($attrs) > 0) {
+	
+	// convert short entries in attribute list to long names
+	int $i;
+	for ($i=0; $i<size($attrs); $i++) {
+		switch ($attrs[$i]) {
+			case "tx": $attrs[$i] = "translateX"; break;
+			case "ty": $attrs[$i] = "translateY"; break;
+			case "tz": $attrs[$i] = "translateZ"; break;
+			case "rx": $attrs[$i] = "rotateX"; break;
+			case "ry": $attrs[$i] = "rotateY"; break;
+			case "rz": $attrs[$i] = "rotateZ"; break;
+			case "sx": $attrs[$i] = "scaleX"; break;
+			case "sy": $attrs[$i] = "scaleY"; break;
+			case "sz": $attrs[$i] = "scaleZ"; break;
+			case "v": $attrs[$i] = "visibility"; break;
+		}
+	}
+
+	// compare selected attributes to curves and build new curves array
+
+	for ($crv in $curves) {
+		for ($attr in $attrs) {
+			if (endsWith($crv, $attr)) $newCurves[size($newCurves)] = $crv;
+		}
+	}
+	clear $curves;
+	$curves = $newCurves;
+    }
+
+    waitCursor -state on ;
+    
+    	// For each curve...
+    for ($crv in $curves)  {
+
+		// Find time for next and previous keys...
+	    int $timeP = `findKeyframe -which previous $crv`;
+	    int $timeN = `findKeyframe -which next $crv`;
+
+		// Find previous and next tangent types
+	    string $tanInPs[] = `keyTangent -time $timeP -q -itt $crv`;
+	    string $tanOutPs[] = `keyTangent -time $timeP -q -ott $crv`;
+	    string $tanInNs[] = `keyTangent -time $timeN -q -itt $crv`;
+	    string $tanOutNs[] = `keyTangent -time $timeN -q -ott $crv`;
+
+		// Set new in and out tangent types based on previous and next tangent types
+	    string $tanInC = $tanOutPs[0];
+	    string $tanOutC = $tanInNs[0];
+
+		// However...if any of the types (previous or next) is "fixed", then use the global (default) tangent instead
+
+	    if (($tanInPs[0] == "fixed") || ($tanOutPs[0] == "fixed") || ($tanInNs[0] == "fixed") || ($tanOutNs[0] == "fixed"))
+		{
+		string $tanInGs[] = `keyTangent -q -g -itt`;
+		string $tanOutGs[] = `keyTangent -q -g -ott`;
+		$tanInC = $tanInGs[0];
+		$tanOutC = $tanOutGs[0];
+		}
+	    else
+		{		
+		if ($tanOutNs[0] == "step")
+		    $tanOutC = $tanOutNs[0];
+		}
+
+		// Find previous and next key values
+	    float $valPs[] = `keyframe -time $timeP -q -valueChange $crv` ;
+	    float $valNs[] = `keyframe -time $timeN -q -valueChange $crv` ;
+
+	    float $valP = $valPs[0] ;
+	    float $valN = $valNs[0] ;
+
+		// Find difference in value between previous and next keys
+
+	    float $diff = $valN - $valP ;
+
+		// Find percentage of difference to use based on Pose Bias value
+
+	    float $diffToUse = $diff * $poseBias;
+
+		// Find current key value by adding amount used to previous key
+
+	    float $valC = $valP + $diffToUse;
+
+		// Set new keyframe
+
+	    setKeyframe -t $timeC -v $valC -ott $tanOutC $crv;
+	    
+	    if ($tanInC != "step")
+		keyTangent -t $timeC -itt $tanInC $crv;
+
+        }
+    
+    currentTime -e $timeC;
+
+    setFocus $pf;
+
+    waitCursor -state off ;
+    
+    print ("// tweenMachine Done. //\n") ;
+    
+}
+
+
+// --------------------------------------------------------------------------
+
+
+// get list of selected attributes from channel box
+// string $attrs[] = `channelBox -q -sma "mainChannelBox"`; 

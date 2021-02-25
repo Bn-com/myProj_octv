@@ -1,0 +1,224 @@
+//zjsEditCurve.mel	////////////////////////////
+
+global proc zjsEditCurve()
+{	;	}	//do nothing
+
+// zjsFilletCV	///////////////////////////////////////////////////////////
+global proc zjsFilletCVUI()
+{	zjsFilletCV(2,0.2,1,0.001);
+	if(`window -ex zjsFilletCVWindow`)	deleteUI zjsFilletCVWindow;
+	window -t "Fillet CV" zjsFilletCVWindow;	columnLayout -adj 1;
+
+	radioButtonGrp -l "Style" -nrb 2 -la2 "3 CVs" "5 CVs" -sl 2 style;
+	floatSliderGrp -l "Distance" -f 1 -min 0.1 -max 0.4 -fmn 0.01 -v 0.2 distance;
+	checkBox -l "Preserve corner" -v 1 keepCorner;
+	floatSliderGrp -l "Corner Distance*100" -f 1 -min 1 -max 10 -fmn 0.1 -fmx 20 -v 1 cornerDistance;
+	string $commands;
+	$commands="undo;int $style=`radioButtonGrp -q -sl style`;float $distance=`floatSliderGrp -q -v distance`;int $keepCorner=`checkBox -q -v keepCorner`;float $cornerDistance=`floatSliderGrp -q -v cornerDistance`;zjsFilletCV($style,$distance,$keepCorner,$cornerDistance/100.0);";
+	radioButtonGrp -e -cc $commands style;
+	floatSliderGrp -e -cc $commands distance;
+	checkBox -e -cc "if(`checkBox -q -v keepCorner`)floatSliderGrp -e -en 1 cornerDistance;else floatSliderGrp -e -en 0 cornerDistance;undo;int $style=`radioButtonGrp -q -sl style`;float $distance=`floatSliderGrp -q -v distance`;int $keepCorner=`checkBox -q -v keepCorner`;float $cornerDistance=`floatSliderGrp -q -v cornerDistance`;zjsFilletCV($style,$distance,$keepCorner,$cornerDistance/100.0);"keepCorner;floatSliderGrp -e -cc $commands cornerDistance;showWindow zjsFilletCVWindow;
+}
+global proc zjsFilletCV(int $points,float $distance,int $keepCorner,float $cornerDistance)
+{
+	string $selectedCVs[]=`filterExpand -sm 28`;
+	if($selectedCVs[0]=="") error "No curve's CVs selected.";
+	string $curveShape[]=`listRelatives -p`;
+	if($curveShape[1]!="") error "This command works on 1 curve's CV only.You select multipile curves' CVs.";
+	string $curveName[]=`listRelatives -p $curveShape[0]`;
+	int $degree=`eval("getAttr "+$curveShape[0]+".degree")`;
+	if($degree!=1) error "The curve's degree is not 1.";
+
+	int $spans=`eval("getAttr "+$curveShape[0]+".spans")`;
+
+	string $allCVs[];
+	int $i,$n;
+	float $u;
+	for($i=0;$i<=$spans;$i++)
+		$allCVs[$i]=$curveName[0]+".cv["+$i+"]";
+	string $unSelCVs[]=stringArrayRemove($selectedCVs,$allCVs);
+
+	int $sizeOfSelectedCVs,$sizeOfUnSelCVs;
+	$sizeOfSelectedCVs=size($selectedCVs);
+	$sizeOfUnSelCVs=size($unSelCVs);
+
+	select -cl;
+	rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 2 -kcp 1 -kep 1 -kt 0 -s 4 -d 1 -tol 0.01 $curveName[0];
+
+	for($i=0;$i<$sizeOfSelectedCVs;$i++)
+	{	$u=zjsGetNumFromCV($selectedCVs[$i]);
+		if($u!=0&&$u!=$spans)
+		{
+			$u-=$distance;
+			eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+			$u+=2.0*$distance;
+			eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+			if($points==2)
+			{	$u+=$distance;
+				eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+				$u-=4.0*$distance;
+				eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+			}
+		}
+	}
+	
+	if($keepCorner)
+	{	for($i=0;$i<$sizeOfUnSelCVs;$i++)
+		{	$u=zjsGetNumFromCV($unSelCVs[$i]);
+			if($u!=0&&$u!=$spans)
+			{
+				$u+=$cornerDistance;
+				eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+				$u-=2.0*$cornerDistance;
+				eval("select -tgl "+$curveName[0]+".u["+$u+"]");
+			}
+		}
+	}
+	string $curvePoints[]=`ls -sl -fl`;
+	string $commands;
+	$commands="insertKnotCurve -ch 1 -cos on -nk 1 -add 1 -ib 0 -rpo 1";
+	$n=size($curvePoints);
+	for($i=0;$i<$n;$i++)
+	{	$commands=$commands+" "+$curvePoints[$i];	}
+
+	eval($commands);
+	rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 2 -kcp 1 -kep 1 -kt 0 -s 4 -d 3 -tol 0.01 $curveName[0];
+	select -r $curveName[0];
+}
+
+// This procedure sharpen the selected CVs.	////////////////////////////////////////
+global proc zjsSharpenCVUI()
+{	zjsSharpenCV(0.1);
+	if(`window -ex zjsSharpenCVWindow`) deleteUI zjsSharpenCVWindow;
+	window -t "Sharpen CVs" zjsSharpenCVWindow;	columnLayout -adj 1;
+	floatSliderGrp -l "Scale" -f 1 -min 0.05 -max 1.0 -fmn 0.001 -v 0.1 scale;
+	string $commands;
+	$commands="undo;float $scale=`floatSliderGrp -q -v scale`;zjsSharpenCV($scale);";
+	floatSliderGrp -e -cc $commands scale;
+	showWindow zjsSharpenCVWindow;
+}
+global proc zjsSharpenCV(float $scale)
+{	
+	string $selectedCVs[]=`filterExpand -sm 28`;
+	if($selectedCVs[0]=="") error "No curve's CV selected.";
+	string $curveShape[]=`listRelatives -p`;
+	if($curveShape[1]!="") error "This command works on 1 curve's CV only.You select multipile curves' CVs.";
+	int $degree=`eval("getAttr "+$curveShape[0]+".degree")`;
+	if($degree!=3) error "The curve's degree is not 3.";
+	
+	string $curveName[]=`listRelatives -p $curveShape[0]`;
+	rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 2 -kcp 1 -kep 1 -kt 0 -s 4 -d 3 -tol 0.01 $curveName;
+
+	int $i,$j,$n,$na,$nb,$sizeOfSelectedCVs;
+	float $u,$ua,$ub;
+	$sizeOfSelectedCVs=size($selectedCVs);
+	for($i=0;$i<$sizeOfSelectedCVs;$i++)
+	{	$n=zjsGetNumFromCV($selectedCVs[$i]);
+		$n+=$i*2;
+		//eval("select -r "+$curveName[0]+".cv["+$n+"]");
+		float $pos[]=`eval("pointPosition "+$curveName[0]+".cv["+$n+"]")`;
+		$u=$n/2.0;
+		$ua=$u+0.2;
+		$ub=$u-0.2;
+		select -cl;
+		eval("select -tgl "+$curveName[0]+".u["+$ua+"]");
+		eval("select -tgl "+$curveName[0]+".u["+$ub+"]");
+		string $sel[]=`ls -sl -fl`;
+		string $command="insertKnotCurve -ch 1 -cos on -nk 1 -add 1 -ib 0 -rpo 1 "+$sel[0]+" "+$sel[1];
+		eval($command);
+		$na=$n+1;	$nb=$n+2;
+		eval("select -r "+$curveName[0]+".cv["+$n+"] "+$curveName[0]+".cv["+$na+"] "+$curveName[0]+".cv["+$nb+"]");
+		scale -r $scale $scale $scale -p $pos[0] $pos[1] $pos[2];
+	}
+	select -r $curveName[0];
+}
+
+//Curves Booleans ======================================================================
+global proc zjsCurvesBoolUI()
+{	string $selection[]=`filterExpand -sm 9`;
+	if($selection[1]=="")
+		error "Please select 2 curves first.";
+	zjsCurveDif();
+	if(`window -ex zjsCurvesBoolWindow`) deleteUI zjsCurvesBoolWindow;
+	window -t "Curves Booleans" zjsCurvesBoolWindow;
+	rowLayout -nc 6 -cw6 60 60 60 60 60 60;
+		button -l "  OP_1  " -c "undo;zjsCurveDif();";
+		button -l "  OP_2  " -c "undo;zjsCurveIntersect();";
+		button -l "  OP_3  " -c "undo;zjsCurveUnion();";
+		button -l "  OP_4  " -c "undo;zjsCurveOp4();";
+		button -l "  OP_5  " -c "undo;zjsCurveOp5();";
+		button -l "  OP_6  " -c "undo;zjsCurveOp6();";
+	showWindow zjsCurvesBoolWindow;
+}
+//Difference--------------------------------------------------
+global proc string zjsCurveDif()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -sl`;
+	delete $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[3];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[1] $selectedCurvesAfterCut[2];
+	delete $selectedCurvesAfterCut[2];
+	select -r $selectedCurvesAfterCut[1];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[1];
+	return $selectedCurvesAfterCut[1];
+}
+//Intersect----------------------------------------------------
+global proc string zjsCurveIntersect()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -selection`;
+	delete $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[2];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[1] $selectedCurvesAfterCut[3];
+	delete $selectedCurvesAfterCut[3];
+	select -r $selectedCurvesAfterCut[1];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[1];
+	return $selectedCurvesAfterCut[1];
+}
+//Unoin--------------------------------------------------------
+global proc string zjsCurveUnion()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -selection`;
+	delete $selectedCurvesAfterCut[1] $selectedCurvesAfterCut[3];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[2];
+	delete $selectedCurvesAfterCut[2];
+	select -r $selectedCurvesAfterCut[0];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[0];
+	return $selectedCurvesAfterCut[0];
+}
+global proc string zjsCurveOp4()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -selection`;
+	delete $selectedCurvesAfterCut[2] $selectedCurvesAfterCut[3];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[1];
+	delete $selectedCurvesAfterCut[1];
+	select -r $selectedCurvesAfterCut[0];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[0];
+	return $selectedCurvesAfterCut[0];
+}
+global proc string zjsCurveOp5()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -selection`;
+	delete $selectedCurvesAfterCut[1] $selectedCurvesAfterCut[2];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[3];
+	delete $selectedCurvesAfterCut[3];
+	select -r $selectedCurvesAfterCut[0];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[0];
+	return $selectedCurvesAfterCut[0];
+}
+global proc string zjsCurveOp6()
+{	cutCurvePreset(1,1,0.0001,6,0,1,0,2,1);
+	string $selectedCurvesAfterCut[]=`ls -selection`;
+	delete $selectedCurvesAfterCut[0] $selectedCurvesAfterCut[1];
+	attachCurve -rpo on -m 1 $selectedCurvesAfterCut[2] $selectedCurvesAfterCut[3];
+	delete $selectedCurvesAfterCut[3];
+	select -r $selectedCurvesAfterCut[2];
+	closeCurve -rpo on;
+	select -r $selectedCurvesAfterCut[2];
+	return $selectedCurvesAfterCut[2];
+}
+
+
+// End of zjsEditCurve.mel  /////////////////////////

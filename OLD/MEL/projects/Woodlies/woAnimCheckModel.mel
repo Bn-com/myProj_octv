@@ -1,0 +1,111 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc woAnimCheckModel()
+{
+	if (`zwGetMode ""` != "anim" && `zwGetMode ""` != "blocking")
+	{
+		return ;
+	}
+	
+	string $filename = `file -q -sn -shn`;
+
+	string $asset = `idmtService "GetAssetNameInAnim" ($filename+"|sets")`;
+	string $buff[];
+	int $num = `tokenize $asset "|" $buff`;
+	string $rightFile = "wo_"+$buff[1]+"_h_ms_notex.mb";
+
+	$rightFile = slGetModelFullpath($rightFile);
+	
+	string $referenceFiles[] = `file -q -r`;
+	for ($file in $referenceFiles)
+	{
+		if (gmatch($file,"*/sets/*"))
+		{
+			string $buff[] = {};
+			int $num = `tokenize $file "{}" $buff`;
+			string $newFile = $buff[0];
+			
+			$newFile = `substituteAllString $newFile "\\" "/"`;
+
+			//print ($newFile+"\n");
+			//print ($rightFile+"\n");
+			if ($newFile == $rightFile)
+			{
+				confirmDialog -title "修正参考" -message "前期参考是正确的"
+					    -button "确认";
+			}
+			else
+			{
+				string $referenceNode = `referenceQuery -rfn $file`;
+				
+				string $confirm = `confirmDialog -title "修正参考" -message "前期参考是错误的，请选择替换或是重新参考"
+					    -button "替换参考" -button "重新参考" -button "取消"`;
+				
+				string $filter = `itemFilter -byName $referenceNode`;
+				
+				if ($confirm == "替换参考")
+				{
+					zwWoodliesRemoveTextureEdits $referenceNode;
+					file -lr $referenceNode $rightFile;
+				}
+				else if ($confirm == "重新参考")
+				{
+					//source slImportRef.mel;
+					importReference $rightFile "mayaBinary";
+
+					$referenceNode = `referenceQuery -rfn $rightFile`;
+					string $nextFilter = `itemFilter -byName $referenceNode`;
+					$filter = `itemFilter -union $filter $nextFilter`;
+				}
+				
+				ReferenceEditor;
+				global string $gReferenceEditorPanel;
+				sceneEditor -edit -filter $filter $gReferenceEditorPanel;
+			}
+		}
+	}
+}
+
+global proc string slGetModelFullpath(string $sceneName)
+{
+	string $str = `idmtService "CheckFilename" $sceneName`;
+	string $buf[];
+	int $size = `tokenize $str "|" $buf`;
+	if ($size != 16)
+	{
+		error $str;
+	}
+	string $project = $buf[3];
+	string $assetType = $buf[11];
+	string $assetName = $buf[12];
+	string $mode = $buf[15];
+	string $filename = $buf[6];
+	string $path = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $assetType + "/" + $assetName + "/" + $mode + "/" + $filename;
+
+	return $path;
+}
+
+global proc zwWoodliesRemoveTextureEdits(string $referenceNode)
+{
+	file -unloadReference $referenceNode;
+	string $edits[] = `referenceQuery -failedEdits true -successfulEdits true -editCommand "setAttr" -editStrings $referenceNode`;
+	for ($edit in $edits)
+	{
+		string $buf[];
+		tokenize $edit " " $buf;
+		if (`match "[.]fileTextureName$" $buf[1]` != "")
+		{
+			evalEcho ("referenceEdit -failedEdits true -successfulEdits true -editCommand \"setAttr\" -removeEdits \"" + $buf[1] + "\"");
+		}
+	}
+}

@@ -1,0 +1,1478 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 3Delight 控制工具【通用】
+//	Author: HanHong
+//	Created: 25/04/2013
+//
+//	Update/Change: HanHong
+//	Last Updated: 2013-5-09
+//	Description:
+//			3delight 工具，包括灯光，材质，渲染相关工具
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc HhedlightLoad()
+{
+	string $version = `about -v`;
+	string $v = `match "[^ ]+"$version`;
+	string $mll="3delight_for_maya"+$v+".mll";
+	if (`pluginInfo -q -loaded $mll`==0)
+	{
+		loadPlugin -quiet $mll;
+		pluginInfo -edit -autoload 1 $mll;
+	}
+	setAttr -type "string" defaultRenderGlobals.currentRenderer "_3delight";
+}
+
+global proc HhedlightShaveLoad()
+{
+	string $version = `about -v`;
+	string $v = `match "[^ ]+"$version`;
+	string $mll="3delight_for_maya"+$v+".mll";
+	string $shave="3dfm_shave"+$v+".mll";
+	if (`pluginInfo -q -loaded $mll`==0)
+	{
+		loadPlugin -quiet $mll;
+		pluginInfo -edit -autoload 1 $mll;
+	}
+	if (`pluginInfo -q -loaded $shave`==0)
+	{
+		loadPlugin -quiet $shave;
+		pluginInfo -edit -autoload 1 $shave;
+	}
+	setAttr -type "string" defaultRenderGlobals.currentRenderer "_3delight";
+}
+global proc Hh3dlightLightAttAdd(string $Attributes)
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl;
+	if (`size($objs)`!=0)
+	{
+		
+		HhedlightLoad();
+		string $lightset="LightSet_3delight";
+		string $meshset="MeshSet_3delight";
+		if(!`objExists $lightset`)
+		{
+			sets -n $lightset;
+		}
+		select -cl;
+		if(!`objExists $meshset`)
+		{
+			sets -n $meshset;
+		}
+		source "C:/tools/3Delight/maya/scripts/AEdelightLightAttribsTemplate.mel";
+		select -cl;
+		for($obj in $objs)
+		{
+		
+			string $shape[]=`listRelatives -s $obj`;
+			string $nodeType=`nodeType($shape[0])`;
+			if(`match "Light" $nodeType`!="")
+			{
+				
+				setAttr ($shape[0]+".useDepthMapShadows") 1;
+				setAttr ($shape[0]+".dmapResolution") 1024;
+				string $lightAttrO[]=`ls -type "delightLightAttribs"`;
+				select $obj;
+				DL_shaderAssignmentPanelCreateNewAttribsNode delightLightAttribs object;
+				string $lightAttrN[]=`ls -type "delightLightAttribs"`;
+				string $Ne[]= stringArrayRemove($lightAttrO, $lightAttrN);
+				string $objgeoAtt=`rename $Ne[0] "keylight_LightAttr"`;
+				DL_setAssignmentPanelAttrib object delightLightAttribs $objgeoAtt;
+				switch($Attributes)
+				{
+					case "shadow":
+					//添加shadow属性
+						AE_DLA_shadowMapNameAddRemove($objgeoAtt, 1);
+						DAR_addRemoveAttr($objgeoAtt, "shadowMapsAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						DAR_addRemoveAttr($objgeoAtt, "shadowObjectsAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						//阴影类型及精度设置
+						setAttr ($objgeoAtt+".generateShadowMaps") 1;
+						setAttr ($objgeoAtt+".shadowMapType") 6;
+						setAttr ($objgeoAtt+".shadowMapResolutionX") 1024;
+						setAttr ($objgeoAtt+".shadowMapResolutionY") 1024;
+						setAttr ($objgeoAtt+".shadowMapShadingRate") 0.5;
+						setAttr ($objgeoAtt+".shadowMapPixelSamplesX") 8;
+						setAttr ($objgeoAtt+".shadowMapPixelSamplesY") 8;
+						setAttr ($objgeoAtt+".farClipPlane") 10000000;
+						//阴影与物体连接
+						AE_setConnectedNodeFromMenu ($objgeoAtt+".shadowObjects") "AE_updateAE" $meshset;
+						break;
+					case "all":
+					//添加所有灯光属性
+						DAR_addRemoveAttr($objgeoAtt, "mainAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						break;
+					case "photon":
+						DAR_addRemoveAttr($objgeoAtt, "photonMapsAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						break;
+					case "Category":
+						DAR_addRemoveAttr($objgeoAtt, "categoryAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						setAttr ($objgeoAtt+".keyLight") 1;
+						break;
+					case "motionblur":
+						DAR_addRemoveAttr($objgeoAtt, "motionBlurAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						break;
+					case "areaLight":
+						DAR_addRemoveAttr($objgeoAtt, "areaLightAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						break;
+					case "mel":
+						DAR_addRemoveAttr($objgeoAtt, "MEL_ScriptsAttrGrp", 1);
+						evalDeferred("DRG_update " + $objgeoAtt);
+						evalDeferred("DAR_refresh");
+						break;
+				}
+			}
+		}
+			
+
+	}
+	else error "没有选择灯光物体，请先选择灯光物体";
+}
+
+global proc Hh3dlightLightAttRemove()
+{
+    string $lights[]=`ls -sl`;
+    HhedlightLoad();
+    select $lights;
+    DL_setAssignmentPanelAttrib object delightLightAttribs "";  
+}
+
+
+global proc Hh3dlightMeshAttsAdd(string $Attributes)
+{
+	HhedlightLoad();
+	HhGeoAttrRemove($Attributes);
+	select -cl  ;
+	string $lightset="LightSet_3delight";
+	string $meshset="MeshSet_3delight";
+	if(!`objExists $lightset`)
+	{
+		sets -n $lightset;
+	}
+	select -cl;
+	if(!`objExists $meshset`)
+	{
+		sets -n $meshset;
+	}
+	select -cl;
+	string $objgeoAtt="MeshSetGeoAttr";
+	if(!`objExists $objgeoAtt`)
+	{
+		string $GeoAttrO[]=`ls -type "delightGeoAttribs"`;	
+		select -ne $meshset;
+		DL_shaderAssignmentPanelCreateNewAttribsNode delightGeoAttribs object;
+		string $GeoAttrN[]=`ls -type "delightGeoAttribs"`;
+		string $Ne[]= stringArrayRemove($GeoAttrO, $GeoAttrN);
+		rename $Ne[0] $objgeoAtt;
+	}
+	select -ne $meshset;
+	DL_setAssignmentPanelAttrib object delightGeoAttribs $objgeoAtt;
+	switch ($Attributes)
+	{
+
+		case "lighting":
+			DAR_addRemoveAttr($objgeoAtt, "lightingAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			AE_setConnectedNodeFromMenu ($objgeoAtt+".illuminationFrom") "AE_updateAE" $lightset;
+			break;
+		case "visibility":
+			DAR_addRemoveAttr($objgeoAtt, "visibilityAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			setAttr ($objgeoAtt+".matteObject") 1;
+			break;
+		case "All":
+			DAR_addRemoveAttr($objgeoAtt, "mainAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "General":
+			DAR_addRemoveAttr($objgeoAtt, "generalAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "Quality":
+			DAR_addRemoveAttr($objgeoAtt, "qualityAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "Raytracing":
+			DAR_addRemoveAttr($objgeoAtt, "raytracingAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "MotionBlur":
+			DAR_addRemoveAttr($objgeoAtt, "motionBlurAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "GI":
+			DAR_addRemoveAttr($objgeoAtt, "globalIlluminationAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "Displacement":
+			DAR_addRemoveAttr($objgeoAtt, "displacementAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "Culling":
+			DAR_addRemoveAttr($objgeoAtt, "cullingAndDicingAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "Geometry":
+			DAR_addRemoveAttr($objgeoAtt, "geometryAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			setAttr ($objgeoAtt+".polyAsSubd") 1;
+			break;
+		case "RefGeo":
+			DAR_addRemoveAttr($objgeoAtt, "motionBlurAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "sss":
+			DAR_addRemoveAttr($objgeoAtt, "subsurfaceScatteringAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "mel":
+			DAR_addRemoveAttr($objgeoAtt, "MEL_ScriptsAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+		case "rib":
+			DAR_addRemoveAttr($objgeoAtt, "RIB_ArchiveAttrGrp", 1);
+			evalDeferred("DRG_update " + $objgeoAtt);
+			evalDeferred("DAR_refresh");
+			break;
+	}
+	select -cl;
+}
+global proc HhLightLink_3delight()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl  ;
+	string $lightset="LightSet_3delight";
+	string $meshset="MeshSet_3delight";
+	if(!`objExists $lightset`)
+	{
+		sets -n $lightset;
+	}
+	select -cl  ;
+	if(!`objExists $meshset`)
+	{
+		sets -n $meshset;
+	}
+	select -cl;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`!="")
+		{
+			sets -edit -forceElement  $lightset $obj;
+			select -cl  ;
+		}
+		else
+		{
+			sets -edit -forceElement   $meshset $obj;
+			select -cl  ;
+		}
+	}
+	select $objs;
+
+	Hh3dlightMeshAttsAdd("lighting");
+}
+
+global proc HhLightLinkBreak_3delight()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	string $lightset="LightSet_3delight";
+	string $meshset="MeshSet_3delight";
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`!="")
+		{
+			string $cons[]=`listConnections -plugs true -connections true ($obj+".instObjGroups")`;
+			for($con in $cons)
+			{
+				if(`match $lightset $con`!="")
+				{
+					string $condis[]=`listConnections -plugs true -connections true $con`;
+					disconnectAttr $condis[1] $condis[0];
+				}
+			}
+
+		}
+		else
+		{
+			string $cons[]=`listConnections -plugs true -connections true ($obj+".instObjGroups")`;
+			for($con in $cons)
+			{
+				if(`match $meshset $con`!="")
+				{
+					string $condis[]=`listConnections -plugs true -connections true $con`;
+					disconnectAttr $condis[1] $condis[0];
+				}
+			}
+		}
+	}
+}
+
+global proc HhGeoAttrRemove(string $Attributes)
+{
+	string $objs[]=`ls -sl -l`;
+	for($obj in $objs)
+	{
+		string $cons[]=`listConnections -plugs true -connections true ($obj+".instObjGroups")`;
+		for($con in $cons)
+		{
+			if(`match $Attributes $con`!="")
+			{
+				string $condis[]=`listConnections -plugs true -connections true $con`;
+				disconnectAttr $condis[1] $condis[0];
+			}
+		}
+	}
+
+}
+
+global proc Hh3dlightGeoAttsAdd(string $Attributes)
+{
+	string $objs[]=`ls -sl`;
+	HhedlightLoad();
+	select -cl  ;
+	string $sets=$Attributes+"Set";
+	string $set=`sets -n $sets`;
+	for ($obj in $objs)
+	{
+		string $shapes[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shapes[0])`;
+		if(`match "mesh" $nodeType`!="")
+		{
+			sets -edit -forceElement  $set $obj;
+			string $objgeoAtt=$set+"_GeoAttribs";
+			if(!`objExists $objgeoAtt`)
+			{
+				string $GeoAttrO[]=`ls -type "delightGeoAttribs"`;	
+				select -ne $set;
+				DL_shaderAssignmentPanelCreateNewAttribsNode delightGeoAttribs object;
+				string $GeoAttrN[]=`ls -type "delightGeoAttribs"`;
+				string $Ne[]= stringArrayRemove($GeoAttrO, $GeoAttrN);
+				rename $Ne[0] $objgeoAtt;
+			}
+			DL_setAssignmentPanelAttrib object delightGeoAttribs $objgeoAtt;
+			switch ($Attributes)
+			{
+
+				case "visibility":
+				DAR_addRemoveAttr($objgeoAtt, "visibilityAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				setAttr ($objgeoAtt+".matteObject") 1;
+				break;
+				case "All":
+				DAR_addRemoveAttr($objgeoAtt, "mainAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "General":
+				DAR_addRemoveAttr($objgeoAtt, "generalAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "Quality":
+				DAR_addRemoveAttr($objgeoAtt, "qualityAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "Raytracing":
+				DAR_addRemoveAttr($objgeoAtt, "raytracingAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "MotionBlur":
+				DAR_addRemoveAttr($objgeoAtt, "motionBlurAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "GI":
+				DAR_addRemoveAttr($objgeoAtt, "globalIlluminationAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "Displacement":
+				DAR_addRemoveAttr($objgeoAtt, "displacementAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "Culling":
+				DAR_addRemoveAttr($objgeoAtt, "cullingAndDicingAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "Geometry":
+				DAR_addRemoveAttr($objgeoAtt, "geometryAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				setAttr ($objgeoAtt+".polyAsSubd") 1;
+				break;
+				case "RefGeo":
+				DAR_addRemoveAttr($objgeoAtt, "motionBlurAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "sss":
+				DAR_addRemoveAttr($objgeoAtt, "subsurfaceScatteringAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "mel":
+				DAR_addRemoveAttr($objgeoAtt, "MEL_ScriptsAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+				case "rib":
+				DAR_addRemoveAttr($objgeoAtt, "RIB_ArchiveAttrGrp", 1);
+				evalDeferred("DRG_update " + $objgeoAtt);
+				evalDeferred("DAR_refresh");
+				break;
+			}
+		}
+	}
+
+}
+//ptc camera
+global proc HhptcCamerCreat()
+{
+	string $cam="cam_ptc_bake";
+	if(!`objExists $cam`) 
+	{
+	    string $ca[]=` camera  -nearClipPlane 0.01 -farClipPlane 1000000000`;
+	    rename $ca[0] $cam;
+	}
+}
+//ptc_bake
+global proc HhPtc_bakeRenderPass()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl  ;
+	string $ptcset="ptc_bakeSet";
+	if(!`objExists $ptcset`)
+	{
+		sets -n $ptcset;
+	}
+	select -cl;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`=="")
+		{
+			sets -edit -forceElement  $ptcset $obj;
+			select -cl  ;
+		}
+	}
+	//delightBuildRenderPassTemplatesMenuItems("Full")
+	//DRP_getAllRenderPasses()
+	string $collection="ptc_bakeCollection";
+	string $ptcAtm="ptc_uber1";
+	if(!`objExists $collection`)
+	{
+		string $co=DL_createShaderCollectionNode();
+		rename $co $collection;
+	}
+	DL_setAssignmentPanelCollection($collection);
+	if(!`objExists $ptcAtm`)
+	{
+		DL_shaderAssignmentPanelShaderSelectorCallback("override","atmosphere","ptc_uber",1);
+	}
+	DL_setAssignmentPanelAttrib("override","atmosphere",$ptcAtm);
+	setAttr -l false ($ptcAtm+".shaderFile");
+	setAttr -type "string" ($ptcAtm+".shaderFile") ("$DELIGHT/shaders/ptc_uber.sdl");
+	setAttr -l true ($ptcAtm+".shaderFile");
+	setAttr ($ptcAtm+".bake") 1;
+	string $path="//file-cluster/GDC/Projects/DomesticProject/ChinaImage/ChinaImage_Scratch/ptc_bake/";
+	setAttr -type "string" ($ptcAtm+".filename") ($path+"<scene>.#.ptc");
+	string $cams[]=`ls -ca`;
+	for($cam in $cams)
+	{
+		if(`match "ptc_bake" $cam`!="")
+		{
+			string $renderpass="ptcbake_renderPass";
+			if(!`objExists $renderpass`)
+			{
+				string $renderPassOld[]=`ls -type "delightRenderPass"`;
+				DRG_createAndConnectRenderPassNode;
+				string $renderPassNew[]=`ls -type "delightRenderPass"`;
+				string $rpd[]=stringArrayRemove($renderPassOld, $renderPassNew);
+				rename $rpd[0] $renderpass;
+			}
+			AE_setConnectedNodeFromMenu ($renderpass+".camera") ("AE_DRP_update "+$renderpass) $cam;
+			setAttr ($renderpass+".pixelSamplesX") 1;
+			setAttr ($renderpass+".pixelSamplesY") 1;
+			setAttr ($renderpass+".pixelFilter") 0;
+			setAttr ($renderpass+".filterWidthX") 1;
+			setAttr ($renderpass+".filterWidthY") 1;
+			setAttr ($renderpass+".filterWidthY") 1;
+			//
+			setAttr ($renderpass+".raytraceMaxSpecularDepth") 0;
+			setAttr ($renderpass+".raytraceMaxDiffuseDepth") 0;
+			setAttr ($renderpass+".raytraceMaxDepth") 0;
+			///
+			//AE_DRP_removeDisplay unifiedRenderGlobalsWindow_DRP_ $renderpass 0;
+			//AE_DRP_addDisplay $renderpass;
+			setAttr ($renderpass+".preWorldMEL") -type "string" "RiAttribute -n \"cull\" -p \"hidden\" \"integer\" \"0\" -p \"backfacing\" \"integer\" \"0\";\r\nRiAttribute -n \"dice\" -p \"rasterorient\" \"integer\" \"0\";\r\n";
+			setAttr ($renderpass+".translatedShadersAOVs") 2;
+			setAttr ($renderpass+".standardAtmosphere") 1;
+			AE_setConnectedNodeFromMenu ($renderpass+".shaderCollection") ("AE_DRP_update "+$renderpass) $collection;
+			AE_setConnectedNodeFromMenu ($renderpass+".objectsToRender") ("AE_DRP_update "+$renderpass) $ptcset;
+		}
+	}
+
+}
+//ptc_render
+global proc Hhptc_renderRenderPass()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl  ;
+	string $ptcset="ptc_AOSet";
+	if(!`objExists $ptcset`)
+	{
+		sets -n $ptcset;
+	}
+	select -cl;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`=="")
+		{
+			sets -edit -forceElement  $ptcset $obj;
+			select -cl  ;
+		}
+	}
+	//delightBuildRenderPassTemplatesMenuItems("Full")
+	//DRP_getAllRenderPasses()
+	string $collection="ptc_renderCollection";
+	string $ptcAtm="ptc_AOAtm";
+	if(!`objExists $collection`)
+	{
+		string $co=DL_createShaderCollectionNode();
+		rename $co $collection;
+	}
+	DL_setAssignmentPanelCollection($collection);
+	if(!`objExists $ptcAtm`)
+	{
+		string $ATmO[]=`ls -type "delightAtmosphereShader"`;
+		DL_shaderAssignmentPanelShaderSelectorCallback("override","atmosphere","ptc_uber",1);
+		string $ATmN[]=`ls -type "delightAtmosphereShader"`;
+		string $ATM[]=stringArrayRemove($ATmO, $ATmN);
+		rename $ATM[0] $ptcAtm;
+	}
+	DL_setAssignmentPanelAttrib("override","atmosphere",$ptcAtm);
+	setAttr -l false ($ptcAtm+".shaderFile");
+	setAttr -type "string" ($ptcAtm+".shaderFile") ("$DELIGHT/shaders/ptc_uber.sdl");
+	setAttr -l true ($ptcAtm+".shaderFile");
+	//ptc_renderAtm set
+	setAttr ($ptcAtm+".AO") 1;
+	string $path="//file-cluster/GDC/Projects/DomesticProject/ChinaImage/ChinaImage_Scratch/ptc_bake/";
+	setAttr -type "string" ($ptcAtm+".filename") ($path+"<scene>.#.ptc");
+	string $renderpass="ptcAO_renderPass";
+	if(!`objExists $renderpass`)
+	{
+		string $renderPassOld[]=`ls -type "delightRenderPass"`;
+		DRG_createAndConnectRenderPassNode;
+		string $renderPassNew[]=`ls -type "delightRenderPass"`;
+		string $rpd[]=stringArrayRemove($renderPassOld, $renderPassNew);
+		rename $rpd[0] $renderpass;
+	}
+	setAttr ($renderpass+".pixelSamplesX") 4;
+	setAttr ($renderpass+".pixelSamplesY") 4;
+	setAttr ($renderpass+".pixelFilter") 2;
+	setAttr ($renderpass+".filterWidthX") 3;
+	setAttr ($renderpass+".filterWidthY") 3;
+	setAttr ($renderpass+".displayDrivers[0]") -type "string" "iff";
+	setAttr ($renderpass+".displayOutputVariables[0]") -type "string" "color aov_AO";
+	///
+	setAttr ($renderpass+".translatedShadersAOVs") 2;
+	setAttr ($renderpass+".standardAtmosphere") 1;
+	AE_setConnectedNodeFromMenu ($renderpass+".shaderCollection") ("AE_DRP_update "+$renderpass) $collection;
+	AE_setConnectedNodeFromMenu ($renderpass+".objectsToRender") ("AE_DRP_update "+$renderpass) $ptcset;
+}
+
+global proc ptc_AOSetAdd()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl  ;
+	string $ptcset="ptc_AOSet";
+	if(!`objExists $ptcset`)
+	{
+		sets -n $ptcset;
+	}
+	select -cl;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`=="")
+		{
+			sets -edit -forceElement  $ptcset $obj;
+			select -cl  ;
+		}
+	}
+}
+
+global proc ptc_bakeSetAdd()
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	select -cl  ;
+	string $ptcset="ptc_bakeSet";
+	if(!`objExists $ptcset`)
+	{
+		sets -n $ptcset;
+	}
+	select -cl;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`=="")
+		{
+			sets -edit -forceElement  $ptcset $obj;
+			select -cl  ;
+		}
+	}
+}
+global proc ptc_bakeSetRemove()
+{
+	string $ptcset="ptc_bakeSet";
+	string $objs[]=`ls -sl -l`;
+	for ($i=0;$i<size($objs);$i++)
+	{
+		string $obcon[]=`listConnections -plugs true -connections true ($objs[$i]+".instObjGroups")`; 
+		for($j=0;$j<size($obcon);$j+=2)
+		{
+			if(`match $ptcset $obcon[$j+1]`!="")
+			{
+				evalEcho ("disconnectAttr \"" +  $obcon[$j] + "\" \"" +  $obcon[$j+1] + "\"");
+			}
+		}
+	}
+}
+global proc ptc_AOSetRemove()
+{
+	string $ptcset="ptc_AOSet";
+	string $objs[]=`ls -sl -l`;
+	for ($i=0;$i<size($objs);$i++)
+	{
+		string $obcon[]=`listConnections -plugs true -connections true ($objs[$i]+".instObjGroups")`; 
+		for($j=0;$j<size($obcon);$j+=2)
+		{
+			if(`match $ptcset $obcon[$j+1]`!="")
+			{
+				evalEcho ("disconnectAttr \"" +  $obcon[$j] + "\" \"" +  $obcon[$j+1] + "\"");
+			}
+		}
+	}
+}
+//renderpass
+global proc hhrenderpass_UI()
+{
+    // Get the dialog's formLayout.
+    string $form = `setParent -q`;
+
+    formLayout -e -width 20 $form;
+    string $t = `text -l "renderPass名"`;
+    textField -w 30 "renderpass_name";
+    setFocus "renderpass_name";
+    string $b1 = `button -l "建层"    -c "hhrenderpass_Button();layoutDialog -dismiss \"Abort\""`;
+
+	formLayout -edit
+		-attachForm            $t   "top"    5
+		-attachForm            $t   "left"   5
+		-attachNone            $t   "bottom"
+		-attachForm            $t   "right"  5   	
+		
+		-attachControl         "renderpass_name"   "top"    5 $t
+		-attachForm            "renderpass_name"   "left"   5
+		-attachNone            "renderpass_name"   "bottom"
+		-attachForm            "renderpass_name"   "right"  5
+		
+		-attachControl         $b1  "top"    5 "renderpass_name"
+		-attachForm            $b1  "left"   25
+		-attachNone            $b1  "bottom"
+		-attachForm            $b1  "right"  25 
+
+    $form;
+    
+}
+global proc hhrenderpass_Button()
+{
+	global string $renderpass_Name;
+	$renderpass_Name=` textField -q -tx "renderpass_name"`;
+	
+}
+global proc hhRenderPassCreat()
+{
+	global string  $renderpass_Name;
+	$renderpass_Name="";
+	layoutDialog -ui "hhrenderpass_UI" -t "创建3delight renderPass";
+	if($renderpass_Name=="") return;
+	createNode delightRenderPass -n ($renderpass_Name+"Pass");
+		addAttr -ci true -sn "version" -ln "version" -dt "string";
+		addAttr -ci true -sn "camera" -ln "camera" -at "message";
+		addAttr -ci true -sn "connectToRenderGlobals" -ln "connectToRenderGlobals" -dv 1 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "resolution" -ln "resolution" -at "long2" -nc 2;
+		addAttr -ci true -sn "resolutionX" -ln "resolutionX" -dv 720 -at "long" -p "resolution";
+		addAttr -ci true -sn "resolutionY" -ln "resolutionY" -dv 486 -at "long" -p "resolution";
+		addAttr -ci true -sn "resolutionMultiplier" -ln "resolutionMultiplier" -min 0 -max 
+			3 -en "Full:Half:Quarter:Eighth" -at "enum";
+		addAttr -ci true -sn "pixelAspectRatio" -ln "pixelAspectRatio" -dv 1 -min 0.01 -at "float";
+		addAttr -ci true -sn "animation" -ln "animation" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "frameRange" -ln "frameRange" -at "float2" -nc 2;
+		addAttr -ci true -sn "startFrame" -ln "startFrame" -dv 1 -at "float" -p "frameRange";
+		addAttr -ci true -sn "endFrame" -ln "endFrame" -dv 1 -at "float" -p "frameRange";
+		addAttr -ci true -sn "increment" -ln "increment" -dv 1 -min 0.0001 -at "float";
+		addAttr -ci true -sn "useCropWindow" -ln "useCropWindow" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "cropMin" -ln "cropMin" -at "float2" -nc 2;
+		addAttr -ci true -sn "cropMinX" -ln "cropMinX" -min 0 -max 1 -at "float" -p "cropMin";
+		addAttr -ci true -sn "cropMinY" -ln "cropMinY" -min 0 -max 1 -at "float" -p "cropMin";
+		addAttr -ci true -sn "cropMax" -ln "cropMax" -at "float2" -nc 2;
+		addAttr -ci true -sn "cropMaxX" -ln "cropMaxX" -dv 1 -min 0 -max 1 -at "float" -p "cropMax";
+		addAttr -ci true -sn "cropMaxY" -ln "cropMaxY" -dv 1 -min 0 -max 1 -at "float" -p "cropMax";
+		addAttr -ci true -sn "bucketOrder" -ln "bucketOrder" -min 0 -max 4 -en "Horizontal:Vertical:Zigzag:Spiral:Circle" 
+			-at "enum";
+		addAttr -ci true -sn "useImagerShaders" -ln "useImagerShaders" -dv 1 -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -sn "renderMode" -ln "renderMode" -min 0 -max 3 -en "Render:Save RIB:RIB Archive:Background Render" 
+			-at "enum";
+		addAttr -ci true -sn "ribFilename" -ln "ribFilename" -dt "string";
+		addAttr -ci true -sn "binaryRib" -ln "binaryRib" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "compressedRib" -ln "compressedRib" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "backgroundRenderParams" -ln "backgroundRenderParams" -dt "string";
+		addAttr -ci true -sn "renderLogFilename" -ln "renderLogFilename" -dt "string";
+		addAttr -ci true -sn "shadingRate" -ln "shadingRate" -dv 1 -min 0.001 -at "float";
+		addAttr -ci true -sn "pixelSamples" -ln "pixelSamples" -at "long2" -nc 2;
+		addAttr -ci true -sn "pixelSamplesX" -ln "pixelSamplesX" -dv 3 -min 1 -at "long" 
+			-p "pixelSamples";
+		addAttr -ci true -sn "pixelSamplesY" -ln "pixelSamplesY" -dv 3 -min 1 -at "long" 
+			-p "pixelSamples";
+		addAttr -ci true -sn "pixelFilter" -ln "pixelFilter" -dv 5 -min 0 -max 8 -en "box:triangle:gaussian:catmull-rom:bessel:sinc:mitchell:zmin:zmax" 
+			-at "enum";
+		addAttr -ci true -sn "filterWidth" -ln "filterWidth" -at "float2" -nc 2;
+		addAttr -ci true -sn "filterWidthX" -ln "filterWidthX" -dv 4 -min 0.001 -at "float" 
+			-p "filterWidth";
+		addAttr -ci true -sn "filterWidthY" -ln "filterWidthY" -dv 4 -min 0.001 -at "float" 
+			-p "filterWidth";
+		addAttr -ci true -sn "raytraceMaxSpecularDepth" -ln "raytraceMaxSpecularDepth" -dv 
+			1 -min 0 -smx 16 -at "long";
+		addAttr -ci true -sn "raytraceMaxDiffuseDepth" -ln "raytraceMaxDiffuseDepth" -dv 
+			1 -min 0 -smx 16 -at "long";
+		addAttr -ci true -sn "raytraceMaxDepth" -ln "raytraceMaxDepth" -dv 1 -min 0 -smx 
+			16 -at "long";
+		addAttr -ci true -sn "polygonalAperture" -ln "polygonalAperture" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "apertureNumberOfBlades" -ln "apertureNumberOfBlades" -dv 8 
+			-min 3 -smx 20 -at "long";
+		addAttr -ci true -sn "apertureRotation" -ln "apertureRotation" -min 0 -smx 360 -at "float";
+		addAttr -ci true -sn "cameraBlur" -ln "cameraBlur" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "cameraBlurSamples" -ln "cameraBlurSamples" -dv 2 -min 2 -max 
+			20 -at "long";
+		addAttr -ci true -sn "transformationBlur" -ln "transformationBlur" -min 0 -max 1 
+			-at "bool";
+		addAttr -ci true -sn "transformationSamples" -ln "transformationSamples" -dv 2 -min 
+			2 -max 20 -at "long";
+		addAttr -ci true -sn "deformationBlur" -ln "deformationBlur" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "deformationSamples" -ln "deformationSamples" -dv 2 -min 2 
+			-max 20 -at "long";
+		addAttr -ci true -sn "motionBlurPosition" -ln "motionBlurPosition" -dv 1 -min 0 
+			-max 2 -en "end on frame:centred on frame:start on frame" -at "enum";
+		addAttr -ci true -sn "sampleMotionBlurOnIntegerFrames" -ln "sampleMotionBlurOnIntegerFrames" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "shutterEfficiency" -ln "shutterEfficiency" -at "float2" -nc 
+			2;
+		addAttr -ci true -sn "shutterEfficiencyA" -ln "shutterEfficiencyA" -dv 1 -min 0 
+			-max 1 -at "float" -p "shutterEfficiency";
+		addAttr -ci true -sn "shutterEfficiencyB" -ln "shutterEfficiencyB" -dv 1 -min 0 
+			-max 1 -at "float" -p "shutterEfficiency";
+		addAttr -ci true -sn "shutterAngleScale" -ln "shutterAngleScale" -dv 1 -min 0.01 
+			-at "float";
+		addAttr -ci true -sn "sampleMotion" -ln "sampleMotion" -dv 1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "extremeMotionDepthOfField" -ln "extremeMotionDepthOfField" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "renderSecondaryDisplays" -ln "renderSecondaryDisplays" -dv 
+			1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -m -sn "displayRenderables" -ln "displayRenderables" -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -m -sn "displayFilenames" -ln "displayFilenames" -dt "string";
+		addAttr -ci true -m -sn "displayDrivers" -ln "displayDrivers" -dt "string";
+		addAttr -ci true -m -sn "displayOutputVariables" -ln "displayOutputVariables" -dt "string";
+		addAttr -ci true -m -sn "displayOverridePixelFilters" -ln "displayOverridePixelFilters" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -h true -m -sn "displayPixelFilters" -ln "displayPixelFilters" 
+			-dv 5 -min 0 -max 8 -en "box:triangle:gaussian:catmull-rom:bessel:sinc:mitchell:zmin:zmax" 
+			-at "enum";
+		addAttr -ci true -m -sn "displayFilterWidthsX" -ln "displayFilterWidthsX" -dv 4 
+			-min 0.001 -at "float";
+		addAttr -ci true -m -sn "displayFilterWidthsY" -ln "displayFilterWidthsY" -dv 4 
+			-min 0.001 -at "float";
+		addAttr -ci true -h true -m -sn "displaySubsetTypes" -ln "displaySubsetTypes" -at "double";
+		addAttr -ci true -m -sn "displayQuantizeZeros" -ln "displayQuantizeZeros" -at "long";
+		addAttr -ci true -m -sn "displayQuantizeOnes" -ln "displayQuantizeOnes" -dv 255 
+			-at "long";
+		addAttr -ci true -m -sn "displayQuantizeMins" -ln "displayQuantizeMins" -at "long";
+		addAttr -ci true -m -sn "displayQuantizeMaxs" -ln "displayQuantizeMaxs" -dv 255 
+			-at "long";
+		addAttr -ci true -m -sn "displayQuantizeDithers" -ln "displayQuantizeDithers" -dv 
+			0.5 -at "float";
+		addAttr -ci true -m -sn "displayHalfFloats" -ln "displayHalfFloats" -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -m -sn "displayGains" -ln "displayGains" -dv 1 -at "float";
+		addAttr -ci true -m -sn "displayGammas" -ln "displayGammas" -dv 1 -at "float";
+		addAttr -ci true -m -sn "displayMattes" -ln "displayMattes" -dv 1 -at "float";
+		addAttr -ci true -m -sn "displayExclusives" -ln "displayExclusives" -at "float";
+		addAttr -ci true -m -sn "displayAssociateAlphas" -ln "displayAssociateAlphas" -dv 
+			1 -at "float";
+		addAttr -ci true -m -sn "displayComputeAlphas" -ln "displayComputeAlphas" -at "float";
+		addAttr -ci true -m -sn "displayEdgeEnables" -ln "displayEdgeEnables" -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -m -sn "displayEdgeVarNames" -ln "displayEdgeVarNames" -dt "string";
+		addAttr -ci true -m -sn "displayEdgeThresholds" -ln "displayEdgeThresholds" -at "double";
+		addAttr -ci true -uac -m -sn "displayEdgeColors" -ln "displayEdgeColors" -at "float3" 
+			-nc 3;
+		addAttr -ci true -sn "displayEdgeColorsR" -ln "displayEdgeColorsR" -at "float" -p "displayEdgeColors";
+		addAttr -ci true -sn "displayEdgeColorsG" -ln "displayEdgeColorsG" -at "float" -p "displayEdgeColors";
+		addAttr -ci true -sn "displayEdgeColorsB" -ln "displayEdgeColorsB" -at "float" -p "displayEdgeColors";
+		addAttr -ci true -m -sn "displayEdgeFilterWidths" -ln "displayEdgeFilterWidths" 
+			-at "double";
+		addAttr -ci true -h true -m -sn "displayEdgeFilterWidthInterps" -ln "displayEdgeFilterWidthInterps" 
+			-min 0 -max 1 -en "Pixels:% Of Frame Width" -at "enum";
+		addAttr -ci true -m -sn "displayEdgeDepthEnables" -ln "displayEdgeDepthEnables" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -m -sn "displayEdgeDepthZMins" -ln "displayEdgeDepthZMins" -at "double";
+		addAttr -ci true -m -sn "displayEdgeDepthZMaxs" -ln "displayEdgeDepthZMaxs" -at "double";
+		addAttr -ci true -m -sn "displayEdgeDepthMinFilters" -ln "displayEdgeDepthMinFilters" 
+			-at "double";
+		addAttr -ci true -h true -m -sn "displayFrameCollapseStates" -ln "displayFrameCollapseStates" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -h true -m -sn "displayAdvancedFrameCollapseStates" -ln "displayAdvancedFrameCollapseStates" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -h true -m -sn "displayEdgeFrameCollapseStates" -ln "displayEdgeFrameCollapseStates" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -h true -sn "displaysAdvanceCollapseString" -ln "displaysAdvanceCollapseString" 
+			-dt "string";
+		addAttr -ci true -m -im false -sn "displaySubsetSets_0" -ln "displaySubsetSets_0" 
+			-at "message";
+		addAttr -ci true -sn "renderShadowMaps" -ln "renderShadowMaps" -dv 1 -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -sn "useDisplacementShadersInShadows" -ln "useDisplacementShadersInShadows" 
+			-dv 1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "useSurfaceShadersInShadows" -ln "useSurfaceShadersInShadows" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "useAtmosphereShadersInShadows" -ln "useAtmosphereShadersInShadows" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "useInteriorShadersInShadows" -ln "useInteriorShadersInShadows" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "shadowMapZThreshold" -ln "shadowMapZThreshold" -at "float3" 
+			-nc 3;
+		addAttr -ci true -sn "shadowMapZThresholdR" -ln "shadowMapZThresholdR" -dv 1 -at "float" 
+			-p "shadowMapZThreshold";
+		addAttr -ci true -sn "shadowMapZThresholdG" -ln "shadowMapZThresholdG" -dv 1 -at "float" 
+			-p "shadowMapZThreshold";
+		addAttr -ci true -sn "shadowMapZThresholdB" -ln "shadowMapZThresholdB" -dv 1 -at "float" 
+			-p "shadowMapZThreshold";
+		addAttr -ci true -sn "depthFilter" -ln "depthFilter" -min 0 -max 3 -en "min:max:average:midpoint" 
+			-at "enum";
+		addAttr -ci true -sn "volumeInterpretation" -ln "volumeInterpretation" -min 0 -max 
+			2 -en "Discrete:Continuous:Distance Inside" -at "enum";
+		addAttr -ci true -sn "giEffect" -ln "giEffect" -min 0 -max 4 -en "None:Occlusion:Fast Image Based Lighting:Full Global Illumination:Point-Based Full Global Illumination" 
+			-at "enum";
+		addAttr -ci true -sn "giAddToFinalMix" -ln "giAddToFinalMix" -dv 1 -min 0 -max 1 
+			-at "bool";
+		addAttr -ci true -sn "giColorBleedingIntensity" -ln "giColorBleedingIntensity" -dv 
+			1 -min 0 -max 1e+020 -smn 0 -smx 1 -at "float";
+		addAttr -ci true -sn "giCastShadowsFromEnvironment" -ln "giCastShadowsFromEnvironment" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -uac -sn "giBlackPoint" -ln "giBlackPoint" -at "float3" -nc 3;
+		addAttr -ci true -sn "giBlackPointR" -ln "giBlackPointR" -at "float" -p "giBlackPoint";
+		addAttr -ci true -sn "giBlackPointG" -ln "giBlackPointG" -at "float" -p "giBlackPoint";
+		addAttr -ci true -sn "giBlackPointB" -ln "giBlackPointB" -at "float" -p "giBlackPoint";
+		addAttr -ci true -uac -sn "giWhitePoint" -ln "giWhitePoint" -at "float3" -nc 3;
+		addAttr -ci true -sn "giWhitePointR" -ln "giWhitePointR" -dv 1 -at "float" -p "giWhitePoint";
+		addAttr -ci true -sn "giWhitePointG" -ln "giWhitePointG" -dv 1 -at "float" -p "giWhitePoint";
+		addAttr -ci true -sn "giWhitePointB" -ln "giWhitePointB" -dv 1 -at "float" -p "giWhitePoint";
+		addAttr -ci true -sn "giSamples" -ln "giSamples" -dv 64 -min 0 -max 1e+020 -smn 
+			0 -smx 128 -at "long";
+		addAttr -ci true -sn "giMaxDistance" -ln "giMaxDistance" -dv 1e+020 -min 0 -max 
+			1e+020 -at "double";
+		addAttr -ci true -sn "giFalloff" -ln "giFalloff" -min 0 -max 2 -en "None:Exponential:Polynomial" 
+			-at "enum";
+		addAttr -ci true -sn "giFalloffExponent" -ln "giFalloffExponent" -dv 2 -min 1 -max 
+			10 -at "float";
+		addAttr -ci true -sn "giCoordinateSystem" -ln "giCoordinateSystem" -at "message";
+		addAttr -ci true -sn "giEnvironmentUseAsBackground" -ln "giEnvironmentUseAsBackground" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "giEnvironmentIntensity" -ln "giEnvironmentIntensity" -dv 1 
+			-min 0 -max 1e+020 -smn 0 -smx 1 -at "float";
+		addAttr -ci true -sn "giEnvironmentSpecularity" -ln "giEnvironmentSpecularity" -dv 
+			1 -min 0 -max 1 -at "float";
+		addAttr -ci true -uac -sn "giEnvironmentColorGain" -ln "giEnvironmentColorGain" 
+			-at "float3" -nc 3;
+		addAttr -ci true -sn "giEnvironmentColorGainR" -ln "giEnvironmentColorGainR" -dv 
+			1 -at "float" -p "giEnvironmentColorGain";
+		addAttr -ci true -sn "giEnvironmentColorGainG" -ln "giEnvironmentColorGainG" -dv 
+			1 -at "float" -p "giEnvironmentColorGain";
+		addAttr -ci true -sn "giEnvironmentColorGainB" -ln "giEnvironmentColorGainB" -dv 
+			1 -at "float" -p "giEnvironmentColorGain";
+		addAttr -ci true -uac -sn "giEnvironmentColorOffset" -ln "giEnvironmentColorOffset" 
+			-at "float3" -nc 3;
+		addAttr -ci true -sn "giEnvironmentColorOffsetR" -ln "giEnvironmentColorOffsetR" 
+			-at "float" -p "giEnvironmentColorOffset";
+		addAttr -ci true -sn "giEnvironmentColorOffsetG" -ln "giEnvironmentColorOffsetG" 
+			-at "float" -p "giEnvironmentColorOffset";
+		addAttr -ci true -sn "giEnvironmentColorOffsetB" -ln "giEnvironmentColorOffsetB" 
+			-at "float" -p "giEnvironmentColorOffset";
+		addAttr -ci true -sn "renderPhotonMaps" -ln "renderPhotonMaps" -dv 2 -min 0 -max 
+			2 -en "Never:Always:Automatic" -at "enum";
+		addAttr -ci true -sn "photonMapsWriteMode" -ln "photonMapsWriteMode" -nn "Write Mode" 
+			-dv 1 -min 0 -max 1 -en "Reuse existing photon maps:Overwrite existing photon maps" 
+			-at "enum";
+		addAttr -ci true -sn "numberOfPhotons" -ln "numberOfPhotons" -dv 50000 -min 0 -at "long";
+		addAttr -ci true -sn "numberOfBounces" -ln "numberOfBounces" -dv 3 -min 1 -smx 16 
+			-at "long";
+		addAttr -ci true -sn "globalMap" -ln "globalMap" -dt "string";
+		addAttr -ci true -sn "causticMap" -ln "causticMap" -dt "string";
+		addAttr -ci true -sn "pointCloudCamera" -ln "pointCloudCamera" -at "message";
+		addAttr -ci true -sn "pointCloudFile" -ln "pointCloudFile" -dt "string";
+		addAttr -ci true -sn "pointCloudWriteMode" -ln "pointCloudWriteMode" -dv 1 -min 
+			0 -max 1 -en "Reuse existing point cloud:Overwrite existing point cloud" -at "enum";
+		addAttr -ci true -sn "pointCloudShadingRateMultiplier" -ln "pointCloudShadingRateMultiplier" 
+			-dv 1 -min 0.0001 -smn 0.001 -smx 10 -at "float";
+		addAttr -ci true -sn "pointCloudMaxSolidAngle" -ln "pointCloudMaxSolidAngle" -dv 
+			0.1 -min 0 -max 1 -at "float";
+		addAttr -ci true -sn "pointCloudBias" -ln "pointCloudBias" -dv 0.001 -min 0 -at "float";
+		addAttr -ci true -sn "shaderCollection" -ln "shaderCollection" -at "message";
+		addAttr -ci true -sn "objectsToRender" -ln "objectsToRender" -at "message";
+		addAttr -ci true -sn "lightsToRender" -ln "lightsToRender" -at "message";
+		addAttr -ci true -sn "clippingPlanesToRender" -ln "clippingPlanesToRender" -at "message";
+		addAttr -ci true -sn "layerToRender" -ln "layerToRender" -at "message";
+		addAttr -ci true -sn "generateRIBArchives" -ln "generateRIBArchives" -dv 1 -min 
+			0 -max 1 -at "bool";
+		addAttr -ci true -sn "ignoreArchivedObjects" -ln "ignoreArchivedObjects" -dv 1 -min 
+			0 -max 1 -at "bool";
+		addAttr -ci true -sn "archiveLighting" -ln "archiveLighting" -dv 2 -min 0 -max 2 
+			-en "No Lighting:Light Linking:Light Sources & Light Linking" -at "enum";
+		addAttr -ci true -sn "archiveWriteMode" -ln "archiveWriteMode" -dv 1 -min 0 -max 
+			1 -en "Reuse existing archive:Overwrite existing archive" -at "enum";
+		addAttr -ci true -sn "archiveTransforms" -ln "archiveTransforms" -dv 1 -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -sn "concatenateGeoTransforms" -ln "concatenateGeoTransforms" -dv 
+			1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "concatenateLightTransforms" -ln "concatenateLightTransforms" 
+			-dv 1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "archiveGeometryShaders" -ln "archiveGeometryShaders" -dv 1 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "archiveGeometryAttributes" -ln "archiveGeometryAttributes" 
+			-dv 1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -m -sn "fragmentObjectSets" -ln "fragmentObjectSets" -at "message";
+		addAttr -ci true -m -sn "fragmentFilenames" -ln "fragmentFilenames" -dt "string";
+		addAttr -ci true -m -sn "fragmentUseStates" -ln "fragmentUseStates" -dv 1 -min 0 
+			-max 1 -at "bool";
+		addAttr -ci true -m -sn "fragmentWriteStates" -ln "fragmentWriteStates" -dv 1 -min 
+			0 -max 1 -at "bool";
+		addAttr -ci true -h true -m -sn "fragmentCollapseStates" -ln "fragmentCollapseStates" 
+			-min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "fragmentBinaryRib" -ln "fragmentBinaryRib" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "fragmentCompressedRib" -ln "fragmentCompressedRib" -min 0 
+			-max 1 -at "bool";
+		addAttr -ci true -sn "fragmentWriteMode" -ln "fragmentWriteMode" -dv 1 -min 0 -max 
+			1 -en "Reuse existing fragments:Overwrite existing fragments" -at "enum";
+		addAttr -ci true -sn "shaderPath" -ln "shaderPath" -dt "string";
+		addAttr -ci true -sn "texturePath" -ln "texturePath" -dt "string";
+		addAttr -ci true -sn "proceduralPath" -ln "proceduralPath" -dt "string";
+		addAttr -ci true -sn "archivePath" -ln "archivePath" -dt "string";
+		addAttr -ci true -sn "preRenderMEL" -ln "preRenderMEL" -dt "string";
+		addAttr -ci true -sn "postRenderMEL" -ln "postRenderMEL" -dt "string";
+		addAttr -ci true -sn "preFrameMEL" -ln "preFrameMEL" -dt "string";
+		addAttr -ci true -sn "postFrameMEL" -ln "postFrameMEL" -dt "string";
+		addAttr -ci true -sn "postOptionMEL" -ln "postOptionMEL" -dt "string";
+		addAttr -ci true -sn "preWorldMEL" -ln "preWorldMEL" -dt "string";
+		addAttr -ci true -sn "postWorldMEL" -ln "postWorldMEL" -dt "string";
+		addAttr -ci true -sn "hider" -ln "hider" -min 0 -max 3 -en "hidden:raytrace:photon:progressive raytrace" 
+			-at "enum";
+		addAttr -ci true -sn "bucketSize" -ln "bucketSize" -at "long2" -nc 2;
+		addAttr -ci true -sn "bucketSizeX" -ln "bucketSizeX" -dv 16 -min 2 -at "long" -p "bucketSize";
+		addAttr -ci true -sn "bucketSizeY" -ln "bucketSizeY" -dv 16 -min 2 -at "long" -p "bucketSize";
+		addAttr -ci true -sn "gridSize" -ln "gridSize" -dv 256 -min 16 -at "long";
+		addAttr -ci true -sn "textureMemory" -ln "textureMemory" -dv 131072 -min 128 -at "long";
+		addAttr -ci true -sn "eyeSplits" -ln "eyeSplits" -dv 10 -min 0 -at "long";
+		addAttr -ci true -sn "opacityThreshold" -ln "opacityThreshold" -at "float3" -nc 
+			3;
+		addAttr -ci true -sn "opacityThresholdR" -ln "opacityThresholdR" -dv 0.99608 -at "float" 
+			-p "opacityThreshold";
+		addAttr -ci true -sn "opacityThresholdG" -ln "opacityThresholdG" -dv 0.99608 -at "float" 
+			-p "opacityThreshold";
+		addAttr -ci true -sn "opacityThresholdB" -ln "opacityThresholdB" -dv 0.99608 -at "float" 
+			-p "opacityThreshold";
+		addAttr -ci true -sn "imageZThreshold" -ln "imageZThreshold" -at "float3" -nc 3;
+		addAttr -ci true -sn "imageZThresholdR" -ln "imageZThresholdR" -dv 0.99608 -at "float" 
+			-p "imageZThreshold";
+		addAttr -ci true -sn "imageZThresholdG" -ln "imageZThresholdG" -dv 0.99608 -at "float" 
+			-p "imageZThreshold";
+		addAttr -ci true -sn "imageZThresholdB" -ln "imageZThresholdB" -dv 0.99608 -at "float" 
+			-p "imageZThreshold";
+		addAttr -ci true -sn "numberOfCPUs" -ln "numberOfCPUs" -at "long";
+		addAttr -ci true -sn "translateMayaShaders" -ln "translateMayaShaders" -dv 1 -min 
+			0 -max 1 -at "bool";
+		addAttr -ci true -sn "useMayaShaders" -ln "useMayaShaders" -dv 1 -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "translatedShadersAOVs" -ln "translatedShadersAOVs" -min 0 
+			-max 2 -en "Default AOVs for Render Mode:Defined AOVs Only:All AOVs" -at "enum";
+		addAttr -ci true -sn "standardAtmosphere" -ln "standardAtmosphere" -min 0 -max 1 
+			-at "bool";
+		addAttr -ci true -sn "volumeShadingRate" -ln "volumeShadingRate" -dv 1 -min 0.001 
+			-at "float";
+		addAttr -ci true -sn "useNetCache" -ln "useNetCache" -min 0 -max 1 -at "bool";
+		addAttr -ci true -sn "netCacheDir" -ln "netCacheDir" -dt "string";
+		addAttr -ci true -sn "netCacheSize" -ln "netCacheSize" -dv 100 -min 100 -at "long";
+		addAttr -ci true -sn "outputRenderProgress" -ln "outputRenderProgress" -min 0 -max 
+			1 -at "bool";
+		addAttr -ci true -sn "statisticsLevel" -ln "statisticsLevel" -min 0 -max 3 -at "long";
+		addAttr -ci true -sn "statisticsFile" -ln "statisticsFile" -dt "string";
+		addAttr -ci true -sn "usedBy3dfm" -ln "usedBy3dfm" -at "message";
+		setAttr ".version" -type "string" "6.0.2";
+		setAttr ".ribFilename" -type "string" "3delight/<scene>/rib/<scene>_<pass>_#.<ext>";
+		setAttr ".backgroundRenderParams" -type "string" "";
+		setAttr ".renderLogFilename" -type "string" "3delight/<scene>/rib/<scene>_<pass>_#.<ext>";
+		setAttr ".pixelSamples" -type "long2" 4 4 ;
+		setAttr ".pixelFilter" 2;
+		setAttr ".filterWidth" -type "float2" 3 3 ;
+		setAttr ".displayEdgeVarNames[0]" -type "string" "Ci";
+		setAttr ".displayEdgeThresholds[0]"  0.1;
+		setAttr ".displayEdgeColors[0]" -type "float3"  1 1 1;
+		setAttr ".displayEdgeFilterWidths[0]"  2;
+		setAttr ".displayEdgeDepthZMaxs[0]"  1000;
+		setAttr ".displayEdgeDepthMinFilters[0]"  1;
+		setAttr ".displayEdgeFrameCollapseStates[0]" yes;
+		setAttr ".globalMap" -type "string" "3delight/<scene>/photonmaps/<scene>_<pass>_global_#.pmap";
+		setAttr ".causticMap" -type "string" "3delight/<scene>/photonmaps/<scene>_<pass>_caustic_#.pmap";
+		setAttr ".pointCloudFile" -type "string" "<scene>_<pass>_GI_#.<ext>";
+		setAttr ".shaderPath" -type "string" "@";
+		setAttr ".texturePath" -type "string" "@";
+		setAttr ".proceduralPath" -type "string" "@";
+		setAttr ".archivePath" -type "string" "@";
+		setAttr ".preRenderMEL" -type "string" "";
+		setAttr ".postRenderMEL" -type "string" "";
+		setAttr ".preFrameMEL" -type "string" "";
+		setAttr ".postFrameMEL" -type "string" "";
+		setAttr ".postOptionMEL" -type "string" "";
+		setAttr ".preWorldMEL" -type "string" "";
+		setAttr ".postWorldMEL" -type "string" "";
+		setAttr ".netCacheDir" -type "string" "";
+		setAttr ".statisticsFile" -type "string" "";
+	AE_setConnectedNodeFromMenu delightRenderGlobals1.renderPass "DRG_GUISelectedRenderPassChanged" ($renderpass_Name+"Pass");
+}
+global proc hhCurRenderPassCreat(string $item)
+{
+	
+	global string  $renderpass_Name;
+	hhRenderPassCreat();
+	switch($item)
+	{
+		case "ch":
+			//color 
+			setAttr ".displayRenderables[0]" yes;
+			setAttr ".displayFilenames[0]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[0]" -type "string" "iff";
+			setAttr ".displayOutputVariables[0]" -type "string" "rgba";
+			//occ
+			setAttr ".displayRenderables[1]" yes;
+			setAttr ".displayFilenames[1]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[1]" -type "string" "iff";
+			setAttr ".displayOutputVariables[1]" -type "string" "color aov_occlusion";
+			setAttr ".giEffect" 1;
+			setAttr ".giSamples" 128;
+			setAttr ".giMaxDistance" 100;
+			//normal
+			setAttr ".displayRenderables[2]" yes;
+			setAttr ".displayFilenames[2]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[2]" -type "string" "iff";
+			setAttr ".displayOutputVariables[2]" -type "string" "normal aov_camera_space_normal";
+			//zdepth
+			setAttr ".displayRenderables[3]" yes;
+			setAttr ".displayFilenames[3]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[3]" -type "string" "iff";
+			setAttr ".displayOutputVariables[3]" -type "string" "color aov_luminance_depth";
+			//color without shadow
+			setAttr ".displayRenderables[4]" yes;
+			setAttr ".displayFilenames[4]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[4]" -type "string" "iff";
+			setAttr ".displayOutputVariables[4]" -type "string" "color aov_color_no_shadow";
+			//shadow
+			setAttr ".displayRenderables[5]" yes;
+			setAttr ".displayFilenames[5]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+			setAttr ".displayDrivers[5]" -type "string" "iff";
+			setAttr ".displayOutputVariables[5]" -type "string" "color unused, float aov_shadow";
+	}
+
+}
+global proc hhColorRenderPassCreat()
+{
+	
+	global string  $renderpass_Name;
+	hhRenderPassCreat();
+	//color 
+	setAttr ".displayRenderables[0]" yes;
+	setAttr ".displayFilenames[0]" -type "string" "3delight/<scene>/image/<scene>_<pass>_<aov>_#.<ext>";
+	setAttr ".displayDrivers[0]" -type "string" "iff";
+	setAttr ".displayOutputVariables[0]" -type "string" "rgba";
+}
+global proc hhRenderPssRemove()
+{
+	string $pass[]=`ls -type "delightRenderPass"`;
+	select $pass;
+	delete;
+}
+
+global proc hhdelightshaderAssign(string $shader)
+{
+	string $objs[]=`ls -sl -l`;
+	HhedlightLoad();
+	string $shadeold[]=`ls -type "delightSurfaceShader"`;
+	select -cl ;
+	for( $obj in $objs)
+	{
+		string $shape[]=`listRelatives -s $obj`;
+		string $nodeType=`nodeType($shape[0])`;
+		if(`match "Light" $nodeType`=="")
+		{
+			select -add $obj;
+			
+		}
+	}
+	DL_shaderAssignmentPanelShaderSelectorCallback("object","surface",$shader,1);
+	string $shadnew[]=`ls -type "delightSurfaceShader"`;
+	string $shade[]=stringArrayRemove($shadeold, $shadnew);
+	setAttr -l false ($shade[0]+".shaderFile");
+	setAttr -type "string" ($shade[0]+".shaderFile") ("$DELIGHT/shaders/"+$shader+".sdl");
+	delightOutputShaderPreview $shade[0] "" "";
+}
+				
+//windows
+
+global proc H3DelightTools_command()
+{
+	global string $aoRays;
+	if (`window -exists H3DelightTools_window`) deleteUI H3DelightTools_window;
+	window -title "3Delight Tools " -in "RP" -menuBar  true -mxb 1 -mnb 1 H3DelightTools_window;
+	   		menu -label "Help";
+			menuItem -label "Help on 3delight Tools" -command "";
+	columnLayout -adjustableColumn true;
+			// Mini Tools
+	string $RenderPassTools = `frameLayout -label "3delightAttribs Tools"  -cl 1  -cll true  -cc "" -borderStyle "etchedIn"`;
+		string $formLayout = `formLayout`;
+			string $button1 = `button -h 30 -l "灯光连接"	-ann "选择物体（包括灯光和接受灯光的物体），进行灯光连接"	-c "HhLightLink_3delight()"`;
+			string $button2 = `button -h 30 -l "断开灯光连接"	-ann "选择物体（灯光物体，或者接受灯光的物体），断开灯光连接"	-c "HhLightLinkBreak_3delight()"`;
+			string $button3 = `button -h 30 -l "添加灯光shadow" 	-ann "添加所选择的灯光的3delight shadow节点" -c "Hh3dlightLightAttAdd(\"shadow\")"`;
+			string $button4 = `button -h 30 -l "删除灯光shadow"	-ann "删除所选择的灯光的3delight shadow节点"	-c "Hh3dlightLightAttRemove()"`;
+			string $button5 = `button -h 30 -l "添加3delight的smooth节点"	-ann "所选择的Poly物体添加smooth节点"	-c "Hh3dlightGeoAttsAdd(\"Geometry\")"`;
+			string $button6 = `button -h 30 -l "删除3delight的smooth节点"	-ann "所选择的Poly物体删除smooth节点"	-c "HhGeoAttrRemove(\"Geometry\")"`;
+			string $button7 = `button -h 30 -l "添加3delight的置换节点"	-ann "添加所选物体的置换属性"	-c "Hh3dlightGeoAttsAdd(\"Displacement\")"`;
+			string $button8 = `button -h 30 -l "删除3delight的置换节点 "	-ann "删除所选物体的置换属性"	-c "HhGeoAttrRemove(\"Displacement\")"`;
+			string $button9 = `button -h 30 -l "Shave "	-ann "调入3df 3delight"	-c "HhedlightShaveLoad()"`;
+			setParent ..;
+		setParent ..;
+		formLayout -edit
+			-attachForm	$button1	"left"		0	
+			-attachPosition	$button1	"right"		0	50
+			
+			-attachControl	$button2	"left"		0	$button1
+			-attachForm	$button2	"right"		0
+			
+			-attachControl	$button3	"top"		0	$button1
+			-attachForm	$button3	"left"		0	
+			-attachPosition	$button3	"right"		0	50
+			
+			-attachControl	$button4	"top"		0	$button1
+			-attachControl	$button4	"left"		0	$button3
+			-attachForm	$button4	"right"		0
+			
+			-attachControl	$button5	"top"		0	$button3
+			-attachForm	$button5	"left"		0	
+			-attachPosition	$button5	"right"		0	50
+
+			
+			-attachControl	$button6	"top"		0	$button3
+			-attachControl	$button6	"left"		0	$button5
+			-attachForm	$button6	"right"		0
+			
+			-attachControl	$button7	"top"		0	$button5
+			-attachForm	$button7	"left"		0	
+			-attachPosition	$button7	"right"		0	50
+			
+			-attachControl	$button8	"top"		0	$button5
+			-attachControl	$button8	"left"		0	$button7
+			-attachForm	$button8	"right"		0
+
+			-attachControl	$button9	"top"		0	$button7
+			-attachForm	$button9	"left"		0	
+			-attachPosition	$button9	"right"		0	50
+		$formLayout;
+	string $RenderPassTools = `frameLayout -label "Shader Tools"  -cl 1  -cll true -cc "" -borderStyle "etchedIn"`;
+		string $formLayout = `formLayout`;
+			string $button1 = `button -h 30 -l "matte"	-bgc 0 0 0 -ann "选择物体，创建matteset并赋M材质（3delight)"	-c "hhdelightshaderAssign(\"matte\")"`;
+			string $button2 = `button -h 30 -l "uv"	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋UV材质（3delight)"	-c "hhdelightshaderAssign(\"uv\")"`;
+			string $button3 = `button -h 30 -l "xyz"	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋xyz材质（3delight)"	-c "hhdelightshaderAssign(\"show_xyz\")"`;
+			string $button4 = `button -h 30 -l "Shave"	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋shave材质(3delight)"	-c "hhdelightshaderAssign(\"Shave\")"`;
+			string $button5 = `button -h 30 -l "maya_fur "	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋shave材质(3delight)"	-c "hhdelightshaderAssign(\"maya_fur\")"`;
+			string $button6 = `button -h 30 -l "glass "	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋glass材质(3delight)"	-c "hhdelightshaderAssign(\"glass\")"`;
+			string $button7 = `button -h 30 -l "wood"	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋wood材质(3delight)"	-c "hhdelightshaderAssign(\"wood\")"`;
+			string $button8 = `button -h 30 -l "stone"	-bgc 0.3 0.1 0.1 -ann "选择物体，创建matteset并赋stone材质(3delight)"	-c "hhdelightshaderAssign(\"stone\")"`;
+		setParent ..;
+		setParent ..;
+		formLayout -edit
+			-attachForm	$button1	"left"		0	
+			-attachPosition	$button1	"right"		0	10
+			
+			-attachControl	$button2	"left"		0	$button1
+			-attachPosition $button2	"right"		 0 20 
+			
+			-attachControl	$button3	"left"		0	$button2
+			-attachPosition $button3	"right"		0 32
+			
+			-attachControl	$button4	"left"		0	$button3
+			-attachPosition $button4	"right"		0 44
+			
+			-attachControl	$button5	"left"		0	$button4
+			-attachPosition $button5	"right"		0 56
+	
+			-attachControl	$button6	"left"		0	$button5
+			-attachPosition $button6	"right"		0 68
+
+			-attachControl	$button7	"left"		0	$button6
+			-attachPosition	$button7	"right"		0 80
+
+			-attachControl	$button8	"left"		0	$button7
+			-attachForm	$button8	"right"		0 
+	    $formLayout;
+		string $RenderPassTools = `frameLayout -label "RenderPass Tools"  -cl 1  -cll true -cc "" -borderStyle "etchedIn"`;
+		string $formLayout = `formLayout`;
+			string $button1 = `button -h 30 -l "创建点去camera" 	-ann "创建点云camer" -c "HhptcCamerCreat()"`;
+			string $button2 = `button -h 30 -l "创建点云" 	-ann "设置点云（包括ptc_Render)" -c "HhPtc_bakeRenderPass()"`;
+			string $button3 = `button -h 30 -l "创建点云occ"	-ann "设置点云基础上的ptc AO(在渲染前，一定要先渲染ptc_Render"	-c "Hhptc_renderRenderPass()"`;
+			string $button4 = `button -h 30 -l "创建包含color通道的renderpass"	-ann "创建只含color通道的renderpass,并进行基础设置"	-c "hhColorRenderPassCreat()"`;
+			string $button5 = `button -h 30 -l "将所选物体添加到ptc_bake"	-ann "将选择物体添加到ptc_bake中"	-c "ptc_bakeSetAdd()"`;
+			string $button6 = `button -h 30 -l "将所选物体添加到ptc_AO"	-ann "将选择物体添加到ptc_AO中"	-c "ptc_AOSetAdd()"`;
+			string $button7 = `button -h 30 -l "RenderPass 多通道（项目设置）"	-ann "RenderPass设置（通用）"	-c "hhCurRenderPassCreat(\"ch\")"`;
+			string $button8 = `button -h 30 -l "将所选物体从ptc_bake中删减"	-ann "将选择物体从ptc_bake中删减"	-c "ptc_bakeSetRemove()"`;
+			string $button9 = `button -h 30 -l "将所选物体从ptc_AO中删减"	-ann "将选择物体从ptc_AO中删减"	-c "ptc_AOSetRemove()"`;
+			string $button10 = `button -h 30 -l "删除所有RenderPass"	-ann "删除所有RenderPass"	-c "hhRenderPssRemove()"`;
+			//string $button10 = `button -h 30 -l "AOPassAdd"	-ann "添加AO通道"	-c "hhRenderPassDelete()"`;
+			//string $button11 = `button -h 30 -l "zdepthPassAdd"	-ann "添加景深通道"	-c "HhRemoveObjPass()"`;
+			//string $button12 = `button -h 30 -l "specularPassAdd"	-ann "添加高光通道"	-c "HhAddObjPass()"`;
+			//string $button13 = `button -h 30 -l "reflectionPassAdd "	-ann "添加反射通道"	-c "HhRemoveObjPass()"`;
+			//string $button14 = `button -h 30 -l "refractionPassAdd"	-ann "添加折射通道"	-c "HhAddObjPass()"`;
+			//string $button15 = `button -h 30 -l "shadowPassAdd"	-ann "添加阴影通道"	-c "HhRemoveObjPass()"`;
+			//string $button16 = `button -h 30 -l "colornoshadow PassAdd"	-ann "添加无阴影的color通道"	-c "HhRemoveObjPass()"`;
+			//string $button17 = `button -h 30 -l "ambientPassAdd"	-ann "添加ambient通道"	-c "HhRemoveObjPass()"`;
+			setParent ..;
+		setParent ..;
+		formLayout -edit
+			-attachForm	$button1	"left"		0	
+			-attachPosition	$button1	"right"		0	30
+			
+			-attachControl	$button2	"left"		0	$button1
+			-attachPosition $button2	"right"		 0  60
+			
+			-attachControl	$button3	"left"		0	$button2
+			-attachForm	$button3	"right"		0  
+
+			-attachControl	$button4	"top"		0	$button1
+			-attachForm	$button4	"left"		0	
+			-attachPosition	$button4	"right"		0	30
+		
+			-attachControl	$button5	"top"		0	$button1
+			-attachControl	$button5	"left"		0	$button4
+			-attachPosition	$button5	"right"		0	60
+			
+			-attachControl	$button6	"top"		0	$button1
+			-attachControl	$button6	"left"		0	$button5
+			-attachForm 	$button6	"right"		0	
+			
+			-attachControl	$button7	"top"		0	$button4
+			-attachForm	$button7	"left"		0	
+			-attachPosition	$button7	"right"		0	30
+		
+			-attachControl	$button8	"top"		0	$button4
+			-attachControl	$button8	"left"		0	$button7
+			-attachPosition	$button8	"right"		0	60
+			
+			-attachControl	$button9	"top"		0	$button4
+			-attachControl	$button9	"left"		0	$button8
+			-attachForm 	$button9	"right"		0	
+			
+			-attachControl	$button10	"top"		0	$button7
+			-attachForm	$button10	"left"		0	
+			-attachPosition	$button10	"right"		0	30
+		/*
+			-attachControl	$button11	"top"		0	$button7
+			-attachControl	$button11	"left"		0	$button10
+			-attachPosition	$button11	"right"		0	60
+
+			-attachControl	$button12	"top"		0	$button7
+			-attachControl	$button12	"left"		0	$button11
+			-attachForm 	$button12	"right"		0
+			
+			-attachControl	$button13	"top"		0	$button10
+			-attachForm	$button13	"left"		0	
+			-attachPosition	$button13	"right"		0	30
+		
+			-attachControl	$button14	"top"		0	$button10
+			-attachControl	$button14	"left"		0	$button13
+			-attachPosition	$button14	"right"		0	60
+
+			-attachControl	$button15	"top"		0	$button10
+			-attachControl	$button15	"left"		0	$button14
+			-attachForm 	$button15	"right"		0
+			
+			-attachControl	$button16	"top"		0	$button13
+			-attachForm	$button16	"left"		0	
+			-attachPosition	$button16	"right"		0	30
+		
+			-attachControl	$button17	"top"		0	$button13
+			-attachControl	$button17	"left"		0	$button16
+			-attachPosition	$button17	"right"		0	60
+		*/
+			
+
+		$formLayout;
+		string $RenderPassTools = `frameLayout -label "shave&hair Tools"  -cl 1  -cll true -cc "" -borderStyle "etchedIn"`;
+		string $formLayout = `formLayout`;
+			string $button1 = `button -h 30 -l "TT项目(圣诞老人毛发文件设置）" 	-ann "TT项目圣诞老人毛发文件设置" -c "source \"//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhHairSet_TT.mel\"; HhHairSet_TT()"`;
+			//string $button2 = `button -h 30 -l "创建点云" 	-ann "设置点云（包括ptc_Render)" -c "HhPtc_bakeRenderPass()"`;
+			//string $button3 = `button -h 30 -l "创建点云occ"	-ann "设置点云基础上的ptc AO(在渲染前，一定要先渲染ptc_Render"	-c "Hhptc_renderRenderPass()"`;
+			//string $button4 = `button -h 30 -l "创建包含color通道的renderpass"	-ann "创建只含color通道的renderpass,并进行基础设置"	-c "hhColorRenderPassCreat()"`;
+			//string $button5 = `button -h 30 -l "将所选物体添加到ptc_bake"	-ann "将选择物体添加到ptc_bake中"	-c "ptc_bakeSetAdd()"`;
+			//string $button6 = `button -h 30 -l "将所选物体添加到ptc_AO"	-ann "将选择物体添加到ptc_AO中"	-c "ptc_AOSetAdd()"`;
+			//string $button7 = `button -h 30 -l "RenderPass 多通道（项目设置）"	-ann "RenderPass设置（通用）"	-c "hhCurRenderPassCreat(\"ch\")"`;
+			//string $button8 = `button -h 30 -l "将所选物体从ptc_bake中删减"	-ann "将选择物体从ptc_bake中删减"	-c "ptc_bakeSetRemove()"`;
+			//string $button9 = `button -h 30 -l "将所选物体从ptc_AO中删减"	-ann "将选择物体从ptc_AO中删减"	-c "ptc_AOSetRemove()"`;
+			//string $button10 = `button -h 30 -l "删除所有RenderPass"	-ann "删除所有RenderPass"	-c "ptc_AOSetAdd()"`;
+			//string $button10 = `button -h 30 -l "AOPassAdd"	-ann "添加AO通道"	-c "hhRenderPassDelete()"`;
+			//string $button11 = `button -h 30 -l "zdepthPassAdd"	-ann "添加景深通道"	-c "HhRemoveObjPass()"`;
+			//string $button12 = `button -h 30 -l "specularPassAdd"	-ann "添加高光通道"	-c "HhAddObjPass()"`;
+			//string $button13 = `button -h 30 -l "reflectionPassAdd "	-ann "添加反射通道"	-c "HhRemoveObjPass()"`;
+			//string $button14 = `button -h 30 -l "refractionPassAdd"	-ann "添加折射通道"	-c "HhAddObjPass()"`;
+			//string $button15 = `button -h 30 -l "shadowPassAdd"	-ann "添加阴影通道"	-c "HhRemoveObjPass()"`;
+			//string $button16 = `button -h 30 -l "colornoshadow PassAdd"	-ann "添加无阴影的color通道"	-c "HhRemoveObjPass()"`;
+			//string $button17 = `button -h 30 -l "ambientPassAdd"	-ann "添加ambient通道"	-c "HhRemoveObjPass()"`;
+			setParent ..;
+		setParent ..;
+		formLayout -edit
+			-attachForm	$button1	"left"		0	
+			-attachPosition	$button1	"right"		0	100
+		/*
+			-attachControl	$button2	"left"		0	$button1
+			-attachPosition $button2	"right"		 0  60
+			
+			-attachControl	$button3	"left"		0	$button2
+			-attachForm	$button3	"right"		0  
+
+			-attachControl	$button4	"top"		0	$button1
+			-attachForm	$button4	"left"		0	
+			-attachPosition	$button4	"right"		0	30
+		
+			-attachControl	$button5	"top"		0	$button1
+			-attachControl	$button5	"left"		0	$button4
+			-attachPosition	$button5	"right"		0	60
+			
+			-attachControl	$button6	"top"		0	$button1
+			-attachControl	$button6	"left"		0	$button5
+			-attachForm 	$button6	"right"		0	
+			
+			-attachControl	$button7	"top"		0	$button4
+			-attachForm	$button7	"left"		0	
+			-attachPosition	$button7	"right"		0	30
+		
+			-attachControl	$button8	"top"		0	$button4
+			-attachControl	$button8	"left"		0	$button7
+			-attachPosition	$button8	"right"		0	60
+			
+			-attachControl	$button9	"top"		0	$button4
+			-attachControl	$button9	"left"		0	$button8
+			-attachForm 	$button9	"right"		0	
+			
+			-attachControl	$button10	"top"		0	$button7
+			-attachForm	$button10	"left"		0	
+			-attachPosition	$button10	"right"		0	30
+		
+			-attachControl	$button11	"top"		0	$button7
+			-attachControl	$button11	"left"		0	$button10
+			-attachPosition	$button11	"right"		0	60
+
+			-attachControl	$button12	"top"		0	$button7
+			-attachControl	$button12	"left"		0	$button11
+			-attachForm 	$button12	"right"		0
+			
+			-attachControl	$button13	"top"		0	$button10
+			-attachForm	$button13	"left"		0	
+			-attachPosition	$button13	"right"		0	30
+		
+			-attachControl	$button14	"top"		0	$button10
+			-attachControl	$button14	"left"		0	$button13
+			-attachPosition	$button14	"right"		0	60
+
+			-attachControl	$button15	"top"		0	$button10
+			-attachControl	$button15	"left"		0	$button14
+			-attachForm 	$button15	"right"		0
+			
+			-attachControl	$button16	"top"		0	$button13
+			-attachForm	$button16	"left"		0	
+			-attachPosition	$button16	"right"		0	30
+		
+			-attachControl	$button17	"top"		0	$button13
+			-attachControl	$button17	"left"		0	$button16
+			-attachPosition	$button17	"right"		0	60
+		*/
+			
+
+		$formLayout;
+	showWindow H3DelightTools_window;
+}
+
+
+
+
+
+
+
+
+ 

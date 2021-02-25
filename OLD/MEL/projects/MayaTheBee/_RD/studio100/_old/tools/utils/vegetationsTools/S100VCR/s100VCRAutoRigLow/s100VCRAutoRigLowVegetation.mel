@@ -1,0 +1,238 @@
+
+global proc s100VCRAskForAutoRigLowVegetation()
+{
+
+$fileSaved = `file -q -modified` ;
+	if( $fileSaved == 1 )
+	{
+	warning "file need to be saved";
+    }else{
+	$checkAllGood = `s100VCRCheckOpenedSceneForARLowRes`;
+
+
+		if($checkAllGood == 1)
+		{
+		s100VCRAskForAutoRigLowVegetationUI ;
+		}else{
+		warning "something is wrong with files, check script editor for more details";
+		}
+	}
+
+}
+
+global proc s100VCRAskForAutoRigLowVegetationUI()
+{
+
+	$hi = `file -q -sn` ;
+	$lo = `s100VCRreturnLowNameFromHighOpened`;
+	$message = "this will rig the file low file";
+	$message += " from the high one " ;
+	$message += ",are you sur ? It will rename low version and create a new one with rig !" ;
+	$returnConf = `confirmDialog -title "VCR Confirm" -message $message
+		-button "Yes" -button "No" -defaultButton "Yes"
+		-cancelButton "No" -dismissString "No"`;
+
+		if($returnConf == "Yes")
+		{
+		s100VCRAutoRigLowVegetation($hi,$lo) ;
+		}
+
+}
+
+global proc s100VCRPrepareLowToBeRig(string $lo)
+{
+
+file -open $lo ;
+$short = `file -q -sn -shortName ` ;
+$ext = `fileExtension($short)` ;
+$folder = `s100VCRgetFolderFromName($lo)` + "_old/";
+
+$chF = `filetest -d $folder `;
+
+	if($chF == 0 )
+	{
+	sysFile -md  $folder ;
+
+    }
+
+$sub = substituteAllString($short , ("." + $ext) , ("*." + $ext));
+$list = sort(`getFileList -folder $folder -filespec $sub` );
+$padName = "001" ;
+
+	if(size($list)>0)
+	{
+	$last = size($list) - 1 ;
+	$subT = substituteAllString($list[$last] , ("." + $ext) , "");
+
+	$lastPad = stringToStringArray($subT,"_") ;
+	$lastPadS = size($lastPad) -1 ;
+
+	$pad = $lastPad[$lastPadS] ;
+	int $padI = $pad ;
+	$padI++;
+	$padName = padNumber( $padI , 3) ;
+	}
+
+$subToRename = substituteAllString($short , ("." + $ext) , ("_"+ $padName+ "." + $ext));
+
+file -rename ($folder + $subToRename) ;
+file -s ;
+file -open $lo ;
+
+
+
+	if(`objExists "rig_grp"`)
+	{
+	delete "rig_grp" ;
+    }
+
+	if(`objExists "hidden_grp"`)
+	{
+	delete "hidden_grp" ;
+    }
+	if(`objExists "deformed_grp"`)
+	{
+    }else{
+	group -em -n "deformed_grp" -p "msh_grp" ;
+    }
+	$var = `ls ("VR_*")`;
+		if(size($var) >0)
+			delete $var ;
+
+namespace -setNamespace ":" ;
+$listNameSpace = `namespaceInfo -ls `;
+
+	for($tmp in $listNameSpace)
+	{
+		if($tmp == "VCR" || $tmp == "VCR:VCR" )
+		{
+		namespace -setNamespace  "VCR";
+		$list = `namespaceInfo -listOnlyDependencyNodes `  ;
+		$listNameSpace2 = `namespaceInfo -ls `;
+
+			if(size($list) >0)
+			{
+			delete $list ;
+
+			}
+		namespace -setNamespace ":" ;
+		namespace -removeNamespace "VCR" ;
+        }
+    }
+
+
+
+file -save ;
+
+
+
+}
+
+global proc s100VCRCleanHighRigAndRebuildForLow(string $hi,string $lo)
+{
+
+file -f -open $hi ;
+file -import -namespace "VCR" $lo;
+file -rename $lo ;
+file -s;
+
+
+$obj = `s100VRstockInfoForVRRIGRebuildGetObject`;
+$amplitude = `s100VRstockInfoForVRRIGRebuildGet("amplitude") `;
+$overLap = `s100VRstockInfoForVRRIGRebuildGet("overLap") `;
+
+$listT = `listRelatives -children -type "transform" "root_ctrl"`;
+
+	for($tmp in $listT)
+		delete $tmp ;
+
+string $list[] = `ls ("VR_*") `;
+string $list2[] = `ls ("VR_*_scN") `;
+string $list4[] = stringArrayRemove( $list2,$list ) ;
+
+	if(size($list4) > 0)
+		delete $list4 ;
+
+$listD = `listRelatives -children -type "transform" "autoRigCurve_grp"`;
+
+	for($i = 0 ; $i<size($listD) ; $i++)
+	{
+	$toDel = `listRelatives -ad -type "transform" ($listD[$i])`;
+		for($j = 0 ; $j < size($toDel); $j++)
+		{
+		$sub = substituteAllString($toDel[$j] ,"_curv","*");
+		$listToDelete = `ls $sub` ;
+			for($tmp in $listToDelete)
+			{
+				if(`objExists $tmp`)
+					delete $tmp ;
+
+            }
+		}
+    }
+
+
+
+
+$listChild = `listRelatives -ad -type "mesh" "msh_grp"` ;
+$listPC = `listRelatives -c "parented_grp"`;
+	if(size($listPC) >0)
+	delete $listPC ;
+$listPC = `listRelatives -c "deformed_grp"`;
+	if(size($listPC) >0)
+	delete $listPC ;
+
+$listS = `listRelatives -c  -type "transform" ("VCR:parented_grp")`;
+$dGrp = "deformed_grp" ;
+$listP = `listRelatives -c  -type "transform" ("VCR:deformed_grp")`;
+
+	if( `objExists $dGrp` )
+	{
+
+    }else{
+	group -n $dGrp -p "msh_grp" ;
+    }
+
+	if(size($listS) >0)
+		parent $listS "parented_grp";
+	if(size($listP) >0)
+		parent $listP $dGrp;
+
+$listG = `ls -type transform ("VCR:*") ` ;
+	for($i = 0; $i< size($listG) ; $i++)
+	{
+		if(`objExists $listG[$i]`)
+			{
+			$childM = `listRelatives -ad  -type "mesh" $listG[$i]`;
+				if(size($childM) >0)
+				{
+
+				}else{
+				delete $listG[$i] ;
+				}
+		}
+
+    }
+
+
+namespace -f -moveNamespace "VCR" ":" ;
+namespace -removeNamespace  "VCR" ;
+
+s100VRRigIt ;
+s100VRSkinProc ;
+s100VRputInfoForVRRIGRebuildModif($obj, $amplitude, $overLap);
+
+
+file -s;
+
+
+
+}
+
+global proc s100VCRAutoRigLowVegetation(string $hi, string $lo)
+{
+s100VCRPrepareLowToBeRig($lo);
+s100VCRCleanHighRigAndRebuildForLow($hi,$lo);
+print "\nRig successed";
+headsUpMessage "succes little padawan !" ;
+}

@@ -1,0 +1,192 @@
+global proc HhDepthTranshaderN()
+{
+	string $done[];
+	clear $done;
+	string $Selectobj[] = `ls-sl`;
+	//设置参数
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	for ($i=0; $i<size($Selectobj); $i++)
+	{
+		string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+		if (size($NodeShape) == 0)
+		{
+			continue;
+		}
+		string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+		if (size($ShadingEngine) == 0)
+		{
+			continue;
+		}
+		string $Shader[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+		string $Str =$Shader[0]+".transparency";
+		if (!`objExists $Str`)
+		{
+			select $Selectobj[$i];
+			HhDepthShaderF();
+			continue;
+		}
+		string $cons[]=`listConnections -plugs true -connections true -destination false $Str`;
+		if (size($cons)==0)
+		{
+			select $Selectobj[$i];
+			HhDepthShaderF();
+		}
+		else
+		{
+			string $trN=`match "[^.]+$" $cons[0]`;
+			string $tro=`match "[^_]+" $cons[1]`;
+			string $tr=`match "[^.]+" $tro`;
+			string $ifo = "HhDepthShader_samplerInfo";
+			string $mul = "HhDepthShader_multiplyDivide";
+			string $rng = "HhDepthShader_setRange";
+			if(!`objExists  $ifo`)
+			{
+				string $ifo = `shadingNode -asUtility samplerInfo -n "HhDepthShader_samplerInfo"`;
+			}
+			if(!`objExists  $mul`)
+			{
+				string $mul = `shadingNode -asUtility multiplyDivide -n "HhDepthShader_multiplyDivide"`;
+			}
+			if(!`objExists  $rng`)
+			{
+				string $rng = `shadingNode -asUtility setRange -n "HhDepthShader_setRange"`;
+			}
+			string $comNear = $ifo+".cameraNearClipPlane";
+			if(!`objExists $comNear`)
+			{
+				addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+				addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+				connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+				setAttr ($mul+".input2X") -1.0;
+				connectAttr ($mul+".outputX") ($rng+".valueX");
+				connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+				setAttr ($rng+".oldMaxX") 3000;
+			}
+			string $dep = $tr+"_HhDepth_surfaceShader";
+			if (!`objExists $dep`)
+			{
+				$dep = `shadingNode -asShader lambert -name $dep`;
+				connectAttr -f $cons[1] ($dep+"."+$trN) ;
+				setAttr ($dep+".ambientColor") -type double3 1 1 1 ;
+				setAttr ($dep+".diffuse") 0;
+				//string $depths[] = `ls -type surfaceShader "*HhDepth_surfaceShader*"`; 
+				connectAttr ($rng+".outValueX") ($dep+".colorR");
+				connectAttr ($rng+".outValueX") ($dep+".colorG");
+				connectAttr ($rng+".outValueX") ($dep+".colorB");
+				//参数调整
+				if (!`objExists ($dep+".black")`)
+				{
+					addAttr -longName "black" -attributeType "float" $dep;
+					addAttr -longName "white" -attributeType "float" $dep;
+					string $conblack[]=`listConnections -s 1 -d 0 -c 1 -p 1 ($rng+".maxX")`;
+					if(size($conblack)<1)
+					{
+						connectAttr ($dep+".black") ($rng+".maxX");
+						connectAttr ($dep+".white") ($rng+".minX");
+						setAttr ($dep+".black") 0;
+						setAttr ($dep+".white") 1;
+					}
+				}
+			}
+			string $ShaderSG=$tr+"_HhTrtrShaderSG";
+			if(!`objExists ($tr+"_HhTrtrShaderSG")`)
+			{
+				string $HhTrtrShaderSG = `sets -renderable true -noSurfaceShader true -empty -name $ShaderSG`;
+				connectAttr -f ($dep+".outColor") ($ShaderSG+".surfaceShader");
+			}
+			select $Selectobj[$i];
+			catch(`sets -e -forceElement $ShaderSG`);
+		}
+	}
+}
+global proc HhDepthShaderF()
+{
+	string $selectobj[]=`ls -sl`;
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	string $ifo = "HhDepthShader_samplerInfo";
+	string $mul = "HhDepthShader_multiplyDivide";
+	string $rng = "HhDepthShader_setRange";
+	if(!`objExists  $ifo`)
+	{
+		string $ifo = `shadingNode -asUtility samplerInfo -n "HhDepthShader_samplerInfo"`;
+	}
+	if(!`objExists  $mul`)
+	{
+		string $mul = `shadingNode -asUtility multiplyDivide -n "HhDepthShader_multiplyDivide"`;
+	}
+	if(!`objExists  $rng`)
+	{
+		string $rng = `shadingNode -asUtility setRange -n "HhDepthShader_setRange"`;
+	}
+	string $dep = "HhDepth_surfaceShader";
+	if (!`objExists $dep`)
+	{
+		$dep = `shadingNode -asShader lambert -name "HhDepth_surfaceShader"`;
+		setAttr ($dep+".ambientColor") -type double3 1 1 1 ;
+		setAttr ($dep+".diffuse") 0;
+		string $depths[] = `ls -type surfaceShader "*HhDepth_surfaceShader*"`; 
+		//connections
+		string $comNear = $ifo+".cameraNearClipPlane";
+		if(!`objExists $comNear`)
+		{
+			addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+			addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+			connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+			setAttr ($mul+".input2X") -1.0;
+			connectAttr ($mul+".outputX") ($rng+".valueX");
+			connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+			//connectAttr ($ifo+".cameraFarClipPlane") ($rng+".oldMaxX");
+			setAttr ($rng+".oldMaxX") 3000;
+			//setAttr ($rng+".minX") 0; 
+			//setAttr ($rng+".maxX") 1.0;
+			//参数调整
+			if (!`objExists ($dep+".black")`)
+			{
+				addAttr -longName "black" -attributeType "float" $dep;
+				addAttr -longName "white" -attributeType "float" $dep;
+				string $conblack[]=`listConnections -s 1 -d 0 -c 1 -p 1($rng+".maxX")`;
+				if(size($conblack)<1)
+				{
+					connectAttr ($dep+".black") ($rng+".maxX");
+					connectAttr ($dep+".white") ($rng+".minX");
+				}
+				setAttr ($dep+".black") 0;
+				setAttr ($dep+".white") 1;
+			}
+		}
+		string $conns[]=`listConnections -plugs true -connections true -destination false ($dep+".colorR")`;
+		if(size($conns)==0)
+		{
+			connectAttr ($rng+".outValueX") ($dep+".colorR");
+			connectAttr ($rng+".outValueX") ($dep+".colorG");
+			connectAttr ($rng+".outValueX") ($dep+".colorB");
+		}
+	}
+	string $SG="HhDepth_surfaceShaderSG";
+	if(!`objExists $SG`)
+	{
+		sets -renderable true -noSurfaceShader true -empty -name $SG;
+		connectAttr -f ($dep +".outColor") ($SG+".surfaceShader");
+	}
+	//赋材质给选择物体
+	select $selectobj;
+	catch(`sets -e -forceElement $SG`);
+	string $cameras[] = `listCameras`;
+	string $attrs[] = {"nearClipPlane","farClipPlane"};
+	for ($cam in $cameras)
+	{
+		for ($attr in $attrs)
+		{
+			string $connects[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($cam+"."+$attr)`;
+			if (size($connects)>1)
+			{
+				for ($i=0;$i<size($connects);$i=$i+2 )
+				{
+					disconnectAttr $connects[$i+1]  $connects[$i];
+				}
+			}
+		}
+	}
+}

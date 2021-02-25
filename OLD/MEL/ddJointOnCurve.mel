@@ -1,0 +1,420 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddJointOnCurve
+//	Verision: 0.61 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: January 25 2005
+//	Changed Projcet Date:
+//	Last Updated: September 20 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note: durdur's Joint On Curve
+//
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddJointOnCurve
+// 
+// 给选择线上点的位置加上joint
+//
+// Arguments :
+//	int $num 
+//	int $att
+//	int $par
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc string ddJointOnCurve(string $baseCurve,int $num,int $att,int $par)
+{
+ int $i ;
+ string $motionPath,$starJoint ;
+
+ $starJoint = `joint -name ($baseCurve + "_joint_" + $i)` ;
+ $motionPath = `pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 $starJoint $baseCurve` ;
+ delete($motionPath + "_uValue") ;
+ setAttr ($motionPath + ".uValue") 0 ;
+ select -cl ;
+ 
+ for($i=1;$i<$num;$i++)
+ {
+  $motionPath = `joint -name ($baseCurve + "_joint_" + $i)` ;
+  $motionPath = `pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 $motionPath $baseCurve` ;
+  delete($motionPath + "_uValue") ;
+  setAttr ($motionPath + ".uValue") (1.0/($num-1)*$i) ;
+//  refresh ;
+//  delete $motionPath ;
+  select -cl ;
+ }
+
+ refresh ;
+
+ if($att == false)
+ {
+  for($i=0;$i<$num;$i++)
+  {
+   delete `listConnections ($baseCurve + "_joint_" + $i + ".rotateOrder")` ;
+  }
+ }
+
+ if($par == true)
+ {
+  for($i=($num-1);$i>0;$i--)
+  {
+   parent ($baseCurve + "_joint_" + $i) ($baseCurve + "_joint_" + ($i-1)) ;
+  }
+ }
+ return $starJoint ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddAttachJointToCurve
+// 
+// 给选择线上点的位置加上joint
+//
+// Arguments:
+//	int $option 0 不attach 到curve上 1 attach 到curve上
+//
+// Return : jointName 生成joint的名字
+//////////////////////////////////////////////////////////
+global proc string ddAttachJointToCurve(string $element,int $option)
+{
+ //int $numTokens ;
+ float $uValue,$temp ;
+ string $selected[],$buffer[],$motionPath,
+	$curveShapes[],$jointName ;
+
+ tokenize $element "[" $buffer ;
+
+ $uValue = `substitute "]" $buffer[1] ""` ;
+
+ tokenize $buffer[0] "." $buffer ;
+
+ $curveShapes = `listRelatives -shapes $buffer[0]` ;
+ 
+ select -clear ;
+
+ $jointName = `joint` ;
+ $motionPath = `pathAnimation -fractionMode false -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 $jointName $buffer[0]` ;
+
+ delete($motionPath + "_uValue") ;
+
+ setAttr ($motionPath + ".uValue") $uValue ;
+
+ if($option == 0)
+ {
+  source ddGeneralTools ;
+  ddBreakConnection ($jointName + ".tx") ;
+  ddBreakConnection ($jointName + ".ty") ;
+  ddBreakConnection ($jointName + ".tz") ;
+  delete $motionPath ;
+ }
+
+ return $jointName ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddAttachJointToCurve
+// 
+// 给选择EP点的位置加上joint
+//
+// Arguments:
+//	string $element
+//
+// Return : jointName 生成joint的名字
+//////////////////////////////////////////////////////////
+global proc string ddEP2Joint(string $element)
+{
+ float $poition[3] ;
+ string $jointName ;
+ 
+ $poition  = `xform -query -worldSpace -translation $element` ;
+ $jointName = `joint` ;
+ xform -worldSpace -translation $poition[0] $poition[1] $poition[2] $jointName;
+
+ return $jointName ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddStretchySplineIK
+// 
+// interface
+//
+// Arguments :
+//	string $baseCurve
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddStretchySplineIK(string $baseCurve,int $num)
+{
+ //1.创建curve info连接到curve
+ //2.创建joint chain
+ //3.计算jointChain的个数
+ //4.计算标准单位
+ //5.创建两个multiplyDivide
+ //6.计算出来的将
+ //7.spline ik 
+ int $jointAmount ;
+ float $generalUnit,$originCurveLength ;
+ string $curveShape[],$curveInfo,$buffer[],
+ $currentMultiplyDivide,$normalizeMultiplyDivide,
+ $startJoint,$endJoint,$selected[],$tmp ;
+
+ $curveShape = `listRelatives -shapes $baseCurve` ;
+
+ //为curve创建curveInfo
+ if(`connectionInfo -isSource ($curveShape[0] + ".worldSpace")`)
+ {
+  $curveInfo = `connectionInfo -isExactDestination ($curveShape[0] + ".worldSpace")` ;
+  tokenize $curveInfo "." $buffer ;
+  $curveInfo = $buffer[0] ;
+  if(`nodeType $curveInfo` != "curveInfo")
+  {
+   $curveInfo = `createNode curveInfo` ;
+   connectAttr -force ($curveShape[0] + ".worldSpace") ($curveInfo + ".inputCurve") ;
+  }
+ }
+ else
+ {
+  $curveInfo = `createNode curveInfo` ;
+  connectAttr -force ($curveShape[0] + ".worldSpace") ($curveInfo + ".inputCurve") ;
+ }
+ 
+ //创建joint chain
+ $startJoint = `ddJointOnCurve $baseCurve $num 0 1` ;
+ select -r ($baseCurve + "_joint_0") ;
+ source ddOrientJointTools ;
+ ddOrientJoint "ddOJT_xyz" 8 "locator1" 1 0 0 1 ;
+
+ //计算joint chain amount
+ select -hierarchy $startJoint ;
+ $selected = `ls -sl` ;
+ $jointAmount = `size($selected)` ;
+ select -clear ;
+ $endJoint = $selected[$jointAmount-1] ;
+
+ //计算标准单位 unit length of joint
+ $originCurveLength = `getAttr ($curveInfo + ".arcLength")` ;
+ $generalUnit = $originCurveLength/($jointAmount-1) ;
+
+ //
+ $currentMultiplyDivide   = `shadingNode -asUtility multiplyDivide -name ($baseCurve + "_currentMultiplyDivide")` ;
+ $normalizeMultiplyDivide = `shadingNode -asUtility multiplyDivide -name ($baseCurve + "_normalizeMultiplyDivide")` ;
+ setAttr ($currentMultiplyDivide + ".operation")   2 ;
+ setAttr ($normalizeMultiplyDivide + ".operation") 2 ;
+
+ connectAttr -force ($curveInfo + ".arcLength") ($currentMultiplyDivide + ".input1X") ;
+ setAttr ($currentMultiplyDivide + ".input2X") ($jointAmount-1);
+ connectAttr -force ($currentMultiplyDivide + ".outputX") ($normalizeMultiplyDivide + ".input1X") ;
+ setAttr ($normalizeMultiplyDivide + ".input2X") $generalUnit ;
+
+ //连接scale
+ select -hierarchy $startJoint ;
+ $selected = `ls -sl` ;
+ for($tmp in $selected)
+ {
+  connectAttr -force ($normalizeMultiplyDivide + ".outputX") ($tmp + ".sx") ;
+ }
+ select -clear ;
+
+
+ ikHandle -solver ikSplineSolver
+	  -createCurve false
+	  -parentCurve false
+	  -startJoint $startJoint
+	  -endEffector $endJoint
+	  -curve $baseCurve
+	  -name ($baseCurve + "_splineIKHandle") ;
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddJointOnCurveCMD
+// 
+// 读取面板上的参数，组合命令
+//
+// Arguments: NULL
+//
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddJointOnCurveCMD()
+{
+ int $numOfJoint ;
+ string $selected[],$baseCurve ;
+
+ $numOfJoint = `textField -query -text numberJonit` ;
+ if($numOfJoint<2) error "The number of joint be no less than 2." ;
+ 
+ 
+ $selected = `ls -sl` ;
+ $baseCurve = $selected[0] ;
+ if($baseCurve == "") error "no curve!" ;
+
+ select -cl ;
+
+ ddJointOnCurve($baseCurve,$numOfJoint,`checkBox -query -value attachToCurve`,`checkBox -query -value ParentJoint`) ;
+
+ select -cl ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddAttachJointToCurveCMD
+// 
+// 给选择线上点的位置加上joint 组合命令
+//
+// Arguments : NULL
+//
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAttachJointToCurveCMD(int $option)
+{
+ string $availabilityElement[],$tmp,$selEP[],$selCPP[] ;
+ //$selected = `ls -sl` ;
+ $selEP = `filterExpand -expand true -selectionMask 30 ` ;//过滤出所有选择中的Edit Points
+ $selCPP = `filterExpand -expand true -selectionMask 39 ` ;//过滤出所有选择中的Curve Parameter Points
+ 
+ //clear $selected ;
+ //appendStringArray($availabilityElement, $selEP, `size($selEP)`) ;
+ //appendStringArray($availabilityElement, $selCPP, `size($selCPP)`) ;
+ 
+ for($tmp in $selCPP)
+ {
+  ddAttachJointToCurve($tmp,$option) ;
+ }
+ for($tmp in $selEP)
+ {
+  ddEP2Joint($tmp) ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddStretchySplineIKCMD
+// 
+// interface
+//
+// Arguments : NULL
+//
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddStretchySplineIKCMD()
+{
+ //1.创建curve info连接到curve
+ //2.创建joint chain
+ //3.计算jointChain的个数
+ //4.计算标准单位
+ //5.创建两个multiplyDivide
+ //6.计算出来的将
+ int $numOfJoint ;
+ string $selected[],$baseCurve ;
+
+ $numOfJoint = `textField -query -text numberJonit` ;
+ if($numOfJoint<2) error "The number of joint be no less than 2." ;
+ 
+ 
+ $selected = `ls -sl` ;
+ $baseCurve = $selected[0] ;
+ if($baseCurve == "") error "no curve!" ;
+
+ select -cl ;
+
+ ddStretchySplineIK($baseCurve,$numOfJoint) ;
+
+ select -cl ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddJointOnCurveUI
+// 
+// interface
+//
+// Arguments: NULL
+//
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddJointOnCurveUI()
+{
+ //初始化面板
+ if(`window -ex ddJointOnCurveUI`)
+ {
+  deleteUI ddJointOnCurveUI ;
+  if(`windowPref -exists ddJointOnCurveUI`)
+  {
+   windowPref -remove ddJointOnCurveUI ;
+  }
+ }
+ 
+ window -width 460
+	-height 260
+	-title "durdur's Toyboxes Joint On Curve v0.61 beta"
+	ddJointOnCurveUI ;
+ 
+ menuBarLayout ;
+ menu -label "Edit" editmenu ;
+      menuItem -label "Reset Settings" -command "cleartext()";
+ menu -label "Help" helpmenu ;
+      menuItem -label "Help on Rename Tools..." ;
+ setParent .. ;
+
+
+ columnLayout -columnAlign "center" ;
+ //rowLayout -numberOfColumns 2 -columnWidth 1 80 ;
+  rowLayout -numberOfColumns 3
+	    -columnWidth 1 110
+	    -columnWidth 2 80 
+	    -columnWidth 3 100 ;
+   separator -style "none" ;
+   text -label "Number of Joint" -width 80 ;
+   textField -width 100 -text 6 numberJonit ;
+  setParent .. ;
+  
+  rowLayout -numberOfColumns 2
+	    -columnWidth 1 110 ;
+   separator -style "none" ;
+   checkBox -label "Attach to Curve" -value false attachToCurve ;
+  setParent .. ;
+
+  rowLayout -numberOfColumns 2
+	    -columnWidth 1 110 ;
+   separator -style "none" ;
+   checkBox -label "Parent Joint" -value true ParentJoint ;
+  setParent .. ;
+
+  separator -style "none" ;
+  rowLayout -numberOfColumns 3 
+	   -columnWidth 1 151
+	   -columnWidth 2 151
+	   -columnWidth 3 151
+	   -columnAlign3 "center" "center" "center"
+	    ;
+   button -label "Create Joint" 
+	  -c "ddJointOnCurveCMD;deleteUI ddJointOnCurveUI;"
+	  -width 150
+	  -height 30 ;
+   button -label "Apply" 
+	  -c "ddJointOnCurveCMD;"
+	  -width 150
+	  -height 30 ;
+   button -label "Close"
+	  -c "deleteUI ddJointOnCurveUI;"
+	  -width 150
+	  -height 30 ;
+  setParent .. ;
+  
+  separator -width 452 ;
+
+
+  button -label "Stretchy Spline"
+	 -command "ddStretchySplineIKCMD"
+	 -width 452
+	 -height 30 ;
+
+  button -label "Attach a Joint to Curve"
+	 -command "ddAttachJointToCurveCMD 1"
+	 -width 452
+	 -height 30 ;
+
+  button -label "Attach a Joint to Curve Only Position"
+	 -command "ddAttachJointToCurveCMD 0"
+	 -width 452
+	 -height 30 ;
+
+ showWindow ddJointOnCurveUI ;
+}
+
+//End of file.

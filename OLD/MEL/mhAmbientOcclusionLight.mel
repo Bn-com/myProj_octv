@@ -1,0 +1,872 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Âíê»
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mhAmbientOcclusionLight()
+{
+   	 if (`window -ex AmbientOcclusionLightUI`) 
+		deleteUI AmbientOcclusionLightUI;
+
+	 window -title "Ambient Occlusion Light" -resizeToFitChildren true AmbientOcclusionLightUI;
+	
+			columnLayout -adjustableColumn 0 -co "left" 20;
+	           checkBox -label "Delete All Light"             -v 1   
+			    -changeCommand "checkBox -e -en #1 AmbientOcclusionLightUIoption1kpSelLight"
+			    AmbientOcclusionLightUIoption1;
+
+				columnLayout -adjustableColumn 0 -co "left" 40;
+				   checkBox -label "keep selected light" -value 1 AmbientOcclusionLightUIoption1kpSelLight;
+				setParent ..;
+
+	           checkBox -label "Delete All Material"          -v 1
+			    -changeCommand "checkBox -e -en #1 AmbientOcclusionLightUIoption2displacement;
+					     checkBox -e -en #1 AmbientOcclusionLightUIoption2bump;
+					     checkBox -e -en #1 AmbientOcclusionLightUIoption2transparency;"
+				AmbientOcclusionLightUIoption2;
+
+				columnLayout -adjustableColumn 0 -co "left" 40;
+					checkBox -label "keep displacement" -v 1    AmbientOcclusionLightUIoption2displacement;
+					checkBox -label "keep bump"        -v 1    AmbientOcclusionLightUIoption2bump;
+					checkBox -label "keep transparency" -v 1    AmbientOcclusionLightUIoption2transparency;
+				setParent ..;
+
+	           checkBox -label "Create Ambient Occlusion Light"   -v 1    AmbientOcclusionLightUIoption3;
+	           checkBox -label "Create and Assign Ambient Shader"		-v 1    AmbientOcclusionLightUIoption4;
+		   checkBox -label "Set Render Resolution"		-v 1 AmbientOcclusionLightUIoption5;
+		   checkBox -label "Rename Scene"		-v 1 AmbientOcclusionLightUIoption6;
+		   checkBox -label "Optimize scene"		-v 1 AmbientOcclusionLightUIoption7;
+	           separator -style "in" -w 240 -h 20;
+
+	           rowLayout -numberOfColumns 2 -columnAlign2 "center" "center"; 
+	               
+	               button -w 100 -label "Set" -c AmbientOcclusion;
+	               button -w 100 -label " Cancel" -c "deleteUI AmbientOcclusionLightUI";
+	               
+			   setParent ..;
+	        setParent ..;
+	 showWindow;
+}
+
+proc int kcHasInputCon(string $nodeAttr)
+{
+	string $connections[] = `listConnections -source true -destination false $nodeAttr`;
+
+	if (size($connections) > 0)
+		return true;
+
+	return false;
+}
+
+global proc AmbientOcclusion()
+{
+   int $dlight = `checkBox -q -value AmbientOcclusionLightUIoption1`;
+   int $kpSelLight=`checkBox -q -value AmbientOcclusionLightUIoption1kpSelLight`;
+   int $dmat   = `checkBox -q -value AmbientOcclusionLightUIoption2`;
+   int $preserverDispl =`checkBox -q -value AmbientOcclusionLightUIoption2displacement`; 
+   int $preserverBump  =`checkBox -q -value AmbientOcclusionLightUIoption2bump`; 
+   int $preserverTrans =`checkBox -q -value AmbientOcclusionLightUIoption2transparency`; 
+   int $crtAmb  = `checkBox -q -value AmbientOcclusionLightUIoption3`;
+   int $crtShd  = `checkBox -q -value AmbientOcclusionLightUIoption4`;
+   int $setRendGlb  = `checkBox -q -value AmbientOcclusionLightUIoption5`;
+   int $rnScn = `checkBox -q -value AmbientOcclusionLightUIoption6`;
+   int $optiScn = `checkBox -q -value AmbientOcclusionLightUIoption7`;
+   
+   // keep selection
+   string $oldSelected[] = `ls -selection`;
+
+
+// delete all light in the scene
+   if($dlight == 1)
+   {
+      $lightInScn = `ls -lights`;
+	if ($kpSelLight == 1)
+	{
+		select -hi `ls -sl`;
+		$allLight = `ls -sl`;
+		$allLightShp = `listRelatives -path -shapes $allLight`;
+		string $kpLight[] = {};
+		for ($lightShp in $allLightShp)
+		{
+			if ( `nodeType $lightShp`== "spotLight"|| `nodeType $lightShp`== "directionalLight"|| `nodeType $lightShp`== "areaLight")
+			{
+				if (kcHasInputCon($lightShp+".color"))
+				{
+					warning($lightShp + ": cannot set light color saturation to 0 because color has input connection.");
+				}
+				else
+				{
+					$colorVal = `getAttr ($lightShp+".color")`;
+					float $colorRVal = $colorVal[0];
+					float $colorGVal = $colorVal[1];
+					float $colorBVal = $colorVal[2];
+					vector $rgbVal = << $colorRVal,$colorGVal,$colorBVal>>;
+					$hsvVal = `rgb_to_hsv $rgbVal`;
+					$changeHsvVal  = <<$hsvVal.x, 0, $hsvVal.z>>;
+					$changedRgb = `hsv_to_rgb $changeHsvVal`;
+					setAttr ($lightShp+".color") -type double3 ($changedRgb.x) ($changedRgb.y) ($changedRgb.z);
+				}
+
+
+				setAttr ($lightShp+".useRayTraceShadows") 1;
+				if (`nodeType $lightShp`== "directionalLight")
+				{
+					setAttr ($lightShp+".lightAngle") 16;
+				}
+				setAttr ($lightShp+".lightRadius") 20;
+				setAttr ($lightShp+".shadowRays") 3;
+				setAttr ($lightShp+".rayDepthLimit") 1;
+
+				$kpLight[size($kpLight)] = $lightShp;
+			}
+			else
+			if (`nodeType $lightShp`== "pointLight")
+			{
+				if (kcHasInputCon($lightShp+".color"))
+				{
+					warning($lightShp + ": cannot set light color saturation to 0 because color has input connection.");
+				}
+				else
+				{
+					$colorVal = `getAttr ($lightShp+".color")`;
+					float $colorRVal = $colorVal[0];
+					float $colorGVal = $colorVal[1];
+					float $colorBVal = $colorVal[2];
+					vector $rgbVal = << $colorRVal,$colorGVal,$colorBVal>>;
+					$hsvVal = `rgb_to_hsv $rgbVal`;
+					$changeHsvVal  = <<$hsvVal.x, 0, $hsvVal.z>>;
+					$changedRgb = `hsv_to_rgb $changeHsvVal`;
+					setAttr ($lightShp+".color") -type double3 ($changedRgb.x) ($changedRgb.y) ($changedRgb.z);
+//					$ramp = `listConnections -s 1 -d 0 ($lightShp+".color")`;
+//					setAttr ($ramp[0]+".colorEntryList[0].color") -type double3 ($changedRgb.x) ($changedRgb.y) ($changedRgb.z);
+				}
+
+				setAttr ($lightShp+".useRayTraceShadows") 1;
+				setAttr ($lightShp+".lightRadius") 20;
+				setAttr ($lightShp+".shadowRays") 3;
+				setAttr ($lightShp+".rayDepthLimit") 1;
+
+				$kpLight[size($kpLight)] = $lightShp;
+			}
+			else
+				if (`nodeType $lightShp` == "ambientLight")
+					warning($lightShp + ": ambient light not keeping.");
+		}
+		$lightInScn = stringArrayRemove($kpLight, $lightInScn); 
+	}
+	
+	
+	for ($item in $lightInScn)
+	{
+		string $transform[] = `listRelatives -parent -path $item`;
+		delete $transform[0];
+	}
+   }
+   
+// delete all mat in the scene
+
+    string $presvrMatObj[];
+   if($dmat == 1)
+   {
+      string $matlist[] = `ls -mat -type shadingEngine -type imagePlane`;
+      string $undeled[] = {"lambert1","particleCloud1","initialParticleSE","initialShadingGroup"};
+      string $clearlist[] = stringArrayRemove($undeled, $matlist);
+      string $presvList[]={};
+      string $allMat[] = `ls -mat`;
+      string $defaultMat[] = {"lambert1","particleCloud1"};
+      $allMat = stringArrayRemove($defaultMat,$allMat);
+      string $allDisplaceShd[] = `ls -type displacementShader`;
+      if ($preserverDispl == 1)
+      {
+	  if (size($allDisplaceShd) > 0 )
+	  {
+	      $allDisplaceSG = `listConnections -type "shadingEngine" $allDisplaceShd`;
+	      $presvList = stringArrayCatenate($allDisplaceShd,$allDisplaceSG);
+
+	      for ($displaceSG in $allDisplaceSG)
+	      {
+		  string $matNameDisplaceAttr[] = `listConnections  -plugs 1 ($displaceSG+".surfaceShader")`;
+		  string $matNameDisplace[] = `listConnections ($displaceSG+".surfaceShader")`;
+
+		  shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matNameDisplace[0]);
+
+			setAttr ".diffuse" 1;
+			setAttr ".c" -type "float3" 1 1 1;
+		  disconnectAttr $matNameDisplaceAttr[0] ($displaceSG+".surfaceShader");
+		  connectAttr -f ("AmbientOcclusion_"+$matNameDisplace[0]+".outColor") ($displaceSG+".surfaceShader");
+	      }
+	  }
+       }
+       $allMat = stringArrayRemove($allDisplaceShd,$allMat); //remove displacement shader from array
+
+// about layeredShader
+	string $allLyrShd[] = `ls -type "layeredShader"`;
+	$allMat = stringArrayRemove($allLyrShd,$allMat);
+	for ($layershd in $allLyrShd)
+	{
+		$upstrmLyrShd = `listConnections -s 1 -d 0 $layershd`;
+		$upstrmLyrShd = stringArrayRemoveDuplicates($upstrmLyrShd);
+		$allMat = stringArrayRemove($upstrmLyrShd,$allMat);
+
+	}
+		/*if (`objectType -isType "layeredShader" $matName`)
+			{
+				$presvList[size($presvList)] = $matName;
+				string $lyrSG[] = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+				$presvList[size($presvList)] = $lyrSG[0];
+				proLyrShd(string $lyrShd)
+			}
+		*/
+
+// about shadingMap
+	string $allshadingMapShd[] = `ls -type "shadingMap"`;
+	$allMat = stringArrayRemove($allshadingMapShd,$allMat);
+	for ($layershd in $allshadingMapShd)
+	{
+		$upstrmshadingMapShd = `listConnections -s 1 -d 0 $layershd`;
+		$upstrmshadingMapShd = stringArrayRemoveDuplicates($upstrmshadingMapShd);
+		$allMat = stringArrayRemove($upstrmshadingMapShd,$allMat);
+
+	}
+
+// about surfaceShader
+	string $allsurfaceShader[] = `ls -type "surfaceShader"`;
+	$allMat = stringArrayRemove($allsurfaceShader,$allMat);
+	for ($layershd in $allsurfaceShader)
+	{
+		$upstrmsurfaceShader = `listConnections -s 1 -d 0 $layershd`;
+		$upstrmsurfaceShader = stringArrayRemoveDuplicates($upstrmsurfaceShader);
+		$allMat = stringArrayRemove($upstrmsurfaceShader,$allMat);
+
+	}
+
+// about useBackground
+	string $alluseBackground[] = `ls -type "useBackground"`;
+	$allMat = stringArrayRemove($alluseBackground,$allMat);
+	for ($layershd in $alluseBackground)
+	{
+		$upstrmuseBackground = `listConnections -s 1 -d 0 $layershd`;
+		$upstrmuseBackground = stringArrayRemoveDuplicates($upstrmuseBackground);
+		$allMat = stringArrayRemove($upstrmuseBackground,$allMat);
+
+	}
+
+	
+	for ($matName in $allMat)
+	{
+//		print ("to--"+$matName+"\n");
+		string $downStr[] = `listConnections -s 0 -d 1 $matName`;
+		int $sw = 1;
+		for ($adownStr in $downStr)
+		{
+			if (`nodeType $adownStr` == "shadingEngine")
+			{
+				$sw = 0;
+			}
+		}
+		if ( $sw == 1) continue;
+
+		if (`nodeType $matName` == "envFog" ||`nodeType $matName` == "volumeShader" ||`nodeType $matName` == "volumeFog" ||`nodeType $matName` == "lightFog" || `nodeType $matName` == "particleCloud")
+		{
+			continue;
+		}
+
+		if ($preserverBump == 0 && $preserverTrans == 0)
+		{
+			break;
+		}
+		if ($preserverBump == 1 && $preserverTrans == 1)
+		{
+				if( (`connectionInfo -isDestination  ($matName+".normalCamera")`)&&(`getAttr ($matName+".transparencyR")`!= 0 || `getAttr ($matName+".transparencyG")`!= 0 || `getAttr ($matName+".transparencyB")`!= 0) )
+				{
+					string $bumpSG[] = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+					$presvList[size($presvList)] = $bumpSG[0];
+					$bumpAttr = `listConnections -plugs 1 -s 1 -d 0 ($matName+".normalCamera")`;
+					$bumpToSGAttr = `listConnections -plugs 1 -s 0 -d 1 ($matName+".outColor")`;
+					$transpVal = `getAttr ($matName+".transparency")`;
+					shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matName);
+							setAttr ".diffuse" 1;
+							setAttr ".c" -type "float3" 1 1 1;
+					disconnectAttr $bumpAttr[0] ($matName+".normalCamera");
+					connectAttr $bumpAttr[0] ("AmbientOcclusion_"+$matName+".normalCamera");
+					disconnectAttr ($matName+".outColor") $bumpToSGAttr[0];
+					connectAttr ("AmbientOcclusion_"+$matName+".outColor") $bumpToSGAttr[0];
+					setAttr ("AmbientOcclusion_"+$matName+".transparency") -type float3 $transpVal[0] $transpVal[1] $transpVal[2];
+				}
+				else
+				{
+					if (`connectionInfo -isDestination  ($matName+".normalCamera")`)
+					{
+						//$presvList[size($presvList)] = $matName;
+						$bumpSG = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+						$presvList[size($presvList)] = $bumpSG[0];
+						$bumpAttr = `listConnections -plugs 1 -s 1 -d 0 ($matName+".normalCamera")`;
+						$bumpToSGAttr = `listConnections -plugs 1 -s 0 -d 1 ($matName+".outColor")`;
+						shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matName);
+								setAttr ".diffuse" 1;
+								setAttr ".c" -type "float3" 1 1 1;
+						disconnectAttr $bumpAttr[0] ($matName+".normalCamera");
+						connectAttr $bumpAttr[0] ("AmbientOcclusion_"+$matName+".normalCamera");
+						disconnectAttr ($matName+".outColor") $bumpToSGAttr[0];
+						connectAttr ("AmbientOcclusion_"+$matName+".outColor") $bumpToSGAttr[0];
+					}
+
+					if (`getAttr ($matName+".transparencyR")`!= 0 || `getAttr ($matName+".transparencyG")`!= 0 || `getAttr ($matName+".transparencyB")`!= 0)
+					{
+						//$presvList[size($presvList)] = $matName;
+						$transpSG = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+						$presvList[size($presvList)] = $transpSG[0];
+						$transpVal = `getAttr ($matName+".transparency")`;
+						shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matName);
+							setAttr ".diffuse" 1;
+							setAttr ".c" -type "float3" 1 1 1;
+						setAttr ("AmbientOcclusion_"+$matName+".transparency") -type float3 $transpVal[0] $transpVal[1] $transpVal[2];
+						connectAttr -f ("AmbientOcclusion_"+$matName+".outColor") ($transpSG[0]+".surfaceShader");
+
+					}
+				}
+					
+
+			
+		}
+		else
+		{
+			if ($preserverBump == 1 )
+			{
+				if (`connectionInfo -isDestination  ($matName+".normalCamera")`)
+				{
+					//$presvList[size($presvList)] = $matName;
+					$bumpSG = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+					$presvList[size($presvList)] = $bumpSG[0];
+					$bumpAttr = `listConnections -plugs 1 -s 1 -d 0 ($matName+".normalCamera")`;
+					$bumpToSGAttr = `listConnections -plugs 1 -s 0 -d 1 ($matName+".outColor")`;
+					shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matName);
+							setAttr ".diffuse" 1;
+							setAttr ".c" -type "float3" 1 1 1;
+					disconnectAttr $bumpAttr[0] ($matName+".normalCamera");
+					connectAttr $bumpAttr[0] ("AmbientOcclusion_"+$matName+".normalCamera");
+					disconnectAttr ($matName+".outColor") $bumpToSGAttr[0];
+					connectAttr ("AmbientOcclusion_"+$matName+".outColor") $bumpToSGAttr[0];
+				}
+			}
+
+			if ($preserverTrans == 1)
+			{
+				if (`getAttr ($matName+".transparencyR")`!= 0 || `getAttr ($matName+".transparencyG")`!= 0 || `getAttr ($matName+".transparencyB")`!= 0)
+				{
+					//$presvList[size($presvList)] = $matName;
+					$transpSG = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+					$presvList[size($presvList)] = $transpSG[0];
+					$transpVal = `getAttr ($matName+".transparency")`;
+					shadingNode -asShader lambert -name ("AmbientOcclusion_"+$matName);
+						setAttr ".diffuse" 1;
+						setAttr ".c" -type "float3" 1 1 1;
+					setAttr ("AmbientOcclusion_"+$matName+".transparency") -type float3 $transpVal[0] $transpVal[1] $transpVal[2];
+					connectAttr -f ("AmbientOcclusion_"+$matName+".outColor") ($transpSG[0]+".surfaceShader");
+
+				}
+			}
+		}
+	
+        }
+	string $clearlist[] = stringArrayRemove($presvList,$clearlist);
+//	print "preserver material&shadingEngine node:\n";print "-------------------\n";print $presvList;
+//	print "deleted material&shadingEngine node:\n";print "-------------------\n";print $clearlist;
+	
+	for ($preserver in $presvList)
+	{
+		if (`nodeType $preserver` == "shadingEngine")
+		{
+			$presvrMatObjTmp  = `sets -q $preserver`;
+			$presvrMatObj = stringArrayCatenate($presvrMatObj,$presvrMatObjTmp);
+		}
+	}
+	$clearlist = stringArrayRemoveDuplicates($clearlist);
+	delete $clearlist;
+
+   }
+
+if( $crtAmb == 1)
+{
+
+	directionalLight; rename "up_Light_1";
+		setAttr ".t" -type "double3" 0 2 20 ;
+		setAttr ".r" -type "double3" -5.7105931374996342 0 0 ;
+		setAttr ".rp" -type "double3" 0 0 -1.5265566588595902e-015 ;
+		setAttr ".rpt" -type "double3" 0 -1.5189806485279936e-016 7.5760103315945847e-018 ;
+		setAttr ".sp" -type "double3" 0 0 -1.5265566588595902e-015 ;
+	select -r "up_Light_Shape1";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20.099751242241783;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_2";
+		setAttr ".t" -type "double3" 20 2 4.4408920985006262e-015 ;
+		setAttr ".r" -type "double3" -5.7105931374996421 90 0 ;
+		setAttr ".rp" -type "double3" 7.8886090522101181e-031 0 0 ;
+		setAttr ".rpt" -type "double3" -7.8886090522101181e-031 -5.4738221262688167e-048 
+			-7.8886090522101181e-031 ;
+		setAttr ".sp" -type "double3" 7.8886090522101181e-031 0 0 ;
+	select -r "up_Light_Shape2";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20.099751242241783;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_3";
+		setAttr ".t" -type "double3" 1.1330996904646013e-014 2 -20.000000000000007 ;
+		setAttr ".r" -type "double3" 174.28940686250033 -5.649800061504203e-030 
+			179.99999999999937 ;
+		setAttr ".s" -type "double3" 1.0000000000000004 1 1.0000000000000004 ;
+		setAttr ".rp" -type "double3" 0 1.2655573305614249e-028 -2.3037127760971884e-015 ;
+		setAttr ".rpt" -type "double3" -2.5730133154487205e-030 -2.292279887778636e-016 
+			4.5959926638758009e-015 ;
+		setAttr ".sp" -type "double3" 0 1.2655573305614249e-028 -2.3037127760971872e-015 ;
+		setAttr ".spt" -type "double3" 0 0 -1.1832913578315182e-030 ;
+	select -r "up_Light_Shape3";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20.099751242241787;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_4";
+		setAttr ".t" -type "double3" -20.000000000000007 2 2.2204460492503137e-014 ;
+		setAttr ".r" -type "double3" -5.7105931374996404 -89.999999999999858 0 ;
+		setAttr ".s" -type "double3" 1.0000000000000004 1 1.0000000000000002 ;
+		setAttr ".rp" -type "double3" -6.3108872417680972e-030 0 0 ;
+		setAttr ".rpt" -type "double3" 6.3108872417680804e-030 1.313717310304515e-046 
+			-6.3108872417680972e-030 ;
+		setAttr ".sp" -type "double3" -6.3108872417680944e-030 0 0 ;
+		setAttr ".spt" -type "double3" -2.8025969286496354e-045 0 0 ;
+	select -r "up_Light_Shape4";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20.099751242241794;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_5";
+		setAttr ".t" -type "double3" 9.823674062930321 8.8531693109296263 15.00389352992495 ;
+		setAttr ".r" -type "double3" -26.79425877188562 32.814349525848328 -0.95553321149151493 ;
+		setAttr ".s" -type "double3" 0.99999999999999989 0.99999999999999978 0.99999999999999989 ;
+		setAttr ".rp" -type "double3" 0 0 4.4408920985006252e-016 ;
+		setAttr ".rpt" -type "double3" 2.18129382621564e-016 1.9657984819797798e-016 
+			-1.1093584873112053e-016 ;
+		setAttr ".sp" -type "double3" 0 0 4.4408920985006262e-016 ;
+		setAttr ".spt" -type "double3" 0 0 -9.8607613152626465e-032 ;
+	select -r "up_Light_Shape5";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_6";
+		setAttr ".t" -type "double3" 15.229151127705462 8.1953928896769206 -10.045321862107782 ;
+		setAttr ".r" -type "double3" 157.77997554167911 57.142109904201597 -177.64719500519041 ;
+		setAttr ".s" -type "double3" 1.0000000000000007 1 1.0000000000000004 ;
+		setAttr ".rp" -type "double3" 3.9443045261050617e-031 -8.8817841970012523e-016 
+			-3.5527136788005025e-015 ;
+		setAttr ".rpt" -type "double3" -2.3895808182073064e-015 -1.3775608591339314e-015 
+			5.1548885825989116e-015 ;
+		setAttr ".sp" -type "double3" 3.944304526105059e-031 -8.8817841970012523e-016 
+			-3.5527136788005009e-015 ;
+		setAttr ".spt" -type "double3" 2.6274346206090336e-046 0 -1.5777218104420243e-030 ;
+	select -r "up_Light_Shape6";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_7";
+		setAttr ".t" -type "double3" -9.828698012601869 8.045706577836274 -15.448731373172309 ;
+		setAttr ".r" -type "double3" 156.79425877188561 -32.814349525848321 179.04446678850849 ;
+		setAttr ".s" -type "double3" 1.0000000000000002 0.99999999999999989 1 ;
+		setAttr ".rp" -type "double3" 0 8.8817841970012523e-016 -3.1086244689504383e-015 ;
+		setAttr ".rpt" -type "double3" 1.7309301501701453e-015 -1.325687641805453e-015 
+			5.8039673951813725e-015 ;
+		setAttr ".sp" -type "double3" 0 8.8817841970012543e-016 -3.1086244689504383e-015 ;
+		setAttr ".spt" -type "double3" 0 -1.9721522630525293e-031 0 ;
+	select -r "up_Light_Shape7";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_8";
+		setAttr ".t" -type "double3" -15.234175077377003 8.7034829990889779 9.6004840188604437 ;
+		setAttr ".r" -type "double3" -27.779975541679065 -57.142109904201554 2.3528049948095995 ;
+		setAttr ".s" -type "double3" 1.0000000000000002 0.99999999999999978 1.0000000000000002 ;
+		setAttr ".rp" -type "double3" -1.577721810442024e-030 -1.7763568394002501e-015 
+			0 ;
+		setAttr ".rpt" -type "double3" -6.3036280228811417e-016 1.7751000743797872e-016 
+			4.4919390723798606e-016 ;
+		setAttr ".sp" -type "double3" -1.5777218104420236e-030 -1.7763568394002505e-015 
+			0 ;
+		setAttr ".spt" -type "double3" -3.5032461608120435e-046 3.9443045261050582e-031 
+			0 ;
+	select -r "up_Light_Shape8";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_9";
+		setAttr ".t" -type "double3" 9.5923088988585476 16.943398576928761 4.5726201080132931 ;
+		setAttr ".r" -type "double3" -56.084079634676272 65.810817578177435 2.0065568202284729 ;
+		setAttr ".s" -type "double3" 0.99999999999999989 0.99999999999999989 1 ;
+	select -r "up_Light_Shape9";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_10";
+		setAttr ".t" -type "double3" 4.5682947780344065 17.450724577984719 -8.6372967139206036 ;
+		setAttr ".r" -type "double3" 118.2429243146675 24.129110048477049 177.71506076591101 ;
+		setAttr ".s" -type "double3" 0.99999999999999956 0.99999999999999978 0.99999999999999967 ;
+		setAttr ".rp" -type "double3" 7.8886090522101146e-031 0 8.8817841970012484e-016 ;
+		setAttr ".rpt" -type "double3" 2.0287304183394489e-016 7.7496784891482986e-016 
+			-1.2717514469926796e-015 ;
+		setAttr ".sp" -type "double3" 7.8886090522101181e-031 0 8.8817841970012523e-016 ;
+		setAttr ".spt" -type "double3" -3.5032461608120411e-046 0 -3.9443045261050577e-031 ;
+	select -r "up_Light_Shape10";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_11";
+		setAttr ".t" -type "double3" -3.6216965784822843 17.163785383933071 9.6066531730720452 ;
+		setAttr ".r" -type "double3" -58.242924314667476 -24.129110048476985 -2.2849392340890131 ;
+		setAttr ".s" -type "double3" 1.0000000000000002 1.0000000000000002 0.99999999999999967 ;
+		setAttr ".rp" -type "double3" 0 0 -1.7763568394002497e-015 ;
+		setAttr ".rpt" -type "double3" 3.2167127437097442e-016 -1.5244503778373777e-015 
+			9.2311463601361811e-016 ;
+		setAttr ".sp" -type "double3" 0 0 -1.7763568394002505e-015 ;
+		setAttr ".spt" -type "double3" 0 0 7.8886090522101154e-031 ;
+	select -r "up_Light_Shape11";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+	directionalLight; rename "up_Light_12";
+		setAttr ".t" -type "double3" -8.6457106993064414 17.671111384989029 -3.6032636488618621 ;
+		setAttr ".r" -type "double3" 116.0840796346763 -65.810817578177435 -177.99344317977153 ;
+		setAttr ".s" -type "double3" 1.0000000000000004 1.0000000000000002 0.99999999999999967 ;
+		setAttr ".rp" -type "double3" 3.9443045261050608e-031 1.2987442821556796e-031 
+			-5.329070518200749e-015 ;
+		setAttr ".rpt" -type "double3" 2.3036800998283371e-015 -4.7085299352793301e-015 
+			6.2891728222234572e-015 ;
+		setAttr ".sp" -type "double3" 3.944304526105059e-031 1.2987442821556794e-031 
+			-5.3290705182007514e-015 ;
+		setAttr ".spt" -type "double3" 1.7516230804060221e-046 2.1895288505075272e-047 
+			2.3665827156630347e-030 ;
+	select -r "up_Light_Shape12";
+		setAttr -k off ".v";
+		setAttr ".in" 0.20000000298023224;
+		setAttr ".urs" yes;
+		setAttr ".shr" 3;
+		setAttr ".col" 20;
+		setAttr ".esp" no;
+		setAttr ".lr" 20;
+		setAttr -av ".dms";
+		setAttr ".lang" 16;
+
+	select -r |up_Light_1 |up_Light_2 |up_Light_3 |up_Light_4 |up_Light_5 |up_Light_6 |up_Light_7 |up_Light_8 |up_Light_9 |up_Light_10 |up_Light_11 |up_Light_12 ;
+	group -name "Ambient_Occlusion_Rig"; xform -os -piv 0 0 0;
+
+	addAttr -ln "color" -usedAsColor -at float3;
+	  addAttr -ln colorR -at "float" -p "color" -dv 1.0;
+	  addAttr -ln colorG -at "float" -p "color" -dv 1.0;
+	  addAttr -ln colorB -at "float" -p "color" -dv 1.0;
+
+	addAttr -ln intensity -at "float" -dv 0.2;
+	addAttr -ln emitDiffuse -at bool -dv true;
+	addAttr -ln emitSpecular -at bool -dv false;
+
+	addAttr -ln shadowColor -usedAsColor -at float3;
+	  addAttr -ln shadColorR -at "float" -p shadowColor;
+	  addAttr -ln shadColorG -at "float" -p shadowColor;
+	  addAttr -ln shadColorB -at "float" -p shadowColor;
+	addAttr -ln useRayTraceShadows -at bool -dv true;
+	addAttr -ln lightAngle -at"float" -dv 16.0;
+	addAttr -ln shadowRays -at short -dv 3;
+	addAttr -ln rayDepthLimit -at short -dv 1;
+
+	for ($i= 1;$i<13 ;$i++ )
+	{
+		connectAttr ("Ambient_Occlusion_Rig.color") ("up_Light_Shape"+$i+".color");
+		connectAttr ("Ambient_Occlusion_Rig.intensity") ("up_Light_Shape"+$i+".intensity");
+		connectAttr ("Ambient_Occlusion_Rig.shadowColor") ("up_Light_Shape"+$i+".shadowColor");
+		connectAttr ("Ambient_Occlusion_Rig.useRayTraceShadows") ("up_Light_Shape"+$i+".useRayTraceShadows");
+		connectAttr ("Ambient_Occlusion_Rig.lightAngle") ("up_Light_Shape"+$i+".lightAngle");
+		connectAttr ("Ambient_Occlusion_Rig.shadowRays") ("up_Light_Shape"+$i+".shadowRays");
+		connectAttr ("Ambient_Occlusion_Rig.rayDepthLimit") ("up_Light_Shape"+$i+".rayDepthLimit");
+	}
+
+	select -cl;
+}
+
+
+if ($crtShd == 1)
+{
+	if (!`objExists Ambient_Occlusion`)
+	{
+		shadingNode -asShader lambert -name Ambient_Occlusion;
+		sets -renderable true -noSurfaceShader true -empty -name "Ambient_OcclusionSG";
+		connectAttr -f Ambient_Occlusion.outColor Ambient_OcclusionSG.surfaceShader;
+			setAttr "Ambient_Occlusion.diffuse" 1;
+			setAttr "Ambient_Occlusion.c" -type "float3" 1 1 1 ;
+	}
+
+	$allGEO = `ls -geometry`;
+	$allGEO = stringArrayRemove($presvrMatObj,$allGEO);
+	for ($geo in $allGEO )
+	{
+		if (`nodeType $geo` == "mesh" || `nodeType $geo` == "nurbsSurface")
+		{
+			sets -e -noWarnings -forceElement "Ambient_OcclusionSG" $geo;
+		}
+	}
+}
+
+if ($setRendGlb == 1)
+{
+	select -ne :defaultResolution;
+		setAttr ".w" 320;
+		setAttr ".h" 180;
+		setAttr ".pa" 0.5625;
+		setAttr ".al" yes;
+		setAttr ".dar" 1.7769999504089355;
+		setAttr ".ldar" yes;
+
+	setAttr defaultRenderQuality.edgeAntiAliasing 0;
+	setAttr "defaultRenderQuality.shadingSamples" 2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 8;
+	setAttr "defaultRenderQuality.particleSamples" 1;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 1;
+	setAttr "defaultRenderQuality.pixelFilterWidthX" 2.2;
+	setAttr "defaultRenderQuality.pixelFilterWidthY" 2.2;
+	setAttr defaultRenderQuality.pixelFilterType 2;
+
+	setAttr "defaultRenderQuality.redThreshold" 0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 0.3;
+	setAttr "defaultRenderQuality.blueThreshold" 0.6;
+
+	setAttr "defaultRenderQuality.enableRaytracing" 1;
+	setAttr "defaultRenderQuality.reflections" 0;
+	setAttr "defaultRenderQuality.refractions" 0;
+	setAttr "defaultRenderQuality.shadows" 1;
+	setAttr "defaultRenderQuality.rtb" 0.0;
+
+
+	$allCameraName = `ls -cameras`;
+
+	string $renderableCam[];
+
+	for ($i=0 ;$i< size($allCameraName) ;$i++ )
+	{
+		int $renderable = `getAttr ($allCameraName[$i] + ".renderable")`;
+
+		if ($renderable)
+			setAttr ($allCameraName[$i] + ".backgroundColor") -type double3 1 1 1 ;
+
+	}
+	select -cl;
+
+
+}
+
+
+if ($rnScn == 1)
+{
+	int $nameIsok = 0;
+	string $tmp[],$temp[],$sceneNamePart[];
+	string $sName = `file -q -sceneName`;
+	tokenize $sName "/" $tmp;
+	tokenize $tmp[size($tmp)-1] "." $temp;
+	string $sceneName = $temp[0];
+	tokenize $sceneName "_" $sceneNamePart;
+	for ($i=0 ;$i<size($sceneNamePart);$i++ )
+	{
+		if( ($sceneNamePart[$i] == "lr")&&($i == 2) ) 
+		{
+			$sceneNamePart[($i-1)] = $sceneNamePart[($i-1)] + "_AmbSha";
+			$nameIsok = 1;
+		}
+
+		if( ($sceneNamePart[$i] == "lr")&&($i == 3) ) 
+		{
+			$sceneNamePart[($i-1)] = $sceneNamePart[($i-1)] + "AmbSha";
+			$nameIsok = 1;
+		}
+	}
+
+	string $pathFile;
+	for ($j=0;$j<(size($tmp)-1);$j++ )
+	{
+		$pathFile = $pathFile + $tmp[$j] + "/";	
+	}
+
+	if ($nameIsok == 1 )
+	{
+	
+		string $newName;
+		for ($i=0 ;$i<size($sceneNamePart);$i++ )
+		{
+			if ( $i == (size($sceneNamePart)-1) )
+			{
+				$newName = $newName + $sceneNamePart[$i]  + ".mb";
+			}
+			else{
+				$newName = $newName + $sceneNamePart[$i]+ "_";
+			}
+		}
+		$newName = $pathFile + $newName;
+		file -rename $newName;
+
+//		file -save -type "mayaBinary";
+//		print ("Save To:  "+$newName+"\n");
+	}
+	else{ print ">>>>>>>>>>>>>>>\n";print"Message:  cannt rename scene\n";print ">>>>>>>>>>>>>>\n";}
+}
+
+// optimize scene
+	if ($optiScn == 1)
+	{
+	    kcDefaultOptimizeSceneCmd;
+	}
+
+	// restore old selection
+
+	select -clear;
+	for ($item in $oldSelected)
+		if (`objExists $item`)
+			select -add $item;
+}
+
+/*
+global proc proLyrShd(string $lyrShd)
+{
+	string $lyrShd;
+	string $eachLyrShd[] = `listConnections -s true -d false $lyrShd`;
+	for ($each in $eachLyrShd)
+	{
+		if ($preserverBump == 1 && $preserverTrans == 1)
+		{
+				if( (`connectionInfo -isDestination  ($each+".normalCamera")`)&&(`getAttr ($each+".transparencyR")`!= 0 || `getAttr ($each+".transparencyG")`!= 0 || `getAttr ($each+".transparencyB")`!= 0) )
+				{
+					//string $bumpSG[] = `listConnections -type "shadingEngine" ($matName+".outColor")`;
+					//$presvList[size($presvList)] = $bumpSG[0];
+					$bumpAttr = `listConnections -plugs 1 -s 1 -d 0 ($each+".normalCamera")`;
+					$bumpToLyrAttr = `listConnections -plugs 1 -s 0 -d 1 $each`;
+					$transpVal = `getAttr ($each+".transparency")`;
+					string $rplcShd = createAmbOccShd($each);
+					disconnectAttr $bumpAttr[0] ($each+".normalCamera");
+					connectAttr $bumpAttr[0] ($rplcShd+".normalCamera");
+					for ($lyrAttr in $bumpToLyrAttr)
+					{
+						$shuxin = `listConnections -plugs -s 1 -d 0 $lyrAttr`;
+						disconnectAttr $shuxin[0] $lyrAttr;
+						$shuxinName = `listAttr $shuxin[0]`;
+						connectAttr ($rplcShd+"."+$shuxinName[0]);
+
+					}
+					setAttr ($rplcShd+".transparency") -type float3 $transpVal[0] $transpVal[1] $transpVal[2];
+				}
+				else 
+				{
+					if(`connectionInfo -isDestination  ($each+".normalCamera")`)
+					{
+						$bumpAttr = `listConnections -plugs 1 -s 1 -d 0 ($each+".normalCamera")`;
+						$bumpToLyrAttr = `listConnections -plugs 1 -s 0 -d 1 $each`;
+						$transpVal = `getAttr ($each+".transparency")`;
+						string $rplcShd = createAmbOccShd($each);
+						disconnectAttr $bumpAttr[0] ($each+".normalCamera");
+						connectAttr $bumpAttr[0] ($rplcShd+".normalCamera");
+						for ($lyrAttr in $bumpToLyrAttr)
+						{
+							$shuxin = `listConnections -plugs -s 1 -d 0 $lyrAttr`;
+							disconnectAttr $shuxin[0] $lyrAttr;
+							$shuxinName = `listAttr $shuxin[0]`;
+							connectAttr ($rplcShd+"."+$shuxinName[0]);
+
+						}
+					}
+
+					if( `getAttr ($each+".transparencyR")`!= 0 || `getAttr ($each+".transparencyG")`!= 0 || `getAttr ($each+".transparencyB")`!= 0 )
+					{
+						$transpVal = `getAttr ($each+".transparency")`;
+						string $rplcShd = createAmbOccShd($each);
+						setAttr ($rplcShd+".transparency") -type float3 $transpVal[0] $transpVal[1] $transpVal[2];
+						$dwonToAttr = `listConnections -plugs 1 -s 0 -d 1 ($each+".outColor")`;
+						connectAttr -f ($rplcShd+".outColor") $dwonToAttr[0];
+					}
+
+				}
+		
+		}
+	}
+
+
+}
+*/
+
+global proc string createAmbOccShd(string $shdName)
+{
+	string $shdName;
+	shadingNode -asShader lambert -name ("AmbientOcclusion_"+$shdName);
+	setAttr ".diffuse" 1;
+	setAttr ".c" -type "float3" 1 1 1;
+	return ("AmbientOcclusion_"+$shdName);
+}

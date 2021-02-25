@@ -1,0 +1,138 @@
+global proc zwDogSpeed()
+{
+	string $file = "//file-cluster/GDC/Projects/LittleTikes/Production/Asset/character/c00301mitts/master/lt_c00301mitts_h_ms_c000.mb";
+
+	string $namespace = `match "[^/\\]+$" $file`;
+	$namespace = `match "[^.]+" $namespace`;
+	$file = `file -reference -groupReference -namespace $namespace $file`;
+	$namespace = `file -query -namespace $file`;
+
+	string $selected[] = `ls ($namespace + ":*_MASTER")`;	// `ls -selection`;
+
+	if (size($selected) != 1)
+		error("Please select the MASTER node.");
+
+	string $master = $selected[0];	// "c00301mitts_MASTER";
+	float $boundingBox[] = `xform -query -boundingBox $master`;
+	float $z = $boundingBox[5] - $boundingBox[0];
+	string $curve = `curve -point (0 * $z) 0 (0 * $z) -point (0.5 * $z) 0 (1 * $z) -point (1 * $z) 0 (2 * $z) -point (0.5 * $z) 0 (3 * $z) -point (0 * $z) 0 (4 * $z) -point (-0.5 * $z) 0 (5 * $z) -point (-1 * $z) 0 (6 * $z) -point (-0.5 * $z) 0 (7 * $z) -point (0 * $z) 0 (8 * $z)`;
+
+	source "generateChannelMenu.mel";
+	CBdeleteConnection ($master + ".tx");
+	CBdeleteConnection ($master + ".ty");
+	CBdeleteConnection ($master + ".tz");
+	CBdeleteConnection ($master + ".rx");
+	CBdeleteConnection ($master + ".ry");
+	CBdeleteConnection ($master + ".rz");
+	CBdeleteConnection ($master + ".sx");
+	CBdeleteConnection ($master + ".sy");
+	CBdeleteConnection ($master + ".sz"); 
+
+	float $startTimeU = `playbackOptions -query -minTime`;
+	float $endTimeU = `playbackOptions -query -maxTime`;
+	string $motionPath = `pathAnimation -fractionMode true -follow true -followAxis z -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU $startTimeU -endTimeU $endTimeU -curve $curve $master`;
+
+	string $plusMinusAverage1 = `createNode plusMinusAverage`;
+	setAttr ($plusMinusAverage1 + ".operation") 2;
+	connectAttr -force "time1.outTime" ($plusMinusAverage1 + ".input1D[0]");
+
+	string $plusMinusAverage2 = `createNode plusMinusAverage`;
+	setAttr ($plusMinusAverage2 + ".operation") 1;
+
+	string $multiply = `createNode multiplyDivide`;
+
+	string $history[] = `listHistory $motionPath`;
+
+	for ($historyNode in $history)
+		if ((`nodeType $historyNode` == "animCurveTA") ||
+			(`nodeType $historyNode` == "animCurveTL") ||
+			(`nodeType $historyNode` == "animCurveTT") ||
+			(`nodeType $historyNode` == "animCurveTU"))
+		{
+			setAttr ($plusMinusAverage1 + ".input1D[1]") `getAttr ($historyNode + ".keyTimeValue[0].keyTime")`;
+			connectAttr -force ($plusMinusAverage1 + ".output1D") ($multiply + ".input1X");
+			setAttr ($plusMinusAverage2 + ".input1D[0]") `getAttr ($historyNode + ".keyTimeValue[0].keyTime")`;
+			connectAttr -force ($multiply + ".outputX") ($plusMinusAverage2 + ".input1D[1]");
+			connectAttr -force ($plusMinusAverage2 + ".output1D") ($historyNode + ".input");
+		}
+
+	if (!`objExists ($master + ".speed")`)
+	{
+		addAttr -longName "speed" -keyable true -defaultValue 1.0 -minValue 0.001 -maxValue 100 $master;
+	}
+	connectAttr -force ($master + ".speed") ($multiply + ".input2X");
+
+	select $selected[0];
+
+	if (!`pluginInfo -query -loaded "animImportExport.mll"`)
+	{
+		loadPlugin -quiet "animImportExport.mll";
+	}
+	string $filename = "Z:/Resource/Support/Maya/projects/LittleTikes/dogrun.anim";
+	file -import -type "animImport" -rpr "a" -options ";targetTime=4;copies=1;option=replaceCompletely;pictures=0;connect=0;" $filename;
+
+	select $selected[0];
+}
+
+/*
+global proc zwDogSpeed()
+{
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) != 1)
+		error("Please select the MASTER node.");
+
+	string $master = $selected[0];	// "c00301mitts_MASTER";
+	float $boundingBox[] = `xform -query -boundingBox $master`;
+	float $z = $boundingBox[5] - $boundingBox[0];
+	string $curve = `curve -point 0 0 0 -point $z 0 (2 * $z) -point 0 0 (4 * $z) -point (-$z) 0 (6 * $z) -point 0 0 (8 * $z)`;
+
+	source "generateChannelMenu.mel";
+	CBdeleteConnection ($master + ".tx");
+	CBdeleteConnection ($master + ".ty");
+	CBdeleteConnection ($master + ".tz");
+	CBdeleteConnection ($master + ".rx");
+	CBdeleteConnection ($master + ".ry");
+	CBdeleteConnection ($master + ".rz");
+	CBdeleteConnection ($master + ".sx");
+	CBdeleteConnection ($master + ".sy");
+	CBdeleteConnection ($master + ".sz"); 
+
+	float $startTimeU = `playbackOptions -query -minTime`;
+	float $endTimeU = `playbackOptions -query -maxTime`;
+	string $motionPath = `pathAnimation -fractionMode true -follow true -followAxis z -upAxis y -worldUpType "vector" -worldUpVector 0 1 0 -inverseUp false -inverseFront false -bank false -startTimeU $startTimeU -endTimeU $endTimeU -curve $curve $master`;
+
+	string $multiply = `createNode multiplyDivide`;
+
+//	string $unitToTimeConversion = `createNode unitToTimeConversion`;
+//	setAttr ($unitToTimeConversion + ".conversionFactor") 250;
+
+//	string $plusMinusAverage1 = `createNode plusMinusAverage`;
+//	setAttr ($plusMinusAverage1 + ".operation") 2;
+//	connectAttr -force "time1.outTime" ($plusMinusAverage1 + ".input2Dx");
+
+	connectAttr -force "time1.outTime" ($multiply + ".input1X");
+//	connectAttr -force ($multiply + ".outputX") ($unitToTimeConversion + ".input"); 
+
+	string $history[] = `listHistory $motionPath`;
+
+	for ($historyNode in $history)
+		if ((`nodeType $historyNode` == "animCurveTA") ||
+			(`nodeType $historyNode` == "animCurveTL") ||
+			(`nodeType $historyNode` == "animCurveTT") ||
+			(`nodeType $historyNode` == "animCurveTU"))
+		{
+		//	connectAttr -force ($unitToTimeConversion + ".output") ($historyNode + ".input");
+
+			connectAttr -force ($multiply + ".outputX") ($historyNode + ".input"); 
+
+		//	connectAttr -force ($motionPath + ".keyTimeValue[0].keyTime") ($plusMinusAverage1 + ".input2Dy");
+		}
+
+	if (!`objExists ($master + ".speed")`)
+	{
+		addAttr -longName "speed" -keyable true -defaultValue 1.0 -minValue 0.001 -maxValue 100 $master;
+	}
+	connectAttr -force ($master + ".speed") ($multiply + ".input2X"); 
+}
+*/

@@ -1,0 +1,135 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc hfCGRepairScence()
+{
+	//清除多余的参考节点
+	string $unknow[] = `ls -type reference`;
+	for($un in $unknow)
+	{
+		string $quiet = catchQuiet(`referenceQuery -f $un`);
+		if($quiet)
+		{
+			lockNode -l false $un;
+			delete $un;
+		}
+
+		if (`objExists ($un+".placeHolderList")`)
+		{
+			string $objs[]  = `listConnections -s 1 -d 0 ($un+".placeHolderList")`;
+			for($o in $objs)
+			{
+				if(!`referenceQuery -inr $o` || `referenceQuery -rfn $o` != $un)
+				{
+					string $cons[] = `listConnections -c 1 -p 1 -type shape ($un+".placeHolderList")`;
+					for($i=0;$i<size($cons);)
+					{
+						if (`match "instObjGroups" $cons[$i+1]` != "")
+						{
+							catchQuiet(`disconnectAttr $cons[$i+1]  $cons[$i]`);
+							$i=$i+2;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//清除不能识别的节点
+	string $unknow[] = `ls -type unknown`;
+	for($un in $unknow)
+	{
+	lockNode -l false $un;
+	delete $un;
+	}
+
+
+	//清除参考的变形shape节点
+	string $mesh[]  = `ls -type mesh`;
+	for ($m in $mesh)
+	{
+	    if(!`referenceQuery -inr $m` && match("ShapeDeformed",$m)!="")
+	    {
+		string $p[] =  `listRelatives -f -p $m`;
+		if(size($p) && `referenceQuery -inr $p[0]` && size(`listRelatives -c $p[0]`)>1)
+		{
+		    setAttr ($m+".intermediateObject") 1;
+		}
+	    }
+	}
+
+	//修改水晶洞的错误贴图
+	string $refFiles[]  = `file -q -r`;
+	for ($rf in $refFiles)
+	{
+		if (match("crystalCave",$rf)!="")
+		{
+			string $ns = `file -q -rpr $rf`;
+			string $files[]  = `ls ($ns+":file37")`;
+			if (size($files))
+			{
+				setAttr ($files[0]+".filterType") 3; 
+			}
+		}
+	}
+
+
+	//修改城市的3D节点
+	string $multies[] = `ls -type multiplyDivide`;
+	for ($m in $multies)
+	{
+		int $ref=0;
+		string $cons[] = `listConnections -s 0 -d 1 -p 1 $m`;
+		for ($c in $cons)
+		{
+			if (match("[.]reflectivity",$c) != "")
+			{
+				$ref=1;
+				break;
+			}
+		}
+
+		if ($ref)
+		{
+			string $ups[] = `hyperShade -lun $m`;
+			for ($u in $ups)
+			{
+				if (nodeType($u)=="place3dTexture")
+				{
+					string $cons[] = `listConnections -s 0 -d 1 -c 1 -p 1 $u`;
+					for ($i=0;$i<size($cons); )
+					{
+						disconnectAttr $cons[$i] $cons[$i+1];
+						$i=$i+2;
+					}
+				}
+			}
+		}
+	}
+	string $bump[] = `ls -type bump2d -type bump3d`;
+	for ($b in $bump)
+	{	
+		string $ups[] = `hyperShade -lun $b`;
+		for ($u in $ups)
+		{
+			if (nodeType($u)=="place3dTexture")
+			{
+				string $cons[] = `listConnections -s 0 -d 1 -c 1 -p 1 $u`;
+				for ($i=0;$i<size($cons); )
+				{
+					disconnectAttr $cons[$i] $cons[$i+1];
+					$i=$i+2;
+				}
+			}
+		}
+	}
+}

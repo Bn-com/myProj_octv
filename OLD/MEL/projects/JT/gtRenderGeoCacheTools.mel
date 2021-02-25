@@ -1,0 +1,179 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc gtRenderGeoCacheTools()
+{
+	cycleCheck -e off;
+	
+	string $sceneName = `file -q -sn -shn`;
+	string $info[] = stringToStringArray($sceneName,"_");
+	string $cachePath= "//file-cluster/GDC/Projects/GummiTarzan/Production/Render/MOV/";
+	string $eo = "ODD";
+	if ( (int)$info[1]/2 == (int)$info[1]/2.0)
+	{
+		$eo = "EVEN";
+	}
+	$cachePath = $cachePath+$eo+"/"+"ep_"+$info[1]+"/"+$info[2]+"/"+$info[3]+"/GeoCache/";
+
+	
+	string $cacheSets[];
+	string $allSets[] = `ls -type objectSet`;
+	string $setName="cache_objs";
+	for ($set in $allSets)
+	{
+		if (endsWith($set,$setName))
+		{
+			$cacheSets[size($cacheSets)] = $set;
+		}
+	}
+
+	for ($set in $cacheSets)
+	{
+			
+			string $buff[]=stringToStringArray($set,":");
+			string $charName = `substituteAllString $set (":"+$setName) ""`;
+			string $folderName = $cachePath+$charName+"/";
+
+			//print ($folderName+"\n");
+
+			//创建geocache
+			select -cl;
+			select -noExpand -deselect $set;
+			select -add $set;
+			string $geometry[] = `ls -sl`;
+			string $pts="";
+			for ($obj in $geometry)
+			{
+				if (size(`ls -v $obj`) == 0 && `getAttr -se ($obj+".visibility")`)
+				{
+					setAttr ($obj+".visibility") 0;
+				}
+				
+				string $his[] = `listHistory $obj`;
+				if (size(`ls -s $his[0]`) != 0)
+					$pts = $pts+" -pts \""+$his[0]+"\"";
+			}
+			select -cl;
+			string $ST = `playbackOptions -q -min`;
+			string $ET = `playbackOptions -q -max`;
+			string $cmd = "cacheFile -sch -f \""+$charName+"\" -dir \""+$folderName+"\" -st "+$ST+" -et "+$ET+" "+$pts;
+
+			//print ($cmd+"\n");
+
+			catch(`eval $cmd`);
+
+
+			if (`referenceQuery -inr $set`)
+			{
+				string $RF = `referenceQuery -f $set`;
+				file -ir $RF;
+			}
+
+			
+			string $fp[] = `listRelatives -f $geometry[0]`;
+			string $ap[] = stringToStringArray($fp[0],"|");
+			string $group;
+			for ($i=0;$i<size($ap) ;$i++ )
+			{
+				if(endsWith($ap[$i],"CHR"))
+				{
+					$group = $ap[$i]+"|"+$ap[$i+1];
+				}
+			}
+			//string $group = `group -w -n ($charName+"_CacheGroup")`; 
+			//xform -os -piv 0 0 0;
+			string $newGroup[] = `parent -w $group`;
+
+			string $allChildren[] = `listRelatives -f -ad -ni -type "transform" $newGroup[0]`;
+			string $bs[]={};
+			string $st = `playbackOptions -q -min`;
+			string $et = `playbackOptions -q -max`;	
+			for ($obj in $allChildren)
+			{
+				string $ccc[] = `listConnections -s 1 -d 0  ($obj+".visibility")` ;
+				if (size($ccc))
+				{
+					$bs[size($bs)] = $obj;
+				}
+				if (match("witch_c_hi_bangle_",$obj) == "witch_c_hi_bangle_")
+				{
+					$bs[size($bs)] = $obj;
+					setAttr -k on ($obj+".translateX");
+					setAttr -l off ($obj+".translateX");
+					setAttr -k on ($obj+".translateY");
+					setAttr -l off ($obj+".translateY");
+					setAttr -k on ($obj+".translateZ");
+					setAttr -l off ($obj+".translateZ");
+					setAttr -k on ($obj+".rotateX");
+					setAttr -l off ($obj+".rotateX");
+					setAttr -k on ($obj+".rotateY");
+					setAttr -l off ($obj+".rotateY");
+					setAttr -k on ($obj+".rotateZ");
+					setAttr -l off ($obj+".rotateZ");
+					setAttr -k on ($obj+".visibility");
+					setAttr -l off ($obj+".visibility");
+				}
+
+			}
+			$bs = stringArrayRemoveDuplicates($bs);
+			bakeResults -sm 1 -t ($st+":"+$et) -at "translateX" -at "translateY" -at "translateZ" -at "rotateX" -at "rotateY" -at "rotateZ" -at "visibility" $bs;
+			select -r $newGroup[0];
+			DeleteHistory;
+			delete $ap[0];
+
+			//导入cache
+			string $cacheObjs[] = `sets -q $set`; //`listRelatives -f -c  $newGroup[0]`;
+			string $namespace = $charName;
+			string $xml = $folderName+$charName+".xml";
+			
+			clear $buff;
+			$buff = stringToStringArray($xml,".");
+			string $cacheName = $buff[0];
+			string $cacheFile=`cacheFile -ccn -dir $folderName -f $charName`;
+			
+			string $channels[] = `cacheFile -f $xml -q -cnm`;
+			for ($i=0;$i<size($cacheObjs);$i++)
+			{
+				//print ($cacheObjs[$i]+"******");
+
+				string $shapes[]=`listRelatives -f -s -ni $cacheObjs[$i]`;
+				if (`objectType $shapes[0]` == "nurbsSurface")
+				{
+					doImportCacheFile($xml,"xml",{$shapes[0]},{}); 
+				}
+				else
+				{
+					string $switch = `createNode historySwitch -n ($charName+"_"+$i+"_swith")`;
+					source doImportCacheFile.mel;
+					string $channel = findChannelForObject($i,$channels,$shapes[0]);
+					//print ($channel+"\n");
+					
+					if (`attributeExists "outMesh" $shapes[0]`)
+					{
+						catch(`connectAttr -f ($shapes[0]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+						setAttr ($switch+".playFromCache") 1;
+						getAttr -silent ($switch+".op[0]");
+						setAttr ($switch+".playFromCache") 0;
+						catch(`disconnectAttr ($shapes[0]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+						setAttr ($switch+".ihi") 0;
+
+						setAttr ($cacheFile+".channel["+$i+"]") -type "string" $channel;
+						connectAttr -f ($cacheFile+".inRange") ($switch+".playFromCache");
+						connectAttr -f ($cacheFile+".outCacheData["+$i+"]") ($switch+".inPositions[0]");
+						connectAttr -f ($switch+".outputGeometry[0]") ($shapes[0]+".inMesh");
+					}
+				}
+			}
+	}
+
+	confirmDialog -title "" -message "GeoCache创建完成" -button "确认" ;
+}

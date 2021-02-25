@@ -1,0 +1,153 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc mwCmd(string $surf, float $posU, float $posV)
+{
+	//$tmp = `ls -sl`;
+	//string $shape[] = `listRelatives -s $tmp`;
+	//string $surf = $shape[0];
+
+	//CHECK TO SEE IF SURFACE ALREADY IS AN EMITTER
+	string $cons[] = `listConnections -type geoConnector $surf`;
+	string $econs[];
+	if(`size $cons`>0)
+	{
+		$econs = `listConnections -type pointEmitter $cons[0]`;
+	}
+
+	string $emitter[];
+	int $emitter_found = 0;
+	if(`size $econs`==0)
+	{
+		//CREATE A SURFACE EMITTER
+		$emitter = `emitter -type surface -r 5000 -sro 0 -nuv 0 -cye none -cyi 1 -spd 1 -srn 0 -nsp 1 -tsp 0 -mxd 0 -mnd 0 -dx 1 -dy 0 -dz 0 -sp 0 $surf`;
+		string $particle[] = `particle`;
+		connectDynamic -em $emitter[1] $particle[0];
+		setAttr ($emitter[1]+".enableTextureRate") 1;
+	}
+	else
+	{
+		$emitter_found = 1;
+	}
+
+	//CREATE RAMP TEXTURE 
+	string $ramp = `shadingNode -asTexture ramp`;
+	$ramp = `rename $ramp "pRamp1"`;
+	print ("CREATING RAMP: "+$ramp+"\n");
+	string $tex = `shadingNode -asUtility place2dTexture`;
+	connectAttr ($tex+".outUV") ($ramp+".uv");
+	connectAttr ($tex+".outUvFilterSize") ($ramp+".uvFilterSize");
+	if($emitter_found==0)
+	{
+		connectAttr -f ($ramp+".outColor") ($emitter[1]+".textureRate");
+	}
+	else
+	{
+		int $size = `size $ramp`;
+		string $num = `substring $ramp 6 $size`;
+		int $n = $num;
+		$n = $n-1;
+		print ("CONNECTING "+$ramp+".outColor TO: pRamp"+$n+".colorOffset\n");
+		connectAttr -f ($ramp+".outColor") ("pRamp"+$n+".colorOffset");
+	}
+	setAttr ($ramp+".type") 4;
+	setAttr ($ramp+".colorEntryList[0].color") -type double3 0 0 0 ;
+	setAttr ($ramp+".colorEntryList[1].color") -type double3 1 1 1 ;
+	setAttr ($ramp+".colorEntryList[2].color") -type double3 0 0 0 ;
+	setAttr ($ramp+".colorEntryList[1].position") 0.02;
+	setAttr ($ramp+".colorEntryList[2].position") 0.04;
+	setAttr ($tex+".coverageV") 8;
+	setAttr ($tex+".translateFrameV") -3.5;
+	float $valU = 0.5-$posU;
+	float $valV = (0.5-$posV)/8.0;
+	setAttr ($tex+".offsetU") $valU;
+	setAttr ($tex+".offsetV") $valV;
+
+	//ANIMATE THE RAMP
+	float $frame = `currentTime -q`;
+	setKeyframe -time ($frame-1) -value 0 ($ramp+".colorEntryList[1].colorR");
+	setKeyframe -time ($frame-1) -value 0 ($ramp+".colorEntryList[1].colorG");
+	setKeyframe -time ($frame-1) -value 0 ($ramp+".colorEntryList[1].colorB");
+
+	setKeyframe -time ($frame+2) -value 1 ($ramp+".colorEntryList[1].colorR");
+	setKeyframe -time ($frame+2) -value 1 ($ramp+".colorEntryList[1].colorG");
+	setKeyframe -time ($frame+2) -value 1 ($ramp+".colorEntryList[1].colorB");
+
+	setKeyframe -time ($frame+5) -value 0 ($ramp+".colorEntryList[1].colorR");
+	setKeyframe -time ($frame+5) -value 0 ($ramp+".colorEntryList[1].colorG");
+	setKeyframe -time ($frame+5) -value 0 ($ramp+".colorEntryList[1].colorB");
+
+	setKeyframe -time ($frame-1) -value 0.00 ($ramp+".colorEntryList[0].position");
+	setKeyframe -time ($frame-1) -value 0.02 ($ramp+".colorEntryList[1].position");
+	setKeyframe -time ($frame-1) -value 0.04 ($ramp+".colorEntryList[2].position");
+
+	setKeyframe -time ($frame+5) -value 0.04 ($ramp+".colorEntryList[0].position");
+	setKeyframe -time ($frame+5) -value 0.07 ($ramp+".colorEntryList[1].position");
+	setKeyframe -time ($frame+5) -value 0.10 ($ramp+".colorEntryList[2].position");
+}
+
+global proc mwDrummer()
+{
+	$tmp = `ls -sl`;
+	string $shape[] = `listRelatives -s $tmp[1]`;
+
+	//CENTER THE PIVOT
+	xform -cp $tmp;
+	string $loc[] = `spaceLocator`;
+	pointConstraint -weight 1 $tmp[0] $loc;
+	$loc[0] = `rename $loc[0] "locA"`;
+
+	//CREATE CLOSEST POINT ON SURFACE NODE
+	string $surf_node = `createNode closestPointOnSurface`;
+	connectAttr -f ($shape[0]+".worldSpace[0]") ($surf_node+".inputSurface");
+	connectAttr -f ($loc[0]+".translate") ($surf_node+".inPosition");
+
+	//GET FRAME RANGE OF ANIMATION
+	float $startFrame = `playbackOptions -q -min`;
+	float $endFrame = `playbackOptions -q -max`;
+
+	//GET LIST OF LOWEST FRAMES
+	float $keyframe_list[];
+	int $k = 0;
+	float $py = 1000000.0;
+	for($i=$startFrame;$i<=$endFrame;$i++)
+	{
+		currentTime $i;
+		float $p[3] = `xform -q -ws -rp $tmp[0]`;
+		//print ("FRAME: "+$i+"\n");
+		//print ("y: "+$p[1]+"\n");
+		//print ("PY: "+$py+"\n");
+		if($p[1]<$py)
+		{
+			$py = $p[1];
+			//print ("SETTING K: "+$k+"\n");
+			$keyframe_list[$k] = $i;
+		}
+		else
+		{
+			$k++;
+			//print ("ADVANCING K: "+$k+"\n");
+			$py = $p[1];
+		}
+	}
+	for($key in $keyframe_list)
+	{
+		if($key>0)
+		{
+			print ("FRAME: "+$key+"\n");
+			currentTime $key;
+			float $posU = `getAttr ($surf_node+".parameterU")`;
+			float $posV = `getAttr ($surf_node+".parameterV")`;
+			mwCmd $shape[0] $posU $posV;
+		}
+	}
+	clear $keyframe_list;
+	select -r $tmp;
+}

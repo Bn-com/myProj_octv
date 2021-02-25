@@ -1,0 +1,118 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc njAnimCheckAssetReference()
+{
+	string $sceneName = `file -q -sn -shn`;
+	string $wrongReferences[];
+	string $rightReferences[];
+
+
+	//获取镜头的asset连接的前期文件
+	string $asset = `idmtService "GetAssetNameInAnim" ($sceneName+"|")`;
+	string $buff[]={};
+	int $num = `tokenize $asset "|" $buff`;
+	string $newfile[]={};
+	string $addfile[] = {};
+	for($i=1;$i<$num;)
+	{
+	    if (endsWith($buff[$i],"Tornado"))
+	    {
+		$addfile[size($addfile)] = $buff[$i];
+	    }
+	    else
+	    {
+		$newfile[size($newfile)] = $buff[$i];
+	    }
+	    $i=$i+2;
+	}
+
+	string $refFiles[]=  `file -q -r`;
+	for ($file in $refFiles)
+	{
+		if (match("Tornado",$file) == "")
+		{
+			string $refnode = `referenceQuery -rfn $file`;
+			
+			clear $buff;
+			$num = `tokenize $file "\\/" $buff`;
+			for ($nfile in $newfile)
+			{
+				string $code = `substring $nfile 1 4`;
+				//print $code;
+				if (match($code,$buff[$num-1]) == $code && match($nfile,$buff[$num-1]) != $nfile)
+				{
+					string $buff1[] = stringToStringArray($buff[$num-1],"_");
+					$nfile = `substituteAllString $buff[$num-1] $buff1[1] $nfile`;
+					clear $buff1;
+					$buff1=stringToStringArray($nfile,"{}");
+					$nfile=$buff1[0];
+					
+					$wrongReferences[size($wrongReferences)] = $refnode;
+					/*string $newpath = `idmtService "GetAssetPath" $nfile`;
+					//print ($newpath+"\n");
+					//print ($nfile+"\n");
+					if (`filetest -r $newpath`)
+					{
+						file -lr $refnode $newpath;
+					}
+					break;*/
+				}
+				else if (match($nfile,$buff[$num-1]) == $nfile)
+				{
+					$rightReferences[size($rightReferences)] = $refnode;
+				}
+
+			}
+		}
+		else
+		{
+			//print $file;
+			string $refnode = `referenceQuery -rfn $file`;
+			
+			clear $buff;
+			$num = `tokenize $file "\\/" $buff`;
+			for ($nfile in $addfile)
+			{
+				string $code = `substring $nfile 1 4`;
+				if (match($code,$buff[$num-1]) == $code && match($nfile,$buff[$num-1]) == $nfile)
+				{
+					//print $nfile;
+					$addfile = stringArrayRemove({$nfile},$addfile);
+					break;
+					$wrongReferences[size($wrongReferences)] = $refnode;
+				}
+			}
+		}
+	}
+
+	$wrongReferences = stringArrayRemove($rightReferences,$wrongReferences);
+	
+
+	//print $addfile;
+	if (size($wrongReferences))
+	{
+		string $confirm = `confirmDialog -title "修正参考" -message "前期参考是错误的，请检查替换!"
+			    -button "替换参考"`;
+		
+		string $filter = `itemFilter -byName $wrongReferences[0]`;
+		for ($wr in $wrongReferences)
+		{
+			string $nextFilter = `itemFilter -byName $wr`;
+			$filter = `itemFilter -union $filter $nextFilter`;
+		}
+		ReferenceEditor;
+		global string $gReferenceEditorPanel;
+		sceneEditor -edit -filter $filter $gReferenceEditorPanel;
+
+	}
+}

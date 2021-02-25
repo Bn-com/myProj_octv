@@ -1,0 +1,409 @@
+global proc njEnvMaterialChangeWindow()
+{
+	if (`window -exists njEnvMaterialChangeWindow`)	deleteUI njEnvMaterialChangeWindow;
+		
+	window -title "场景修改工具-4.14" njEnvMaterialChangeWindow;
+	 
+	rowColumnLayout -numberOfColumns 2;      
+		columnLayout -adjustableColumn true;
+			button -label "材质重命名工具" -c "source ddRenameTools;ddRenameToolsUI ;";
+			button -label "锁定所选节点" -c "lockNode `ls -sl`";
+			button -label "解锁所选节点" -c "lockNode -lock off `ls -sl`";
+			button -label "隐藏reference材质" -c "hideNjReferenceMat";
+			button -label "显示reference材质" -c "showNjReferenceMat";
+			button -label "显示所有材质球" -c "showAllNjReferenceMat";
+			button -label "去除选中的NameSpace" -c "njEnvMaterialChangeRemoveSelectedNamespace";
+			button -label "工具说明" -command "njEnvMaterialChangeHelp";
+			
+		setParent ..;
+	//	       separator;
+		columnLayout -adjustableColumn true;
+			button -label "Morning" -command "njEnvMaterialChange(\"MLA\")";
+			button -label "Noon" -command "njEnvMaterialChange(\"MLB\")";
+			button -label "Afternoon" -command "njEnvMaterialChange(\"MLC\")";
+			button -label "Later-Afternoon" -command "njEnvMaterialChange(\"MLG\")";
+			button -label "Evening" -command "njEnvMaterialChange(\"MLD\")";
+			button -label "Later-Evening" -command "njEnvMaterialChange(\"MLH\")";
+			button -label "Night" -command "njEnvMaterialChange(\"MLE\")";
+			button -label "Dawn" -command "njEnvMaterialChange(\"MLF\")";			
+			button -label "Original" -command "njEnvMaterialChange(\"MLO\")";
+			button -label "Other" -command "njEnvMaterialChange(\"MLX\")";
+			
+		setParent ..;
+	showWindow njEnvMaterialChangeWindow;
+	window -e -widthHeight 200 244 njEnvMaterialChangeWindow;
+}
+
+proc string[] listAllMaterials(string $keyWord)
+{
+	string $allMaterials[]={};
+	
+	string $cmd="ls -type anisotropic -type blinn -type hairTubeShader -type lambert -type layeredShader "+
+	"-type oceanShader -type particleCloud -type phong -type phongE -type rampShader "+
+	"-type shaderGlow -type shadingMap -type surfaceShader -type useBackground	-type displacementShader ";
+	if (`pluginInfo -q -l Mayatomr`)	
+	{
+		$cmd+="-type dgs_material -type dielectric_material -type mi_car_paint_phen -type mi_car_paint_phen_x "+
+		"-type mi_car_paint_phen_x_passes -type mi_metallic_paint -type mi_metallic_paint_x "+
+		"-type mi_metallic_paint_x_passes -type mia_material -type mia_material_x -type mia_material_x_passes "+
+		"-type mib_glossy_reflection -type mib_glossy_refraction -type mib_illum_blinn -type mib_illum_cooktorr "+
+		"-type mib_illum_hair -type mib_illum_lambert -type mib_illum_phong -type mib_illum_ward "+
+		"-type mib_illum_ward_deriv -type misss_call_shader -type misss_fast_shader -type misss_fast_shader_x "+
+		"-type misss_fast_shader_x_passes -type misss_fast_simple_maya -type misss_fast_skin_maya "+
+		"-type misss_physical -type misss_set_normal -type misss_skin_specular -type path_material -type transmat ";
+	}
+	if ($keyWord !="noKeyWord")	$cmd+="\""+$keyWord+"*\" "+"\"*:"+$keyWord+"*\"";
+	
+	$allMaterials=eval($cmd) ;	
+	
+	return 	$allMaterials;
+}
+
+proc string[] listAllTextures(string $keyWord)
+{
+	string $allTextures[]={};
+
+	string $cmd= "ls -type bulge -type checker -type cloth -type file -type fractal -type grid "+
+	"-type mountain -type movie -type noise -type ocean -type psdFileTex "+
+	"-type ramp -type water -type fluidTexture2D -type brownian -type cloud "+
+	"-type crater -type fluidTexture3D -type granite -type leather -type marble -type projection"+
+	"-type rock -type snow -type solidFractal -type volumeNoise -type wood -type particleAgeMapper"+
+	"-type stucco -type envBall -type envChrome -type envCube -type envSky -type envSphere -type layeredTexture ";
+	if (`pluginInfo -q -l Mayatomr`)	
+	{
+		$cmd+= "-type mentalrayTexture -type mentalrayVertexColors -type mi_bump_flakes "+
+		"-type mia_light_surface -type mia_roundcorners -type mib_amb_occlusion "+
+		"-type mib_bent_normal_env -type mib_bump_basis -type mib_bump_map "+
+		"-type mib_bump_map2 -type mib_fast_occlusion -type mib_passthrough_bump_map "+
+		"-type mib_texture_checkerboard -type mib_texture_filter_lookup -type mib_texture_lookup "+
+		"-type mib_texture_lookup2 -type mib_texture_polkadot -type mib_texture_polkasphere "+
+		"-type mib_texture_remap -type mib_texture_rotate -type mib_texture_turbulence "+
+		"-type mib_texture_vector -type mib_texture_wave -type misss_lambert_gamma ";
+	}
+	if ($keyWord !="noKeyWord")	$cmd+="\""+$keyWord+"*\" "+"\"*:"+$keyWord+"*\"";
+	$allTextures=eval($cmd) ;	
+	return 	$allTextures;
+}
+
+
+
+global proc hideNjReferenceMat()
+{
+	string $allMaterials[]=listAllMaterials("noKeyWord");
+	string $allTextures[]=listAllTextures("noKeyWord");
+	
+	for ($m in $allMaterials)
+	{
+			if (`referenceQuery -isNodeReferenced $m`)
+			{
+				string $connects[]=`listConnections -p 1 $m`;
+				for ($c in $connects)
+				{
+					if (`gmatch $c  "defaultShaderList1.*"`)
+					{
+						disconnectAttr ($m+".msg") $c;
+						break;	
+					}
+				}
+			}
+	}
+
+	for ($t in $allTextures)
+	{
+			if (`referenceQuery -isNodeReferenced $t`)
+			{	
+				string $connects[]=`listConnections -p 1 $t`;
+				for ($c in $connects)
+				{
+					if (`gmatch $c  "defaultTextureList1.*"`)
+					{
+						disconnectAttr ($t+".msg") $c;
+						break;	
+					}
+				}
+			}
+	}
+
+}
+
+
+global proc showAllNjReferenceMat()
+{
+	string $allMaterials[]=listAllMaterials("noKeyWord");	
+	for ($a in $allMaterials)
+	{
+			showMaterialsInHypershade($a);
+	}
+	
+}
+
+
+
+global proc showNjReferenceMat()
+{
+//	showMaterials
+	string $allMaterials[]=listAllMaterials("noKeyWord");	
+	for ($a in $allMaterials)
+	{
+		if (`referenceQuery -isNodeReferenced $a`)
+		{
+			string $isCon="";
+			string $connects[]=`listConnections -p 1 $a`;
+			for ($b in $connects)
+			{
+				if (`gmatch $b "defaultShaderList1.*"`)
+				{
+					$isCon="isConnected";
+					break;		
+				}
+			}
+			
+			if ($isCon=="isConnected")	continue;
+			
+			showMaterialsInHypershade($a);
+		}
+	}
+	
+//	showTextures
+	string $allTextures[]=listAllTextures("noKeyWord");	
+	for ($a in $allTextures)
+	{
+		if (`referenceQuery -isNodeReferenced $a`)
+		{
+			string $isCon="";
+			string $connects[]=`listConnections -p 1 $a`;
+			for ($b in $connects)
+			{
+				if (`gmatch $b "defaultTextureList1.*"`)
+				{
+					$isCon="isConnected";
+					break;		
+				}
+			}
+			
+			if ($isCon=="isConnected")	continue;
+			
+			showTexturesInHypershade($a);
+		}
+	}
+	
+
+
+}
+
+
+global proc hideMaterialsInHypershade(string $mat)
+{
+		string $connects[]=`listConnections -p 1 $mat`;
+		for ($a in $connects)
+		{
+			if (`gmatch $a  "defaultShaderList1.*"`)
+			{
+				disconnectAttr ($mat+".msg") $a;
+//				break;	
+			}
+		}
+}
+
+global proc hideTexturesInHypershade(string $mat)
+{
+		string $connects[]=`listConnections -p 1 $mat`;
+		for ($a in $connects)
+		{
+			if (`gmatch $a  "defaultTextureList1.*"`)
+			{
+				print $a;
+				disconnectAttr ($mat+".msg") $a;
+//				break;	
+			}
+		}
+}
+
+
+
+proc int insertNumInArray(int $xx[])
+{
+	int $n = `size $xx`;
+    if ($xx[0]!=0)    return 0;
+	for ($i=1;$i<$n;$i++)
+	{
+	    int $ff=$xx[$i]-$xx[$i-1];
+	    if ($ff!=1)    return ($xx[$i-1]+1);
+	}
+	return ($xx[$n-1]+1);
+}
+ 
+
+global proc showMaterialsInHypershade(string $mat)
+{
+		int $ID[]=`getAttr -mi defaultShaderList1.s`;
+		int $newID=-1;
+		if (`size $ID`==0)	$newID=0;
+		else 	$newID = insertNumInArray($ID);
+		connectAttr ($mat+".msg") ("defaultShaderList1.s["+$newID+"]");
+}
+
+global proc showTexturesInHypershade(string $tex)
+{
+		int $ID[]=`getAttr -mi defaultTextureList1.tx`;
+		int $newID=-1;
+		if (`size $ID`==0)	$newID=0;
+		else 	$newID = insertNumInArray($ID);
+		connectAttr ($tex+".msg") ("defaultTextureList1.tx["+$newID+"]");
+}
+
+
+global proc njEnvMaterialChange(string $type)
+{
+//	string $allMaterials[]=`ls -materials "MLA*" "MLB*" "MLC*" "MLD*" "MLE*" "MLF*" "MLG*" "MLO*" "MLX*"`;
+//	求当前时间段以外的时间段	
+	string $timeType[]={"MLA","MLB","MLC","MLD","MLE","MLF","MLG","MLH","MLO","MLX"};
+	string $otherTimeType[]={};
+	int $i=0;
+	for ($tm in $timeType)
+	{
+		if ($tm != $type)	$otherTimeType[$i++]=$tm;		
+	}
+	$i=0;
+	
+
+//	string $MLA_lights[]=`ls "MLA_lights" "*:MLA_lights" "*:*:MLA_lights"`;
+//	for ($a in $MLA_lights)	  lockNode $a;
+//		
+//	string $MLB_lights[]=`ls "MLB_lights" "*:MLB_lights" "*:*:MLB_lights"`;
+//	for ($a in $MLB_lights)	  lockNode $a;
+//	
+//	string $MLC_lights[]=`ls "MLC_lights" "*:MLC_lights" "*:*:MLC_lights"`;
+//	for ($a in $MLC_lights)	  lockNode $a;
+//
+//	string $MLD_lights[]=`ls "MLD_lights" "*:MLD_lights" "*:*:MLD_lights"`;
+//	for ($a in $MLD_lights)	  lockNode $a;
+//
+//	string $MLE_lights[]=`ls "MLE_lights" "*:MLE_lights" "*:*:MLE_lights"`;
+//	for ($a in $MLE_lights)	  lockNode $a;
+//
+//	string $MLF_lights[]=`ls "MLF_lights" "*:MLF_lights" "*:*:MLF_lights"`;
+//	for ($a in $MLF_lights)	  lockNode $a;
+//
+//	string $MLO_lights[]=`ls "MLO_lights" "*:MLO_lights" "*:*:MLO_lights"`;
+//	for ($a in $MLO_lights)	  lockNode $a;
+	
+	
+//显示主灯光
+	string $cmd = "ls "+	"\""		+($type+"_lights ")+"\" "+		
+									"\"*:"		+($type+"_lights ")+"\" "+		
+									"\"*:*:"	+($type+"_lights ")+"\" ";
+	string $curLights[]=eval($cmd);
+	for ($a in $curLights)	setAttr  ( $a + ".visibility" ) 1;
+	
+//隐藏其他灯光	
+	string $otLights[] = {};
+	for ($ott in $otherTimeType)
+		{
+			string $cmd = "ls "+	"\""		+($ott+"_lights ")+"\" "+		
+											"\"*:"		+($ott+"_lights ")+"\" "+		
+											"\"*:*:"	+($ott+"_lights ")+"\" ";
+			$otLights = eval($cmd);
+			for ($b in $otLights)	setAttr  ( $b + ".visibility" ) 0;
+		
+		}
+	
+//	求当前时间段所有材质球	
+
+//	$type 目标时间段
+//	$targetMaterials目标时间段所有材质球
+//	$otherTimeType其他时间段
+//	$otherMaterialsName其他时间段材质球
+//	$connections其他时间段材质球链接sg节点信息
+
+
+	string $targetMaterials[]=listAllMaterials($type);
+	for ($tm in $targetMaterials)
+	{
+		showMaterialsInHypershade($tm);
+//		lockNode -lock off $tm;
+		
+		for ($ott in $otherTimeType)
+		{
+			string $otherMaterialsName = `substitute $type $tm $ott`;
+			if (`objExists $otherMaterialsName`)
+			{	
+				
+				string $connections[]=`listConnections -s 0 -d 1 -c 1 -p 1 -type "shadingEngine" $otherMaterialsName`;
+				for ($i = 0; $i <`size $connections`/2;$i+=2)
+				{
+					string $curMat = `substitute $ott $connections[$i] $type`;
+					connectAttr -f $curMat $connections[$i+1];
+				}
+				hideMaterialsInHypershade($otherMaterialsName);
+//				lockNode $otherMaterialsName;
+			}
+		}
+	}
+
+	string $targetTextures[]=listAllTextures($type);
+//	print "\n";print $targetTextures;
+	for ($tx in $targetTextures)
+	{
+		
+		for ($ott in $otherTimeType)
+		{	
+			
+			string $otherTexturesName = `substitute $type $tx $ott`;
+			if (`objExists $otherTexturesName`)
+			{	
+				
+				hideTexturesInHypershade($otherTexturesName);
+			}
+		}
+		showTexturesInHypershade($tx);
+	}
+
+}
+
+
+global proc njEnvMaterialChangeRemoveSelectedNamespace()
+{
+	int $count = 0;
+
+	print "Remove namespace\n";
+	print "----------------\n";
+
+	for ($count =0; $count<3; $count++)
+	{
+		string $buf[] = `ls -long -sl`;
+		for ($i=size($buf)-1; $i>=0; $i--)
+		{
+			if (`objExists $buf[$i]`)
+			{
+				if (!`reference -isNodeReferenced $buf[$i]`)
+				{
+					string $buf1[];
+					tokenize $buf[$i] "|" $buf1;
+					string $name = $buf1[size($buf1)-1];
+					string $sp = `match "([0-9a-zA-Z_]*:)+" $name`;
+					if ($sp != "")
+					{
+						$name = `substitute $sp $name ""`;
+						if (!catch(`rename $buf[$i] $name`))
+						{
+							$count ++;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+
+
+global proc njEnvMaterialChangeHelp()
+{
+	string $path = "//file-cluster/gdc/Resource/Support/Maya/projects/Ninjago/工具说明/";
+	string $file = "场景时间修改工具.doc";
+	string $temp = `internalVar -utd`;
+	sysFile -copy ($temp+$file) ($path+$file);
+	system("load "+$temp+$file);
+}
+

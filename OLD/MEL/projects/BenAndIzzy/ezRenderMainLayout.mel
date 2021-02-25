@@ -1,0 +1,1180 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/09/26
+///
+/// Description: 
+////			Ben&Izzy项目渲染环节综合工具面板
+///				主要功能：规范化的分层方案及方法，角色控制，摄像机控制等等。。。
+////			包含子程序：ezRenderMainLayoutLight.mel,ezRenderMainLayoutMaterial.mel,ezRenderMainLayoutRenderLayer.mel
+////					  ezAllCharCon.mel,ezRenderCam.mel,ezRenderBlur2D.mel,ezRenderReplaceFxCloth.mel,slAnimCopyForRef.mel,ezRenderShow.mel,zwCameraImportExport.mel
+///
+
+
+
+global proc ezRenderMainLayoutCollapse(int $hl)
+{
+	if ($hl == 0)
+	{
+		string $children[] = `rowColumnLayout -q -ca  ezRenderMainLayout_charCon`;
+		$hl = 45 + size($children)/3*15;
+	}
+	int $height = `window -q -h ez_render_mainLayout`;
+	window -e -h ($height-$hl) ez_render_mainLayout;
+}
+
+global proc ezRenderMainLayout()
+{
+	string $camera[] = `ls -type camera`;
+	string $curCam = `lookThru -q `;
+
+	string $charAttr[] = {"skinning_vis","skinProxy_vis","skeleton_vis","hair_vis"};
+	string $master[] = `ls "*MASTER" "*:*MASTER" "*:*:*MASTER"`;
+
+	string $path = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\icons\\BenAdnIzzy\\render\\";
+	
+	if(`window -exists ez_render_mainLayout`)
+	{	
+		deleteUI ez_render_mainLayout;
+		if(`window -exists ez_render_mainLayout_material`)
+			deleteUI ez_render_mainLayout_material;
+		if(`window -exists ez_render_mainLayout_renderLayer`)
+			deleteUI ez_render_mainLayout_renderLayer;
+	}
+	window -title "AutoCreateRenderLayersByWSL" -mxb false -s true  -resizeToFitChildren true ez_render_mainLayout;
+	
+		string $mainColumnLayout = `columnLayout -adjustableColumn true -rs 10 `;
+			
+			string $mainImage = `symbolButton -image ($path+"mainimage.bmp") -command ("ezRenderUpdateMainLayout;")`;
+			
+			// Creat tools
+			string $ctFrameLayout = `frameLayout -label "Creat Tools" -labelAlign "top" -cl true -cc "ezRenderMainLayoutCollapse(119);" -cll true  -borderStyle "etchedIn"`;
+				string $ctFormLayout = `formLayout`;
+					string $mrLayer		 = `button -l "创建 Mentalray层"  -w 105 -h 25 -command "ezRenderMainLayoutRenderLayer(\"mr\")"`;
+					string $swLayer		 = `button -l "创建 software 层"  -w 105 -h 25 -command "ezRenderMainLayoutRenderLayer(\"sw\")"`;
+					string $bgLayer		 = `button -l "创建Background层"  -w 105 -h 25 -command "ezRenderMainLayoutRenderLayer(\"bg\")"`;
+					string $matarial	 = `button -l "创建材质工具    "  -w 105 -h 25 -command "ezRenderMainLayoutMaterial"`;
+					string $reference	 = `button -l "打开灯光列表    "  -w 105 -h 25 -command "ezRenderMainLayoutLight"`;
+					string $motionblur	 = `button -l "批量运动模糊    "  -w 105 -h 25 -command "ezRenderBlur2D"`;
+					string $bgLight		 = `button -l "重建场景灯光    "  -w 105 -h 25 -command "source ezLightingLink.mel;"`;
+					string $rename		 = `button -l "选择物体建层隐藏"  -w 105 -h 25 -command "ezRenderMainLayoutCreatNorenderLayer"`;
+					//string $rename		 = `button -l "选择命名渲染层  "  -w 105 -h 25 -command "ezRenderMainLayoutRenderLayerName"`;
+					string $shadow		 = `button -l "Show "      -ann "只显示nurbs，poly，light物体"     -w 50 -h 25 -command "ezRenderShow"`;
+					string $get		 = `button -l "Get    "		-ann "导入当前文件对应的摄像机"  -w 50 -h 25 -command "ezRenderMainLayoutGetCamera"`;
+					string $repla		 = `button -l "Repla  "	 -ann "根据选择的Master自动导入对应Reference并导动画"  -w 50 -h 25 -command "slAnimCopyForRef"`;
+					string $fxcloth		 = `button -l "fxcloth"		-ann "根据文件名自动导入fxcloth并替换原模型"  -w 50 -h 25 -command ""`;//ezRenderReplaceFxCloth
+				setParent ..;
+				formLayout -edit
+					-attachForm	$mrLayer		"top"		5
+					-attachForm	$mrLayer		"left"		10
+
+					-attachForm	$swLayer		"top"		5
+					-attachControl	$swLayer		"left"		10	$mrLayer
+
+					-attachControl	$bgLayer		"top"		5	$mrLayer
+					-attachForm	$bgLayer		"left"		10	
+					
+					-attachControl	$matarial		"top"		5	$swLayer
+					-attachControl	$matarial		"left"		10	$bgLayer
+
+					-attachControl	$reference		"top"		5	$bgLayer
+					-attachForm	$reference		"left"		10	
+					
+					-attachControl	$motionblur		"top"		5	$matarial
+					-attachControl	$motionblur		"left"		10	$reference
+
+					-attachControl	$bgLight		"top"		5	$reference
+					-attachForm	$bgLight		"left"		10	
+					
+					-attachControl	$rename			"top"		5	$motionblur
+					-attachControl	$rename			"left"		10	$bgLight
+
+					-attachForm	$shadow			"top"		5
+					-attachControl	$shadow			"left"		10	$swLayer
+
+					-attachControl	$get			"top"		5	$shadow
+					-attachControl	$get			"left"		10	$matarial
+
+					-attachControl	$repla			"top"		5	$get
+					-attachControl	$repla			"left"		10	$motionblur
+
+					-attachControl	$fxcloth		"top"		5	$repla
+					-attachControl	$fxcloth		"left"		10	$rename
+				$ctFormLayout;
+			setParent ..;
+
+			// Character control
+			string $ccFrameLayout = `frameLayout -label "Character Control" -labelAlign "top" -cl true  -cll true -cc "ezRenderMainLayoutCollapse(0)" -borderStyle "etchedIn" `;
+				string $ccColumnLayout = `columnLayout -adjustableColumn true ccColumnLayout`;
+					string $ccFrameLayout1 = `frameLayout -label "" -labelAlign "top" -cl false  -cll false  -bv false -borderStyle "etchedIn" `;
+						string $ccFormLayout = `formLayout `;
+							string $disChar		= `button -l "显示角色"  -w 52 -h 15 -command "ezAllCharaCon(0)"`;
+							string $disHigh		= `button -l "显示高精"  -w 52 -h 15 -command "ezAllCharaCon(1)"`;
+							string $disLow		= `button -l "显示低精"  -w 52 -h 15 -command "ezAllCharaCon(2)"`;
+							string $disHair		= `button -l "显示头发"  -w 52 -h 15 -command "ezAllCharaCon(3)"`;
+							string $smooth		= `button -l "光滑角色"  -w 52 -h 15 -command "ezAllCharaCon(4)"`;
+						setParent ..;
+						formLayout -edit
+							-attachForm	$disChar		"top"		0
+							-attachForm	$disChar		"left"		35
+
+							-attachForm	$disHigh		"top"		0
+							-attachControl	$disHigh		"left"		0	$disChar
+							
+							-attachForm	$disLow			"top"		0
+							-attachControl	$disLow			"left"		0	$disHigh
+							
+							-attachForm	$disHair		"top"		0
+							-attachControl	$disHair		"left"		0	$disLow
+							
+							-attachForm	$smooth			"top"		0
+							-attachControl	$smooth			"left"		0	$disHair
+						$ccFormLayout;
+					setParent ..;
+					frameLayout -label "" -labelAlign "top" -cl false  -cll false  -bv false -borderStyle "etchedIn" ;
+						rowColumnLayout	 -numberOfColumns 3 -columnWidth 1 215 -columnWidth 2 52 -columnWidth 3 31  ezRenderMainLayout_charCon;
+							for ($char in $master)
+							{
+								
+								if (`objExists ($char+"."+$charAttr[0])` && `objExists ($char+"."+$charAttr[1])`)
+								{
+									string $buffer[];
+									int $num = `tokenize $char ":_" $buffer`;
+									$charName = $buffer[$num-2];
+									
+									
+									int $skin = `getAttr ($char+"."+$charAttr[0])`;
+									int $proxy = `getAttr ($char+"."+$charAttr[1])`;
+									int $skeleton = `getAttr ($char+"."+$charAttr[2])`;
+									if ($skin == 1)	$num = 2;
+									else if ($proxy ==1) $num =3;
+									else if ($skeleton == 0 ) $num = 1;
+									else 
+									{
+										$num =2;
+										setAttr ($char+"."+$charAttr[0]) 1;
+									}
+									radioButtonGrp  -numberOfRadioButtons 3 	-columnWidth4 56 52 52 52  -labelArray4  "" ""  ""  ""
+									-select $num
+									-onCommand1 ("ezHideShow(\""+$char+"\",0)")
+									-onCommand2 ("ezHideShow(\""+$char+"\",1)")
+									-onCommand3 ("ezHideShow(\""+$char+"\",2)")
+									-label (""+$charName +"")
+									($char+"_char_con")
+									;
+									
+									int $hair=0;
+									int $adj = `objExists ($char+"."+$charAttr[3])`;
+									if ($adj == 1)	$hair = `getAttr ($char+"."+$charAttr[3])`;
+									checkBox  -label ""
+									-enable $adj -value $hair 
+									-onCommand  ("ezHideShow(\""+$char+"\",3)") 
+									-offCommand  ("ezHideShow(\""+$char+"\",4)")  
+									 ($char + "_hair_con");
+									
+									
+									int $smooth = `getAttr ($char + ".smooth")`;
+									checkBox  -label "" 
+									-value $smooth
+									-onCommand  ("ezHideShow(\""+$char+"\",5)")
+									-offCommand  ("ezHideShow(\""+$char+"\",6)")
+									($char + "_smooth_con");
+								}
+							}
+						setParent ..;
+					setParent ..;
+				setParent ..;
+			setParent ..;
+
+			// Camera Tools
+			string $cmFrameLayout = `frameLayout -label "Camera Tools" -labelAlign "top" -cl true -cll true -cc "ezRenderMainLayoutCollapse(58)" -borderStyle "etchedIn"`;
+				string $cmFormLayout = `formLayout `;
+					//Scene Camera
+					string $camList = `optionMenuGrp -l "S:"  -columnWidth 1 20 -columnWidth 2 128   -cc "ezRenderMainLayoutCamLoop(2,0)" ezRenderMainLayout_camList`;
+					int $exCam = 0;
+					for ($camShape in $camera)
+					{
+						string $cam[] = `listRelatives -p $camShape`;
+						if (!(startsWith($cam[0],"top") || startsWith($cam[0],"front") || startsWith($cam[0],"side")))
+						{
+							menuItem -label $cam ;	
+						}
+						if ($cam[0] == $curCam)
+							$exCam = 1;
+					}
+					if ($exCam)
+						optionMenuGrp -edit -v $curCam $camList;
+					else 
+						optionMenuGrp -edit -v persp $camList;
+					string $camFront	= `button -l "<<front"  -w 45 -h 25 -command "ezRenderMainLayoutCamLoop(0,0)"`;
+					string $camBack 	= `button -l "back >>"  -w 45 -h 25 -command "ezRenderMainLayoutCamLoop(1,0)"`;
+					
+					//RenderView Camera
+					string $rcamList = `optionMenuGrp -l "R:"  -columnWidth 1 20 -columnWidth 2 128  -cc "ezRenderMainLayoutCamLoop(2,1)" ezRenderMainLayout_rcamList`;
+					int $exCam = 0;
+					for ($camShape in $camera)
+					{
+						string $cam[] = `listRelatives -p $camShape`;
+						if (!(startsWith($cam[0],"top") || startsWith($cam[0],"front") || startsWith($cam[0],"side")))
+						{
+							menuItem -label $cam ;	
+						}
+						if ($cam[0] == $curCam)
+							$exCam = 1;
+					}
+					if ($exCam)
+						optionMenuGrp -edit -v $curCam $rcamList;
+					else 
+						optionMenuGrp -edit -v persp $rcamList;
+					string $rcamFront	= `button -l "<<front"  -w 45 -h 25 -command "ezRenderMainLayoutCamLoop(0,1)"`;
+					string $rcamBack 	= `button -l "back >>"  -w 45 -h 25 -command "ezRenderMainLayoutCamLoop(1,1)"`;
+				setParent ..;
+				formLayout -edit
+					-attachForm	$camList		"top"		5
+					-attachForm	$camList		"left"		0
+					
+					-attachControl	$camFront		"top"		5	$camList
+					-attachForm	$camFront		"left"		20
+					
+					-attachControl	$camBack		"top"		5	$camList
+					-attachControl	$camBack		"left"		10	$camFront
+
+					-attachForm	$rcamList		"top"		5
+					-attachForm	$rcamList		"left"		150	
+					
+					-attachControl	$rcamFront		"top"		5	$rcamList
+					-attachForm	$rcamFront		"left"		170	
+					
+					-attachControl	$rcamBack		"top"		5	$rcamList
+					-attachControl	$rcamBack		"left"		10	$rcamFront
+				$cmFormLayout;
+			setParent ..;
+
+			// Mouth Tools
+			/*string $mtFrameLayout = `frameLayout -label "Mouth Tools" -labelAlign "top" -cl true  -cll true -cc "ezRenderMainLayoutCollapse(87)" -borderStyle "etchedIn"`;
+				string $mtFormLayout = `formLayout`;
+					string $benImage = `symbolButton -image ($path+"ben.bmp") -command ("ezRenderMainLayoutSelectMouth(\"ben\")")`;
+					string $izzyImage = `symbolButton -image ($path+"izzy.bmp") -command ("ezRenderMainLayoutSelectMouth(\"izzy\")")`;
+					string $yasmineImage = `symbolButton -image ($path+"yasmine.bmp") -command ("ezRenderMainLayoutSelectMouth(\"yasmine\")")`;
+					string $roxImage = `symbolButton -image ($path+"rox.bmp") -command ("ezRenderMainLayoutSelectMouth(\"roxanne\")")`;
+					string $wellImage = `symbolButton -image ($path+"well.bmp") -command ("ezRenderMainLayoutSelectMouth(\"well\")")`;
+					string $jakeImage = `symbolButton -image ($path+"jake.bmp") -command ("ezRenderMainLayoutSelectMouth(\"jake\")")`;
+					string $omarImage = `symbolButton -image ($path+"omar.bmp") -command ("ezRenderMainLayoutSelectMouth(\"omar\")")`;
+					string $jazariImage = `symbolButton -image ($path+"jazari.bmp") -command ("ezRenderMainLayoutSelectMouth(\"jazari\")")`;
+					string $pygmalionImage = `symbolButton -image ($path+"pygmalion.bmp") -command ("ezRenderMainLayoutSelectMouth(\"pygmalion\")")`;
+					string $didoImage = `symbolButton -image ($path+"dido.bmp") -command ("ezRenderMainLayoutSelectMouth(\"dido\")")`;
+				setParent ..;
+				formLayout -edit
+					-attachForm		$benImage			"top"		5
+					-attachForm		$benImage			"left"		10
+
+					-attachForm		$izzyImage			"top"		5
+					-attachControl	$izzyImage			"left"		10	$benImage
+
+					-attachForm		$yasmineImage		"top"		5
+					-attachControl	$yasmineImage		"left"		10	$izzyImage
+
+					-attachForm		$roxImage			"top"		5
+					-attachControl	$roxImage			"left"		10	$yasmineImage
+
+					-attachForm		$wellImage			"top"		5
+					-attachControl	$wellImage			"left"		10	$roxImage
+
+					-attachForm		$jakeImage			"top"		5
+					-attachControl	$jakeImage			"left"		10	$wellImage
+
+					-attachForm		$omarImage			"top"		5
+					-attachControl	$omarImage			"left"		10	$jakeImage
+
+					-attachControl	$jazariImage		"top"		5	$benImage
+					-attachForm		$jazariImage		"left"		10
+
+					-attachControl	$pygmalionImage		"top"		5	$benImage
+					-attachControl	$pygmalionImage		"left"		10	$jazariImage
+
+					-attachControl	$didoImage			"top"		5	$benImage
+					-attachControl	$didoImage			"left"		10	$pygmalionImage
+				$mtFormLayout;
+			setParent ..;*/
+
+			string $camFront	= `button -l "CLOSE"  -w 100 -h 30 -command "deleteUI ez_render_mainLayout;"`;
+	
+	window -e -w 310 -h 300 ez_render_mainLayout; // -h 340 
+	showWindow ez_render_mainLayout;
+	frameLayout	-e -cl false $ctFrameLayout;
+
+	// Character control
+	source "ezAllCharCon.mel";
+	
+	//Camera Tools 
+	source "ezRenderCam.mel";
+
+	//批量运动模糊
+	source "ezRenderBlur2D.mel";
+	
+	//fxcloth替换原模型cloth	
+	//source "ezRenderReplaceFxCloth.mel";
+	
+	//替换reference并导动画
+	source "slAnimCopyForRef.mel";
+	
+	//切换显示模式
+	source "ezRenderShow.mel";
+
+	//材质面板
+	source "ezRenderMainLayoutMaterial.mel";
+
+	//分层面板
+	source "ezRenderMainLayoutRenderLayer.mel";
+
+	//灯光列表
+	source "ezRenderMainLayoutLight.mel";
+
+	//Get Scene Camera
+	source "zwCameraImportExport.mel";
+}
+
+global proc ezRenderUpdateMainLayout()
+{
+	ezRenderUpdateSceneChars;
+	ezRenderUpdateCameras;
+	window -e -w 310 ez_render_mainLayout;
+}
+
+global proc ezRenderUpdateSceneChars()
+{
+	string $charAttr[] = {"skinning_vis","skinProxy_vis","skeleton_vis","hair_vis"};
+	string $master[] = `ls "*MASTER" "*:*MASTER" "*:*:*MASTER"`;
+	
+	string $children[] = `rowColumnLayout -q -ca  ezRenderMainLayout_charCon`;
+	for ($ui in $children)
+	{
+		deleteUI $ui;
+	}
+
+	setParent ezRenderMainLayout_charCon;
+		for ($char in $master)
+		{
+			if (`objExists ($char+"."+$charAttr[0])`)
+			{
+				string $buffer[];
+				int $num = `tokenize $char ":_" $buffer`;
+				$charName = $buffer[$num-2];
+				
+				
+				int $skin = `getAttr ($char+"."+$charAttr[0])`;
+				int $proxy = `getAttr ($char+"."+$charAttr[1])`;
+				int $skeleton = `getAttr ($char+"."+$charAttr[2])`;
+				if ($skin == 1)	$num = 2;
+				else if ($proxy ==1) $num =3;
+				else if ($skeleton == 0 ) $num = 1;
+				else 
+				{
+					$num =2;
+					setAttr ($char+"."+$charAttr[0]) 1;
+				}
+				radioButtonGrp  -numberOfRadioButtons 3 	-columnWidth4 56 52 52 52  -labelArray4  "" ""  ""  ""
+				-select $num
+				-onCommand1 ("ezHideShow(\""+$char+"\",0)")
+				-onCommand2 ("ezHideShow(\""+$char+"\",1)")
+				-onCommand3 ("ezHideShow(\""+$char+"\",2)")
+				-label (""+$charName +"")
+				($char+"_char_con")
+				;
+				
+				int $hair=0;
+				int $adj = `objExists ($char+"."+$charAttr[3])`;
+				if ($adj == 1)	$hair = `getAttr ($char+"."+$charAttr[3])`;
+				checkBox  -label ""
+				-enable $adj -value $hair 
+				-onCommand  ("ezHideShow(\""+$char+"\",3)") 
+				-offCommand  ("ezHideShow(\""+$char+"\",4)")  
+				 ($char + "_hair_con");
+				
+				
+				int $smooth = `getAttr ($char + ".smooth")`;
+				checkBox  -label "" 
+				-value $smooth
+				-onCommand  ("ezHideShow(\""+$char+"\",5)")
+				-offCommand  ("ezHideShow(\""+$char+"\",6)")
+				($char + "_smooth_con");
+			}
+		}
+}
+
+global proc ezRenderUpdateCameras()
+{
+	string $camera[] = `ls -type camera`;
+	string $curCam = `lookThru -q `;
+
+	string $children[] = `optionMenuGrp -q -ill ezRenderMainLayout_camList`;
+	string $shot[] = `optionMenuGrp -q -ils ezRenderMainLayout_camList`;
+	string $longOpm = `substring $children[0] 1 (size($children[0])-size($shot[0])-1)`;
+	for ($ui in $children)
+	{	
+		deleteUI $ui;
+	}
+	for ($camShape in $camera)
+	{
+		string $cam[] = `listRelatives -p $camShape`;
+		if (!(startsWith($cam[0],"top") || startsWith($cam[0],"front") || startsWith($cam[0],"side")))
+		{
+			menuItem -parent $longOpm -label $cam ;	
+		}
+	}
+	optionMenuGrp -edit -v $curCam ezRenderMainLayout_camList;
+	
+	string $children[] = `optionMenuGrp -q -ill ezRenderMainLayout_rcamList`;
+	string $shot[] = `optionMenuGrp -q -ils ezRenderMainLayout_rcamList`;
+	string $longOpm = `substring $children[0] 1 (size($children[0])-size($shot[0])-1)`;
+	for ($ui in $children)
+		deleteUI $ui;
+	for ($camShape in $camera)
+	{
+		string $cam[] = `listRelatives -p $camShape`;
+		if (!(startsWith($cam[0],"top") || startsWith($cam[0],"front") || startsWith($cam[0],"side")))
+		{
+			menuItem -parent $longOpm -label $cam ;	
+		}
+	}
+	optionMenuGrp -edit -v $curCam ezRenderMainLayout_rcamList;
+}
+
+global proc ezRenderMainLayoutCamLoop(int $mod,int $scene)
+{
+	if ($mod == 2)
+	{
+		string $select;
+		if ($scene)
+			$select = `optionMenuGrp -q -v ezRenderMainLayout_rcamList`;
+		else 
+			$select = `optionMenuGrp -q -v ezRenderMainLayout_camList`;
+		
+		if ($scene)
+		{
+			RenderViewWindow;
+			renderWindowRenderCamera snapshot renderView $select;
+			optionMenuGrp -e -v $select ezRenderMainLayout_rcamList;
+		}
+		else
+		{	
+			optionMenuGrp -e -v $select ezRenderMainLayout_camList;
+			lookThru $select;
+		}
+	}
+	else
+	{
+		string $default[] = {"top","front","side"};
+		string $shapes[] = `ls -type camera`;
+		string $cams[]={};
+
+		for ($cam in $shapes)
+		{
+			$trans = `listRelatives -p $cam`;
+			if (stringArrayCount($trans[0],$default) == 0)
+			{
+				$cams[size($cams)] = $trans[0];
+			}
+		}
+		
+		string $vis;
+		if ($scene)
+			$vis = `renderWindowEditor -q  -crc renderView`;
+		else
+			$vis = `lookThru -q`;
+		string $curCam[] = `ls  $vis`;
+		int $num = 0;
+		for ($i=0;$i<size($cams) ;$i++ )
+		{
+			if ($cams[$i] == $curCam[0]) $num = $i;
+		}
+		
+		if ($mod == 0)
+		{
+			if ($num == 0)
+				$num = (size($cams)-1);
+			else	$num = $num - 1;
+		}
+		else if ($mod == 1)
+		{
+			if ($num == (size($cams)-1))
+				$num = 0;
+			else	$num = $num + 1;	
+		}
+
+		if ($scene)
+		{	
+			RenderViewWindow;
+			renderWindowRenderCamera snapshot renderView  $cams[$num];
+			optionMenuGrp -e -v $cams[$num] ezRenderMainLayout_rcamList;
+		}
+		else
+		{
+			lookThru $cams[$num];
+			optionMenuGrp -e -v $cams[$num] ezRenderMainLayout_camList;
+		}
+
+	}
+}
+
+global proc int ezRenderMainLayoutSelectMouthGetSmooth(string $head)
+{
+	int $smooth = 0;
+	string $smoothnode[] = `listHistory -pdo true -gl true  $head`;
+	for ($node in $smoothnode)
+	{
+		if (`nodeType $node` == "polySmoothFace")
+		{
+			$smooth += `getAttr ($node+".dv")`;
+		}
+	}
+	return $smooth;
+}
+
+global proc ezRenderMainLayoutSelectMouth(string $char)
+{
+	switch ($char)
+	{
+		case "ben" :
+			string $faces[]={};
+			string $head[] = `ls "*:ben_*_head" "*ben_*_head" "*:*:ben_*_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[906:995]","[1021:1025]","[1062:1071]","[1094:1098]"};
+			if ($smooth == 1)
+				$faces = {"[906:995]","[1021:1025]","[1062:1071]","[1094:1098]",
+						  "[3946:4215]","[4289:4303]","[4412:4441]","[4506:4520]"};
+			if ($smooth == 2)
+				$faces = {"[906:995]","[1021:1025]","[1062:1071]","[1094:1098]",
+						  "[3946:4215]","[4289:4303]","[4412:4441]","[4506:4520]",
+						  "[7652:7921]","[7997:8011]","[8120:8149]","[8216:8230]","[16772:17581]","[17801:17845]","[18170:18259]","[18452:18496]"};
+			if ($smooth == 3)
+				$faces = {"[906:995]","[1021:1025]","[1062:1071]","[1094:1098]",
+						  "[3946:4215]","[4289:4303]","[4412:4441]","[4506:4520]",
+						  "[7652:7921]","[7997:8011]","[8120:8149]","[8216:8230]","[16772:17581]","[17801:17845]","[18170:18259]","[18452:18496]",
+						  "[22454:22723]","[22799:22813]","[22922:22951]","[23018:23032]","[31574:32383]","[32603:32647]","[32972:33061]","[33254:33298]","[42692:43501]",
+						  "[43727:43771]","[44096:44185]","[44384:44428]","[70052:72481]","[73139:73273]","[74246:74515]","[75092:75226]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "izzy" :
+			string $faces[]={};
+			string $head[] = `ls "*:izzy_c_hi_head_new" "*izzy_c_hi_head_new" "*:*:izzy_c_hi_head_new"`;
+			if (`objExists $head[0]`)
+			{
+				string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+				if ($smooth == 0)
+					$faces = {"[113:157]","[514:518]","[523:527]","[656:700]","[1056:1060]","[1065:1069]"};
+				if ($smooth == 1)
+					$faces = {"[113:157]","[514:518]","[523:527]","[656:700]","[1056:1060]","[1065:1069]",
+					"[1485:1619]","[2683:2697]","[2710:2724]","[3104:3238]","[4299:4313]","[4326:4340]"};
+				if ($smooth == 2)
+					$faces = {"[113:157]","[514:518]","[523:527]","[656:700]","[1056:1060]","[1065:1069]",
+					"[1485:1619]","[2683:2697]","[2710:2724]","[3104:3238]","[4299:4313]","[4326:4340]",
+					"[4915:5049]","[6118:6132]","[6145:6159]","[6544:6678]","[7744:7758]","[7771:7785]","[9031:9435]",
+					"[12625:12669]","[12706:12750]","[13888:14292]","[17473:17517]","[17554:17598]"};
+			}
+			else 
+			{
+				$head = `ls "*:izzy_c_hi_head" "*izzy_c_hi_head" "*:*:izzy_c_hi_head" "*:*izzyd_c_hi_head" "*izzyd_c_hi_head" "*:*:*izzyd_c_hi_head"`;
+				if (`objExists $head[0]`)
+				{
+					string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+					if ($smooth == 0)
+						$faces = {"[113:157]","[518:522]","[527:531]","[660:704]","[1065:1069]","[1074:1078]"};
+					if ($smooth == 1)
+						$faces = {"[113:157]","[518:522]","[527:531]","[660:704]","[1065:1069]","[1074:1078]",
+								  "[1467:1601]","[2676:2690]","[2703:2717]","[3097:3231]","[4307:4321]","[4334:4348]"};
+					if ($smooth == 2)
+						$faces = {"[113:157]","[518:522]","[527:531]","[660:704]","[1065:1069]","[1074:1078]",
+								  "[1467:1601]","[2676:2690]","[2703:2717]","[3097:3231]","[4307:4321]","[4334:4348]",
+								  "[4843:4977]","[6058:6072]","[6085:6099]","[6484:6618]","[7699:7713]","[7726:7740]",
+								  "[8905:9309]","[12532:12576]","[12613:12657]","[13795:14199]","[17425:17469]","[17506:17550]"};
+				}
+			}
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "yasmine" :
+			string $faces[]={};
+			string $head[] = `ls "*:yasmine_*_body" "*yasmine_*_body" "*:*:yasmine_*_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[500:579]","[592:599]","[1119:1198]","[1211:1218]"};
+			if ($smooth == 1)
+				$faces = {"[500:579]","[592:599]","[1119:1198]","[1211:1218]",
+						 "[6013:6252]","[6289:6312]","[7864:8103]","[8140:8163]"};
+			if ($smooth == 2)
+				$faces = {"[500:579]","[592:599]","[1119:1198]","[1211:1218]",
+						 "[6013:6252]","[6289:6312]","[7864:8103]","[8140:8163]",
+						 "[19548:19787]","[19824:19847]","[21405:21644]","[21681:21704]",
+						 "[36087:36806]","[36915:36986]","[41640:42359]","[42468:42539]"};
+			if ($smooth == 3)
+				$faces = {"[500:579]","[592:599]","[1119:1198]","[1211:1218]",
+						 "[6013:6252]","[6289:6312]","[7864:8103]","[8140:8163]",
+						 "[19548:19787]","[19824:19847]","[21405:21644]","[21681:21704]",
+						 "[36087:36806]","[36915:36986]","[41640:42359]","[42468:42539]",
+						 "[73692:73931]","[73968:73991]","[75549:75788]","[75825:75848]",
+						 "[90231:90950]","[91059:91130]","[95784:96503]","[96612:96683]",
+						 "[130836:131555]","[131664:131735]","[136407:137126]","[137235:137306]",
+						 "[180453:182612]","[182937:183152]","[197112:199271]","[199596:199811]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "roxanne" :
+			string $faces[]={};
+			string $head[] = `ls "*:roxanne_*_hi_head" "*roxanne_*_hi_head" "*:*:roxanne_*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[0:60]","[1140:1143]","[1145:1148]","[1197:1198]","[1317:1363]"};
+			if ($smooth == 1)
+				$faces = {"[0:60]","[1140:1143]","[1145:1148]","[1197:1198]","[1317:1363]",
+						  "[1398:1580]","[4816:4827]","[4831:4842]","[4987:4992]","[5347:5487]"};
+			if ($smooth == 2)
+				$faces = {"[0:60]","[1140:1143]","[1145:1148]","[1197:1198]","[1317:1363]",
+						  "[1398:1580]","[4816:4827]","[4831:4842]","[4987:4992]","[5347:5487]",
+						  "[5590:5772]","[9010:9021]","[9025:9036]","[9181:9186]","[9541:9681]","[9784:10332]",
+						  "[20038:20073]","[20083:20118]","[20551:20568]","[21631:22053]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "well" :
+			string $faces[]={};
+			string $head[] = `ls "*:*clutchford*_hi_head" "*clutchford*_hi_head" "*:*:*clutchford*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[601:648]","[653:655]","[657]","[666:680]","[1278:1325]","[1330:1332]","[1334]","[1343:1357]","[1381:1406]"};
+			if ($smooth == 1)
+				$faces = {"[601:648]","[653:655]","[657]","[666:680]","[1278:1325]","[1330:1332]","[1334]","[1343:1357]","[1381:1406]",
+						  "[3257:3400]","[3413:3421]","[3425:3427]","[3452:3495]","[5295:5438]","[5451:5459]","[5463:5465]","[5490:5533]","[5603:5678]"};
+			if ($smooth == 2)
+				$faces = {"[601:648]","[653:655]","[657]","[666:680]","[1278:1325]","[1330:1332]","[1334]","[1343:1357]","[1381:1406]",
+						  "[3257:3400]","[3413:3421]","[3425:3427]","[3452:3495]","[5295:5438]","[5451:5459]","[5463:5465]","[5490:5533]","[5603:5678]",
+						  "[7599:7742]","[7755:7763]","[7767:7769]","[7794:7838]","[9630:9773]","[9786:9794]","[9798:9800]","[9825:9869]","[9939:10016]",
+						  "[15567:15998]","[16035:16061]","[16071:16079]","[16152:16283]","[21681:22112]","[22149:22175]","[22185:22193]","[22266:22397]",
+						  "[22605:22832]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "jake" :
+			string $faces[]={};
+			string $head[] = `ls "*:*jake*_hi_head" "*jake*_hi_head" "*:*:*jake*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[186:190]","[425:427]","[440:443]","[544:597]","[782:786]","[1021:1023]","[1036:1039]","[1140:1193]"};
+			if ($smooth == 1)
+				$faces = {"[186:190]","[425:427]","[440:443]","[544:597]","[782:786]","[1021:1023]","[1036:1039]","[1140:1193]",
+						  "[1895:1909]","[2612:2620]","[2657:2668]","[2968:3127]","[3679:3693]","[4396:4404]","[4441:4452]","[4752:4911]"};
+			if ($smooth == 2)
+				$faces = {"[186:190]","[425:427]","[440:443]","[544:597]","[782:786]","[1021:1023]","[1036:1039]","[1140:1193]",
+						  "[1895:1909]","[2612:2620]","[2657:2668]","[2968:3127]","[3679:3693]","[4396:4404]","[4441:4452]","[4752:4911]",
+						  "[5912:5926]","[6629:6637]","[6674:6685]","[6986:7147]","[7700:7714]","[8417:8425]","[8462:8473]","[8774:8935]","[11039:11083]",
+						  "[13190:13216]","[13325:13360]","[14258:14737]","[16391:16435]","[18542:18568]","[18677:18712]","[19610:20089]"};
+			if ($smooth == 3)
+				$faces = {"[186:190]","[425:427]","[440:443]","[544:597]","[782:786]","[1021:1023]","[1036:1039]","[1140:1193]",
+						  "[1895:1909]","[2612:2620]","[2657:2668]","[2968:3127]","[3679:3693]","[4396:4404]","[4441:4452]","[4752:4911]",
+						  "[5912:5926]","[6629:6637]","[6674:6685]","[6986:7147]","[7700:7714]","[8417:8425]","[8462:8473]","[8774:8935]","[11039:11083]",
+						  "[13190:13216]","[13325:13360]","[14258:14737]","[16391:16435]","[18542:18568]","[18677:18712]","[19610:20089]",
+						  "[21974:21988]","[22691:22699]","[22736:22747]","[23048:23209]","[23762:23776]","[24479:24487]","[24524:24535]","[24836:24997]",
+						  "[27101:27145]","[29252:29278]","[29387:29422]","[30320:30799]","[32453:32497]","[34604:34630]","[34739:34774]","[35672:36151]",
+						  "[39152:39196]","[41303:41329]","[41438:41473]","[42374:42859]","[44516:44560]","[46667:46693]","[46802:46837]","[47738:48223]",
+						  "[54533:54667]","[60986:61066]","[61391:61498]","[64190:65629]","[70589:70723]","[77042:77122]","[77447:77554]","[80246:81685]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "omar" :
+			string $faces[]={};
+			string $head[] = `ls "*:*omar*_hi_head" "*omar*_hi_head" "*:*:*omar*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[0:67]","[76:83]","[85:151]","[160:168]","[1454:1455]","[1480:1503]"};
+			if ($smooth == 1)
+				$faces = {"[0:67]","[76:83]","[85:151]","[160:168]","[1454:1455]","[1480:1503]",
+						  "[1534:1737]","[1762:1785]","[1789:1989]","[2014:2040]","[5896:5901]","[5972:6043]"};
+			if ($smooth == 2)
+				$faces = {"[0:67]","[76:83]","[85:151]","[160:168]","[1454:1455]","[1480:1503]",
+						  "[1534:1737]","[1762:1785]","[1789:1989]","[2014:2040]","[5896:5901]","[5972:6043]",
+						  "[6134:6337]","[6362:6385]","[6389:6589]","[6614:6640]","[10496:10501]","[10574:10645]","[10736:11347]","[11420:11491]",
+						  "[11501:12103]","[12176:12256]","[23822:23839]","[24050:24265]"};
+			if ($smooth == 3)
+				$faces = {"[0:67]","[76:83]","[85:151]","[160:168]","[1454:1455]","[1480:1503]",
+						  "[1534:1737]","[1762:1785]","[1789:1989]","[2014:2040]","[5896:5901]","[5972:6043]",
+						  "[6134:6337]","[6362:6385]","[6389:6589]","[6614:6640]","[10496:10501]","[10574:10645]","[10736:11347]","[11420:11491]",
+						  "[11501:12103]","[12176:12256]","[23822:23839]","[24050:24265]",
+						  "[24536:24739]","[24764:24787]","[24791:24991]","[25016:25042]","[28898:28903]","[28976:29047]","[29138:29749]","[29822:29893]",
+						  "[29903:30505]","[30578:30658]","[42224:42241]","[42452:42667]","[42938:43549]","[43622:43693]","[43703:44305]","[44378:44458]",
+						  "[56024:56041]","[56258:56473]","[56744:58579]","[58796:59011]","[59039:60847]","[61064:61306]","[96002:96055]","[96686:97333]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "jazari" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0120jazari*_hi_head" "*cc0120jazari*_hi_head" "*:*:*cc0120jazari*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[207:294]","[945:1032]","[1476:1497]"};
+			if ($smooth == 1)
+				$faces = {"[207:294]","[945:1032]","[1476:1497]","[2118:2381]","[4331:4594]","[5924:5989]"};
+			if ($smooth == 2)
+				$faces = {"[207:294]","[945:1032]","[1476:1497]","[2118:2381]","[4331:4594]","[5924:5989]","[6611:6874]","[8825:9088]","[10418:10483]","[12344:13135]"
+						  ,"[18983:19774]","[23762:23959]"};
+			if ($smooth == 3)
+				$faces = {"[207:294]","[945:1032]","[1476:1497]","[2118:2381]","[4331:4594]","[5924:5989]","[6611:6874]","[8825:9088]","[10418:10483]","[12344:13135]"
+						  ,"[18983:19774]","[23762:23959]","[24581:24844]","[26795:27058]","[28388:28453]","[30314:31105]","[36953:37744]","[41732:41929]","[43793:44584]"
+						  ,"[50435:51226]","[55214:55411]","[60992:63367]","[80909:83284]","[95246:95839]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "pygmalion" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0132pygmalion*_hi_head" "*cc0132pygmalion*_hi_head" "*:*:*cc0132pygmalion*_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[158:227]","[832:901]","[1520:1547]"};
+			if ($smooth == 1)
+				$faces = {"[158:227]","[832:901]","[1520:1547]","[2050:2259]","[4072:4281]","[6136:6219]"};
+			if ($smooth == 2)
+				$faces = {"[158:227]","[832:901]","[1520:1547]","[2050:2259]","[4072:4281]","[6136:6219]","[6778:6987]","[8800:9009]","[10864:10947]","[12454:13083]"
+						  ,"[18520:19149]","[24712:24963]"};
+			if ($smooth == 3)
+				$faces = {"[158:227]","[832:901]","[1520:1547]","[2050:2259]","[4072:4281]","[6136:6219]","[6778:6987]","[8800:9009]","[10864:10947]","[12454:13083]"
+						  ,"[18520:19149]","[24712:24963]","[25690:25899]","[27712:27921]","[29776:29859]","[31366:31995]","[37432:38061]","[43624:43875]","[45550:46179]"
+						  ,"[51616:52245]","[57808:58059]","[62578:64467]","[80776:82665]","[99352:100107]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "dido" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0131dido*_hi_body" "*cc0131dido*_hi_body" "*:*:*cc0131dido*_hi_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[0:76]","[1545:1621]"};
+			if ($smooth == 1)
+				$faces = {"[0:76]","[1545:1621]","[3090:3320]","[7724:7954]"};
+			if ($smooth == 2)
+				$faces = {"[0:76]","[1545:1621]","[3090:3320]","[7724:7954]","[12358:12588]","[16993:17223]","[21628:22320]","[35530:36222]"};
+			if ($smooth == 3)
+				$faces = {"[0:76]","[1545:1621]","[3090:3320]","[7724:7954]","[12358:12588]","[16993:17223]","[21628:22320]","[35530:36222]","[49432:49662]","[54067:54297]"
+						  ,"[58702:59394]","[72604:73296]","[86506:87198]","[100411:101103]","[114316:116394]","[156022:158100]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "ghost" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0112ghost*_hi_body_1" "*cc0112ghost*_hi_body_1" "*:*:*cc0112ghost*_hi_body_1"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[553:582]","[608:617]","[2182:2211]","[2237:2246]","[3258:3277]"};
+			if ($smooth == 1)
+				$faces = {"[553:582]","[608:617]","[2182:2211]","[2237:2246]","[3258:3277]",
+						"[5019:5108]","[5184:5213]","[9912:10001]","[10077:10106]","[13148:13207]"};
+			if ($smooth == 2)
+				$faces = {"[553:582]","[608:617]","[2182:2211]","[2237:2246]","[3258:3277]",
+						"[5019:5108]","[5184:5213]","[9912:10001]","[10077:10106]","[13148:13207]",
+						"[15119:15208]","[15284:15313]","[20006:20095]","[20171:20200]","[23234:23293]",
+						"[28517:28786]","[29012:29101]","[43196:43465]","[43691:43780]","[52904:53083]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "marktwain" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0113marktwain_c_hi_head" "*cc0113marktwain_c_hi_head" "*:*:*cc0113marktwain_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[423:474]","[1059:1110]"};
+			if ($smooth == 1)
+				$faces = {"[423:474]","[1059:1110]","[2570:2725]","[4471:4626]"};
+			if ($smooth == 2)
+				$faces =  {"[423:474]","[1059:1110]","[2570:2725]","[4471:4626]",
+						"[6487:6642]","[8395:8550]","[12928:13395]","[18631:19098]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "rashid" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0114rashid_c_hi_head" "*cc0114rashid_c_hi_head" "*:*:*cc0114rashid_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[167:261]","[1798:1894]","[3261]","[3263:3305]","[3322:3377]"};
+			if ($smooth == 1)
+				$faces = {"[167:261]","[1798:1894]","[3261]","[3263:3305]","[3322:3377]",
+						"[3879:3887]","[3889:4163]","[4870:4871]","[8770:8789]","[8791:9060]",
+						"[13163:13244]","[13247:13291]","[13340:13507]"};
+			if ($smooth == 2)
+				$faces = {"[167:261]","[1798:1894]","[3261]","[3263:3305]","[3322:3377]",
+						"[3879:3887]","[3889:4163]","[4870:4871]","[8770:8789]","[8791:9060]",
+						"[13163:13244]","[13247:13291]","[13340:13507]","[14009:14293]",
+						"[18395:18397]","[18902:19192]","[23291:23293]","[23297:23425]",
+						"[23474:23641]","[25145:25999]","[28118:28123]","[38300:38308]",
+						"[39818:40690]","[52982:52990]","[52997:53242]","[53249:53383]","[53528:54031]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "ibnsina" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0151ibnsina_c_hi_head" "*cc0151ibnsina_c_hi_head" "*:*:*cc0151ibnsina_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[1439:1542]","[2982:3085]"};
+			if ($smooth == 1)
+				$faces = {"[1439:1542]","[2982:3085]","[7402:7713]","[12030:12341]"};
+			if ($smooth == 2)
+				$faces = {"[1439:1542]","[2982:3085]","[7402:7713]","[12030:12341]",
+						"[16659:16970]","[21288:21599]","[34548:35483]","[48432:49367]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "chamberlain" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0152chamberlain_c_hi_body" "*cc0152chamberlain_c_hi_body" "*:*:*cc0152chamberlain_c_hi_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[2856:3053]"};
+			if ($smooth == 1)
+				$faces = {"[2856:3053]","[11622:12215]"};
+			if ($smooth == 2)
+				$faces = {"[2856:3053]","[11622:12215]","[20784:21377]","[47082:48863]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "pearldiver" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0161pearldiver_c_hi_body" "*cc0161pearldiver_c_hi_body" "*:*:*cc0161pearldiver_c_hi_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[272:348]","[2480:2567]","[4699:4709]","[4712:4733]"};
+			if ($smooth == 1)
+				$faces = {"[272:348]","[2480:2567]","[4699:4709]","[4712:4733]",
+						"[5548:5778]","[12175:12438]","[18835:18867]","[18874:18939]"};
+			if ($smooth == 2)
+				$faces = {"[272:348]","[2480:2567]","[4699:4709]","[4712:4733]",
+						"[5548:5778]","[12175:12438]","[18835:18867]","[18874:18939]",
+						"[19756:19986]","[26380:26643]","[33037:33069]","[33076:33141]","[35584:36276]",
+						"[55465:56256]","[75445:75543]","[75562:75759]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "gilgamesh" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0164gilgamesh_c_hi_body" "*cc0164gilgamesh_c_hi_body" "*:*:*cc0164gilgamesh_c_hi_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[3472:3487]","[3494:3533]","[3538:3551]","[3874:3889]","[3896:3935]","[3940:3953]"};
+			if ($smooth == 1)
+				$faces = {"[3472:3487]","[3494:3533]","[3538:3551]","[3874:3889]","[3896:3935]","[3940:3953]",
+						"[14704:14751]","[14770:14889]","[14902:14943]","[15914:15961]","[15980:16099]","[16112:16153]"};
+			if ($smooth == 2)
+				$faces = {"[3472:3487]","[3494:3533]","[3538:3551]","[3874:3889]","[3896:3935]","[3940:3953]",
+						"[14704:14751]","[14770:14889]","[14902:14943]","[15914:15961]","[15980:16099]","[16112:16153]",
+						"[16112:16153]","[27588:27635]","[27654:27773]","[27786:27827]","[28794:28841]",
+						"[28860:28979]","[28992:29033]","[61284:61427]","[61482:61841]","[61878:62003]",
+						"[64914:65057]","[65112:65471]","[65508:65633]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "clutchfordc" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0149clutchfordc_c_hi_head" "*cc0149clutchfordc_c_hi_head" "*:*:*cc0149clutchfordc_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[604:651]","[669:671]","[681:683]","[1288:1335]","[1353:1355]","[1365:1367]","[1394:1419]"};
+			if ($smooth == 1)
+				$faces = {"[604:651]","[669:671]","[681:683]","[1288:1335]","[1353:1355]","[1365:1367]","[1394:1419]",
+						"[3240:3383]","[3435:3443]","[3471:3478]","[5299:5442]","[5494:5502]","[5530:5537]","[5616:5691]"};
+			if ($smooth == 2)
+				$faces = {"[604:651]","[669:671]","[681:683]","[1288:1335]","[1353:1355]","[1365:1367]","[1394:1419]",
+						"[3240:3383]","[3435:3443]","[3471:3478]","[5299:5442]","[5494:5502]","[5530:5537]","[5616:5691]",
+						"[7504:7647]","[7699:7707]","[7735:7743]","[9556:9699]","[9751:9759]","[9787:9795]","[9874:9951]","[15412:15843]",
+						"[15997:16023]","[16105:16128]","[21589:22020]","[22174:22200]","[22282:22305]","[22540:22767]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "biruni" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0171biruni_c_hi_head" "*cc0171biruni_c_hi_head" "*:*:*cc0171biruni_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[542:619]","[1198:1275]"};
+			if ($smooth == 1)
+				$faces = {"[542:619]","[1198:1275]","[2965:3198]","[4930:5163]"};
+			if ($smooth == 2)
+				$faces = {"[542:619]","[1198:1275]","[2965:3198]","[4930:5163]","[6988:7221]","[8956:9189]","[14257:14958]","[20152:20853]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "officer" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0172officer_c_hi_head" "*cc0172officer_c_hi_head" "*:*:*cc0172officer_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[470:478]","[503]","[537]","[609:683]","[1196:1204]","[1229]","[1263]","[1335:1411]","[1454:1466]","[1511:1521]"};
+			if ($smooth == 1)
+				$faces = {"[470:478]","[503]","[537]","[609:683]","[1196:1204]","[1229]","[1263]","[1335:1411]","[1454:1466]","[1489]",
+						"[1500:1509]","[1511:1521]","[2947:2973]","[3046:3048]","[3148:3150]","[3364:3586]","[5122:5148]",
+						"[5221:5223]","[5323:5325]","[5539:5767]","[5894:5932]","[5999]","[6002:6003]","[6005:6006]",
+						"[6008:6009]","[6011:6012]","[6014:6015]","[6018:6019]","[6021:6022]","[6024:6025]","[6027:6028]","[6030:6032]",
+						"[6035]","[6038]","[6041]","[6044]","[6047]","[6050]","[6053]","[6056]","[6059]","[6062:6063]","[6065:6097]"};
+			if ($smooth == 2)
+				$faces = {"[470:478]","[503]","[537]","[609:683]","[1196:1204]","[1229]","[1263]","[1335:1411]","[1454:1466]","[1511:1521]",
+						"[2947:2973]","[3046:3048]","[3148:3150]","[3364:3586]","[5122:5148]","[5221:5223]","[5323:5325]","[5539:5767]",
+						"[5894:5932]","[5999]","[6003]","[6006]","[6009]","[6012]","[6015]","[6019]","[6022]","[6025]","[6028]","[6031:6032]",
+						"[6035]","[6038]","[6041]","[6044]","[6047]","[6050]","[6053]","[6056]","[6059]","[6063]","[6065:6097]","[7560:7586]",
+						"[7659:7661]","[7761:7763]","[7977:8201]","[9738:9764]","[9837:9839]","[9939:9941]","[10155:10385]","[10512:10550]",
+						"[10617:10618]","[10650:10651]","[10653:10654]","[10656:10657]","[10659:10660]","[10662:10663]","[10665:10666]",
+						"[10668:10669]","[10671:10672]","[10674:10675]","[10677:10678]","[10683:10715]","[14991:15071]","[15288:15296]",
+						"[15594:15602]","[16242:16910]","[21516:21596]","[21813:21821]","[22119:22127]","[22767:23453]","[23832:23948]",
+						"[24147]","[24156:24157]","[24159]","[24165:24166]","[24168]","[24174:24175]","[24177]","[24183:24184]","[24186]",
+						"[24192:24193]","[24195]","[24204:24205]","[24207]","[24213:24214]","[24216]","[24222:24223]","[24225]","[24231:24232]",
+						"[24234]","[24240:24241]","[24243]","[24246]","[24255]","[24264]","[24273]","[24282]","[24291]","[24300]",
+						"[24309]","[24318]","[24327]","[24336:24337]","[24339]","[24345:24443]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "equestrianadmin" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0191equestrianadmin_c_hi_head" "*cc0191equestrianadmin_c_hi_head" "*:*:*cc0191equestrianadmin_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[0:83]","[649:732]","[1298:1321]"};
+			if ($smooth == 1)
+				$faces = {"[0:83]","[649:732]","[1298:1321]","[1298:1573]","[3266:3517]","[5210:5281]"};
+			if ($smooth == 2)
+				$faces = {"[0:83]","[649:732]","[1298:1321]","[1298:1573]","[3266:3517]",
+						"[5210:5533]","[7229:7480]","[9176:10003]","[15080:15835]","[20912:21127]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "securityguard" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0192securityguard_c_hi_head" "*cc0192securityguard_c_hi_head" "*:*:*cc0192securityguard_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[585:628]","[640:682]","[684:699]","[714]","[1300:1343]","[1355:1397]","[1399:1414]","[1429]"};
+			if ($smooth == 1)
+				$faces = {"[585:628]","[640:682]","[684:699]","[714]","[1300:1343]","[1355:1397]","[1399:1414]","[1429]",
+						 "[3186:3317]","[3351:3479]","[3483:3530]","[3573:3575]","[5332:5463]","[5497:5625]","[5629:5676]","[5719:5721]"};
+			if ($smooth == 2)
+				$faces = {"[585:628]","[640:682]","[684:699]","[714]","[1300:1343]","[1355:1397]","[1399:1414]","[1429]","[3186:3317]",
+						"[3351:3479]","[3483:3530]","[3573:3575]","[5332:5463]","[5497:5625]","[5629:5676]","[5719:5721]","[7477:7608]",
+						"[7642:7770]","[7774:7821]","[7864:7866]","[9622:9753]","[9787:9915]","[9919:9966]","[10009:10011]",
+						"[15280:15675]","[15775:16161]","[16171:16314]","[16441:16449]","[21718:22113]","[22213:22599]","[22609:22752]","[22879:22887]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "lysippos" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0193lysippos_c_hi_body" "*cc0193lysippos_c_hi_body" "*:*:*cc0193lysippos_c_hi_body"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[2275:2374]","[2392:2401]","[4677:4776]","[4794:4825]"};
+			if ($smooth == 1)
+				$faces = {"[2275:2374]","[2392:2401]","[4677:4776]","[4794:4825]","[11653:11952]","[12004:12033]","[18861:19160]","[19212:19307]"};
+			if ($smooth == 2)
+				$faces = {"[2275:2374]","[2392:2401]","[4677:4776]","[4794:4825]","[11653:11952]","[12004:12033]","[18861:19160]","[19212:19307]",
+						"[26133:26432]","[26484:26513]","[33339:33638]","[33690:33785]","[54267:55166]","[55320:55409]","[75891:76790]","[76944:77231]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "horsehandler" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0194horsehandler_c_hi_body1" "*cc0194horsehandler_c_hi_body1" "*:*:*cc0194horsehandler_c_hi_body1"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[3782:3858]","[4434:4510]"};
+			if ($smooth == 1)
+				$faces = {"[3782:3858]","[4434:4510]","[15907:16137]","[17862:18092]"};
+			if ($smooth == 2)
+				$faces = {"[3782:3858]","[4434:4510]","[15907:16137]","[17862:18092]","[29580:29810]","[31536:31766]","[65955:66647]","[71820:72512]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+		case "ibnbatouta" :
+			string $faces[]={};
+			string $head[] = `ls "*:*cc0201ibnbatouta_c_hi_head" "*cc0201ibnbatouta_c_hi_head" "*:*:*cc0201ibnbatouta_c_hi_head"`;
+			if (!`objExists $head[0]`)
+				break;
+			string $smooth = ezRenderMainLayoutSelectMouthGetSmooth($head[0]);
+			if ($smooth == 0)
+				$faces = {"[0:167]"};
+			if ($smooth == 1)
+				$faces = {"[0:167]","[1372:1875]"};
+			if ($smooth == 2)
+				$faces = {"[0:167]","[1372:1875]","[5486:5989]","[9602:11113]"};
+			select -cl;
+			for ($face in $faces)
+			{
+				select -add ($head[0] + ".f" + $face);
+			}
+			break;
+	}
+}
+
+global proc ezRenderMainLayoutRenderLayerName()
+{
+	string $master[] = `ls -sl`;
+	if (!`objExists $master[0]`)
+		error "请选择角色MASTER！";
+	
+	string $buff[];
+	tokenize $master[0] ":" $buff;
+	tokenize $buff[size($buff)-1] "_" $buff;
+	string $name = $buff[0];
+
+	string $curLayer = `editRenderLayerGlobals -q -currentRenderLayer`;
+	if ($curLayer == "defaultRenderLayer")
+		error "当前层为默认渲染层，请选择需要改名的渲染层！";
+		
+	rename $curLayer $name;
+}
+
+global proc ezRenderMainLayoutCreatNorenderLayer()
+{
+	string $norender[] = `ls -sl`;
+	
+	string $exists[] = `ls -type displayLayer no_render`;
+	if (!`objExists $exists[0]`)
+		createDisplayLayer -name "no_render" -number 1 -empty;
+	setAttr no_render.visibility 0;
+	editDisplayLayerMembers no_render $norender;
+}
+
+global proc ezRenderMainLayoutGetCamera()
+{
+
+	string $file, $project, $episode, $scene, $buf[];
+
+	string $file = `file -query -sceneName`;
+	if ($file != "")
+	{
+		tokenize $file "/" $buf;
+		$file = tolower($buf[size($buf)-1]);
+		string $str = `match "^[0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+_" $file`;
+		if ($str != "")
+		{
+			tokenize $str "_" $buf;
+			$project = $buf[0];
+			$episode = $buf[1];
+			$scene = $buf[2];
+		}
+	}
+	zwGetCameraUIGetCamera($project,$episode,$scene);
+}

@@ -1,0 +1,189 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÚ Ÿ¡˙
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc slInstancerCreator()
+{
+        string $brCT[]=`textScrollList -q -si crowdType `;
+        int  $brCTSize=`size $brCT`;
+	if ($brCTSize==0)
+	{
+		error "please select at least one type!";
+	}
+	brCrowdType $brCT;
+
+	string $runObj;
+	string $walkObj;
+	string $buffer[];
+	for ($i=0;$i<`size $brCT`;$i++ )
+	{
+		tokenize $brCT[$i] "_" $buffer;
+		$brCT[$i] = " -object "+$brCT[$i] + "_GEO ";
+		if ($buffer[1]=="run")
+			$runObj += $brCT[$i];
+		else if ($buffer[1]=="walk")
+			$walkObj += $brCT[$i];
+	}
+
+	float	$speed[];
+	string 	$type;
+	if (`objExists runCrowdParticleShape`)
+	{
+		$type =" -aimDirection rotationPP ";
+		$speed = `getAttr runCrowdParticle.velocity`;
+		for ($temp in $speed )
+		{
+			if ($temp != 0)
+			{
+				$type= " -aimDirection velocity ";
+				break;
+			}
+		}
+		string $cmd="particleInstancer -addObject " + $runObj + $type + " -scale scalePP -objectIndex crowdIndex -name runCrowdInstance runCrowdParticleShape" ;
+		eval($cmd);
+	}
+	if (`objExists walkCrowdParticleShape`)
+	{
+		$type = " -aimDirection rotationPP ";
+		$speed = `getAttr walkCrowdParticle.velocity`;
+		for ($temp in $speed )
+		{
+			if ($temp != 0)
+			{
+				$type = " -aimDirection velocity ";
+				break;
+			}
+		}
+		string $cmd="particleInstancer -addObject " + $walkObj + $type + " -scale scalePP -objectIndex crowdIndex -name walkCrowdInstance walkCrowdParticleShape" ;
+		print $cmd;
+		eval($cmd);
+	}
+	brHideCrowd();
+}
+
+
+global proc brHideCrowd()
+{
+        string $brCT[]=`textScrollList -q -si crowdType `;
+	string $brCTMaster[];
+	string $brCTGeo[];
+	for ($i=0;$i<`size $brCT` ;$i++ )
+	{
+		$brCTMaster[$i] = $brCT[$i]+"_MASTER";
+		$brCTGeo[$i] = $brCT[$i]+"_GEO";
+	}
+	string $brCTGroup = `group -name crowdGroup $brCTMaster $brCTGeo`;
+	hide $brCTGroup;
+}
+
+global proc brCrowdType(string $brCT[])
+{
+	string	$brfistupe;
+	float	$speed[];
+	string	$type;
+	string	$buffer[];
+	if (`objExists runCrowdParticle`)
+	{
+		$type = "OutPlace";
+		$speed = `getAttr runCrowdParticle.velocity`;
+		for ($temp in $speed )
+		{
+			if ($temp != 0)
+			{
+				$type = "InPlace";
+				break;
+			}
+		}
+		for ( $brfistupe in $brCT )
+		{
+			tokenize $brfistupe "_" $buffer;
+			if ($buffer[1] == "run")
+			{
+				file -import -type "mayaBinary"   (`getenv "DEV_PATH"` + "/Maya/Import/Bratz_crowd/"+$type+"/"+$brfistupe+".mb");
+			}
+		}
+	}
+	if (`objExists walkCrowdParticle`)
+	{
+		$type = "OutPlace";
+		$speed = `getAttr walkCrowdParticle.velocity`;
+		for ($temp in $speed )
+		{
+			if ($temp != 0)
+			{
+				$type = "InPlace";
+				break;
+			}
+		}
+		for ( $brfistupe in $brCT )
+		{
+			tokenize $brfistupe "_" $buffer;
+			if ($buffer[1] == "walk")
+			{
+				file -import -type "mayaBinary"   (`getenv "DEV_PATH"` + "/Maya/Import/Bratz_crowd/"+$type+"/"+$brfistupe+".mb");
+			}
+		}
+	}
+}
+
+
+global proc brCrowLayers()
+{
+	string $brListfish[]	=`ls -dag -long "crowdGroup"`;
+	string $brList[]	=`ls -type "instancer"`;
+	string $brListlight[]	=`ls -lights "crowlight*"`;
+	string $brCreatlayer	=`createRenderLayer -name "crowd" -number 1 -makeCurrent -noRecurse $brListfish $brList $brListlight	`;
+	layerEditorLayerButtonSelect 0 $brCreatlayer;
+	setAttr "defaultRenderLayer.renderable"			0;
+	setAttr "defaultRenderQuality.edgeAntiAliasing" 	0;
+	setAttr "defaultRenderQuality.shadingSamples" 		2;
+	setAttr "defaultRenderQuality.maxShadingSamples" 	8;
+	setAttr "defaultRenderQuality.useMultiPixelFilter" 	1;
+	setAttr "defaultRenderQuality.pixelFilterType" 		2;
+	setAttr "defaultRenderQuality.redThreshold" 		0.4;
+	setAttr "defaultRenderQuality.greenThreshold" 		0.3;
+	setAttr "defaultRenderQuality.blueThreshold"        0.6;
+	
+	
+}
+
+global proc brCrowdDepth()
+{
+	// Shader override
+	string $ifo = `shadingNode -asUtility samplerInfo`;
+	string $mul = `shadingNode -asUtility multiplyDivide`;
+	string $rng = `shadingNode -asUtility setRange`;
+	string $sdr = `shadingNode -asShader surfaceShader`;
+	string $set = `sets -renderable true -noSurfaceShader true -empty`;
+	
+	addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+	addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+	addAttr -ln Depthvalue -at double  -min 0 -max 1 -dv 0 $sdr;
+	connectAttr ($sdr+".Depthvalue") ($rng+".minX") ;
+	connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+	setAttr ($mul+".input2X") -1.0;
+	connectAttr ($mul+".outputX") ($rng+".valueX");
+	connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+	connectAttr ($ifo+".cameraFarClipPlane") ($rng+".oldMaxX");
+	setAttr ($rng+".maxX") 1.0;
+	connectAttr ($rng+".outValueX") ($sdr+".outColorR");
+	connectAttr ($rng+".outValueX") ($sdr+".outColorG");
+	connectAttr ($rng+".outValueX") ($sdr+".outColorB");
+	connectAttr ($sdr+".outColor") ($set+".surfaceShader");
+	
+	
+
+	
+	string $brListfish[]	=`ls -dag -long "crowdGroup"`;
+	string $brList[]	=`ls -type "instancer"`;
+	string $brCreatlayer=`createRenderLayer -name "crowDepth" -number 1 -makeCurrent -noRecurse $brListfish $brList`;
+	layerEditorLayerButtonSelect 0 $brCreatlayer; 
+	setAttr "defaultRenderLayer.renderable" 0;
+	select 	$brListfish ;hyperShade  -assign $sdr;
+}

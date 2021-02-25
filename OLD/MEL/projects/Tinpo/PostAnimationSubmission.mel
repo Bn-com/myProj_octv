@@ -1,0 +1,606 @@
+// PostAnimationSubmission.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	To be called after a distributed animation submission. Reads the animation submission playlist and combines the output of the
+	animation submission jobs
+Use:
+	PostAnimationSubmission argList
+Options:
+	
+	
+Dependancies:
+
+	Other scripts that must be in the script path
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	09/07/05
+Revisions:	09/15/06	Rev 1.0
+		- Generalized code so that this script may be called by LayoutSubmission and PostLayout
+		- Cleaned up code
+		
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+// ---------------------------------------------------------------------------------------------------
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "compileAnimCache"`)
+		loadPlugin "compileAnimCache";	
+	if (!`pluginInfo -q -l "mergeAnimCache"`)
+		loadPlugin "mergeAnimCache";	
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+	if (!`pluginInfo -q -l "timeQuery"`)
+		loadPlugin "timeQuery";
+}
+// ---------------------------------------------------------------------------------------------------
+proc string makeTabs (int $howMany)
+{
+	string $tabs;
+	
+	for ($i=0;$i<$howMany;$i++)
+	{
+		$tabs += "\t";	
+	}	
+	return $tabs;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string mergeConstraints( )
+{
+	global string $gSequence;	
+	global string $gShot;
+	global string $gPlaylistXmlLocations[];
+	global int $gPlaylistNumItems;
+	
+	string $names[];
+	
+	string $out_xml = "<controls>\n";
+	
+	for ($i=0;$i<($gPlaylistNumItems);$i++)
+	{
+		string $file = $gPlaylistXmlLocations[$i]+"/"+$gSequence+"_"+$gShot+"_constraints.xml";
+		print ("PostAnimationSubmission: Reading file "+$file+"...\n"); // ###
+		
+		string $constXML = readXML ($file,0);
+		string $controlsXML[] = xml_getTag ($constXML,"controls");
+		for ($j = 0; $j < size($controlsXML); $j ++)
+		{
+			string $newName = xml_getVarNew ($controlsXML[$j],"name");
+			if (stringArrayFindIndex($newName,$names) != -1)
+				continue;	
+			
+			int $c = size ($names);
+			$names[$c] = $newName;
+			$out_xml += "\t"+$controlsXML[$j]+"\n";
+		}
+	}
+	$out_xml += "</controls>\n";
+	return $out_xml;	
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getAssetList (int $indent)
+{
+	global string $gSequence;	
+	global string $gShot;
+	global string $gPlaylistXmlLocations[];
+	global int $gPlaylistNumItems;
+	global string $gPlaylist;
+	
+	string $xml = readXML ($gPlaylist,0);
+	string $jobsXML[] = xml_getTag($xml,"Job");
+	
+	string $assets[];
+	
+	for ($i=0;$i<($gPlaylistNumItems);$i++)
+	{
+		string $file = $gPlaylistXmlLocations[$i]+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+		print ("PostAnimationSubmission: Reading file "+$file + "...\n"); // ###
+		
+		// get assets in this playlist job
+		string $subJobAssetsXML[] = xml_getTag ($jobsXML[$i],"Asset");
+		string $subJobAssets[]; clear $subJobAssets;
+		for ($j=0;$j<size($subJobAssetsXML);$j++)
+		{
+			$subJobAssets[$j] = xml_getVar($subJobAssetsXML[$j],"namespace");	
+		}
+		
+		string $strucXML = readXML ($file,0);
+		string $assetsXML[] = xml_getTag ($strucXML,"Assets");
+		string $assetXML[] = xml_getTag ($assetsXML[0],"Asset");
+		
+		// only copy the asset xml if it is found in this current sub job
+		for ($j=0;$j<size($assetXML);$j++)
+		{
+			string $curNs = xml_getVar($assetXML[$j],"Namespace");	
+			if (stringArrayFindIndex ($curNs,$subJobAssets) == -1)
+				continue;
+			//print ("Copying "+$curNs+" from "+$i+"\n");
+			$assets[size($assets)] = $assetXML[$j];
+		}
+		
+	}
+	string $xml_out = makeTabs($indent)+"<Assets>\n";
+	for ($i=0;$i<size($assets);$i++)
+		$xml_out += makeTabs($indent+1)+$assets[$i]+"\n";
+	$xml_out += makeTabs($indent)+"</Assets>\n";
+	
+	return $xml_out;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getShotCastForShot (string $shotNumber, int $ident)
+{
+	global string $gShotCastMembers[];
+	global string $gShotNumbers[];
+	string $cast;
+	
+	$cast = makeTabs ($ident)+"<ShotCast>\n";
+	
+	int $indices[] = stringArrayFindIndices ($shotNumber,$gShotNumbers);
+	
+	for ($i=0;$i<size($indices);$i++)
+	{
+		int $index = $indices[$i];
+		$cast += makeTabs ($ident + 1)+$gShotCastMembers[$index]+"\n";	
+	}
+	$cast += makeTabs ($ident)+"</ShotCast>\n";
+	return $cast;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc getShotCast()
+{
+	global string $gSequence;	
+	global string $gShot;
+	global string $gPlaylistXmlLocations[];
+	global int $gPlaylistNumItems;
+	
+	global string $gShotCastMembers[];clear $gShotCastMembers;
+	global string $gShotNumbers[];clear $gShotNumbers;
+	string $namespaces[];
+	
+	for ($i=0;$i<($gPlaylistNumItems);$i++)
+	{
+		string $file = $gPlaylistXmlLocations[$i]+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+		print ("PostAnimationSubmission: Reading file "+$file + "...\n"); // ###
+		
+		string $strucXML = readXML ($file,0);
+		string $shotXML[] = xml_getTag ($strucXML,"Shot");
+		for ($j = 0; $j < size($shotXML);$j++)
+		{
+			string $shotNumber = xml_getVar ($shotXML[$j],"ShotNumber");
+			string $shotCast[] = xml_getTag ($shotXML[$j],"ShotCast");
+			string $members[] = xml_getTag ($shotCast[0],"Member");	
+			for ($k = 0;$k < size($members); $k++)
+			{
+				string $newNs = xml_getVarNew ($members[$k],"Namespace");
+				if (stringArrayFindIndex($newNs,$namespaces) != -1)
+					continue;
+				int $c = size ($gShotCastMembers);
+				$gShotNumbers[$c] = $shotNumber;
+				$gShotCastMembers[$c] = $members[$k];	
+				$namespaces[$c] = $newNs;	
+			}
+		}
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getDistanceInfoForShot (string $shotNumber, int $ident)
+{
+	global string $gDistanceInfoAssets[];
+	global string $gDistanceInfoShotNumbers[];
+	string $distInfo;
+	
+	$distInfo = makeTabs ($ident)+"<DistanceInfo>\n";
+	
+	int $indices[] = stringArrayFindIndices ($shotNumber,$gDistanceInfoShotNumbers);
+	
+	for ($i=0;$i<size($indices);$i++)
+	{
+		int $index = $indices[$i];
+		$distInfo += makeTabs ($ident + 1)+$gDistanceInfoAssets[$index]+"\n";	
+	}
+	$distInfo += makeTabs ($ident)+"</DistanceInfo>\n";
+	return $distInfo;
+}
+
+// ---------------------------------------------------------------------------------------------------
+global proc  getDistanceInfo ()
+{
+	global string $gSequence;	
+	global string $gShot;
+	global string $gPlaylistXmlLocations[];
+	global int $gPlaylistNumItems;
+	
+	global string $gDistanceInfoAssets[];clear $gDistanceInfoAssets;
+	global string $gDistanceInfoShotNumbers[];clear $gDistanceInfoShotNumbers;
+	string $namespaces[];
+	
+	for ($i=0;$i<($gPlaylistNumItems);$i++)
+	{
+		string $file = $gPlaylistXmlLocations[$i]+"/"+$gSequence+"_"+$gShot+"_distanceInfo.xml";
+		print ("PostAnimationSubmission: Reading file "+$file + "...\n"); // ###
+		
+		string $diXML = readXML ($file,0);
+		string $shotXML[] = xml_getTag ($diXML,"Shot");
+		
+		for ($j = 0; $j < size($shotXML);$j++)
+		{
+			string $shotNumber = xml_getVar ($shotXML[$j],"ShotNumber");
+			string $distanceInfo[] = xml_getTag ($shotXML[$j],"DistanceInfo");
+			string $assets[] = xml_getTag ($distanceInfo[0],"Asset");
+				
+			for ($k = 0;$k < size($assets); $k++)
+			{
+				string $newNs = xml_getVarNew ($assets[$k],"Namespace");
+				if (stringArrayFindIndex($newNs,$namespaces) != -1)
+					continue;
+				int $c = size ($gDistanceInfoAssets);
+				$gDistanceInfoShotNumbers[$c] = $shotNumber;
+				$gDistanceInfoAssets[$c] = $assets[$k];
+				$namespaces[$c] = $newNs;	
+			}
+		}
+		
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc buildDistanceInfo (string $xml, string $curShot, int $depth)
+{
+	global string $gDistanceInfo_xml;	
+	$depth ++;
+	string $curTag = xml_pruneChildren ($xml);
+	string $tagName = xml_getTagName ($curTag);
+	
+	if ($tagName == "Shot")
+		$curShot = xml_getVar ($curTag,"ShotNumber");
+		
+	if ($tagName == "DistanceInfo")
+	{
+		string $di = getDistanceInfoForShot ($curShot,$depth-1);
+		$gDistanceInfo_xml += $di;
+		return;
+	}
+	string $out = makeTabs ($depth-1)+$curTag;
+	$gDistanceInfo_xml += $out+"\n";
+	
+	string $childTags[] = xml_getChildTags ($xml);
+	for ($i = 0; $i < size ($childTags); $i ++)
+	{
+		buildDistanceInfo ($childTags[$i],$curShot,$depth);	
+	}
+	if (size($childTags))
+	{
+		string $out = makeTabs ($depth-1)+"</"+$tagName+">";
+		$gDistanceInfo_xml += $out+"\n";
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc buildStruc(string $xml, string $curShot, int $depth)
+{
+	global string $gStructure_xml;
+	$depth ++;
+	
+	
+	string $curTag = xml_pruneChildren ($xml);
+	
+	
+	string $tagName = xml_getTagName ($curTag);
+	
+	if ($tagName == "Shot")
+		$curShot = xml_getVar ($curTag,"ShotNumber");
+	
+	if ($tagName == "ShotCast")
+	{
+		string $cast = getShotCastForShot ($curShot,$depth-1);
+		$gStructure_xml += $cast;
+		return;
+	}
+	if ($tagName == "Assets")
+	{
+		// insert assets	
+		string $assets = getAssetList($depth-1);
+		$gStructure_xml += $assets;
+		return;
+	}
+	
+	
+	string $out = makeTabs ($depth-1)+$curTag;
+	
+	$gStructure_xml += $out+"\n";
+	
+	string $childTags[] = xml_getChildTags ($xml);
+	/*
+		Acount for cases where there are no child tags, but the xml is of the form
+		<node ... >
+		</node>
+	*/
+	string $endsWith = substring ($curTag,size($curTag)-1,size($curTag));
+	for ($i = 0; $i < size ($childTags); $i ++)
+	{
+		buildStruc ($childTags[$i],$curShot,$depth);	
+	}
+	if (size($childTags) || $endsWith != "/>")
+	{
+		string $out = makeTabs ($depth-1)+"</"+$tagName+">";;
+		$gStructure_xml += $out+"\n";
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc do_postAnimationSubmission ()
+{
+	// ------------------------------------------------------------------------------------------
+	/*
+		Global variables from root proc
+	*/
+	// ------------------------------------------------------------------------------------------
+	global string $gSequence;			// The sequence
+	global string $gShot;				// The shot
+	global string $gHost;				// Who is calling this, "insight" or "maya"
+	global string $gPlaylist;			// Name of playlist that was used to distribute export.
+	global int $gUpdateInsightAssetLinking;		// Update Insight asset linking with new contents of scene
+	global string $gParentTaskType;			// Who called this "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskType;			// In what context is this process being called. "AnimationSubmissionPostExport", "PostLayoutPostExport", "LayoutSubmissionPostExport"		
+
+
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Define global variables
+	*/
+	// ------------------------------------------------------------------------------------------
+	global string $gStructure_xml;
+	global string $gDistanceInfo_xml;
+	global string $gPlaylistJobs[]; clear $gPlaylistJobs;
+	global int $gPlaylistNumItems;
+	global string $gPlaylistXmlLocations[]; clear $gPlaylistXmlLocations;
+	global string $gPlaylistCacheLocations[]; clear $gPlaylistCacheLocations;
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Define some paths
+	*/
+	// ------------------------------------------------------------------------------------------
+	string $basePath = getPath ("ShotBase",{$gSequence,$gShot});
+	string $shotInfoDir = getPath ("ShotInfoDir",{$gSequence,$gShot});
+	string $strucTarget = $shotInfoDir+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+	string $distanceInfoTarget = $shotInfoDir+"/"+$gSequence+"_"+$gShot+"_distanceInfo.xml";
+	string $constraintsTarget = $basePath+"/shotGroupInfo/"+$gSequence+"_"+$gShot+"_constraints.xml";
+	
+	string $cacheTarget = $basePath+"/cache/animation/";
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Read playlist and get the xml output locations.
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Reading playlist "+$gPlaylist+"...\n\n"); 
+	
+	string $playlist_xml = readXML ($gPlaylist,0);
+	string $gPlaylistJobs[] = xml_getTag ($playlist_xml,"Job");
+	$gPlaylistNumItems = size($gPlaylistJobs);
+	
+	for ($i=0;$i<$gPlaylistNumItems;$i++)
+	{
+		string $xml_output[] = xml_getTag ($gPlaylistJobs[$i],"XmlOutput");
+		string $location = xml_getVar ($xml_output[0],"location");
+		$gPlaylistXmlLocations[$i] = getPath ("ConformPath",{$location});
+		
+		string $cache_output[] = xml_getTag ($gPlaylistJobs[$i],"CacheOutput");
+		$location = xml_getVar ($cache_output[0],"location");
+		$gPlaylistCacheLocations[$i] = getPath ("ConformPath",{$location});
+		
+	}
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Check that the Animation Submission process completed successfully.
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Checking that "+$gParentTaskType+" completed successfully...\n\n"); 
+	
+	int $errors = 0;
+	for ($i=0;$i<$gPlaylistNumItems;$i++)
+	{
+		string $lock_file = $gPlaylistXmlLocations[$i]+"/"+$gTaskType+"Export_lock"; 
+		if (`filetest -f $lock_file`)
+		{
+			sysFile -delete $lock_file;
+			print ($gTaskType+": "+$gParentTaskType+"Export process #"+$i+" did not complete successfully.\n");
+			$errors = 1;	
+		}
+	}
+	if ($errors)
+	{
+		print ($gTaskType+": Cannot continue due to because the "+$gParentTaskType+"Export process didn't complete successfully...\n\n");
+	}
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Merge the shot group structure file.
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Merging the structure file...\n\n"); 
+	
+	// obselete header
+	$gStructure_xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+	
+	string $struc = $gPlaylistXmlLocations[0]+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+	string $struc_xml = readXML ($struc,0);
+	
+	string $data[] = xml_getTag ($struc_xml,"ShotGroup");
+	
+	getShotCast(); // ###
+	
+	buildStruc ($data[0],"",0);  
+	
+	
+	print ($gStructure_xml+"\n");
+	writeFile ($strucTarget,$gStructure_xml);
+	
+	print ($gTaskType+": Wrote shot group structure file to "+$strucTarget+".\n\n");
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		If specified call Insight to update it's asset list
+	*/
+	// ------------------------------------------------------------------------------------------
+	if ($gUpdateInsightAssetLinking)
+	{
+		print ($gTaskType+": Calling Insight to update asset linking...\n\n");
+		insightUpdateAssetLinking ($gSequence,$gShot,"");
+	}
+	// ------------------------------------------------------------------------------------------
+	/*
+		Merge the distanceInfo file.
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Merging the distance info file...\n\n");
+	
+	// obselete header
+	$gDistanceInfo_xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+	
+	string $distInfo = $gPlaylistXmlLocations[0]+"/"+$gSequence+"_"+$gShot+"_distanceInfo.xml";
+	string $distInfo_xml = readXML ($distInfo,0);
+	
+	getDistanceInfo ();
+	$data = xml_getTag ($distInfo_xml,"Shots");
+	
+	buildDistanceInfo ($data[0],"",0);
+	
+	writeFile ($distanceInfoTarget,$gDistanceInfo_xml);
+	
+	print ($gTaskType+": Wrote distance info file to "+$distanceInfoTarget+".\n\n");
+	
+	// ------------------------------------------------------------------------------------------
+	/*
+		Merge the constraints file.
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Merging the constraints file...\n\n");
+	
+	string $constraints_xml = mergeConstraints ();
+	
+	writeFile ($constraintsTarget,$constraints_xml);
+	
+	print ($gTaskType+": Wrote constraints file to "+$constraintsTarget+".\n\n");
+	
+	
+	// ------------------------------------------------------------------------------------------
+	// ------------------------------------------------------------------------------------------
+	// ------------------------------------------------------------------------------------------
+	/*
+		Merge the animation cache
+	*/
+	// ------------------------------------------------------------------------------------------
+	
+	print ($gTaskType+": Merging the animation cache...\n\n");
+	
+	// Get frame range
+	int $rangeData[];
+
+	getInsightShotGroupLength ($gSequence,$gShot,$rangeData);
+	$frameStart = $rangeData[0];
+	$frameEnd = $rangeData[1];
+	
+	
+	// build the mergeAnimCache command
+	string $mergeCmd = "mergeAnimCache -s "+$frameStart+" -e "+$frameEnd+" ";
+	for ($i=0;$i<$gPlaylistNumItems;$i++)
+	{
+		$mergeCmd += "-c \""+$gPlaylistCacheLocations[$i]+"\" ";
+	}
+	$mergeCmd += "-o \""+$cacheTarget+"\"";
+	
+	print ($mergeCmd+"\n");
+	float $st = `timerX`;
+	eval ($mergeCmd);
+	print ($gTaskType+": Cache merge complete. Elapsed time "+(`timerX -st $st`)+" seconds.\n\n");
+	// ------------------------------------------------------------------------------------------
+	/*
+		Compile the animation cache
+	*/
+	// ------------------------------------------------------------------------------------------
+	print ($gTaskType+": Compiling the animation cache...\n\n");
+	string $outputCache = $cacheTarget+"cache.bcf"; 
+	if (`filetest -f $outputCache`)
+	{
+		string $archiveDir = $cacheTarget+"archive";
+		if (!`filetest -d $archiveDir`)
+			sysFile -makeDir $archiveDir;
+			
+		string $curStamp = eval ("systemTime -asTimeStamp");
+		
+		string $archiveCache = $archiveDir + "/cache."+$curStamp+".bcf";	
+		
+		print ($gTaskType+": Archiving existing compiled cache to "+$archiveCache+"...\n"); 
+		sysFile -cp $archiveCache $outputCache;	
+	}
+	
+	string $compileCmd = "compileAnimCache -s "+$frameStart+" -e "+$frameEnd+" -b 1 -c \""+$cacheTarget+"\" -o \""+$outputCache+"\"";
+	
+	print ($compileCmd+"\n");
+	float $st = `timerX`;
+	eval ($compileCmd);
+	print ($gTaskType+": Cache compile complete. Elapsed time "+(`timerX -st $st`)+" seconds.\n\n");
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc PostAnimationSubmission( string $args ) 
+{
+	// turn off undo queue
+	undoInfo -state off;
+	
+	// load plugins and source scripts
+	loadPlugins;
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;			// The sequence
+	global string $gShot;				// The shot
+	global string $gHost;				// Who is calling this, "insight" or "maya"
+	global string $gPlaylist;			// Name of playlist that was used to distribute export.
+	global int $gUpdateInsightAssetLinking;		// Update Insight asset linking with new contents of scene
+	global string $gParentTaskType;			// Who called this "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskType;			// In what context is this process being called. "AnimationSubmissionPostExport", "PostLayoutPostExport", "LayoutSubmissionPostExport"		
+
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gParentTaskType = getArgValue ($args,"parentTaskType");
+	$gTaskType = getArgValue ($args,"taskType");
+	
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gPlaylist =  getArgValue ($args,"playlist");
+	$gUpdateInsightAssetLinking = (int)getArgValue ($args,"updateInsightAssetLinking");
+//
+	
+	
+	do_postAnimationSubmission();
+	
+	print ("\n"+$gTaskType+": DONE\n");
+}

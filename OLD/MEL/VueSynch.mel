@@ -1,0 +1,587 @@
+//-----------------------------------------------------------------------------
+// Copyright (C) 2002 e-on software
+//
+// MEL script for MAYA 4.0
+//
+// File:	VueSynch.mel
+//
+// Desc:	Used to generate a synchro file for Vue 4 Pro. It uses the
+//			VueSynch.mll plugin which must be located in the \bin\plug-ins\
+//			Maya directory
+//
+// Author:	Julien Chauvier
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+// procedure that returns fps as a float
+//-----------------------------------------------------------------------------
+global proc float getFPS()
+{
+	float $fps, $fUnit, $byFrame;
+	string $type;
+
+	//
+	// get unit frame factor
+	//
+	$type = `optionVar -q workingUnitTime`;
+	if ("game" == $type) {
+		$fUnit = 1./15;
+	} else if ("film" == $type) {
+		$fUnit = 1./24;
+	} else if ("pal" == $type) {
+		$fUnit = 1./25;
+	} else if ("ntsc" == $type) {
+		$fUnit = 1./30;
+	} else if ("show" == $type) {
+		$fUnit = 1./48;
+	} else if ("palf" == $type) {
+		$fUnit = 1./50;
+	} else if ("ntscf" == $type) {
+		$fUnit = 1./60;
+	} else if ("millisec" == $type) {
+		$fUnit = 1./1000;
+	} else if ("sec" == $type) {
+		$fUnit = 1.;
+	} else if ("min" == $type) {
+		$fUnit = 60.;
+	} else if ("hour" == $type) {
+		$fUnit = 3600.;
+	} else {
+		$fUnit = 1./15;
+	}
+
+	//
+	// calculate and return fps
+	//
+	$byFrame = `getAttr "defaultRenderGlobals.byFrameStep"`;
+	$fps = 1./($fUnit*$byFrame);
+	return $fps;
+}
+
+//-----------------------------------------------------------------------------
+// Main procedure that creates the GUI
+//-----------------------------------------------------------------------------
+global proc VueSynch()
+{
+	//-------------------------------------------------------------------------
+	// declare UI elements and scene parameters as globals, thus being able to
+	// access them in other procedures
+	//
+	global string	$ColumnLayout,
+					$Separator1, $Separator2, $Separator3, $Separator4, $Separator5,
+					$SceneText, $FramesText, $DurationText, $SelectText,
+					$FramesField, $DurationField, $SelectField,
+					$SelNoneButton, $SelAllButton, $SyncButton, $RefreshButton, $CloseButton,
+					$SelectList, $ExportButton;
+	//-------------------------------------------------------------------------
+
+	//
+	// create the GUI window
+	//
+	if (`window -exists SynchroWindow`) {
+		deleteUI -window SynchroWindow;
+	}
+
+	window	-title "Vue Infinite Synchronizer"
+			-minimizeButton false
+			-maximizeButton false
+			-wh 257 470
+			-sizeable false
+			SynchroWindow;
+
+		frameLayout -labelVisible false
+					-marginWidth 5
+					-marginHeight 5;
+
+			$ColumnLayout = `columnLayout -columnWidth 235`;
+
+				$SceneText = `text -label "Scene info:" -align "left"`;
+
+				rowLayout -nc 2;
+					$FramesText = `text -label "Nb of frames:"`;
+					$FramesField = `intField -enable false`;
+				setParent ..;	// end rowLayout
+
+				rowLayout -nc 2;
+					$DurationText = `text -label "Duration (s):"`;
+					$DurationField = `floatField -enable false`;
+				setParent ..;	// end rowLayout
+
+				$Separator1 = `separator -height 20 -width 235 -style "in"`;
+
+				rowLayout -nc 2;
+					$SelectText = `text -label "Selected objects:"`;
+					$SelectField = `intField -enable false`;
+				setParent ..;	// end rowLayout
+
+				$Separator2 = `separator -height 5 -style "none"`;
+
+				$SelectList = `textScrollList	-allowMultiSelection true
+												-width 235
+												-height 200
+												-numberOfRows 1
+												-selectCommand "UpdateSelectCount"`;
+
+				$Separator3 = `separator -height 5 -style "none"`;
+
+				rowLayout	-nc 2
+							-columnWidth2 117 117
+							-columnAlign2 "center" "center"
+							-columnAttach 1 "both" 5
+							-columnAttach 2 "both" 5;
+					$SelNoneButton = `button -width 100 -label "Select None" -command "SelectNone"`;
+					$SelAllButton = `button -width 100 -label "Select All" -command "SelectAll"`;
+				setParent ..;	// end rowLayout
+
+				$Separator4 = `separator -height 20 -width 235 -style "in"`;
+
+				rowLayout	-nc 2
+							-columnWidth2 117 117
+							-columnAlign2 "center" "center"
+							-columnAttach 1 "both" 5
+							-columnAttach 2 "both" 5;
+					$SyncButton = `button -height 30 -label "Synchronize" -align "center" -command "Synchronize(0);"`;
+					$ExportButton = `button -height 30 -label "Export" -align "center" -command "Synchronize(1);"`;
+				setParent ..;	// end rowLayout
+
+				//columnLayout -edit -columnAttach "both" 0 $ColumnLayout;
+				//$SyncButton = `button -height 30 -label "Synchronize" -align "center" -command "Synchronize"`;
+
+				$Separator5 = `separator -height 20 -width 235 -style "in"`;
+
+				rowLayout	-nc 2
+							-columnWidth2 117 117
+							-columnAlign2 "center" "center"
+							-columnAttach 1 "both" 5
+							-columnAttach 2 "both" 5;
+					$RefreshButton = `button -width 100 -label "Refresh" -command "InitUI"`;
+					$CloseButton = `button -width 100 -label "Close" -command "deleteUI -window SynchroWindow"`;
+				setParent ..;	// end rowLayout
+
+			setParent ..;	// end columnLayout
+
+		setParent ..;	// end frameLayout
+		if (`about -version`=="2011 Hotfix 2 x64")
+		{
+			if (`pluginInfo -q -l "//file-cluster/GDC/Resource/Support/Maya/2011-x64/plug-ins/VueSynch.mll"`!=1)
+			{
+				loadPlugin "//file-cluster/GDC/Resource/Support/Maya/2011-x64/plug-ins/VueSynch.mll";
+			}
+		}
+		else
+		{
+			if (`pluginInfo -q -l "//file-cluster/GDC/Resource/Support/Maya/2012-x64/plug-ins/VueSynch.mll"`!=1)
+			{
+				loadPlugin "//file-cluster/GDC/Resource/Support/Maya/2012-x64/plug-ins/VueSynch.mll";
+			}
+		}
+		InitUI();
+}
+
+//-----------------------------------------------------------------------------
+// Procedure called to init items list and scene parameters
+//-----------------------------------------------------------------------------
+global proc InitUI()
+{
+	//-------------------------------------------------------------------------
+	global string	$RefreshButton, $CloseButton, $SelectList,
+					$FramesField, $DurationField, $SelectField;
+	global string $listCameras[], $listLights[], $list[], $names[];
+	global int $nbC, $nbL, $width, $height, $nbFrames;
+	global float $fps, $fStart, $fEnd, $byFrame, $deviceAR;
+	//-------------------------------------------------------------------------
+
+	//
+	// get a list of all scene cameras and lights
+	//
+	$listCameras = `ls -cameras -l`;
+	$listLights = `ls -lights -l`;
+	$list = stringArrayCatenate($listCameras, $listLights);
+
+	//
+	// get general scene info for later use
+	//
+	$nbC = `size($listCameras)`;
+	$nbL = `size($listLights)`;
+	$fStart = `getAttr "defaultRenderGlobals.startFrame"`;
+	$fEnd = `getAttr "defaultRenderGlobals.endFrame"`;
+	$byFrame = `getAttr "defaultRenderGlobals.byFrameStep"`;
+	$fps = getFPS();
+	$width = `getAttr "defaultResolution.width"`;
+	$height = `getAttr "defaultResolution.height"`;
+	$deviceAR = `getAttr "defaultResolution.deviceAspectRatio"`;
+	float $f = ($fEnd-$fStart)/$byFrame;
+	$nbFrames = $f+1;
+
+	//
+	// call plugin to get short names from full names list
+	//
+	$names = `SYNCHRO_GetShortNames $list`;
+
+	//
+	// set frames, animation duration, and number of selected objects
+	//
+	intField -edit -value $nbFrames $FramesField;
+	float $dur = ($nbFrames-1)/$fps;
+	floatField -edit -value $dur $DurationField;
+	intField -edit -value 0 $SelectField;
+
+	//
+	// fill item list
+	//
+	textScrollList -edit -removeAll $SelectList;
+	int $i;
+	for($i=0; $i<size($names); $i++) {
+		textScrollList -edit -append $names[$i] $SelectList;
+	}
+	textScrollList -edit -deselectAll $SelectList;
+
+	//
+	// display window
+	//
+    showWindow SynchroWindow;
+}
+
+//-----------------------------------------------------------------------------
+// Procedure called when an item is clicked in the textScrollList $SelectList
+//-----------------------------------------------------------------------------
+global proc UpdateSelectCount()
+{
+	//-------------------------------------------------------------------------
+	global string $SelectField, $SelectList;
+	//-------------------------------------------------------------------------
+
+	//
+	// get the number of selected items and update it
+	//
+	int $nbSelected = `textScrollList -q -numberOfSelectedItems $SelectList`;
+	intField -edit -value $nbSelected $SelectField;
+}
+
+//-----------------------------------------------------------------------------
+// Procedure called when the select none button is clicked
+//-----------------------------------------------------------------------------
+global proc SelectNone()
+{
+	//-------------------------------------------------------------------------
+	global string $SelectList;
+	//-------------------------------------------------------------------------
+
+	//
+	// deselect all items
+	//
+	int $nbItems = `textScrollList -q -numberOfItems $SelectList`;
+	int $i;
+	for($i=1; $i<=$nbItems; $i++) {
+		textScrollList -edit -deselectIndexedItem $i $SelectList;
+	}
+	UpdateSelectCount();
+}
+
+//-----------------------------------------------------------------------------
+// Procedure called when the select all button is clicked
+//-----------------------------------------------------------------------------
+global proc SelectAll()
+{
+	//-------------------------------------------------------------------------
+	global string $SelectList;
+	//-------------------------------------------------------------------------
+
+	//
+	// select all items
+	//
+	int $nbItems = `textScrollList -q -numberOfItems $SelectList`;
+	int $i;
+	for($i=1; $i<=$nbItems; $i++) {
+		textScrollList -edit -selectIndexedItem $i $SelectList;
+	}
+	UpdateSelectCount();
+}
+
+//-----------------------------------------------------------------------------
+// Procedure called when the synchronize button is clicked
+//-----------------------------------------------------------------------------
+global proc Synchronize(int $mode)
+{
+	//-------------------------------------------------------------------------
+	global string $sync_file;
+	global string $SelectList;
+	global string $list[], $names[];
+	global int $nbC, $nbL, $width, $height, $nbFrames;
+	global float $fps, $fStart, $fEnd, $byFrame, $deviceAR;
+	//-------------------------------------------------------------------------
+
+	//
+	// check if at least one object has been selected, if not then abort
+	//
+	int $nbSelected = `textScrollList -q -numberOfSelectedItems $SelectList`;
+	if ($nbSelected==0)
+	{
+		confirmDialog	-title "! Error !"
+						-message "No object was selected, operation aborted."
+    					-button "Ok";
+		return;
+	}
+
+	//
+	// create the selected objects list
+	//
+	string $sList[];
+
+	string $type[];
+
+	int $index[] = `textScrollList -q -selectIndexedItem $SelectList`;
+
+	int $i, $j, $k;
+
+	for($i=0; $i<size($index); $i++)
+	 {
+		$sList[$i] = $list[$index[$i]-1];
+
+		if ($index[$i]<=$nbC)
+		{
+			$type[$i] = "camera";
+		}
+		else if ($i<($nbC+$nbL))
+		{
+			$type[$i] = "light";
+		}
+		else
+		{
+			$type[$i] = "unknown";
+		}
+	}
+
+	//
+	// call plugin for memory allocation
+	//
+	int $nbObj = size($sList);
+	SYNCHRO_Free;
+	SYNCHRO_Allocate $nbObj $fStart $fEnd $byFrame $fps $width $height $deviceAR $sList $type;
+
+	//
+	// get all objects' parameters
+	//
+	for($i=0; $i<size($sList); $i++)
+	{
+		float $time;
+		float $ShAngle[];
+		float $deltaBlur;
+		float $Property[];
+
+		if ($type[$i]=="camera")
+		 {
+			//
+			// BlurLength
+			//
+			for($j=0; $j<$nbFrames; $j++)
+			 {
+				if (`attributeExists "shutterAngle" $sList[$i]`)
+				 {
+					//
+					// shutterAngle attribute exists in node, can be retrieved
+					//
+					if (`getAttr "defaultRenderGlobals.motionBlur"`==true)
+					{
+						$ShAngle[$j] = -`getAttr ($sList[$i]+".shutterAngle")`/(3.5*360.0);
+					}
+					else
+					{
+						$ShAngle[$j] = 0.0;
+					}
+				}
+			}
+			SYNCHRO_StoreProperty "blurLength" $i $ShAngle;
+
+			//
+			// FocalLength
+			//
+			clear $Property;
+			$time = $fStart;
+			float $fWidth = $width;
+			float $fHeight = $height;
+			float $fInvPictureAspectRatio = $fHeight/$fWidth;
+			for($j=0; $j<$nbFrames; $j++)
+			{
+				if (`attributeExists "focalLength" $sList[$i]`)
+				{
+					//
+					// focalLength attribute exists in node, can be retrieved
+					//
+					$deltaBlur = $byFrame*$ShAngle[$j];
+					float $fHAperture1 = `getAttr -time $time ($sList[$i]+".horizontalFilmAperture")`;
+					float $fVAperture1 = `getAttr -time $time ($sList[$i]+".verticalFilmAperture")`;
+					float $fHAperture2 = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".horizontalFilmAperture")`;
+					float $fVAperture2 = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".verticalFilmAperture")`;
+					float $fRatio1 = ($fHAperture1/$fVAperture1)*$fInvPictureAspectRatio;
+					float $fRatio2 = ($fHAperture2/$fVAperture2)*$fInvPictureAspectRatio;
+					if ($fRatio1 < 1.0) $fVAperture1 = $fRatio1*$fVAperture1;
+					if ($fRatio2 < 1.0) $fVAperture2 = $fRatio2*$fVAperture2;
+					float $fFocal1 = `getAttr -time $time ($sList[$i]+".focalLength")`;
+					float $fFocal2 = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".focalLength")`;
+					$Property[2*$j+0] = $fFocal1/(25.4*$fVAperture1);
+					$Property[2*$j+1] = $fFocal2/(25.4*$fVAperture2);
+				}
+				$time += $byFrame;
+			}// end $j
+
+			SYNCHRO_StoreProperty "focalLength" $i $Property;
+
+			//
+			// FocalDistance
+			//
+			clear $Property;
+			$time = $fStart;
+			for($j=0; $j<$nbFrames; $j++)
+			{
+				if (`attributeExists "focusDistance" $sList[$i]`)
+				 {
+					//
+					// focus attribute exists in node, can be retrieved
+					//
+					$deltaBlur = $byFrame*$ShAngle[$j];
+					if (`getAttr -time $time ($sList[$i]+".depthOfField")`==false)
+					{
+						$Property[2*$j+0] = -(`getAttr -time $time ($sList[$i]+".focusDistance")`);
+						$Property[2*$j+1] = -(`getAttr -time ($time+$deltaBlur) ($sList[$i]+".focusDistance")`);
+					}
+					else
+					{
+						$Property[2*$j+0] = `getAttr -time $time ($sList[$i]+".focusDistance")`;
+						$Property[2*$j+1] = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".focusDistance")`;
+					}
+				}
+				$time += $byFrame;
+			}// end $j
+			SYNCHRO_StoreProperty "focalDistance" $i $Property ;
+
+			//
+			// DepthOfField
+			//
+			//clear $Property;
+			//$time = $fStart;
+			//for($j=0; $j<$nbFrames; $j++) {
+			//	if (`attributeExists "fStop" $sList[$i]`) {
+			//		//
+			//		// depth of field attribute exists in node, can be retrieved
+			//		//
+			//		$deltaBlur = $byFrame*$ShAngle[$j];
+			//		$Property[2*$j+0] = `getAttr -time $time ($sList[$i]+".fStop")`;
+			//		$Property[2*$j+1] = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".fStop")`;
+			//	}
+			//	$time += $byFrame;
+			//}// end $j
+			//SYNCHRO_StoreProperty "depthOfField" $i $Property;
+		}
+
+
+		float $Position[], $Rotation[];
+		$time = $fStart;
+		string $upAxis = `optionVar -q upAxisDirection`;
+
+		for($j=0; $j<$nbFrames; $j++)
+		{
+			//
+			// get world transformations matrix
+			//
+			float $m1[], $m2[], $transf1[], $transf2[];
+			$m1 = `getAttr -time $time ($sList[$i]+".worldMatrix")`;
+			$transf1 = `SYNCHRO_GetTransforms $m1 $upAxis`;
+			if ($type[$i]=="camera")
+			{
+				$deltaBlur = $byFrame*$ShAngle[$j];
+				$m2 = `getAttr -time ($time+$deltaBlur) ($sList[$i]+".worldMatrix")`;
+				$transf2 = `SYNCHRO_GetTransforms $m2 $upAxis`;
+			}
+			//
+			// fill position and rotation arrays
+			//
+			if ($type[$i]=="camera")
+			 {
+				$Position[6*$j+0] = $transf1[0];
+				$Position[6*$j+1] = $transf1[1];
+				$Position[6*$j+2] = $transf1[2];
+				$Position[6*$j+3] = $transf2[0];
+				$Position[6*$j+4] = $transf2[1];
+				$Position[6*$j+5] = $transf2[2];
+
+				int $c;
+				for($c=0; $c<9; $c++)
+				{
+					$Rotation[(18*$j)+$c] = $transf1[3+$c];
+					$Rotation[(18*$j)+$c+9] = $transf2[3+$c];
+				}
+			}
+			else
+			{
+				$Position[3*$j+0] = $transf1[0];
+				$Position[3*$j+1] = $transf1[1];
+				$Position[3*$j+2] = $transf1[2];
+
+				int $c;
+				for($c=0; $c<9; $c++)
+				{
+					$Rotation[(9*$j)+$c] = $transf1[3+$c];
+				}
+			}
+			$time += $byFrame;
+		}// end $j
+		SYNCHRO_StoreProperty "position" $i $Position;
+		SYNCHRO_StoreProperty "rotation" $i $Rotation;
+
+	}// end $i
+
+	//
+	// call plugin to get and save synchro items' data
+	//
+	int $stat;
+
+	if ($mode == 0)
+	{
+		$stat = `SYNCHRO_ToFile`;
+	}
+	else
+	{
+		$sync_file = "";
+		fileBrowserDialog -m 1 -fc "SaveSynchroDataAs" -ft "Vue synchro data (*.dat)"
+						  -ds 1 -an "Save As" -fl "Vue synchro data (*.dat),*.dat"
+						  -wt "Export Synchronization Data...";
+		if ($sync_file == "")
+		{
+			SYNCHRO_Free;
+			return;
+		}
+		else
+		{
+			$stat = `SYNCHRO_Export $sync_file`;
+		}
+	}
+
+	if ($stat==0)
+	{
+		confirmDialog	-title "! Error !"
+						-message "Could not generate synchronization file!"
+						-button "Ok";
+	}
+	else
+	{
+		confirmDialog	-title "Info"
+						-message "Synchronization file successfully created."
+						-button "Ok";
+	}
+
+	//
+	// call plugin to free allocated memory
+	//
+	SYNCHRO_Free;
+}
+
+global proc SaveSynchroDataAs(string $filename, string $fileType)
+{
+	global string $sync_file;
+	$sync_file = $filename;
+}
+
+//-----------------------------------------------------------------------------
+// END OF FILE
+//-----------------------------------------------------------------------------

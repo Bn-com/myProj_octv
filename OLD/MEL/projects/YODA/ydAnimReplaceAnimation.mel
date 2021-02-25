@@ -1,0 +1,449 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+//python("execfile('//file-cluster/GDC/Resource/Support/Maya/projects/Ninjago/edo_lockAndUnlockTransform.py')");
+
+global proc ydAnimReplaceAnimation()
+{
+	string $sel[] = `ls "*:Asset_Root"`;
+	for ($sl in $sel)
+	{
+		//select -cl;
+		//select -r $sl;
+		if (`objExists $sl` && `referenceQuery -inr $sl`)
+		{
+			ydAnimReplaceAnimationRepair($sl);
+		}
+		//select -cl;
+	}
+	//ydAnimGetAssetReference();
+	file -save;
+}
+
+global proc ydAnimReplaceAnimationRepair(string $item)
+{
+	string $reffile = `referenceQuery -f $item`;
+	string $refnode = `referenceQuery -rfn $item`;
+
+	string $file = ydAnimReplaceAnimationGetFile($reffile);
+	if ($file != "没有找到对应的内部前期文件!")
+	{
+		if (match("WildwoodForest_Ext",$item) == "WildwoodForest_Ext")
+		{
+			file -lr $refnode $file;
+		}
+		else 
+		{
+			if (match(".mb$",$file)!= "")
+				slImportRef $file "mayaBinary";
+			if (match(".ma$",$file)!= "")
+				slImportRef $file "mayaAscii";
+			string $current[] = `ls -sl`;
+			string $child[] = `listRelatives $current[0]`;
+			
+			//select -r $item ;select -add $child[0];
+			ydAnimReplaceAnimationCopy($item,$child[0]);
+		}
+	}
+}
+
+global proc string ydAnimReplaceAnimationGetFile(string $file)
+{
+	string $type;
+	
+	string $scenename = `file -q -sn -shn`;
+	string $scbuff[] = stringToStringArray($scenename,"_");
+	string $txtFile = "D:/YODA/"+$scbuff[1]+"/"+$scbuff[2]+"/"+$scbuff[0]+"_"+$scbuff[1]+"_"+$scbuff[2]+"_"+$scbuff[3]+".txt";
+	if (!`filetest -r $txtFile`)
+	{
+		string $full = `file -q -sn`;
+		string $path =substituteAllString($full,$scenename,"");
+		$txtFile = $path+$scbuff[0]+"_"+$scbuff[1]+"_"+$scbuff[2]+".txt";
+	}
+	string $Episode = $scbuff[1];
+	int $adjust=substring($Episode,2,5);
+
+	
+	string $reffile = `referenceQuery -f $file`;
+	
+	string $rebuff[] = stringToStringArray($reffile,"{}");
+	string $fullpath = $rebuff[0];
+	$fileId=`fopen $txtFile r`;
+	string $nextLine = `fgetline $fileId`;
+	while(size($nextLine)>0)
+	{
+		if (match($fullpath,$nextLine)!="")
+		{
+			string $tpbuff[] = stringToStringArray($nextLine," ");
+			$type = $tpbuff[0];
+			break;
+		}
+		$nextLine = `fgetline $fileId`;
+	}
+	fclose $fileId;
+
+	string $buff[] = stringToStringArray($reffile,"/\\");
+	string $filename = $buff[size($buff)-1];
+	clear $buff;
+	$buff = stringToStringArray($filename,"_");
+	string $filename = $buff[2];
+	for ($i=3;$i<(size($buff)-1);$i++)
+	{
+		$filename = $filename+$buff[$i];
+	}
+	//print $filename;
+	
+	string $path = "//file-cluster/GDC/Projects/YODA/Project/scenes/"+$type+"/";
+	print $path;
+	string $epPath[] = `getFileList -fld $path`;
+	int $break=0;
+	string $task="";
+
+
+	//string $scenename = "yd_E0101_Q0010_S0040_blocking_v013.ma";
+	//string $filename= "ShipTraffic";
+	string $assets = idmtService("GetAssetInAnimYODAanim", $scenename);
+	string $buffer[] = stringToStringArray($assets,"|");
+	string $fullpath;
+	for($i=0;$i<size($buffer);)
+	{
+	    print ($buffer[$i]+"\n");
+	    if(match(tolower($filename),tolower($buffer[$i+1]))!="")
+	    {
+		$fullpath = "\\\\file-cluster\\GDC\\Projects\\YODA\\Project\\Scenes\\"+$buffer[$i+2];
+		if(`filetest -r $fullpath`)
+		{    
+		    //print $fullpath;
+		    return $fullpath;
+		    $break=1;
+		    break;
+		}    
+		    
+	    }
+	    $i=$i+3;
+	}
+	
+	/*for ($ep in $epPath)
+	{
+		int $epFolder=substring($ep,2,5);
+		print $epFolder;
+		if($epFolder>=101)
+		{
+			string $scPath[] = `getFileList -fld ($path+$ep+"/")`;
+			for ($sp in $scPath)
+			{
+				if (size($sp)>7 && match("[sS]ky[dD]ome",$sp)=="")//排除客户定位用物体
+				{
+					string $name = substring($sp,13,(size($sp)));
+					
+					if (gmatch(tolower($name),(tolower($filename)+"*")))
+					{
+						$task = $path+$ep+"/"+$sp;
+						print ($name+"\n");
+						print ($filename+"\n");
+					}
+					if (tolower($name)==tolower($filename))
+					{
+						
+						$task = $path+$ep+"/"+$sp+"/"+"master/";
+						clear $buff;
+						$buff = `getFileList -fld $task -fs "*.mb"`;
+						if (!size($buff))
+						{
+							$buff = `getFileList -fld $task -fs "*.ma"`;
+						}
+						string $idmtFile = $task +$buff[0];
+						if(`filetest -r $idmtFile` )
+						{
+							return $idmtFile;
+						}
+					}
+				}
+			}
+		}
+	}*/
+	
+	if (!$break)
+		return "没有找到对应的内部前期文件!";
+
+}
+
+global proc ydAnimReplaceAnimationCopy(string $rig,string $ms)
+{
+	
+	ydAnimReplaceAnimationCopyForSet($rig,$ms);
+	
+	string $sel[] = {$rig,$ms};//`ls -sl`;
+	/*if (size($sel) != 2)
+	{
+		error "请先选择导出角色，再选择导入的角色!";
+	}*/
+	
+	string $buff[] = stringToStringArray($sel[0],":");
+	string $old="";
+	if (size($buff)==1)
+	{
+		clear $buff;
+		$buff = stringToStringArray($sel[0],"_");
+		$old = $buff[0]+"_";
+	}
+	else 
+	{
+		$old = `substituteAllString $sel[0] $buff[size($buff)-1] ""`;
+	}
+	clear $buff;
+	$buff = stringToStringArray($sel[1],":");
+	string $new = `substituteAllString $sel[1] $buff[size($buff)-1] ""`;
+
+	
+	//
+	if (objExists($old+"chest_CTL") && attributeExists("leftArm",($old+"chest_CTL")) && objExists($new+"LfArm_Switch"))
+	{
+		
+		if (getAttr($old+"chest_CTL.leftArm")==10)
+		{
+			setAttr ($new+"LfArm_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"chest_CTL.leftArm")==0)
+		{
+			setAttr ($new+"LfArm_Switch.IKFK")  0;
+		}
+		
+		if (getAttr($old+"chest_CTL.rightArm")==10)
+		{
+			setAttr ($new+"RtArm_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"chest_CTL.rightArm")==0)
+		{
+			setAttr ($new+"RtArm_Switch.IKFK")  0;
+		}
+		
+	}
+	if (objExists($old+"pelvis_CTL") && attributeExists("leftLeg",($old+"pelvis_CTL")) && objExists($new+"LfLeg_Switch"))
+	{
+		
+		if (getAttr($old+"pelvis_CTL.leftLeg")==10)
+		{
+			setAttr ($new+"LfLeg_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"pelvis_CTL.leftLeg")==0)
+		{
+			setAttr ($new+"LfLeg_Switch.IKFK")  0;
+		}
+		
+		if (getAttr($old+"pelvis_CTL.rightLeg")==10)
+		{
+			setAttr ($new+"RtLeg_Switch.IKFK")  1;
+		}
+		else if (getAttr($old+"pelvis_CTL.rightLeg")==0)
+		{
+			setAttr ($new+"RtLeg_Switch.IKFK")  0;
+		}
+		
+	}
+
+
+	string $confile = "//file-cluster/GDC/Projects/YODA/YODA_Scratch/TD/controls.txt";
+	$fileId = `fopen $confile "r"`;
+	string $content = `fgetline $fileId`;
+	while (size($content) > 0 )
+	{
+		clear $buff;
+		int $num = `tokenize $content "\t \n" $buff`;
+		string $oldCon = $old+$buff[0];
+		string $newCon = $new+$buff[1];
+		string $list[] = `ls  ($old+"*"+$buff[0])`;
+		for ($item in $list)
+		{
+			if (endsWith($item,$oldCon))
+			{
+				string $ac[] = `listConnections -type animCurve -s 1 -d 0 $item`;
+				if (size($ac))
+				{
+					$oldCon = $item;
+				}
+			}
+		}
+		if (`objExists $oldCon` && catchQuiet(`select -r $oldCon`) == 0  && `objExists $newCon` && catchQuiet(`select -r $newCon`) == 0 )
+		{
+			select -r $oldCon;select -add $newCon;
+			//print ("ydAnimReplaceAnimationCopyCMD \""+$oldCon+"\" \""+$newCon+"\";\n");
+			ydAnimReplaceAnimationCopyCMD($oldCon,$newCon);
+			//added by Edward.Sun on 25th September
+			//$oldCon="aaa";
+			//$newCon="bbb";
+			//string $cmd=("edo_AnimCopyAnimations('"+$oldCon+"','"+$newCon+"','njAnimReplaceAnimationCopyCMD(\""+$oldCon+"\",\""+$newCon+"\")')");
+			//python($cmd);
+			//=====================================
+		}
+		$content = `fgetline $fileId`;
+	}
+	fclose $fileId;
+}
+
+global proc ydAnimReplaceAnimationCopyCMD(string $sr,string $ds)
+{
+	string $master[] = {$sr,$ds};//`ls -sl`;
+	int $ct=3;
+	int $pt=1;
+	
+	//if (size($master) != 2)
+	//	error "请先选择导出动画的角色的character，再选择需要导入动画的角色的character !";
+
+	string $buff[];
+	int $num1 = `tokenize $master[0] ":" $buff`;
+	string $preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+	if ($num1==1)
+	{
+		$num1 = `tokenize $master[0] "_" $buff`;
+		$preCopy = `substring $master[0] 1 (size($master[0])-size($buff[$num1-1]) )`;
+		if ($num1==1)
+		{
+			$preCopy = "";
+		}
+	}
+
+	clear $buff;
+	int $num2 = `tokenize $master[1] ":" $buff`;
+	string $prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+	if ($num2==1)
+	{
+		$num1 = `tokenize $master[1] "_" $buff`;
+		$prePaste = `substring $master[1] 1 (size($master[1])-size($buff[$num2-1]) )`;
+		if ($num1==1)
+		{
+			$prePaste = "";
+		}
+	}
+	
+	
+	string $animSets[];
+	if ($pt ==1 )
+	{
+		$animSets = {"faceControls","TSM2Controls","FaceMachineControls","bodySet","CTRL_SET","face_controls_Sets"};
+	}
+	else if ($pt ==2)
+	{
+		$animSets = {"TSM2Controls","bodySet","CTRL_SET"};
+	}
+	else if ($pt ==3)
+	{
+		$animSets = {"faceControls","FaceMachineControls","face_controls_Sets"};
+	}
+	
+	string $source[];
+	for ($set in $animSets)
+	{
+		string $copySet = $preCopy + $set;
+		if (`objExists $copySet`)
+		{
+			select -r  $copySet;
+			string $setObjs[] = `ls -sl`;
+			$source = stringArrayCatenate($source,$setObjs);
+		}
+	}
+
+	/*string $pasteSet = $prePaste + "set";
+	string $pasteFset = $prePaste + "facial_set";
+	string $pasteAset = $prePaste + "accessory_set";
+	string $dest[];
+	if (`objExists $pasteFset`)
+		$dest = `sets -query $pasteSet $pasteFset`;
+	if (`objExists $pasteAset`)
+		$dest = `sets -query $pasteSet $pasteFset $pasteAset`;*/
+
+	if ($ct == 1 || $ct ==2)
+	{
+		for ($obj in $source)
+		{
+			string $paste = `substitute $preCopy $obj $prePaste`;
+			if ($preCopy == "")
+			{
+				$paste = $prePaste+$obj;
+			}
+			//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+			if (`objExists $paste` && !endsWith((tolower($paste)),"master"))
+			{
+				//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+				
+				string $attrs[] = stringArrayCatenate(`listAttr -k -o $obj`,`listAttr -cb -u $obj`);
+				for ($attr in $attrs)
+				{
+					if (`getAttr -type ($obj+"."+$attr)` != "double3")
+					{
+						float $value = `getAttr ($obj+"."+$attr)`;
+						if (`objExists ($paste+"."+$attr)` && `getAttr -se ($paste+"."+$attr)`)
+						{
+							setAttr ($paste+"."+$attr) $value;
+							if ($ct == 2)
+							{
+								setKeyframe ($paste+"."+$attr);
+							}
+						}
+					}
+				}
+				if (`copyKey $obj` && $ct == 1)
+				{
+					//print ($preCopy+"---"+$obj+"----"+$prePaste+"----"+$paste+"\n");
+					pasteKey -o "replaceCompletely" $paste;
+				}
+			}
+		}
+	}
+	else if ($ct == 3)
+	{
+		string $attrs[] = stringArrayCatenate(`listAttr -k -o $master[0]`,`listAttr -cb -u $master[0]`);
+		for ($attr in $attrs)
+		{
+			if (`objExists($master[1]+"."+$attr)` &&`getAttr -se ($master[1]+"."+$attr)` && `getAttr -type ($master[0]+"."+$attr)` != "double3")
+			{
+				float $value = `getAttr ($master[0]+"."+$attr)`;
+				catchQuiet(`setAttr ($master[1]+"."+$attr) $value`);
+
+				//if (`copyKey $master[0]`)
+				if (size(`listAttr -k -o $master[1]`)>1 && `copyKey -at $attr $master[0]`)
+				{
+					pasteKey -at $attr -o "replaceCompletely" $master[1];
+				}
+			}
+		}
+	}
+}
+
+
+global proc ydAnimReplaceAnimationCopyForSet(string $old,string $new)
+{
+	if (size($old) && size($new))
+	{
+		string $buff[]=stringToStringArray($old,":");
+		string $oldPre = $buff[0]+":";
+
+		clear $buff;
+		$buff = stringToStringArray($new,":");
+		string $newPre = $buff[0]+":";
+
+		string $oldCons[] = `ls -type nurbsCurve ($oldPre+"*")`;
+		for ($con in $oldCons)
+		{
+			string $trans[] = `listRelatives -p $con`;
+			string $oldCon = $trans[0];
+
+			string $newCon = substituteAllString($oldCon,$oldPre,$newPre);
+			
+			if (`objExists $oldCon` && catchQuiet(`select -r $oldCon`) == 0  && `objExists $newCon` && catchQuiet(`select -r $newCon`) == 0 )
+			{
+				select -r $oldCon;select -add $newCon;
+				ydAnimReplaceAnimationCopyCMD($oldCon,$newCon);
+			}
+		}
+		
+	}
+}

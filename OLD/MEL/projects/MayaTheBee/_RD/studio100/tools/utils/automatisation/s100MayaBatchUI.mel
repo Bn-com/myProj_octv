@@ -1,0 +1,264 @@
+global proc s100MayaBatchUI()
+{
+$prod = `s100FMIAgetProdPath`;
+
+	if(`window -ex s100MayaBatchUI `)
+		deleteUI s100MayaBatchUI ;
+
+$w = 300 ;
+$wS = $w - 10 ;
+window -title "batch for s100 prod"  -h 500 -w $w  s100MayaBatchUI ;
+
+	menuBarLayout s100MBUIMLMain;
+
+		menu -en 1 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100MayaBatchUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+		setParent ..;
+
+string $dept[] = `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($prod) `;
+
+$fl = ` formLayout s100MayaBatchFL `;
+
+
+$textPath = `text -w 80 -font "tinyBoldLabelFont" -label "Path :" ` ;
+$textF = `textField -w ($wS -100)  -en 0 -text $prod s100MBTFPath` ;
+
+$sep1= `separator -w $wS  -p $fl `  ;
+
+$textDept = `text  -w 80 -font "tinyBoldLabelFont" -label "department :" `;
+$cl = `columnLayout -p $fl s100MayaBatchCL `;
+
+	for($i = 0 ; $i < size($dept ) ; $i++)
+	{
+	checkBox  -h 20 -w ($wS -100) -p $cl  -label $dept[$i]  $dept[$i];
+    }
+
+
+
+setParent ..;
+
+$sep2= `separator -w $wS  -p $fl `  ;
+
+$textOption = `text  -w 80 -font "tinyBoldLabelFont" -label "options :" `;
+$chkAllFile = `checkBox -en 0 -h 20 -w ($wS -100) -p $fl  -label "all files(longer..)" s100MBallFile `;
+$chkForceOveride = `checkBox  -h 20 -w ($wS -100) -p $fl  -label "force Overide" s100MBForceOveride `;
+
+$sep3= `separator -w $wS  -p $fl `  ;
+
+$textProc = `text  -w 80 -font "tinyBoldLabelFont" -label "Procedures :" `;
+
+string $procNam[] =`s100MBgetprocName`;
+
+$cl2 = `columnLayout -p $fl s100MayaBatchCLProcName `;
+
+	for($i = 0 ; $i < size($procNam ) ; $i++)
+	{
+	checkBox  -h 20 -w ($wS -100) -p $cl2  -label $procNam[$i] $procNam[$i];
+    }
+
+
+setParent ..;
+$sep4 = `separator -w $wS  -p $fl `  ;
+$prog1 = `progressBar  -w $wS s100MBprogressBar`;
+$buttonRun = `button  -c s100MayaBatch -w $wS -l "batch !"`;
+
+
+
+formLayout -e
+
+	-attachForm $textF "top" 5
+	-attachForm $textPath "top" 5
+	-attachForm $textF "right" 5
+	-attachControl $sep1 "top" 5 $textF
+	-attachControl $cl "top" 5 $sep1
+	-attachControl $textDept "top" 5 $sep1
+	-attachForm $cl "right" 0
+	-attachControl $sep2 "top" 5 $cl
+	-attachControl $textOption "top" 5 $sep2
+	-attachControl $chkAllFile "top" 5 $sep2
+	-attachForm $chkAllFile "right" 5
+	-attachControl $chkForceOveride "top" 5 $chkAllFile
+	-attachForm $chkForceOveride "right" 5
+	-attachControl $sep3 "top" 5 $chkForceOveride
+	-attachControl $textProc "top" 5 $sep3
+	-attachControl $cl2 "top" 5 $sep3
+	-attachForm $cl2 "right" 0
+	-attachControl $sep4  "bottom" 5 $prog1
+	-attachControl $prog1   "bottom" 5 $buttonRun
+	-attachForm $buttonRun   "bottom" 5
+
+
+
+	$fl  ;
+
+
+showWindow ;
+
+}
+
+global proc s100MayaBatch()
+{
+$prod = `s100FMIAgetProdPath`;
+
+$path = `textField -q -text  s100MBTFPath` ;
+
+string $dept[] = `s1KeepOnlyFolderReturnLocalPathIgnoreUnderscore($prod) `;
+string $clC[] = `columnLayout -q -childArray s100MayaBatchCL`;
+string $paths[] ;
+clear $paths ;
+$j= 0 ;
+	for($i = 0 ; $i < size($clC) ; $i++)
+	{
+		if(`checkBox -q -v $clC[$i]`)
+		{
+		$paths[$j] =$prod + $dept[$i] +"/";
+		$j++;
+        }
+    }
+
+
+$over = `checkBox -q -v s100MBForceOveride`;
+string $procs[] = `s100MBgetproc` ;
+string $procsR[];
+//s100MayaBatchCL
+string $clC[] = `columnLayout -q -childArray s100MayaBatchCLProcName`;
+$j = 0 ;
+	for($i = 0 ; $i < size($clC) ; $i++)
+	{
+		if(`checkBox -q -v $clC[$i]`)
+		{
+		$procsR[$j] = $procs[$i] ;
+		$j++;
+        }
+    }
+
+
+//print $procsR ;
+
+
+string $files[] = `s100returnAllSubRootSceneFromAssetsFolders($paths)`;
+
+//print $files;
+
+
+
+	if(size($procsR) > 0)
+	{
+
+	$d = `date`;
+
+	$sub = substituteAllString($d , "/" ,"_") ;
+	$sub = substituteAllString($sub , " " ,"-") ;
+	$sub = substituteAllString($sub , ":" ,"_") ;
+	$file = ("y:/_RD/log/logForBatchS100_" + $sub  +".txt");
+	$ch = `filetest -e $file  `;
+
+		if($ch ==0)
+		{
+		$fileId=`fopen $file "w"`;
+		fclose $fileId;
+		}
+
+	string $s;
+	$fileId=`fopen $file "w"`;
+	$s =("Studio 100 : Maya Production\ndate : " + $d   +"\nAuto s100 Batch File\n" );
+	fprint $fileId $s  ;
+
+	$siz = size($files) ;
+	progressBar -e -minValue 0 -maxValue $siz -step 0  s100MBprogressBar ;
+
+		for ($i = 0 ; $i < size($files) ; $i++  )
+		{
+		$padNumber = padNumber ($i, 5) ;
+
+		$s =("\n----------------------------------------------\n----------------------------------------------\nAsset Number : "+ $padNumber +"\nfile : "+ $files[$i]  +"\n ");
+		fprint $fileId $s ;
+		string $fileO = ( "file -f -options \"v=0\"" + " -ignoreVersion -o \"" +  $files[$i] +"\";");
+		eval($fileO) ;
+
+			for($j = 0 ; $j < size($procsR) ; $j++)
+			{
+			string $print[] = `eval($procsR[$j]) `;
+
+
+					for($tmp in $print)
+					{
+					fprint $fileId $tmp;
+					}
+
+			fprint $fileId "\n\n" ;
+			}
+
+			if(`file -q -modified `)
+				file -save ;
+
+		progressBar -e -step 1 s100MBprogressBar ;
+
+		}
+	file -f -newFile ;
+	progressBar -e  -endProgress s100MBprogressBar ;
+	$d = `date`;
+
+	$s =("Studio 100 : Maya Production\nend at : " + $d   +"\nAuto Reconnect Textures on entire 3D Bank\n" );
+
+	fclose $fileId;
+	}else{
+	warning "no proc!" ;
+    }
+
+}
+
+global proc s100test()
+{
+print "test";
+}
+
+global proc string s100MBreturnProdName()
+{
+return "Maya" ;
+}
+
+global proc string[] s100MBgetprocName()
+{
+global string $base_prod_path;
+$folder = "s100MBprocByProd" ;
+$prod = `s100MBreturnProdName`;
+$path =  $base_prod_path + $folder +"/" ;
+
+$file = $path + $prod  +".proc" ;
+$fileId=`fopen $file "r"`;
+string $s;
+$s=`fread $fileId $s`;
+fclose $fileId;
+
+
+string $array[] =stringToStringArray($s, ";") ;
+
+return $array ;
+
+}
+
+global proc string[] s100MBgetproc()
+{
+global string $base_prod_path;
+$folder = "s100MBprocByProd" ;
+$prod = `s100MBreturnProdName`;
+$path =  $base_prod_path + $folder +"/" ;
+
+$file = $path + $prod  +"Proc.proc" ;
+$fileId=`fopen $file "r"`;
+string $s;
+$s=`fread $fileId $s`;
+fclose $fileId;
+
+
+string $array[] =stringToStringArray($s, ";") ;
+
+return $array ;
+
+}
+
+
+//s100MayaBatchUI ;

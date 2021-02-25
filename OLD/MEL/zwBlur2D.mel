@@ -1,0 +1,499 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwBlur2D()
+{
+	zwBlur2DcleanTemp;
+
+	if (!`optionVar -exists "zwBlur2DLength"`)
+		optionVar -floatValue "zwBlur2DLength" 1;
+	if (!`optionVar -exists "zwBlur2DSharpness"`)
+		optionVar -floatValue "zwBlur2DSharpness" 1;
+	if (!`optionVar -exists "zwBlur2DColor"`)
+		optionVar -intValue "zwBlur2DColor" 0;
+	if (!`optionVar -exists "zwBlur2DSmooth"`)
+		optionVar -intValue "zwBlur2DSmooth" 2;
+	if (!`optionVar -exists "zwBlur2DMemory"`)
+		optionVar -intValue "zwBlur2DMemory" 200;
+	if (!`optionVar -exists "zwBlur2DFolder"`)
+		optionVar -stringValue "zwBlur2DFolder" "";
+	if (!`optionVar -exists "zwBlur2Dformat"`)
+		optionVar -intValue "zwBlur2Dformat" 0;
+
+	if (`window -exists zwBlur2D`)
+		deleteUI zwBlur2D;
+	window -menuBar true -width 665 -height 500 -title "Blur2D Tool" -resizeToFitChildren true zwBlur2D;
+		menu -label "Edit";
+			menuItem -label "Reset Setings" -command "zwBlur2DReset";
+		menu -label "Help";
+			menuItem -label "Help on Blur2D Tool..." -command "zjHelpCallback zwBlur2D";
+		string $formLayout = `formLayout`;
+			string $tabLayout = `tabLayout -childResizable true -scrollable true -tabsVisible false`;
+				columnLayout -adjustableColumn true;
+				//	text -label "注意：Moebius 会根据文件名计算RGBA 文件跟Vector 文件帧数的对应关系\n其他项目为RGBA 文件第1帧对应Vector 文件的第43帧";
+					rowLayout -numberOfColumns 3 -adjustableColumn 2 -columnWidth 1 140 -columnAttach 1 "right" 8;
+						text -label "RGBA File";
+						string $textField1 = `textField -editable false`;
+						string $symbolButton1 = `symbolButton -image "navButtonBrowse.xpm"`;
+						setParent..;
+					rowLayout -numberOfColumns 3 -adjustableColumn 2 -columnWidth 1 140 -columnAttach 1 "right" 8;
+						text -label "Vector File";
+						string $textField2 = `textField -editable false`;
+						string $symbolButton2 = `symbolButton -image "navButtonBrowse.xpm"`;
+						setParent..;
+					separator;
+					string $intSliderGrp = `intSliderGrp -enable false -label "Frame" -field true`;
+					string $formLayout1 = `formLayout`;
+						string $dev_path = `getenv "DEV_PATH"`;
+						string $image1 = `image -width 192 -height 108 -image ($dev_path + "/Maya/Icons/blank.bmp")`;
+						string $image2 = `image -width 192 -height 108 -image ($dev_path + "/Maya/Icons/blank.bmp")`;
+						string $button1 = `button -label "RGBA File"`;
+						string $button2 = `button -label "Vector File"`;
+						setParent..;
+					formLayout -edit
+						-attachForm		$image1		"left"		140
+
+						-attachControl		$image2		"left"		1	$image1
+
+						-attachControl		$button1	"top"		0	$image1
+						-attachOppositeControl	$button1	"left"		0	$image1
+						-attachOppositeControl	$button1	"right"		0	$image1
+
+						-attachControl		$button2	"top"		0	$image2
+						-attachOppositeControl	$button2	"left"		0	$image2
+						-attachOppositeControl	$button2	"right"		0	$image2
+					$formLayout1;
+					separator;
+					floatSliderGrp
+						-label "Blur Length"
+						-field true
+						-precision 3
+						-value `optionVar -query "zwBlur2DLength"`
+						-minValue 0
+						-maxValue 30
+						-changeCommand "optionVar -floatValue \"zwBlur2DLength\" #1";
+					floatSliderGrp
+						-label "Blur Sharpness"
+						-field true
+						-precision 3
+						-value `optionVar -query "zwBlur2DSharpness"`
+						-minValue 0
+						-maxValue 15
+						-changeCommand "optionVar -floatValue \"zwBlur2DSharpness\" #1";
+					radioButtonGrp -label "Smooth"
+						-numberOfRadioButtons 2
+						-label1 "Alpha"
+						-label2 "Color"
+						-select (`optionVar -query "zwBlur2DColor"` + 1)
+						-onCommand1 "optionVar -intValue \"zwBlur2DColor\" 0"
+						-onCommand2 "optionVar -intValue \"zwBlur2DColor\" 1";
+					intFieldGrp
+						-label "Smooth Value"
+						-value1 `optionVar -query "zwBlur2DSmooth"`
+						-changeCommand "optionVar -intValue \"zwBlur2DSmooth\" #1";
+					intFieldGrp
+						-label "2d Blur Memory Limit"  
+						-extraLabel "MB"
+						-columnAlign 3 "left"
+						-value1 `optionVar -query "zwBlur2DMemory"`
+						-changeCommand "optionVar -intValue \"zwBlur2DMemory\" #1";
+					radioButtonGrp -label "Save As"
+						-numberOfRadioButtons 3
+						-label1 "32 bit TGA"
+						-label2 "24 bit TGA"
+						-label3 "TIFF"
+						-select (`optionVar -query "zwBlur2Dformat"` + 1)
+						-onCommand1 "optionVar -intValue \"zwBlur2Dformat\" 0"
+						-onCommand2 "optionVar -intValue \"zwBlur2Dformat\" 1"
+						-onCommand3 "optionVar -intValue \"zwBlur2Dformat\" 2";
+					setParent..;
+				setParent..;
+			string $button3=`button -label "Save Batch Blur..." -command ("zwBlur2DbatchBlur \"" + $textField1 + "\" \"" + $textField2 + "\" \"" + $intSliderGrp + "\"")`;
+			string $button4=`button -label "Blur" -command ("zwBlur2DframeBlur \"" + $textField1 + "\" \"" + $textField2 + "\" \"" + $intSliderGrp + "\"")`;
+			string $button5=`button -label "Close"	-command "zwBlur2DcleanTemp;\ndeleteUI zwBlur2D;"`;
+			setParent..;
+		formLayout -edit
+			-attachNone	$button3	"top"
+			-attachForm	$button3	"left"		5
+			-attachForm	$button3	"bottom"	5
+			-attachPosition	$button3	"right"		5	33
+
+			-attachNone	$button4	"top"
+			-attachControl	$button4	"left"		5	$button3
+			-attachForm	$button4	"bottom"	5
+			-attachPosition	$button4	"right"		5	66
+
+			-attachNone	$button5	"top"
+			-attachControl	$button5	"left"		5	$button4
+			-attachForm	$button5	"bottom"	5
+			-attachForm	$button5	"right"		5
+
+			-attachForm	$tabLayout	"top"		0
+			-attachForm	$tabLayout	"left"		0
+			-attachControl	$tabLayout	"bottom"	5	$button5
+			-attachForm	$tabLayout	"right"		0
+		$formLayout;
+		setParent..;
+
+	symbolButton -edit -command ("zwBlur2DBrowser \"" + $textField1 + "\" \"" + $textField2 + "\" \"" + $intSliderGrp + "\" \"" + $image1 + "\" \"" +  $button1 + "\"") $symbolButton1;
+	symbolButton -edit -command ("zwBlur2DBrowser \"" + $textField2 + "\" \"" + $textField1 + "\" \"" + $intSliderGrp + "\" \"" + $image2 + "\" \"" +  $button2 + "\"") $symbolButton2;
+	intSliderGrp -edit -changeCommand ("zwBlur2Dslider \"" + $textField1 + "\" \"" + $textField2 + "\" \"" + $intSliderGrp + "\" \"" + $image1 + "\" \"" +  $button1 + "\" \"" + $image2 + "\" \"" +  $button2 + "\"") $intSliderGrp;
+
+	showWindow zwBlur2D;
+}
+
+global proc zwBlur2DBrowser(string $textField1, string $textField2, string $intSliderGrp, string $image, string $button)
+{
+	fileBrowserDialog -mode 0 -fileCommand ("zwBlur2DBrowserCommand \"" + $textField1 + "\" \"" + $textField2 + "\" \"" + $intSliderGrp + "\" \"" + $image + "\" \"" + $button + "\"") -fileType "image" -actionName "OK";
+}
+
+global proc zwBlur2DBrowserCommand(string $textField1, string $textField2, string $intSliderGrp, string $image, string $button, string $filename, string $fileType)
+{
+	textField -edit -fileName $filename $textField1;
+	
+	int $startEnd1[2] = `zwBlur2DStartEnd $textField1`;
+	int $startEnd2[2] = `zwBlur2DStartEnd $textField2`;
+
+	if (($startEnd1[0] != -1) && ($startEnd2[0] != -1))
+	{
+		int $min = 1;
+		int $max = min($startEnd1[1] - $startEnd1[0] + 1, $startEnd2[1] - $startEnd2[0] + 1);
+		if ($max > $min)
+			intSliderGrp -edit -enable true -min $min -max $max -value 1 $intSliderGrp;
+		else
+			intSliderGrp -edit -enable false -value 1 $intSliderGrp;
+	}
+	else
+		intSliderGrp -edit -enable false -value 1 $intSliderGrp;
+	
+	waitCursor -state on;
+	zwBlur2DPreview $filename $image $button;
+	waitCursor -state off;
+
+}
+
+global proc int[] zwBlur2DStartEnd(string $textField)
+{
+	int $startEnd[2] = {-1, -1};
+
+	string $file = `textField -query -fileName $textField`;
+	if (!`filetest -f $file`)
+		return $startEnd;
+	
+	string $buf[];
+	tokenize $file "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	string $folder = `substring $file 1 (size($file) - size($filename) - 1)`;
+	string $str = `match "[.][0-9]{4}[.]" $filename`;
+	if ($str == "")
+		return $startEnd;
+	
+	$startEnd[0] = int(`match "[0-9]{4}" $str`);
+	string $filespec = $folder + "/" + `substitute $str $filename ".????."`;
+	$buf = `getFileList -filespec $filespec`;
+	for ($file in $buf)
+	{
+		$str = `match "[.][0-9]{4}[.]" $file`;
+		if ($str != "")
+		{
+			int $end = int(`match "[0-9]{4}" $str`);
+			if ($end > $startEnd[1])
+				$startEnd[1] = $end;
+		}
+	}
+
+	return $startEnd;
+}
+
+global proc zwBlur2DPreview(string $file, string $image, string $button)
+{
+	string $temp = `internalVar -userTmpDir` + "blur";
+	sysFile -makeDir $temp;
+
+	string $buf[];
+	tokenize $file "/" $buf;
+	string $filename = $buf[size($buf)-1];
+
+	image -edit -docTag $file -annotation $file $image;
+	button -edit -label $filename -command ("zwBlur2Dfcheck \"\"") -annotation $file $button;
+
+	if (`filetest -f $file`)
+	{
+		string $imageFile = $file;
+		if (`gmatch $filename "*.rar"`)
+		{
+			$filename = `substring $filename 1 (size($filename)-3)` + "iff";
+			$imageFile = `internalVar -userTmpDir` + "blur/" + $filename;
+			string $rs = `zwBlur2Drar $file`;
+			if (!`filetest -f $imageFile`)
+			{
+				image -edit -image (`getenv "DEV_PATH"` + "/Maya/Icons/blank.bmp") $image;
+				return;
+			}
+		}
+		button -edit -command ("zwBlur2Dfcheck \"" + $imageFile + "\"") $button;
+		$temp = `internalVar -userTmpDir` + "blur/icon_" + $filename + ".iff";
+		if(catch(`idmtImage -film -resize 192 108 $imageFile $temp`) || !`filetest -f $temp`)
+		{
+			image -edit -image (`getenv "DEV_PATH"` + "/Maya/Icons/blank.bmp") $image;
+			return;
+		}
+
+		image -edit -image $temp $image;
+	}
+	else
+	{
+		warning ("文件不存在: " + $file);
+		image -edit -image (`getenv "DEV_PATH"` + "/Maya/Icons/blank.bmp") $image;
+	}
+}
+
+global proc string zwBlur2Drar(string $rar)
+{
+	string $buf[];
+	tokenize $rar "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	if (!`gmatch $filename "*.rar"`)
+		return $rar;
+
+	string $temp = `internalVar -userTmpDir` + "blur";
+	sysFile -makeDir $temp;
+	$filename = `substring $filename 1 (size($filename)-3)` + "iff";
+	string $unRar = `internalVar -userTmpDir` + "blur/" + $filename;
+	sysFile -delete $unRar;
+	string $cmd = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Others\\WinRar\\Rar.exe x \"" + `substituteAllString $rar "/" "\\"` + "\" \"" + `substituteAllString $temp "/" "\\"` + "\"";
+	chdir "C:";
+	string $rs = `system $cmd`;
+	if (!`filetest -f $unRar`)
+		warning ("解压缩文件出错: " + $rar + "\n" + $rs);
+
+	return $unRar;
+}
+
+global proc zwBlur2Dfcheck(string $file)
+{
+	if ($file == "")
+		return;
+
+	system ("shell fcheck -F \"" + `substituteAllString $file "/" "\\"` + "\"");
+}
+
+global proc zwBlur2Dslider(string $textField1, string $textField2, string $intSliderGrp, string $image1, string $button1, string $image2, string $button2)
+{
+	string $file = `zwBlur2DqueryFile $textField1 $intSliderGrp 0`;
+	waitCursor -state on;
+	zwBlur2DPreview $file $image1 $button1;
+	waitCursor -state off;
+	$file = `zwBlur2DqueryFile $textField2 $intSliderGrp 0`;
+	waitCursor -state on;
+	zwBlur2DPreview $file $image2 $button2;
+	waitCursor -state off;
+}
+
+global proc string zwBlur2DqueryFile(string $textField, string $intSliderGrp, int $value)
+{
+	string $file = `textField -query -fileName $textField`;
+	if (!`intSliderGrp - query -enable $intSliderGrp`)
+		return $file;
+
+	string $buf[];
+	tokenize $file "/" $buf;
+	string $filename = $buf[size($buf)-1];
+	string $folder = `substring $file 1 (size($file) - size($filename) - 1)`;
+	string $str = `match "[.][0-9]{4}[.]" $filename`;
+
+	if ($value == 0)
+		$value = `intSliderGrp -query -value $intSliderGrp`;
+	$value = int(`match "[0-9]{4}" $str`) + $value - 1;
+	if ($value < 10)
+		$filename = `substitute $str $filename (".000" + $value + ".")`;
+	else if ($value < 100)
+		$filename = `substitute $str $filename (".00" + $value + ".")`;
+	else if ($value < 1000)
+		$filename = `substitute $str $filename (".0" + $value + ".")`;
+	else
+		$filename = `substitute $str $filename ("." + $value + ".")`;
+	
+	return ($folder + "/" + $filename);
+}
+
+global proc zwBlur2DReset()
+{
+	zwBlur2DcleanTemp;
+
+	optionVar -floatValue "zwBlur2DLength" 1;
+	optionVar -floatValue "zwBlur2DSharpness" 1;
+	optionVar -intValue "zwBlur2DColor" 0;
+	optionVar -intValue "zwBlur2DSmooth" 2;
+	optionVar -intValue "zwBlur2DMemory" 200;
+	optionVar -stringValue "zwBlur2DFolder" "";
+	optionVar -intValue "zwBlur2Dformat" 0;
+
+	zwBlur2D;
+}
+
+global proc zwBlur2DcleanTemp()
+{
+	string $temp = `internalVar -userTmpDir` + "blur";
+	string $cmd = "rd /s/q " + `substituteAllString $temp "/" "\\"`;
+	system $cmd;
+}
+
+global proc zwBlur2DframeBlur(string $textField1, string $textField2, string $intSliderGrp)
+{
+	string $rgba = `zwBlur2DqueryFile $textField1 $intSliderGrp 0`;
+	string $vector = `zwBlur2DqueryFile $textField2 $intSliderGrp 0`;
+	waitCursor -state on;
+	zwBlur2Dblur $rgba $vector "";
+	waitCursor -state off;
+}
+
+global proc zwBlur2DbatchBlur(string $textField1, string $textField2, string $intSliderGrp)
+{
+	string $folder = `optionVar -query "zwBlur2DFolder"`;
+	if (!`filetest -d $folder`)
+		$folder = `workspace -query -rootDirectory` + "images";
+	$folder = `idmtFolderDialog -initialDir $folder`;
+	$folder = `substituteAllString $folder "\\" "/"`;
+
+	if (`filetest -d $folder`)
+	{
+		optionVar -stringValue "zwBlur2DFolder" $folder;
+		
+		int $min= `intSliderGrp -query -min $intSliderGrp`;
+		int $max= `intSliderGrp -query -max $intSliderGrp`;
+		if (!`intSliderGrp -query -enable $intSliderGrp`)
+		{
+			$min = 0;
+			$max = 0;
+		}
+		
+		for ($i=$min; $i<=$max; $i++)
+		{
+			string $rgba = `zwBlur2DqueryFile $textField1 $intSliderGrp $i`;
+			string $vector = `zwBlur2DqueryFile $textField2 $intSliderGrp $i`;
+			waitCursor -state on;
+			int $rs = `zwBlur2Dblur $rgba $vector $folder`;
+			waitCursor -state off;
+			if (!$rs)
+				break;
+		}
+
+		if (`optionVar -query "zwBlur2Dformat"` == 1)
+		{
+			string $cmd = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\bin\\tgaConvert.exe \"" + `substituteAllString $folder "/" "\\"` + "\" -r";
+			system $cmd;
+		}
+	}
+}
+
+global proc int zwBlur2Dblur(string $rgba, string $vector, string $folder)
+{
+	string $buf[];
+
+	if (!`filetest -f $rgba`)
+	{
+		warning ("RGBA 文件不存在: " + $rgba);
+		return false;
+	}
+
+	if (!`filetest -f $vector`)
+	{
+		warning ("Vector 文件不存在: " + $vector);
+		return false;
+	}
+
+	print ($rgba + " + " + $vector + "\n");
+
+	string $temp = `internalVar -userTmpDir` + "blur";
+	sysFile -makeDir $temp;
+
+	$temp = `internalVar -userTmpDir` + "blur/zwBlur2D.iff";
+	sysFile -delete $temp;
+	string $tempVector = `zwBlur2Drar $vector`;
+	if (!`filetest -f $tempVector`)
+		return false;
+	string $cmd = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\bin\\zwBlur2D.exe \"" + `substituteAllString $rgba "/" "\\"` + "\" \"" + `substituteAllString $tempVector "/" "\\"` + "\" \"" + `substituteAllString $temp "/" "\\"` + "\"";
+	chdir "C:";
+	string $rs = `system $cmd`;
+	if ($tempVector != $vector)
+		sysFile -delete $tempVector;
+	if(!`filetest -f $temp`)	// $rs != "" || !`filetest -f $temp`
+	{
+		warning ("合成Vector 时出错: " + $rs);
+		return false;
+	}
+	
+	float $length= `optionVar -query "zwBlur2DLength"`;
+	float $sharp = `optionVar -query "zwBlur2DSharpness"`;
+	int $color = `optionVar -query "zwBlur2DColor"`;
+	int $smooth = `optionVar -query "zwBlur2DSmooth"`;
+	int $memory = `optionVar -query "zwBlur2DMemory"`;
+	$cmd = "blur2d -l " + $length + " -s " + $sharp + " -m " + $smooth + " -r " + $color + " -o " + $memory + " -f \"" + `substituteAllString $temp "/" "\\"` + "\"";
+	$temp = `internalVar -userTmpDir` + "blur/zwBlur2D_blur.iff";
+	sysFile -delete $temp;
+	chdir "C:";
+	$rs = `system $cmd`;
+	sysFile -delete (`internalVar -userTmpDir` + "blur/zwBlur2D.iff");
+	if (`tokenize $rs "\n" $buf` > 1 || !`filetest -f $temp`)
+	{
+		warning ("blur2d 时出错: " + $buf[0]);
+		return false;
+	}
+
+	if ($folder == "")
+	{
+		RenderViewWindow;
+		string $renderPanels[] = `getPanel -scriptType "renderWindowPanel"`;
+		renderWindowEditor -edit -realSize -loadImage $temp $renderPanels[0];
+	}
+	else
+	{
+		tokenize $rgba "/" $buf;
+		string $filename = $buf[size($buf)-1];
+//		$filename = `substitute "[.][^.]+$" $filename ".tga"`;
+
+		string $folder = `optionVar -query "zwBlur2DFolder"`;
+		if (`optionVar -query "zwBlur2Dformat"` == 2)
+		{
+			$filename = `substitute "[.][^.]+$" $filename ".tif"`;
+			string $tga = $folder + "/" + $filename;
+			sysFile -delete $tga;
+			
+			$cmd = "imgcvt -f iff -t tif \"" + `substituteAllString $temp "/" "\\"` + "\" \"" + `substituteAllString $tga "/" "\\"` + "\"";
+			$rs = `system $cmd`;
+			sysFile -delete $temp;
+			if (!`filetest -f $tga`)	// if ($rs != "" || !`filetest -f $tga`)
+			{
+				warning ("转换成TIFF 时出错: " + $rs);
+				return false;
+			}
+			print ("==> " + $tga + "\n");
+		}
+		else
+		{
+			$filename = `substitute "[.][^.]+$" $filename ".tga"`;
+			string $tga = $folder + "/" + $filename;
+			sysFile -delete $tga;
+			
+			$cmd = "imgcvt -f iff -t tga \"" + `substituteAllString $temp "/" "\\"` + "\" \"" + `substituteAllString $tga "/" "\\"` + "\"";
+			$rs = `system $cmd`;
+			sysFile -delete $temp;
+			if (!`filetest -f $tga`)	// if ($rs != "" || !`filetest -f $tga`)
+			{
+				warning ("转换成TGA 时出错: " + $rs);
+				return false;
+			}
+			print ("==> " + $tga + "\n");
+		}
+	}
+
+	return true;
+}

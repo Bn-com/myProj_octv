@@ -1,0 +1,176 @@
+
+global proc HHProxyToolsDelight()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyTools.mel";
+	HhcurveRecord();
+	HhDelectProxy();
+	HhRenderPassSetDelight();
+	HhProxyPSetDelight();
+	HhProxyExportDelight();
+}
+global proc HhRenderPassSetDelight()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/Hh3DelightTools.mel";
+	HhedlightLoad();
+	setAttr "defaultResolution.width" 320;
+	setAttr "defaultResolution.height" 240;
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyTools.mel";
+	HhselectHProxyMR();
+	global string $filepath;
+	string $fileName=`file -q -sn -shn`;
+	string $DelightName=`match "[^.]+" $fileName`+".rib";
+	global string $netFile;
+	$netFile=$filepath+$DelightName;
+	global string $renderpass;
+	$renderpass="proxy_renderpass";
+	if(!`objExists $renderpass`)
+	{
+		string $renderPassOld[]=`ls -type "delightRenderPass"`;
+		DRG_createAndConnectRenderPassNode;
+		string $renderPassNew[]=`ls -type "delightRenderPass"`;
+		string $rpd[]=stringArrayRemove($renderPassOld, $renderPassNew);
+		rename $rpd[0] $renderpass;
+	}
+		AE_setConnectedNodeFromMenu ($renderpass+".camera") ("AE_DRP_update "+$renderpass) "perspShape";
+		setAttr ($renderpass+".pixelSamplesX") 1;
+		setAttr ($renderpass+".pixelSamplesY") 1;
+		setAttr ($renderpass+".pixelFilter") 0;
+		setAttr ($renderpass+".filterWidthX") 1;
+		setAttr ($renderpass+".filterWidthY") 1;
+		setAttr ($renderpass+".filterWidthY") 1;
+		setAttr ($renderpass+".shadingRate") 5;
+		setAttr ($renderpass+".raytraceMaxSpecularDepth") 0;
+		setAttr ($renderpass+".raytraceMaxDiffuseDepth") 0;
+		setAttr ($renderpass+".raytraceMaxDepth") 0;
+		setAttr ($renderpass+".renderMode") 2;
+		setAttr -type "string" ($renderpass+".ribFilename") $netFile;
+		setAttr ($renderpass+".archiveGeometryShaders") 0;
+		select -cl;
+		HhProxyHSetDelight();
+		global string $proxyset;
+		AE_setConnectedNodeFromMenu ($renderpass+".objectsToRender") ("AE_DRP_update "+$renderpass) $proxyset;
+		HhProxyRender();
+}
+/*
+global proc HhProxyFileCopy()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyTools.mel";
+	global string $filepath;
+	string $localFile=`workspace -expandName "3delight"`+"/<scene>/rib/<scene>_<pass>_#.<ext>";
+	global string $proxyfile;
+	string $fileName=`file -q -sn -shn`;
+	string $DelightName=`match "[^.]+" $fileName`+".rib";
+	string $locRname=`workspace -expandName "3delight"`+"/<scene>/rib/"+$DelightName;
+	global string $netFile;
+	$netFile=$filepath+$DelightName;
+	sysFile -ren  $locRname $localFile;
+	sysFile -cp  $netFile $locRname;
+}
+*/
+global proc HhProxyPSetDelight()
+{
+	global string $renderpass;
+	global string $netFile;
+	global string $filepath;
+	string $file=`file -q -sn`;
+	string $buf[];
+	tokenize $file "/" $buf;
+	int $m=size($buf)-2;
+	$filepath="//file-cluster/GDC/Projects/DomesticProject/Library/MoTX/proxy/ProxyFiles/"+$buf[$m]+"/";
+	string $fileName=`file -q -sn -shn`;
+	string $DelightName=`match "[^.]+" $fileName`+".rib";
+	$netFile=$filepath+$DelightName;
+	string $ribNode=`match "[^.]+" $fileName`+"delightRibArchive";
+	if(`objExists $ribNode`)
+	{
+		delete $ribNode;
+	}
+	string $ribOld[]=`ls -type "delightRibArchive"`;
+	HhselectPProxyMR();
+	string $objs[]=`ls -sl -l`;
+	DRA_create;
+	string $ribNew[]=`ls -type "delightRibArchive"`;
+	string $rib[]=stringArrayRemove($ribOld, $ribNew);
+	string $ribp[]=`listRelatives -p $rib[0]`;
+	rename $ribp[0] $ribNode;
+	parent $ribNode $objs[0] ;
+	string $ribs[]=`listRelatives -s $ribNode`;
+	AE_setConnectedNodeFromMenu ($ribs[0]+".connectedRenderPass") "AE_updateAE" "";
+	setAttr -type "string" ($ribs[0]+".ribFilename") $netFile;
+}
+global proc HhProxyHSetDelight()
+{
+	global string $proxyset;
+	$proxyset="proxyset";
+	if(!`objExists $proxyset`)
+	{
+		sets -n $proxyset;
+	}
+	select -cl;
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyTools.mel";
+	HhselectHProxyMR();
+	string $objs[]=`ls -sl`;
+	for ($obj in $objs )
+	{
+		sets -edit -forceElement $proxyset $obj;
+	}
+}
+
+global proc HhProxyExportDelight()
+{
+	global string $curve;
+	global string $filepath;
+	string $fileName=`file -q -sn -shn`;
+	string $MrName=`match "[^.]+" $fileName`+"_delight"+".ma";
+	//string $pgroup=`match "[^.]+" $fileName`+"_p_delight";
+	string $pgroup=$curve+"_p_delight";
+	if(!`objExists $pgroup`)
+	{
+		rename $curve $pgroup;
+	}
+	select -cl;
+	HhProxyShaderSwichDelight();
+	select -cl;
+	HhselectPProxyMR();
+	string $objs[]=`ls -sl `;
+	for($obj in $objs)
+	{
+		string $p[]=`listRelatives -p $obj`;
+		if($p[0]!= $pgroup)
+		{
+			parent $obj $pgroup;
+		}
+		string $shape[]=`listRelatives -s $obj`;
+		setAttr ($shape[0]+".primaryVisibility") 0;
+	}
+	/*
+	string $Archives[]=`ls -type "delightRibArchive"`;
+	for($ArchiveShape in $Archives)
+	{
+		string $Arch[]=`listRelatives -p $ArchiveShape`;
+		string $pa[]=`listRelatives -p $Arch[0]`;
+		if($pa[0]!=$pgroup)
+		{
+			parent $Arch[0] $pgroup;
+		}
+	}
+	*/
+	select $pgroup;
+	file -force -options "v=0" -typ "mayaAscii" -pr -es ($filepath+$MrName);
+}
+
+global proc HhProxyShaderSwichDelight()
+{
+	HhselectHProxyMR();
+	string $objselect[]=`ls -sl`;
+	if(size($objselect)!=0)
+	{
+		string $Shape[]=`listRelatives -fullPath -shapes $objselect[0]`;
+		string $SG[]=`listConnections -t "shadingEngine" $Shape[0]`;
+		select -cl;
+		string $Rib[]=`ls -type "delightRibArchive"`;
+		select $Rib;
+		catch(`sets -e -forceElement $SG[0]`);
+	}
+}	
+

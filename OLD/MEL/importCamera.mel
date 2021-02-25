@@ -1,0 +1,149 @@
+global proc importCamera()
+{
+	if(!`window -exists importCamera`)
+	{
+		window -title "Import Camera" -width 300 -height 300 importCamera;
+			formLayout formLayout1;
+				
+				string $command = "fileBrowserDialog
+					-mode 0
+					-fileCommand \"importCameraList\"
+					-fileType \"mayaBinary\"
+					-actionName \"Import_Camera\"";
+				
+				textFieldButtonGrp
+					-columnWidth 1 40
+					-columnWidth 3 45
+					-adjustableColumn 2
+					-label "File:"
+					-buttonLabel "Browse"
+					-buttonCommand $command
+					textFieldButtonGrp1;
+				
+				textScrollList -allowMultiSelection true -doubleClickCommand "importCameraProc" textScrollList1;
+				button -label "Import" -command "importCameraProc" button1;
+			formLayout -edit
+				-attachForm	textFieldButtonGrp1	"top"		5
+				-attachForm	textFieldButtonGrp1	"left"		5
+				-attachForm	textFieldButtonGrp1	"right"		5
+
+				-attachForm	button1			"left"		5
+				-attachForm	button1			"bottom"	5
+				-attachForm	button1			"right"		5
+
+				-attachControl	textScrollList1		"top"		5	textFieldButtonGrp1
+				-attachForm	textScrollList1		"left"		5
+				-attachControl	textScrollList1		"bottom"	5	button1
+				-attachForm	textScrollList1		"right"		5
+			formLayout1;
+	}
+	showWindow importCamera;
+}
+
+global proc importCameraList(string $filename, string $fileType)
+{
+	string $tempfile, $str, $buffer[];
+	textFieldButtonGrp -edit -fileName $filename textFieldButtonGrp1;
+	$tempfile = `internalVar -userTmpDir` + "importCamera.txt";
+	if(`filetest -f $tempfile`)
+		sysFile -delete $tempfile;
+	textScrollList -edit -removeAll textScrollList1;
+	waitCursor -state on;
+	chdir "c:";
+	system("mayabatch -batch -file \"" + $filename + "\" -command \"source importCamera.mel;importCameraBat;\"");
+	waitCursor -state off;
+	if(!`filetest -f $tempfile`)
+		error "List cameras fail.";
+	int $fileId = `fopen $tempfile "r"`;
+	$str = `fgetline $fileId`;
+	fclose $fileId;
+	tokenize $str " " $buffer;
+	for($str in $buffer)
+		textScrollList -edit -append $str textScrollList1;
+	sysFile -delete $tempfile;
+}
+
+global proc importCameraProc()
+{
+	string $str, $camera, $choice, $tempfile, $cameras[], $buffer[], $buffer1[];
+	$cameras = `textScrollList -query -selectItem textScrollList1`;
+	for ($camera in $cameras)
+	{
+		$choice = "";
+		if (`objExists $camera`)
+		{
+			$choice = `confirmDialog
+				-title "Duplicate Name"
+				-message ($camera + " alreadly exist.")
+				-messageAlign "center"
+			//	-button "Replace"
+				-button "Rename Imported"
+				-button "No Import"
+				-defaultButton "Rename Imported"
+				-cancelButton "No Import"
+				-dismissString "No Import"`;
+		}
+
+		if ($choice == "Replace")
+			delete $camera;
+	//	else if($choice == "Rename Imported")
+	//		$newname = "new";
+		else if($choice == "No Import")
+			continue;
+
+		$tempfile = `internalVar -userTmpDir` + $camera + ".mb";
+		if (!`filetest -f $tempfile`)
+			error ($camera + " not exists.");
+
+		file -import -type "mayaBinary" -ra true -namespace "importCamera1" -options "v=0" $tempfile;
+		importCameranamespace;
+		importCameranamespace;
+	}
+}
+
+global proc importCameraBat()
+{
+	string $camera, $tempfile, $buffer[], $cameras[];
+	
+	$tempfile = `internalVar -userTmpDir`;
+	$buffer = `getFileList -folder $tempfile -filespec "cam_*.mb"`;
+	for($tempfile in $buffer)
+	{
+		$tempfile = `internalVar -userTmpDir` + $tempfile;
+		if(`filetest -w $tempfile`)
+			sysFile -delete $tempfile;
+	}
+	
+	$tempfile = `internalVar -userTmpDir` + "importCamera.txt";
+	int $fileId=`fopen $tempfile "w"`;
+	$cameras = `ls -transforms "cam_*"`;
+	for ($camera in $cameras)
+	{
+		$buffer = `listRelatives -children $camera`;
+		if(`nodeType $buffer[0]` == "camera")
+		{
+			select $camera;
+			$tempfile = `internalVar -userTmpDir` + $camera;
+			file -force -exportSelected -type "mayaBinary" $tempfile;
+			fprint $fileId ($camera + " ");
+		}
+	}
+	fclose $fileId;
+}
+
+global proc importCameranamespace()
+{
+	string $obj, $new, $objs[], $buf[];
+	$objs = `ls "importCamera*:*"`;
+	for($obj in $objs)
+	{
+		if (`objExists $obj`)
+		{
+			tokenize $obj "->" $buf;
+			$new = ` substitute "importCamera[0-9]+:" $buf[size($buf)-1]  ""`;
+			while(`objExists $new`)
+				$new += "_new";
+			rename $obj $new;
+		}
+	}
+}

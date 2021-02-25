@@ -1,0 +1,271 @@
+global proc zwAssetFile()
+{
+	global int $zwAssetFile;
+	idmtDHtmlDlg -destroyWindow $zwAssetFile;
+
+	string $project;
+	string $episode;
+	string $scene;
+	string $referenced;
+
+	string $fileName = `file -query -shortName -sceneName`;
+	string $buf[];
+//	if (`tokenize $fileName "_" $buf` > 3)
+//	{
+//		$project = $buf[0];
+//		$episode = $buf[1];
+//		$scene = $buf[2];
+//	}
+
+	$buf = `file -query -reference`;
+	for ($reference in $buf)
+	{
+		if ($referenced != "")
+		{
+			$referenced += ";";
+		}
+		$referenced += `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+	}
+
+////	string $url = "http://app-server/ws/Support/Working/ui/AssetFile.aspx" + "?project=" + $project + "&episode=" + $episode + "&scene=" + $scene + "&referenced=" + $referenced;
+//	string $format = "http://app-server/ws/Support/Working/ui/AssetFile.aspx?project=<Project>&episode=<Episode>&sequence=<Sequence>&scene=<Shot>&referenced=" + $referenced;
+//	string $url = `zwGetPath $format $fileName`;
+//	if ($url == "")
+//	{
+//		$url = "http://app-server/ws/Support/Working/ui/AssetFile.aspx";
+//	}
+//	$project = zwGetProject($fileName);
+//	if ($project == "" || $project == "HeroFactory" || $project == "Calimero" || $project == "ZoomWhiteDolphin")
+//	{
+		$url = "http://info-srv/TD/ui/AssetFile2.aspx?filename=" + $fileName;
+//	}
+	$zwAssetFile = `idmtDHtmlDlg -host $url`;
+}
+
+global proc zwAssetFileReference(string $project, string $asset_type, string $code, string $asset_name, string $asset_mode, string $asset_file)
+{
+	string $file;
+	if (zwGetProjectGeneration($project) == 1)
+	{
+		$file = "//file-cluster/GDC/Projects/" + $project + "/Production/Asset/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+	}
+	else
+	{
+		if ($project == "Ninjago")
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $code + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+		else
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+	}
+
+	slImportRef($file, "mayaBinary");
+}
+
+global proc zwAssetFileImport(string $project, string $asset_type, string $code, string $asset_name, string $asset_mode, string $asset_file)
+{
+	string $file;
+	if (zwGetProjectGeneration($project) == 1)
+	{
+		$file = "//file-cluster/GDC/Projects/" + $project + "/Production/Asset/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+	}
+	else
+	{
+		if ($project == "Ninjago")
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $code + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+		else
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+	}
+	file -import $file;
+}
+
+global proc zwAssetFileReplace(string $project, string $asset_type, string $code, string $asset_name, string $asset_mode, string $asset_file)
+{
+	ReferenceEditor;
+
+	string $file;
+	if (zwGetProjectGeneration($project) == 1)
+	{
+		$file = "//file-cluster/GDC/Projects/" + $project + "/Production/Asset/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+	}
+	else
+	{
+		if ($project == "Ninjago")
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $code + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+		else
+		{
+			$file = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $asset_name + "/" + $asset_mode + "/" + $asset_file;
+		}
+	}
+
+	global string $gReferenceEditorPanel;
+	string $references[] = `sceneEditor -query -selectItem $gReferenceEditorPanel`;
+	if (size($references) > 0)
+	{
+		for ($reference in $references)
+		{
+			string $referenceNode = `file -query -referenceNode $reference`;
+			file -loadReference $referenceNode $file;
+		}
+		return;
+	}
+
+	$references = zwAssetFileMatch($asset_type, $asset_name, $asset_mode);
+	if (size($references) == 0)
+	{
+		error "清先在Reference Editor 里面选择需要替换的参考";
+	}
+	else if (size($references) == 1)
+	{
+		string $referenceNode = `file -query -referenceNode $references[0]`;
+		file -loadReference $referenceNode $file;
+		return;
+	}
+
+	string $cmd = "confirmDialog -message \"替换哪个参考？\" -cancelButton \"Cancel\" -defaultButton \"Cancel\" -dismissString \"Cancel\"";
+	for ($reference in $references)
+	{
+		string $filename = `referenceQuery -shortName -filename $reference`;
+		$cmd += " -button \"" + $filename + "\"";
+	}
+	$cmd += " -button \"All\" -button \"Cancel\"";
+	string $rs = `eval $cmd`;
+	if ($rs == "All")
+	{
+		for ($reference in $references)
+		{
+			string $referenceNode = `file -query -referenceNode $reference`;
+			file -loadReference $referenceNode $file;
+		}
+	}
+	else if ($rs != "Cancel")
+	{
+		for ($reference in $references)
+		{
+			string $filename = `referenceQuery -shortName -filename $reference`;
+			if ($filename == $rs)
+			{
+				string $referenceNode = `file -query -referenceNode $reference`;
+				file -loadReference $referenceNode $file;
+				break;
+			}
+		}
+	}
+}
+
+// 已上传但没有参考
+global proc string[] zwAssetFileUnReferenced()
+{
+	string $unReferenced[];
+	clear $unReferenced;
+
+	string $references[] = `file -query -reference`;
+
+	string $fileName = `file -query -shortName -sceneName`;
+	string $str = `idmtService "GetAssetInAnim" ($fileName + "|characters|master")`;
+	string $assets[];
+	tokenize $str "|" $assets;
+
+	for ($i=0; $i<size($assets); $i+=2)
+	{
+		int $find = false;
+		for ($reference in $references)
+		{
+			string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+			if (`match ("_" + $assets[$i] + "_") $filename` != "")
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			$unReferenced[size($unReferenced)] = $assets[$i];
+		}
+	}
+
+	return $unReferenced;
+}
+
+global proc string[] zwAssetFileMatch(string $asset_type, string $asset_name, string $asset_mode)
+{
+	string $match[];
+	clear $match;
+
+	string $references[] = `file -query -reference`;
+
+	string $fileName = `file -query -shortName -sceneName`;
+	string $str = `idmtService "GetAssetInAnim" ($fileName + "|" + $asset_type + "|" + $asset_mode)`;
+	string $assets[];
+	tokenize $str "|" $assets;
+
+	string $character = `match "[0-9]+" $asset_name`;
+	$character = `substring $character 1 (size($character)/2)`;
+	$character = `match ("[^0-9]+" + $character) $asset_name`;
+
+	for ($reference in $references)
+	{
+		string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+
+		if (`match ("_" + $character + "[0-9]+") $filename` == "")
+		{
+			continue;
+		}
+
+		int $find = false;
+		for ($i=0; $i<size($assets); $i+=2)
+		{
+			if (`match ("_" + $assets[$i] + "_") $filename` != "")
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			$match[size($match)] = $reference;
+		}
+	}
+
+	return $match;
+}
+
+global proc zwAssetFileImportRef(string $path)
+{
+	if (`match "/ShunLiu/" $path` != "")
+	{
+		string $mocap = `substitute "_h_ms_anim[.]" $path "_mocap_h_ms_anim."`;
+		if ($mocap != $path && `filetest -f $mocap`)
+		{
+			string $asset = `match "[^/\\]+$" $path`;
+			string $buf[];
+			tokenize $asset "_" $buf;
+			$asset = $buf[1];
+			string $result = `confirmDialog -message ($asset + "\n\n使用 anim 文件还是 mocap 文件？") -button "anim" -button "mocap" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+			if ($result == "Cancel")
+			{
+				return;
+			}
+			else if ($result == "mocap")
+			{
+				$path = $mocap;
+			}
+		}
+	}
+
+	string $fileType = "mayaBinary";
+	string $ext = `match "[^.]+$" $path`;
+	if (tolower($ext) == "ma")
+	{
+		$fileType = "mayaAscii";
+	}
+	slImportRef($path, $fileType);
+}

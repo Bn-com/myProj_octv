@@ -1,0 +1,707 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwExportCharacterSetup()
+{
+	//CHECK FOR KEYFRAMES
+	string $animCheck[] = `ls -type animCurve`;
+	if(`size $animCheck`>0)
+	{
+		print "\n*****************************************************************\n";
+		print "**PLEASE DELETE ALL ANIMATION AND SET CHARACTER IN NEUTRAL POSE**\n";
+		print "*****************************************************************\n";
+	}
+	else
+	{
+		$tmp = `ls "*MASTER"`;
+		string $master = $tmp[0];
+		eval ("$tmp = `ls \"*MASTER\"`;\n"+
+		"string $master = $tmp[0];");
+
+		//GET CURRENT DIRECTORY
+		string $dir = `workspace -q -dir`;
+		string $data = `substitute "scenes" $dir "data"`;
+		eval ("string $dir = `workspace -q -dir`");
+		eval ("string $data = `substitute \"scenes\" \$dir \"data\"`");
+		print ("DIRECTORY: "+$data+"\n");
+
+		//EXPORT DEFORMER WEIGHTS
+		eval ("string $cluster_list[] = `ls -type cluster`");
+		mwExportClusterData $master $data;
+
+///////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////
+
+		//EXPORT SKIN WEIGHTS
+		print "DOING SKIN CLUSTERS\n\n";
+		string $skinCluster_list[] = `ls -type skinCluster`;
+		string $mesh_list[];
+		int $i = 0;
+		for($sc in $skinCluster_list)
+		{
+			string $mesh1[] = `listConnections -s 0 -d 1 ($sc+".outputGeometry[0]")`;
+			if(`size $mesh1`>0)
+			{
+				$mesh_list[$i] = $mesh1[0];
+				$i++;
+			}
+		}
+		eval ("string $skinCluster_list[] = `ls -type skinCluster`;\n"+
+		"string $mesh_list[];\n"+
+		"int $i = 0;\n"+
+		"for\($sc in $skinCluster_list\)\n"+
+		"{\n\t"+
+		"string $mesh1[] = `listConnections -s 0 -d 1 -type mesh \($sc+\".outputGeometry[0]\"\)`;\n\t"+
+		"if\(`size $mesh1`>0\)\n\t{\n\t\t"+
+		"$mesh_list[$i] = $mesh1[0];\n\t\t"+
+		"$i++;\n\t}\n"+
+		"}\n");
+
+		for($mesh in $mesh_list)
+		{
+			string $type[] = `ls -st $mesh`;
+			if(`strcmp "transform" $type[1]`==0)
+			{
+				print ("EXPORTING WEIGHTS FOR: "+$mesh+"\n");
+				print "PLEASE WAIT\n\n";
+				select -r $mesh;
+				sds_poly_smooth_weights_export;
+				skinCluster -e -ub $mesh;
+			}
+		}
+		print "FINISHED EXPORTING SKIN CLUSTERS\n\n";
+
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+
+		//GET PARENTING INFO FOR SURFACES
+		string $pfile = ($data+$master+"_PARENT_DATA.data");
+		int $pfileId = `fopen $pfile "w"`;
+		string $surf_list[], $group_list[], $jt_list[], $check_list[];
+		int $s = 0;
+		string $meshes[] = `ls -type mesh -type nurbsSurface`;
+		for($mesh in $meshes)
+		{
+			int $found = 0;
+			string $surf[] = `listRelatives -parent $mesh`;
+			for($m=0;$m<`size $mesh_list`;$m++)
+			{
+				if(`strcmp $surf[0] $mesh_list[$m]`==0)
+				{
+					print ("SURFACE IS SKINNED: "+$surf[0]+"\n");
+					$found = 1;
+					break;
+				}
+			}
+
+			//ELIMINATE REPEAT SURFACES
+			for($check in $check_list)
+			{
+				if(`strcmp $surf[0] $check`==0)
+				{
+					$found = 1;
+					break;
+				}
+			}
+
+			//PARENTED SURFACES
+			if($found==0)
+			{
+				fprint $pfileId ("if\(`objExists "+$surf[0]+"`\)\n{\n");
+				//JOINT VS GROUP
+				$surf_list[$s] = $surf[0];
+				$check_list[$s] = $surf[0];
+				string $parent[] = `listRelatives -parent $surf[0]`;
+				string $type[] = `ls -st $parent[0]`;
+				if(`strcmp "joint" $type[1]`==0)
+				{
+					fprint $pfileId ("\tparent -a "+$surf[0]+" "+$parent[0]+";\n}\n");
+					print ("SURFACE: "+$surf[0]+" IS PARENTED TO JOINT: "+$parent[0]+"\n");
+					$jt_list[$s] = $parent[0];
+				}
+				else		//SURFACE PARENTED TO GROUP//
+				{
+					print ("SURFACE: "+$surf[0]+" IS PARENTED TO GROUP: "+$parent[0]+"\n");
+					$group_list[$s] = $parent[0];
+
+					//GET PIVOT FOR GROUP
+					float $gp[3] = `xform -q -ws -rp $parent[0]`;
+					float $x = $gp[0]*0.01;
+					float $y = $gp[1]*0.01;
+					float $z = $gp[2]*0.01;
+					print ("PIVOT FOR GROUP: "+$parent[0]+" IS: "+$x+" "+$y+" "+$z+"\n");
+
+					//GET KEYABLE ATTRIBUTES
+					string $attrs = "translateX translateY translateZ rotateX rotateY rotateZ scaleX scaleY scaleZ visibility";
+					string $attr_list[];
+					tokenize($attrs, $attr_list);
+					string $keyable[] = `listAttr -k $parent[0]`;
+					string $non_keys[];
+					int $k = 0;
+					for($attr in $attr_list)
+					{
+						int $found = 0;
+						for($key in $keyable)
+						{
+							if(`strcmp $attr $key`==0)
+							{
+								$found = 1;
+								break;
+							}
+						}
+						if($found==0)
+						{
+							$non_keys[$k] = $attr;
+							$k++;
+						}
+					}
+
+					fprint $pfileId ("\tif\(`objExists "+$parent[0]+"`\)\n\t{\n\t\t"+
+					"string \$parent[] = `listRelatives -parent "+$surf[0]+"`;\n\t\t"+
+					"if\(`strcmp \$parent[0] "+$parent[0]+"`!=0\)\n\t\t{\n\t\t\t"+
+					"parent -a "+$surf[0]+" "+$parent[0]+";\n\t\t}\n\t}\n\t"+
+					"else\n\t{\n\t\tstring \$group = `group -name "+$parent[0]+" -em`;\n\t\t"+
+					"xform -ws -piv "+$x+" "+$y+" "+$z+" \$group;\n\t\t"+
+					"parent -a "+$surf[0]+" \$group;\n\t");
+					for($non in $non_keys)
+					{
+						fprint $pfileId ("\tsetAttr -k 0 \(\$group+\"."+$non+"\"\);\n\t");
+					}
+
+					fprint $pfileId ("}\n");
+
+					//FIND JOINT
+					string $joint[] = `listRelatives -parent $parent[0]`;
+					string $type1[] = `ls -st $joint[0]`;
+					if(`strcmp "joint" $type1[1]`==0)
+					{
+						fprint $pfileId ("\tstring \$parent[] = `listRelatives -parent "+$parent[0]+"`;\n\t"+
+						"if\(`strcmp \$parent[0] "+$joint[0]+"`!=0\)\n\t{\n\t\t"+
+						"parent -a "+$parent[0]+" "+$joint[0]+";\n\t}\n");
+						print ("GROUP: "+$parent[0]+" IS PARENTED TO JOINT: "+$joint[0]+"\n");
+						$jt_list[$s] = $joint[0];
+					}
+					else
+					{
+						print ("SURFACE: "+$surf[0]+" IS PARENTED TO ANOTHER\n");
+					}
+					fprint $pfileId ("}\n");
+				}
+				$s++;
+			}
+			print "\n";
+		}
+		fclose $pfileId;
+		clear $surf_list;
+		clear $group_list;
+		clear $jt_list;
+		clear $check_list;
+
+//////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////
+
+		//SCALE DUPLICATE SKELETON
+		string $dup[] = `duplicate -rr $master`;
+		setAttr ($dup[0]+".scale") 0.01 0.01 0.01;
+		refresh;
+
+		//DISABLE ALL
+		string $node_list[] = `ls "*.nodeState"`;
+		string $lock_nodes[];
+		int $n = 0;
+		for($node in $node_list)
+		{
+			if(`getAttr -l $node`)
+			{
+				$lock_nodes[$n] = $node;
+				setAttr -l 0 $node;
+				$n++;
+			}
+		}
+		DisableAll;
+
+		//GET ENTIRE HIERARCHY
+		string $all_nodes[] = `listRelatives -ad -pa -type transform -type joint -type ikHandle -type nurbsCurve $master`;
+
+		//CHECK FOR SELECTION HANDLES
+		string $handle_list[];
+		int $h = 0;
+		for($node in $all_nodes)
+		{
+			if(`objExists ($node+".displayHandle")`)
+			{
+				if(`getAttr ($node+".displayHandle")`)
+				{
+					$handle_list[$h] = ($node+".selectHandle");
+					$h++;
+				}
+			}
+		}
+
+		string $hfile = ($data+$master+"_SELECTION_HANDLE_DATA.data");
+		int $hfileId = `fopen $hfile "w"`;
+		for($handle in $handle_list)
+		{
+			float $p[3] = `xform -q -ws -translation $handle`;
+			float $x = $p[0]*0.01;
+			float $y = $p[1]*0.01;
+			float $z = $p[2]*0.01;
+			fprint $hfileId ("if\(`objExists "+$handle+"`\)\n{\n\t"+
+			"move -a "+$x+" "+$y+" "+$z+" "+$handle+";\n}\n");
+		}
+		fclose $hfileId;
+
+		int $size = `size $all_nodes`;
+		string $ik_pc[];
+		int $j = 0;
+		for($a=0;$a<$size;$a++)
+		{
+			string $node = $all_nodes[$size-$a-1];
+			string $type[] = `ls -st $node`;
+			string $dup_node = `substitute "MASTER" $node "MASTER1"`;
+			if(`strcmp "transform" $type[1]`==0)
+			{
+				print ("DOING TRANSFORM: "+$node+"\n");
+				int $lock[3];
+				int $lockCount = 0;
+				string $sdk_cons[], $sdk_trans[];
+				int $sdkCount = 0;
+				string $translates = "tx ty tz";
+				string $trans_list[3];
+				tokenize($translates, $trans_list);
+				for($trans in $trans_list)
+				{
+					$lock[$lockCount] = `getAttr -l ($node+"."+$trans)`;
+					if(`connectionInfo -id ($node+"."+$trans)`==0)
+					{
+						if(`getAttr -l ($node+"."+$trans)`)
+						{
+							setAttr -l 0 ($node+"."+$trans);
+							print ("UNLOCKING: "+$node+" TRANSLATION: "+$trans+"\n");
+						}
+					}
+					else
+					{
+						string $trans_cons[] = `listConnections -s 1 -d 0 ($node+"."+$trans)`;
+						string $trans_type[] = `ls -st $trans_cons[0]`;
+						if(`gmatch $trans_type[1] "animC*"`)
+						{
+							print ("\nFOUND SDK FOR NODE: "+$node+" TRANSLATION: "+$trans+"\n\n");
+							$sdk_cons[$sdkCount] = $trans_cons[0];
+							$sdk_trans[$sdkCount] = $trans;
+							$sdkCount++;
+							setAttr -l 0 ($node+"."+$trans);
+							print ("UNLOCKING: "+$node+" TRANSLATION: "+$trans+"\n");
+							disconnectAttr ($trans_cons[0]+".output") ($node+"."+$trans);
+							scaleKey -scaleSpecifiedKeys 1 -time ":" -float ":" -at $trans -timeScale 1 -timePivot 0 -floatScale 1 -floatPivot 0 -valueScale 0.01 -valuePivot 0 -hierarchy none -controlPoints 0 -shape 1 $node;
+						}
+					}
+					$lockCount++;
+				}
+				string $pc[] = `pointConstraint -weight 1 $dup_node $node`;
+				string $shape[] = `listRelatives -shapes -pa $node`;
+				string $parent[] = `listRelatives -parent -pa $node`;
+				string $typeS[] = `ls -st $shape[0]`;
+				string $typeP[] = `ls -st $parent[0]`;
+				if(`strcmp "locator" $typeS[1]`==0&&`strcmp "ikHandle" $typeP[1]`==0)
+				{
+					$ik_pc[$j] = $pc[0];
+					$j++;
+				}
+				else
+				{
+					delete $pc;
+					for($m=0;$m<`size $sdk_cons`;$m++)
+					{
+						print ("CONNECTING SDK: "+$sdk_cons[$m]+".output TO: "+$node+"."+$sdk_trans[$m]+"\n");
+						connectAttr -f ($sdk_cons[$m]+".output") ($node+"."+$sdk_trans[$m]);
+					}
+				}
+				clear $sdk_cons;
+				clear $sdk_trans;
+				for($l=0;$l<3;$l++)
+				{
+					setAttr -l $lock[$l] ($node+"."+$trans_list[$l]);
+				}
+			}			
+			if(`strcmp "joint" $type[1]`==0)
+			{
+				print ("DOING JOINT: "+$node+"\n");
+				int $lock = `getAttr -l ($node+".tx")`;
+				if($lock==1)
+				{
+					setAttr -l 0 ($node+".tx");
+					setAttr -l 0 ($node+".ty");
+					setAttr -l 0 ($node+".tz");
+				}
+				string $pc[] = `pointConstraint -weight 1 $dup_node $node`;
+				delete $pc;
+				if($lock==1)
+				{
+					setAttr -l 1 ($node+".tx");
+					setAttr -l 1 ($node+".ty");
+					setAttr -l 1 ($node+".tz");
+				}
+				print ("FINISHED JOINT: "+$node+"\n\n");
+			}
+			if(`strcmp "ikHandle" $type[1]`==0)
+			{
+				print ("DOING IK HANDLE: "+$node+"\n");
+				if(`connectionInfo -id ($node+".tx")`==0)
+				{
+					print ("DOING IK: "+$node+"\n");
+					string $dup_node = `substitute "MASTER" $node "MASTER1"`;
+					int $lock = `getAttr -l ($node+".tx")`;
+					if($lock==1)
+					{
+						setAttr -l 0 ($node+".tx");
+						setAttr -l 0 ($node+".ty");
+						setAttr -l 0 ($node+".tz");
+					}
+					EnableAll;
+					refresh;
+					string $pc[] = `pointConstraint -weight 1 $dup_node $node`;
+					$ik_pc[$j] = $pc[0];
+					$j++;
+					if($lock==1)
+					{
+						setAttr -l 1 ($node+".tx");
+						setAttr -l 1 ($node+".ty");
+						setAttr -l 1 ($node+".tz");
+					}
+					DisableAll;
+				}
+			}
+			if(`strcmp "nurbsCurve" $type[1]`==0)
+			{
+				if(`gmatch $node "*eye*"`==0)
+				{
+					//CHECK FOR INSTANCES
+					string $c_parent[] = `listRelatives -allParents -pa $node`;
+					if(`size $c_parent`>1)
+					{
+						string $c_group[] = `listRelatives -allParents -pa $c_parent[0]`;
+						select -r $c_group;
+						mwObjSnap;
+						select -cl;
+					}
+					for($parent in $c_parent)
+					{
+						print ("\n**************CURVE: "+$parent+"****************\n\n");
+						int $lock = 0;
+						if(`getAttr -l ($parent+".sx")`)
+						{
+							setAttr -l 0 ($parent+".sx");
+							setAttr -l 0 ($parent+".sy");
+							setAttr -l 0 ($parent+".sz");
+							$lock = 1;
+						}
+						setAttr ($parent+".scale") 0.01 0.01 0.01;
+						if($lock==1)
+						{
+							setAttr -l 1 ($parent+".sx");
+							setAttr -l 1 ($parent+".sy");
+							setAttr -l 1 ($parent+".sz");
+						}
+					}
+				}
+			}
+		}
+		delete $ik_pc;
+		EnableAll;
+		print "\nRELOCKING NODESTATES\n\n";
+		for($node in $lock_nodes)
+		{
+			if(`objExists $node`)
+			{
+				setAttr -l 1 $node;
+			}
+		}
+		print "DELETING DUPLICATE\n\n";
+		delete $dup;
+
+///////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////
+
+		//SCALE ALL LOCATORS
+		string $loc_list[] = `ls -type locator`;
+		for($loc in $loc_list)
+		{
+			string $parent[] = `listRelatives -parent -pa $loc`;
+			$loc = $parent[0];
+			int $lock = `getAttr -l ($loc+".sx")`;
+			if($lock==1)
+			{
+				setAttr -l 0 ($loc+".sx");
+				setAttr -l 0 ($loc+".sy");
+				setAttr -l 0 ($loc+".sz");
+			}
+			float $scale = `getAttr ($loc+".sx")`;
+			if($scale>1.0)
+			{
+				scale -a 1 1 1 $loc;
+			}
+			if($lock==1)
+			{
+				setAttr -l 1 ($loc+".sx");
+				setAttr -l 1 ($loc+".sy");
+				setAttr -l 1 ($loc+".sz");
+			}
+		}
+
+//////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
+
+		//DELETE ALL SURFACES
+		string $meshes[] = `ls -type mesh -type nurbsSurface`;
+		for($mesh in $meshes)
+		{
+			if(`objExists $mesh`)
+			{
+				delete `pickWalk -d up $mesh`;
+			}
+		}
+		delete `ls -type brush`;
+
+/////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
+
+		//DELETE UNUSED SHADERS
+		for($s=0;$s<4;$s++)
+		{
+			//print ($s+"\n");
+			string $shaders[] = `ls -type shadingEngine`;
+			for($shader in $shaders)
+			{
+				if(`connectionInfo -id ($shader+".dagSetMembers[0]")`==0&&`gmatch $shader "*initial*"`!=1)
+				{
+					print ("DELETING SHADER: "+$shader+"\n");
+					delete $shader;
+				}
+			}
+			string $mats[] = `ls -mat`;
+			for($mat in $mats)
+			{
+				if(`connectionInfo -is ($mat+".outColor")`==0)
+				{
+					if(`strcmp "lambert1" $mat`!=0&&`strcmp "particleCloud1" $mat`!=0)
+					{
+						print ("DELETING MATERIAL: "+$mat+"\n");
+						delete $mat;
+					}
+				}
+			}
+			string $textures[] = `ls -tex`;
+			for($tex in $textures)
+			{
+				int $delete = 0;
+				if(`objExists ($tex+".outColor")`)
+				{
+					if(`connectionInfo -is ($tex+".outColor")`==0)
+					{
+						$delete = 1;
+					}
+				}
+				if(`objExists ($tex+".output")`)
+				{
+					if(`connectionInfo -is ($tex+".output")`==0)
+					{
+						$delete = 1;
+					}
+				}
+				if(`objExists ($tex+".outUV")`)
+				{
+					if(`connectionInfo -is ($tex+".outUV")`==0)
+					{
+						$delete = 1;
+					}
+				}
+				if($delete==1)
+				{
+					print ("DELETING TEXURES: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $si[] = `ls -type samplerInfo`;
+			for($tex in $si)
+			{
+				int $delete = 1;
+				string $attrs[] = `listAttr $tex`;
+				for($attr in $attrs)
+				{
+					if(`strcmp "message" $attr`!=0)
+					{
+						if(`connectionInfo -is ($tex+"."+$attr)`)
+						{
+							$delete = 0;
+							break;
+						}
+					}
+				}
+				if($delete==1)
+				{
+					print ("DELETING SAMPLER INFO: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $bc[] = `ls -type blendColors`;
+			for($tex in $bc)
+			{
+				if(`connectionInfo -is ($tex+".output")`==0)
+				{
+					print ("DELETING BLEND COLORS: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $placements[] = `ls -type place2dTexture`;
+			for($tex in $placements)
+			{
+				if(`connectionInfo -is ($tex+".outUV")`==0)
+				{
+					print ("DELETING PLACEMENTS: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $mds[] = `ls -type multiplyDivide`;
+			for($md in $mds)
+			{
+				if(`connectionInfo -is ($md+".output")`==0&&`connectionInfo -is ($md+".outputZ")`==0)
+				{
+					print ("DELETING MD: "+$md+"\n");
+					delete $md;
+				}
+			}
+			string $placement3[] = `ls -type place3dTexture`;
+			for($tex in $placement3)
+			{
+				if(`connectionInfo -is ($tex+".worldInverseMatrix[0]")`==0)
+				{
+					print ("DELETING PLACEMENTS: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $bump[] = `ls -type bump3d -type bump2d`;
+			for($tex in $bump)
+			{
+				if(`connectionInfo -is ($tex+".outNormal")`==0)
+				{
+					print ("DELETING BUMP: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+			string $conditions[] = `ls -type condition`;
+			for($tex in $conditions)
+			{
+				if(`connectionInfo -is ($tex+".outColor")`==0)
+				{
+					print ("DELETING CONDITIONS: "+$tex+"\n");
+					delete $tex;
+				}
+			}
+		}
+		print "FINISHED DELETING UNUSED SHADING NODES\n\n";
+
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
+
+		//DELETE UNUSED DISPLAY LAYERS
+		string $layers[] = `ls -type displayLayer`;
+		for($layer in $layers)
+		{
+			if(`strcmp "defaultLayer" $layer`!=0)
+			{
+				if(`connectionInfo -is ($layer+".drawInfo")`==0)
+				{
+					print ("DELETING UNUSED DISPLAY LAYER: "+$layer+"\n");
+					delete $layer;
+				}
+			}
+		}
+
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
+
+		//ZERO TRANSLATIONS FOR TORSO AND FOOT CONTROLS
+		string $name_parts[];
+		tokenize($master, "_", $name_parts);
+		string $char = $name_parts[0];
+		string $foot = ($char+"_footCon");
+		for($f=0;$f<2;$f++)
+		{
+			string $footCon;
+			if($f==0)
+			{
+				$footCon = ($foot+"_l");
+			}
+			else
+			{
+				$footCon = ($foot+"_r");
+			}
+			if(`objExists $footCon`)
+			{
+				float $pos[3] = `xform -q -ws -rp $footCon`;
+				move -r (-$pos[0]) (-$pos[1]) (-$pos[2]) $footCon;
+				string $tip[] = `listRelatives -c -pa $footCon`;
+				setAttr -l 0 ($tip[0]+".tx");
+				setAttr -l 0 ($tip[0]+".ty");
+				setAttr -l 0 ($tip[0]+".tz");
+				move -r $pos[0] $pos[1] $pos[2] $tip[0];
+				parent -w $tip;
+				makeIdentity -t 1 $footCon;
+				move -r $pos[0] $pos[1] $pos[2] ($footCon+".rotatePivot") ($footCon+".scalePivot");
+				parent $tip $footCon;
+				setAttr -l 1 ($tip[0]+".tx");
+				setAttr -l 1 ($tip[0]+".ty");
+				setAttr -l 1 ($tip[0]+".tz");
+			}
+		}
+		string $torso = ($char+"_torso");
+		if(`objExists $torso`)
+		{
+			float $piv[3] = `xform -q -ws -rp $torso`;
+			string $joints[] = `listRelatives -c -pa $torso`;
+			for($jt in $joints)
+			{
+				setAttr -l 0 ($jt+".tx");
+				setAttr -l 0 ($jt+".ty");
+				setAttr -l 0 ($jt+".tz");
+			}
+			parent -w $joints;
+			makeIdentity -t 1 $torso;
+			xform -ws -piv $piv[0] $piv[1] $piv[2] $torso;
+			for($jt in $joints)
+			{
+				parent $jt $torso;
+				setAttr -l 1 ($jt+".tx");
+				setAttr -l 1 ($jt+".ty");
+				setAttr -l 1 ($jt+".tz");
+			}
+		}
+
+//////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////
+
+		//POSITION SELECTION HANDLES
+		print "\nPOSITIONING SELECTION HANDLE\n\n";
+		int $hfileId = `fopen $hfile "r"`;
+		string $nextLine = `fgetline $hfileId`;
+		string $cmd = $nextLine;
+		while ( size( $nextLine ) > 0 )
+		{
+    			$nextLine = `fgetline $hfileId`;
+    			$cmd = $cmd+$nextLine;
+   	 	}
+    		fclose $hfileId;
+		eval $cmd;
+		sysFile -delete $hfile;
+
+		print "FINISHED EXPORTING DEFORMATION DATA AND ADJUSTING SKELETON TO NEW SCALE\n";
+	}
+}

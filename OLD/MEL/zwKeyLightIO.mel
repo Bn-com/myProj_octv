@@ -1,0 +1,178 @@
+global proc zwKeyLightIO()
+{
+	if (`window -exists zwKeyLightIO`)
+	{
+		deleteUI zwKeyLightIO;
+	}
+
+	string $episode = "";
+	string $shot = "";
+	string $filename = `file -query -sceneName`;
+	$filename = `match "[^/\\@]+$" $filename`;
+	if (`match "^[^_.]+_[^_.]+_[^_.]+" $filename` != "")
+	{
+		string $buf[];
+		tokenize $filename "_" $buf;
+		$episode = $buf[1];
+		$shot = $buf[2];
+	}
+
+	window -title "KeyLightIO" -resizeToFitChildren true zwKeyLightIO;
+		string $formLayout = `formLayout`;
+			text -label "导出、导入灯的位置：先选灯，再加选物体" textHelp;
+			textFieldGrp -label "Sequence" -text $episode textFieldGrpSequence;
+			textFieldGrp -label "Shot" -text $shot textFieldGrpShot;
+			button -label "Export" -command "zwKeyLightExport" buttonExport;
+			button -label "Import" -command "zwKeyLightImport" buttonImport;
+		formLayout -edit
+			-attachForm		textHelp		top	0
+			-attachForm		textHelp		left	0
+			-attachForm		textHelp		right	0
+
+			-attachControl		textFieldGrpSequence	top	0	textHelp
+			-attachForm		textFieldGrpSequence	left	0
+			-attachForm		textFieldGrpSequence	right	0
+
+			-attachControl		textFieldGrpShot	top	0	textFieldGrpSequence
+			-attachForm		textFieldGrpShot	left	0
+			-attachForm		textFieldGrpShot	right	0
+
+			-attachControl		buttonExport		top	0	textFieldGrpShot
+			-attachForm		buttonExport		left	0
+			-attachPosition		buttonExport		right	0	50
+
+			-attachControl		buttonImport		top	0	textFieldGrpShot
+			-attachControl		buttonImport		left	0	buttonExport
+			-attachForm		buttonImport		right	0
+		$formLayout;
+	showWindow zwKeyLightIO;
+}
+
+global proc zwKeyLightExport()
+{
+	string $episode = `textFieldGrp -query -text textFieldGrpSequence`;
+	$episode = strip($episode);
+	if ($episode == "")
+	{
+		error "请填写Sequence";
+	}
+	string $shot = `textFieldGrp -query -text textFieldGrpShot`;
+	$shot = strip($shot);
+	if ($shot == "")
+	{
+		error "请填写Shot";
+	}
+
+	string $path = "\\\\file-cluster\\GDC\\Projects\\WinxClubII\\WinxClubII_Scratch\\masterLightingInfo\\masterLighting_" + $episode + "_" + $shot + ".txt";
+
+	zwKeyLightExportProc $path;
+}
+
+global proc zwKeyLightImport()
+{
+	string $episode = `textFieldGrp -query -text textFieldGrpSequence`;
+	$episode = strip($episode);
+	if ($episode == "")
+	{
+		error "请填写Sequence";
+	}
+	string $shot = `textFieldGrp -query -text textFieldGrpShot`;
+	$shot = strip($shot);
+	if ($shot == "")
+	{
+		error "请填写Shot";
+	}
+
+	string $path = "\\\\file-cluster\\GDC\\Projects\\WinxClubII\\WinxClubII_Scratch\\masterLightingInfo\\masterLighting_" + $episode + "_" + $shot + ".txt";
+
+	zwKeyLightImportProc $path;
+}
+
+global proc zwKeyLightExportProc(string $path)
+{
+	string $buf[] = `ls -sl`;
+	if (size($buf) != 2)
+	{
+		error "先选灯，再加选物体";
+	}
+	string $light = $buf[0];
+	string $object = $buf[1];
+
+	$buf = `listConnections -type "lookAt" $light`;
+	if (size($buf) == 0)
+	{
+		error ($light + "不是一盏lookAt灯");
+	}
+	string $lookAt = $buf[0];
+	$buf = `listConnections ($lookAt + ".target[0].targetTranslateX")`;
+	if (size($buf) == 0)
+	{
+		error ($light + "不是一盏lookAt灯");
+	}
+	string $locator = $buf[0];
+
+	float $geoPiv[] = `xform -q -ws -translation $object`;
+	float $ltPiv[] = `xform -q -ws -translation $light`;
+	float $locPiv[] = `xform -q -ws -translation $locator`;
+
+	int $fileId = `fopen $path w`;
+	if (!$fileId)
+	{
+		error("Fail to open " + $path);
+	}
+
+	fprint $fileId ($object + " " + $geoPiv[0] + " " + $geoPiv[1] + " " + $geoPiv[2] + "\n");
+	fprint $fileId ($light + " " + $ltPiv[0] + " " + $ltPiv[1] + " " + $ltPiv[2] + "\n");
+	fprint $fileId ($locator + " " + $locPiv[0] + " " + $locPiv[1] + " " + $locPiv[2] + "\n");
+
+	fclose $fileId;
+}
+
+global proc zwKeyLightImportProc(string $path)
+{
+	string $buf[] = `ls -sl`;
+	if (size($buf) != 2)
+	{
+		error "先选灯，再加选物体";
+	}
+	string $light = $buf[0];
+	string $object = $buf[1];
+
+	$buf = `listConnections -type "lookAt" $light`;
+	if (size($buf) == 0)
+	{
+		error ($light + "不是一盏lookAt灯");
+	}
+	string $lookAt = $buf[0];
+	$buf = `listConnections ($lookAt + ".target[0].targetTranslateX")`;
+	if (size($buf) == 0)
+	{
+		error ($light + "不是一盏lookAt灯");
+	}
+	string $locator = $buf[0];
+
+	int $fileId = `fopen $path r`;
+	if (!$fileId)
+	{
+		error("Fail to open " + $path);
+	}
+
+	string $str = `fgetline $fileId`;
+	string $geoPiv[];
+	tokenizeList $str $geoPiv;
+
+	$str = `fgetline $fileId`;
+	string $ltPiv[];
+	tokenizeList $str $ltPiv;
+
+	$str = `fgetline $fileId`;
+	string $locPiv[];
+	tokenizeList $str $locPiv;
+
+	fclose $fileId;
+	
+	float $geoPivNow[] = `xform -q -ws -translation $object`;
+
+	xform -worldSpace -translation ((float)$ltPiv[1] + $geoPivNow[0] - (float)$geoPiv[1]) ((float)$ltPiv[2] + $geoPivNow[1] - (float)$geoPiv[2]) ((float)$ltPiv[3] + $geoPivNow[2] - (float)$geoPiv[3]) $light;
+	xform -worldSpace -translation ((float)$locPiv[1] + $geoPivNow[0] - (float)$geoPiv[1]) ((float)$locPiv[2] + $geoPivNow[1] - (float)$geoPiv[2]) ((float)$locPiv[3] + $geoPivNow[2] - (float)$geoPiv[3]) $locator;
+}

@@ -1,0 +1,322 @@
+global proc iRenderBatchCMDWriter(string $mod)
+{
+	// Info
+	string $sceneName = `file -q -sceneName -shortName`;
+	string $buffer[];
+	int $k = `tokenize $sceneName "\\" $buffer`;
+	$sceneName = $buffer[$k-1];
+	clear $buffer;
+	tokenize $sceneName "_" $buffer;
+	$sceneName = `substring $sceneName 1 ((size($sceneName))-3)`;
+	if ($sceneName!=""){
+		string $temp = `textFieldButtonGrp -q -text charHairSaveFieldBGrp`;
+		$temp = $temp+"\\"+$sceneName+"_"+$mod+".bat";
+		// User selection
+		string $originals[] = `textScrollList -q -selectItem theHairFileList`;
+		string $project_dir = `workspace -query -rd`;
+		$project_dir = `substring $project_dir 1 ((size($project_dir))-1)`;
+		$tmp = "D:\\Alias\\MAYA8.5\\bin\\mayabatch.exe -batch";
+		$tmp += " -proj \"" + $project_dir + "\"";
+		$tmp += " -command \"source iRenderBatchProcessing.mel; neilSceneOpenedScriptJob(\\\""+ $mod + "\\\")\"";
+		$tmp += " -file ";
+		// Write the data
+		if (`size $originals`){
+			$fileId=`fopen $temp "w"`;
+			for ($each in $originals){
+				if (`filetest -f $each`){
+					string $fileflow = "";
+					$each = `strip $each`;
+					$fileflow = $tmp + $each + "\n";
+					fprint $fileId $fileflow;
+				}
+			}
+			fclose $fileId;
+			// Execute
+			string $fbString = "\n^INF006: 开始文件分层...";
+			iRenderFeedbackDisplay($fbString);
+			system("shell \"" + $temp + "\" ");
+			}
+	}
+}
+
+global proc iRenderDeleteHairFilesBHMenu()
+{
+	string $originals[] = `textScrollList -q -selectItem theHairFileList`;
+	if (`size($originals)`){
+		for ($each in $originals){
+			textScrollList -e -ri  $each theHairFileList;
+		}
+	}
+}
+
+global proc refreshBatchHairList()
+{
+	string $itemsInList[] = `textScrollList -q -ai theHairFileList`;	
+	$itemsInList = stringArrayRemoveDuplicates($itemsInList);
+	textScrollList -e -ra theHairFileList;
+	for ($each in $itemsInList){
+		if (`filetest -f $each`){
+			textScrollList -e -append $each theHairFileList;
+		}else{
+			string $fbString = "\n^INF007: 非常规文件－\n        "+$each;
+			iRenderFeedbackDisplay($fbString);
+		}
+	}
+}
+
+global proc importToBatchHairList(string $filePath,string $filetype)
+{
+	$filePath += "/";
+	string $mbs[] = `getFileList -folder $filePath -filespec "*.mb"`;
+	string $mas[] = `getFileList -folder $filePath -filespec "*.ma"`;
+	string $fileList[] = stringArrayCatenate($mbs, $mas);
+	for ($each in $fileList){
+		if (`filetest -f $each`){
+			textScrollList -e -append ($filePath+$each) theHairFileList;
+		}else{
+			string $fbString = "\n^INF008: 非常规文件－\n        "+$each;
+			iRenderFeedbackDisplay($fbString);
+		}
+	}	
+	refreshBatchHairList;
+}
+global proc string iRenderBrowseHairFiles()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "importToBatchHairList"  -actionName "请选择文件所在目录" -operationMode "Reference"`;
+	return $filePath;
+}
+global proc doEditCharHairSavePath(string $filename,string $filetype)
+{
+	textFieldButtonGrp -e -text $filename charHairSaveFieldBGrp;
+}
+
+global proc string charHairSaveTo()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "doEditCharHairSavePath"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+global proc renameHairSetList()
+{
+	string $fbString;
+	string $originals[] = `textScrollList -q -selectItem theHairSetList`;
+	if (`size $originals`==1){
+		string $text;
+		string $result = `promptDialog 
+			-title "File Set 重命名(以字母开头)"
+			-message "重命名为: (自动添加_fSet后缀)"
+			-button "OK" -button "Cancel"
+			-defaultButton "OK" -cancelButton "Cancel"
+			-dismissString "Cancel"`;
+	 
+		if ($result == "OK") {
+			$text = `promptDialog -query -text`;
+			int $kpp[] = `textScrollList -q -sii theHairSetList`;
+			textScrollList -e -rii $kpp[0] theHairSetList;
+			rename $originals[0] ($text + "_fSet");
+			textScrollList -e -append ($text + "_fSet") theHairSetList;
+			$fbString = $text + "_fSet";
+			iRenderFeedbackDisplay("\n^OPE014: File Set 重命名...	//" + $fbString);
+		}
+	}
+}
+
+global proc deletefromHairSetList()
+{
+	string $originals[] = `textScrollList -q -selectItem theHairSetList`;
+	for ($each in $originals){
+		sets -e -clear $each;
+		select -r -ne $each;
+		delete;
+		textScrollList -e -ri $each theHairSetList;
+	}
+}
+
+global proc selectMemberofHairSetList()
+{
+	$originals = `textScrollList -q -selectItem theHairSetList`;
+	select $originals;
+}
+
+global proc doAddHairSetList()
+{
+	string $originals[];
+	string $temp[] = `ls -sl`;
+	$originals = `textScrollList -q -selectItem theHairSetList`;
+	for ($each in $originals){
+		sets -edit -forceElement  $each $temp;
+	}
+}
+
+global proc doRemoveHairSetList()
+{
+	string $originals[];
+	string $temp[] = `ls -sl`;
+	$originals = `textScrollList -q -selectItem theHairSetList`;
+	for ($each in $originals){
+		sets -edit -rm  $each $temp;
+	}
+}
+
+global proc doCreateCharHairSet()
+{
+	string $text;
+ 	string $result = `promptDialog 
+ 		-title "创建File Set(请以字母开头)"
+ 		-message "命名为: (自动添加_fSet后缀)"
+ 		-button "OK" -button "Cancel"
+ 		-defaultButton "OK" -cancelButton "Cancel"
+ 		-dismissString "Cancel"`;
+ 
+ 	if ($result == "OK") {
+ 		$text = `promptDialog -query -text`;
+		string $kset = `sets -n ($text + "_fSet")`;
+		textScrollList -e -append ($text + "_fSet") theHairSetList;
+		$fbString = $text + "_fSet";
+		iRenderFeedbackDisplay("\n^OPE015: 创建File Set...	//" + $fbString);
+ 	}	
+}
+
+// iRenderFileSeperating("hair")
+global proc iRenderFileSeperating()
+{
+	// Info needed for later use
+	string $sceneName = `file -q -sceneName -shortName`;
+	string $buffer[];
+	clear $buffer;
+	$buffer = `iRenderFileNameAnalysis($sceneName)`;
+
+	// Path needed for saving files
+	string $newPath = `textFieldButtonGrp -q -text charHairSaveFieldBGrp`;
+
+	// Objects that needed to be seperated as a new file
+	$originals = `textScrollList -q -selectItem theHairSetList`;
+
+	// File seperating operation
+	if (`size $originals`){
+		for ($each in $originals){
+			// If it exist and is a objectSet
+			if (`objExists $each`){
+				if (`nodeType $each`=="objectSet"){
+					// New file name concatenating
+					string $lop = $each;
+					$lop = `substring $lop 1 ((size($each))-5)`;
+					if (size($buffer)>3){
+						string $ver = `iRenderStepCountNum($buffer[5])`;
+						$lop = $newPath+"\\"+$buffer[0]+"_"+$buffer[1]+"_"+$buffer[2]+"_"+$lop+"_lr_"+$ver+".mb";				
+					}else{
+						// Current scene file name problem!
+						$lop = iRenderEnterObjectName("Export As", "当前文件命名不规则，请为新文件输入文件名：");
+						if ($lop!=""){
+							if (!endsWith($lop, ".mb")){
+								$lop = $newPath+"\\"+$lop+".mb";
+							}else{
+								$lop = $newPath+"\\"+$lop;
+							}	
+						}
+					}
+					// Check if $lop exists or not
+					if (`iRenderFileExistOrNot($lop)`){
+						system("shell \"Del " + $lop + "\" ");
+					}
+					select $each;
+					iRenderExportAsFile($lop);
+					iRenderFeedbackDisplay("\n^OPE016: 文件输出完成!\n        " + $lop);
+					// Add a item to the list for operating in the next step
+					string $k[] = `textScrollList -q -ai theHairFileList`;
+					if (!iRenderArrayCheckItem($lop, $k)){
+						textScrollList -e -append $lop theHairFileList;	
+					}
+				}else{
+					$fbString = "\n^OPE017: " + $each + "不是objectSet, 文件输出失败!";
+					iRenderFeedbackDisplay($fbString);
+				}		
+			}else{
+					$fbString = "\n^OPE018: 对象" + $each + "不存在, 文件输出失败!";
+					iRenderFeedbackDisplay($fbString);
+			}
+		}
+	}
+}
+
+global proc iRenderHairGUI()
+{
+	// See if there is fSet in current scene
+	string $hsets[] = `ls -type objectSet "*_fSet" "*:*_fSet"`;
+
+	separator -style "none" -height 6 charHairHeader;
+	frameLayout -l "整理文件 － 每个*_fSet将是一个独立文件！* 部分是文件标记！" -collapsable true -width 420 charHairFL;
+		columnLayout -adjustableColumn true;
+		formLayout charHairForm;
+			textScrollList 	
+				-numberOfRows 12
+				-allowMultiSelection true
+				-width 200
+				theHairSetList;
+				popupMenu -parent theHairSetList exportPopupMenu;
+					menuItem -l "执行文件分离" -c "iRenderFileSeperating" exportBHMenu;
+
+			columnLayout -adjustableColumn true charHairCL;
+				button -label "创建" -command "doCreateCharHairSet" createBtn;
+				separator -style "none" -height 5;
+				button -label "改名" -command "renameHairSetList" renameBtn;
+				separator -style "none" -height 5;
+				button -label "添加" -command "doAddHairSetList" attachButton;
+				separator -style "none" -height 5;
+				button -label "删减" -command "doRemoveHairSetList" delButton;
+				separator -style "none" -height 5;
+				button -label "选择" -command "selectMemberofHairSetList" selButton;
+				separator -style "none" -height 5;
+				button -label "从列表中删除" -command "deletefromHairSetList" listDeleteButton;
+		setParent ..;
+		setParent ..;
+		separator -style "none" -height 10;
+		textFieldButtonGrp -label "分层文件保存到: " -columnWidth 1 150 -buttonLabel "Browse" -buttonCommand "charHairSaveTo" -adjustableColumn 1 charHairSaveFieldBGrp;
+		separator -style "none" -height 10;
+	setParent charHairFL;
+	setParent ..;
+
+	frameLayout -l "制作文件 － 从下面列表中选择文件开始文件分层" -collapsable true -width 420 editCharHairFL;
+		columnLayout -adjustableColumn true;
+			columnLayout -adjustableColumn true;
+			textScrollList 	
+				-numberOfRows 15
+				-allowMultiSelection true
+				-width 500
+				-selectCommand ""
+				theHairFileList;
+				popupMenu -parent theHairFileList batchPopupMenu;
+					menuItem -l "------------ 文件列表编辑";
+					menuItem -l "刷新列表" -c "refreshBatchHairList" refreshBHMenu;
+					menuItem -l "导入处理" -c "iRenderBrowseHairFiles" importBHMenu;
+					menuItem -l "删除所选" -c "iRenderDeleteHairFilesBHMenu" deleteBHMenu;
+					menuItem -l "删除全部" -c "textScrollList -e -ra theHairFileList" clearBHMenu;
+					menuItem -l "------------ 文件分层处理";
+					menuItem -l "Occ文件" -c "iRenderBatchCMDWriter(\"occ\")" occBHMenu;
+					menuItem -l "Hair文件" -c "iRenderBatchCMDWriter(\"hair\")" hairBHMenu;
+					menuItem -l "Rgba文件" -c "iRenderBatchCMDWriter(\"rgba\")" rgbaBHMenu;
+					menuItem -l "Depth文件" -c "iRenderBatchCMDWriter(\"depth\")" depthBHMenu;
+					//menuItem -l "Shadow文件( NOT available)" -c "" shadowBHMenu;
+		setParent ..;
+		separator -style "none" -height 10;
+	setParent editCharHairFL;
+	setParent ..;
+	separator -style "none" -height 50;
+
+	formLayout -e
+		-ac charHairCL "left" 10 theHairSetList
+		-af charHairCL "top" 0
+		-af charHairCL "bottom" 0
+		-af charHairCL "right" 5 
+		charHairForm;
+	// initialize UI
+	for ($each in $hsets){
+		textScrollList -e 
+		-append $each
+		theHairSetList;
+	}
+	string $tmp = `textFieldGrp -q -tx projDir` + "scenes\\iRender";
+	textFieldButtonGrp -e -text $tmp charHairSaveFieldBGrp;
+}
+iRenderHairGUI();
+source iRenderScriptsHub.mel;

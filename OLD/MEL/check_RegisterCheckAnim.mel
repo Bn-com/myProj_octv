@@ -1,0 +1,394 @@
+//-----------------------------------------------------------------------
+//  Alias Script File
+//
+//  Creation Date:  January 16, 2003
+//
+//  Procedure Name:
+//      check_RegisterUsercheck
+//
+//  Description:
+//
+//		Initialization function that is called when the Check Scene
+//		operation is invoked.  The purpose of this function is to
+//		allow users to register their own custom check operations.
+//
+//  Input Arguments: none
+//
+//	Return Value: None.
+//
+//-----------------------------------------------------------------------
+
+//
+// Modified by Cz - May 18th, 2006
+//
+
+global proc check_RegisterCheckAnim()
+{
+	global string $gUserScenechecks[];
+	clear $gUserScenechecks;
+	//	use the check_AddUsercheck() proc to register all your
+	//	custom check steps here.
+	//
+	
+	check_AddUsercheck( "check_filename", "File Name", 1, "checkFilename()" );
+	check_AddUsercheck( "check_animLayer", "Layer Name", 1, "checkAnimLayer()" );
+	check_AddUsercheck( "check_animMaster", "Master Group", 1, "checkAnimMaster()" );
+	check_AddUsercheck( "check_animCamera", "Camera Name", 1, "checkAnimCam()" );
+	check_AddUsercheck( "check_cameraPosition", "Camera Position", 1, "checkinCameraPosition" );
+
+	//-----------------------------------------------------------------------------
+	// Area below is auto-run procedures
+
+		// clean character's Smooth animation
+		cleanAnim;
+
+	// Area above is auto-run procedures
+	//-----------------------------------------------------------------------------
+
+}
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//
+//+++++++++++++++++++++++++++++++++++ Check Functions Start ++++++++++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+global proc string[] getCharNames()
+{
+	int $i = 0;
+	string $charNames[];
+	string $buffer;
+
+	string $allChar[] = `ls -tr "*_MASTER" "*:*_MASTER"`;
+	for ($each in $allChar)
+	{
+		$buffer = `substring $each 1 (size($each)-7)`;
+		if (`objExists ($buffer+"_Facial_Curve")`)
+		{
+			$charNames[$i++] = $buffer;
+		}
+	}
+	return $charNames;	
+}
+
+global proc checkFilename()
+{
+	print "\nChecking File Name\n";
+	print "--------------------";
+
+		int $numDel = 0;
+		string $fname = `file -q -sn`;
+		if ($fname != "")
+		{
+			string $buffer[] = {};
+			tokenize $fname "/." $buffer;
+			string $sname = $buffer[size($buffer)-2];
+			if (`match "^[a-z0-9_]+$" $sname` == "") 
+			{
+				print "file name includes illegal letters";
+				$numDel++;
+			}
+		}
+
+		check_Summary( "Checked file name", ("Found " + $numDel + " illegal file name") );
+
+	print "\n";
+}
+
+// check cameras
+global proc checkAnimCam()
+{
+	// This proc will check current scene for illegal cameras.
+	// If found, this proc will list them out.
+	
+	print "\n";
+	print "Checking Animaiton Cameras\n";
+	print "---------------------------";
+
+		int $numDel = 0;
+
+		string $illegalCam[]={""};
+		string $camPrefix = "cam_";
+
+		string $allCamShape[] = `ls -cameras`;
+		string $defaultCams[] = {"persp", "top", "front", "side"};
+ 			
+		// get the transform nodes
+		string $temp[] = `listRelatives -allParents $allCamShape`;                      
+			
+		// get the cameras' list
+		appendStringArray( $illegalCam, $temp, size($temp));
+		
+		// remove all the default cameras, which are supposed as legal ones
+                string $nonDefaultCams[] = stringArrayRemove( $defaultCams, $illegalCam);
+
+		// Here we move on to check if the cameras in the list 
+		// start with "re_cam". If not, record them as illegal one
+
+		for ($each in $nonDefaultCams )
+		{
+                  
+			// Just make sure current camera is non-null
+			if($each!="")
+			{
+				// filter those are referenced
+				if (!`reference -q -isNodeReferenced $each`)
+				{
+					// Camera, with a name starts with "re_cam", 
+					// is supposed as legal camera
+					if(!startsWith($each,$camPrefix))
+					{
+						print("\n" + "  -> " + "Illegal camera name: " + $each + "\n");
+						$numDel++;
+					}
+				}
+
+			}
+
+
+                }
+
+	check_Summary( "Checked animaiton cameras", ("Found " + $numDel + " illegal cameras!") );
+
+	print "\n";
+}
+
+// check illegal layers
+global proc int checkAnimLayer()
+{
+	// This proc will check current scene for illegal layers
+	// If found, this proc will list them out.
+	
+	print "\nChecking Animation Layers\n";
+	print "---------------------------";
+
+		int $numDel = 0;
+
+		// get the displayLayer list
+		string $allLayers[] = `ls -type displayLayer`;
+		string $defaultLayer[] = {"defaultLayer"};
+
+		// remove the default layer
+		$allLayers = stringArrayRemove($defaultLayer, $allLayers);
+
+		// if the layer-Array is larger than 1
+		// we conclude that current scene includes illegal layers.
+		if ((size($allLayers))>0)
+		{
+			for ($each in $allLayers)
+			{
+				if ((`gmatch $each "layer[0-9]"`)||(`gmatch $each "layer[0-9][0-9]"`))
+				{
+					warning ("Bad layer name: " + $each);
+					$numDel++;
+				}
+			}
+
+		}
+
+	check_Summary( "Checked animation layers", ("Found " + $numDel + " bad layers' names!") );
+
+	print "\n";
+
+	return $numDel;
+}
+
+// check Animation Master
+global proc checkAnimMaster()
+{
+	// This proc will check current scene for illegal SCALE operation
+	// on master group. If found, this proc will list them out.
+	
+	print "\nChecking Animation Master Group\n";
+	print "--------------------------------";
+
+		int $numDel = 0;
+		
+		// restore the master group's name
+		string $masterCtr[];
+		int $i=0;
+
+		// make sure master control group locates at the top level
+		string $topGrp[] = `ls -assemblies`;
+
+		// loop to get the top char-control group's name, which ends
+		// with "_MASTER". As for other condictions, like the unique
+		// master group checking, which have been done during setting 
+		// up, so here we will have no need to consider those. ^_^
+		for($each in $topGrp)
+		{
+			string $buff[];
+			int $numTokens = `tokenize $each "_" $buff`;
+			string $temp = $buff[$numTokens-1];
+			$temp = toupper($temp);
+
+			if (endsWith($temp, "MASTER"))
+			{
+				$masterCtr[$i] = $each;
+				$i++;
+
+			}
+		}
+		
+		
+		for ($this in $masterCtr)
+		{
+			if (`objExists ($this+".sx")`||`objExists ($this+".sy")`||`objExists ($this+".sz")`)
+			{
+				float $masterSX = `getAttr ($this + ".sx")`;
+				float $masterSY = `getAttr ($this + ".sy")`;
+				float $masterSZ = `getAttr ($this + ".sz")`;
+
+				if (($masterSX!=1)||($masterSY!=1)||($masterSZ!=1))
+				{
+					warning ("Found illegal SCALE operation on master group: " + $this + "!");
+					$numDel++;
+				}
+			}
+		}
+
+	check_Summary( "Checked animatin master group", ("Found " + $numDel + " illegal SCALE operation on master group!") );
+
+	print "\n";
+	//2007.1.25 huojian
+	hjAntimesets;
+}
+
+// check Animation Keyframe
+global proc checkAnimKeyframe()
+{
+	// This proc will check current scene for illegal SCALE operation
+	// on master group. If found, this proc will list them out.
+	
+	print "\nChecking Amimation Keyframe\n";
+	print "-----------------------------";
+
+		int $numDel = 0;
+		
+		// get all the animation curves
+		string $allAnimCurves[] = `ls -type animCurve`;
+
+		// loop to check the unexpected keyframes between frame -31
+		// and frame 0.
+		for ( $each in $allAnimCurves )
+		{
+			int $keyFlag = `findKeyframe -time 0 -which previous $each`;
+			if (($keyFlag<0)&&($keyFlag>-31))
+			{
+				print ("\n" + "  -> " + $each + " has unexpected keyframe between -31 and 0!" + "\n");
+				$numDel++;
+			}
+		}		
+ 
+	check_Summary( "Checked animation keyframes", ("Found " + $numDel + " unexpected keyframes between frame -31 and frame 0!") );
+
+	print "\n";
+}
+
+global proc cleanAnim()
+{
+	source generateChannelMenu.mel;
+
+	//add by wanshoulong
+	//增加ez项目新的设置规范
+	//--------------------------------------------------------------
+	string $file = `file -q -sn`;
+	string $buffer[];
+	int $num1 = `tokenize $file "\/" $buffer`;
+	int $num2 = `tokenize $buffer[$num1-1] "_" $buffer`;
+	string $proj = $buffer[0];
+	//--------------------------------------------------------------
+	
+	
+	string $allChar[] = `getCharNames`;
+
+/* modified by huangzhongwei 20061024, 修正场景中出现多个同名角色的问题，例如群组
+	if (size($allChar))
+	{
+		for ($char in $allChar)
+		{
+			// Smooth setting
+			if (`objExists ($char+"_Upper_Body.Smooth")`)
+			{
+				CBdeleteConnection ($char+"_Upper_Body.Smooth");
+				
+				// set smooth attribute
+				setAttr ($char+"_Upper_Body.Smooth") 0;
+				
+			}		
+		}
+	}
+*/
+	for ($char in $allChar)
+	{
+		//add by wanshoulong
+		//增加ez项目新的设置规范
+		//--------------------------------------------------------------
+		if ($proj == "ez")
+		{
+			string $buf[] = `ls ($char + "_MASTER.smooth")`;
+			for ($attr in $buf)
+			{
+				CBdeleteConnection $attr;
+
+				// set smooth attribute
+				if (!`getAttr -lock $attr`)
+				{
+					evalEcho ("setAttr \"" + $attr + "\" 0");
+				}
+			}		
+		}
+		//--------------------------------------------------------------
+		else
+		{
+			string $buf[] = `ls ($char + "_Upper_Body.Smooth")`;
+			for ($attr in $buf)
+			{
+				CBdeleteConnection $attr;
+
+				// set smooth attribute
+				evalEcho ("setAttr \"" + $attr + "\" 0");
+			}	
+		}
+	}
+}
+
+//2007.01.25 huojian edting
+global proc int hjAntimesets()
+{
+	string $hjsetst[]=`ls -type "objectSet" "*facial*" "*:*facial*" "*:*:*facial*" "*TSM2Controls*" "*:*TSM2Controls*"`;
+
+	if (`size $hjsetst`==0)
+	{
+		error " 请确认参考文件是正确的层级 确认IDMT插件正确加载";
+	}
+	return 0;
+}
+
+global proc checkinCameraPosition()
+{
+	eval "source zwCameraImportExport.mel";
+
+	print "\n";
+	print "Checking Camera's Position\n";
+	print "---------------------------\n";
+
+	int $numDel = 0;
+
+	string $camera = zwCheckCameraPositionEx("");
+	if ($camera != "")
+	{
+		$numDel ++;
+		warning ($camera + " is quite far away from worldposition zero!");
+	}
+
+	check_Summary( "Checked animaiton cameras", ("Found " + $numDel + " camera which is quite far away from worldposition zero!") );
+
+	print "\n";
+}
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++ Check Functions End +++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

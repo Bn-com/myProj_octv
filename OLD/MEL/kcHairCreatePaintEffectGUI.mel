@@ -1,0 +1,283 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc kcHairCreateBrush(string $strokecurve, string $ctrcurve, string $brushMEL, string $stroke_group)
+{
+	eval("source \"" + "C:/AW/Maya4.0/brushes/hair/" + $brushMEL + "\"");
+
+	select -r $strokecurve;
+
+	// create stroke
+
+	AttachBrushToCurves;
+	string $selected[] = `ls -selection`;
+	parent $selected $stroke_group;
+
+	// create control curve
+
+	select -add $ctrcurve;
+	SetStrokeControlCurves;
+	bindCurvesToStrokes;
+}
+
+proc kcHairSetBrushPara(string $character)
+{
+	string $strokes[] = `ls -type stroke`;
+
+	if (`objExists $strokes[0]`)
+	{
+		select -r $strokes;
+
+		ShareOneBrush;
+
+		// get the brush
+		string $brush[] = `listConnections -s 1 -d 0 -type brush $strokes[0]`;
+		string $hairbrush = $brush[0];
+		setAttr ($hairbrush+".globalScale") 0.1;
+		setAttr ($hairbrush+".brushWidth") 0;
+		setAttr ($hairbrush+".mapColor") 1;
+		setAttr ($hairbrush+".texColorScale") 0;
+		setAttr ($hairbrush+".texColorOffset") 0;
+		setAttr ($hairbrush+".textureType") 1;
+		setAttr ($hairbrush+".mapMethod") 2;
+		setAttr ($hairbrush+".texColor1") -type double3 0.596 0.396 0.153;
+		setAttr ($hairbrush+".texColor2") -type double3 0.29 0.106 0.012;
+		setAttr ($hairbrush+".translucence") 0.388;
+		setAttr ($hairbrush+".specular") 0.200;
+		setAttr ($hairbrush+".specularColor") -type double3 0.711 0.419 0.048;
+		setAttr ($hairbrush+".tubesPerStep") 15;
+		setAttr ($hairbrush+".lengthMin") 0.7;
+		setAttr ($hairbrush+".lengthMax") 0.68;
+		setAttr ($hairbrush+".segments") 100;
+		setAttr ($hairbrush+".curveFollow") 0.98;
+		setAttr ($hairbrush+".curveAttract") 0.2;
+		setAttr ($hairbrush+".momentum") 0.98;
+		setAttr ($hairbrush+".lengthFlex") 0.90;
+		rename $hairbrush ($character + "_hairBrush");
+	}
+}
+
+proc string[] kcHairCreateRailCurve(string $curve, float $length)
+{
+//	float $strokeV[] = evalDeferred("getCVTangentCmd " + $curve);
+	float $strokeV[] = getCVTangentCmd($curve);
+
+	// create rail curves
+
+	float $halfLength = $length / 2.0;
+
+	string $curve1[] = `duplicate -returnRootsOnly $curve`;
+	move -relative ($halfLength * $strokeV[0]) ($halfLength * $strokeV[1]) ($halfLength * $strokeV[2]) $curve1[0];
+
+	string $curve2[] = `duplicate -returnRootsOnly $curve`;
+	move -relative (-$halfLength * $strokeV[0]) (-$halfLength * $strokeV[1]) (-$halfLength * $strokeV[2]) $curve2[0];
+
+	string $result[];
+
+	$result[0] = $curve1[0];
+	$result[1] = $curve2[0];
+
+	return $result;
+}
+
+proc string kcHairCreateStroke4CV(string $curve, float $length)
+{
+//	float $strokeV[] = evalDeferred("getCVTangentCmd " + $curve);
+	float $strokeV[] = getCVTangentCmd($curve);
+
+	// create stroke curve
+
+	float $firstCV[] = `pointPosition ($curve + ".cv[0]")`;
+
+	float $halfLength = $length / 2.0;
+	float $quarterLength = $length / 6.0;
+
+	float $point1[] = {$firstCV[0] - ($halfLength * $strokeV[0]),
+					   $firstCV[1] - ($halfLength * $strokeV[1]),
+					   $firstCV[2] - ($halfLength * $strokeV[2])};
+
+	float $point2[] = {$firstCV[0] - ($quarterLength * $strokeV[0]),
+					   $firstCV[1] - ($quarterLength * $strokeV[1]),
+					   $firstCV[2] - ($quarterLength * $strokeV[2])};
+
+	float $point3[] = {$firstCV[0] + ($quarterLength * $strokeV[0]),
+					   $firstCV[1] + ($quarterLength * $strokeV[1]),
+					   $firstCV[2] + ($quarterLength * $strokeV[2])};
+
+	float $point4[] = {$firstCV[0] + ($halfLength * $strokeV[0]),
+					   $firstCV[1] + ($halfLength * $strokeV[1]),
+					   $firstCV[2] + ($halfLength * $strokeV[2])};
+
+	string $strokeCurve = `curve -degree 3 -point $point1[0] $point1[1] $point1[2] -point $point2[0] $point2[1] $point2[2] -point $point3[0] $point3[1] $point3[2] -point $point4[0] $point4[1] $point4[2] -k 0 -k 0 -k 0 -k 1 -k 1 -k 1 -name ($curve + "_stroke")`;
+	return $strokeCurve;
+}
+
+proc string kcHairCreateStroke2CV(string $curve, float $length)
+{
+//	float $strokeV[] = evalDeferred("getCVTangentCmd " + $curve);
+	float $strokeV[] = getCVTangentCmd($curve);
+
+	// create stroke curve
+
+	float $firstCV[] = `pointPosition ($curve + ".cv[0]")`;
+
+	float $halfLength = $length / 2.0;
+
+	float $point1[] = {$firstCV[0] - ($halfLength * $strokeV[0]),
+					   $firstCV[1] - ($halfLength * $strokeV[1]),
+					   $firstCV[2] - ($halfLength * $strokeV[2])};
+
+	float $point2[] = {$firstCV[0] + ($halfLength * $strokeV[0]),
+					   $firstCV[1] + ($halfLength * $strokeV[1]),
+					   $firstCV[2] + ($halfLength * $strokeV[2])};
+
+	string $strokeCurve = `curve -degree 1 -point $point1[0] $point1[1] $point1[2] -point $point2[0] $point2[1] $point2[2] -knot 0 -knot 1 -name ($curve + "_stroke")`;
+	return $strokeCurve;
+}
+
+proc kcHairCreateStrip(string $character, float $length)
+{
+    string $selected[] = `ls -selection`;
+
+	// check at least a NURBS curve is selected
+
+	int $valid = false;
+
+	for ($item in $selected)
+		if (kcIsType($item, "nurbsCurve"))
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select curves to create strokes.");
+
+	string $strip_group = `group -empty -name ($character + "_hairlayer")`;
+
+	for ($item in $selected)
+	    if (kcIsType($item, "nurbsCurve"))
+		{
+			string $railCurve[] = kcHairCreateRailCurve($item, $length);
+		    string $strokeCurve = kcHairCreateStroke4CV($item, $length);
+
+			string $surf[] = `singleProfileBirailSurface -constructionHistory false -polygon 0 -transformMode 1 -tangentContinuityProfile1 0 $strokeCurve $railCurve[0] $railCurve[1]`;
+			parent $surf[0] $strip_group;
+
+			// delete curves
+
+			delete $railCurve[0] $railCurve[1] $strokeCurve;
+		}
+
+	// restore original selection
+
+	select $selected;
+}
+
+proc kcHairCreateStroke(string $character, string $brushMEL, float $length)
+{
+    string $selected[] = `ls -selection`;
+
+	// check at least a NURBS curve is selected
+
+	int $valid = false;
+
+	for ($item in $selected)
+		if (kcIsType($item, "nurbsCurve"))
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select curves to create strokes.");
+
+	string $stroke_group = `group -empty -name ($character + "_stroke_group")`;
+
+	for ($item in $selected)
+	    if (kcIsType($item, "nurbsCurve"))
+		{
+		    string $strokeCurve = kcHairCreateStroke2CV($item, $length);
+			parent $strokeCurve $stroke_group;
+
+			kcHairCreateBrush($strokeCurve, $item, $brushMEL, $stroke_group);
+		}
+
+	kcHairSetBrushPara($character);
+
+	// restore original selection
+
+	select $selected;
+}
+
+global proc kcHairCreatePaintEffectCB(string $textField, string $brushTextField, string $strokeLengthSlider)
+{
+	string $character = `textFieldGrp -q -text $textField`;
+	string $brushMEL = `textFieldGrp -q -text $brushTextField`;
+	float $strokeLength = `floatSliderGrp -q -value $strokeLengthSlider`;
+
+	kcHairCreateStroke($character, $brushMEL, $strokeLength);
+}
+
+global proc kcHairCreateStripCB(string $textField, string $strokeLengthSlider)
+{
+	string $character = `textFieldGrp -q -text $textField`;
+	float $strokeLength = `floatSliderGrp -q -value $strokeLengthSlider`;
+
+	kcHairCreateStrip($character, $strokeLength);
+}
+
+global proc kcHairCreatePaintEffectGUI()
+{
+	if (!`pluginInfo -q -loaded getCVTangentCmd`)
+	{
+		loadPlugin getCVTangentCmd;
+		evalDeferred("source kcHairCreatePaintEffectGUI");
+	}
+
+	if (`window -q -exists kcHairCreatePaintEffectGUIWnd`)
+		return;
+
+	window -title "Create Paint Effects or Strips" -resizeToFitChildren true kcHairCreatePaintEffectGUIWnd;
+		
+		string $formLayout = `formLayout`;
+
+			string $textField = `textFieldGrp -label "Character" -text "simon"`;
+			string $brushTextField = `textFieldGrp -label "Brush" -text "hairThickBlond.mel"`;
+			string $strokeLengthSlider = `floatSliderGrp -precision 3 -label "Stroke Length" -field true -minValue 0.0 -maxValue 1.0 -fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.01`;
+			string $button1 = `button -label "Create PFX" -command ("kcHairCreatePaintEffectCB " + $textField + " " + $brushTextField + " " + $strokeLengthSlider)`;
+			string $button2 = `button -label "Create Strip" -command ("kcHairCreateStripCB " + $textField + " " + $strokeLengthSlider)`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$textField	"top"	5
+			-attachForm		$textField	"left"	5
+			-attachForm		$textField	"right"	5
+
+			-attachControl	$brushTextField		"top"		5	$textField
+			-attachForm		$brushTextField		"left"		5
+			-attachForm		$brushTextField		"right"		5
+
+			-attachControl	$strokeLengthSlider		"top"		5	$brushTextField
+			-attachForm		$strokeLengthSlider		"left"		5
+			-attachForm		$strokeLengthSlider		"right"		5
+
+			-attachControl	$button1		"top"		5	$strokeLengthSlider
+			-attachForm		$button1		"left"		5
+			-attachPosition	$button1		"right"		0	50	
+
+			-attachControl	$button2		"top"		5	$strokeLengthSlider
+			-attachControl	$button2		"left"		0	$button1
+			-attachForm		$button2		"right"		5
+		$formLayout;
+
+	showWindow kcHairCreatePaintEffectGUIWnd;
+}

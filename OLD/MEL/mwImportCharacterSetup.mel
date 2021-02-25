@@ -1,0 +1,112 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwImportCharacterSetup(string $master, string $data, string $cluster_list[], string $mesh_list[])
+{
+	//PARENT SURFACES TO JOINTS
+	print ("PARENTING SURFACES\n");
+	string $pfile = ($data+$master+"_PARENT_DATA.data");
+	int $pfileId = `fopen $pfile "r"`;
+	string $nextLine = `fgetline $pfileId`;
+    	string $cmd = $nextLine;
+    	while ( size( $nextLine ) > 0 )
+	{
+    		$nextLine = `fgetline $pfileId`;
+    		$cmd = $cmd+$nextLine;
+    	}
+    	fclose $pfileId;
+	eval $cmd;
+
+	//CREATE CLUSTERS
+	string $cluster;
+	for($cluster in $cluster_list)
+	{
+		if(`objExists $cluster`==0)
+		{
+			print ("IMPORTING CLUSTER: "+$cluster+"\n");
+			string $file = ($data+$master+"_"+$cluster+"_EXPORT_DATA.data");
+			int $fileId = `fopen $file "r"`;
+			string $nextLine = `fgetline $fileId`;
+    			string $cmd = $nextLine;
+    			while ( size( $nextLine ) > 0 )
+			{
+    				$nextLine = `fgetline $fileId`;
+    				$cmd = $cmd+$nextLine;
+    			}
+    			fclose $fileId;
+			eval $cmd;
+		}
+		else
+		{
+			print ("CLUSTER ALREADY EXISTS: "+$cluster+"\n");
+		}
+	}
+
+	//GET JOINTS
+	string $torso[] = `pickWalk -d down $master`;
+	string $joints[] = `listRelatives -c -pa -type joint $torso[0]`;
+	
+	//BIND SURFACES
+	string $mesh;
+	for($mesh in $mesh_list)
+	{
+		string $cmd = ("skinCluster -mi 4 -dr 4");
+		if(`gmatch $mesh "*tongue"`)
+		{
+			$cmd = ($cmd+" -tsb ");
+			$tmp = `ls -type joint "*tongue0"`;
+			string $tjoints[] = `listRelatives -ad -type joint $tmp[0]`;
+			$tjoints[`size $tjoints`] = $tmp[0];
+			for($joint in $tjoints)
+			{
+				$cmd = ($cmd+" "+$joint);
+			}
+		}
+		else
+		{
+			for($joint in $joints)
+			{
+				$cmd = ($cmd+" "+$joint);
+			}
+		}
+		$cmd = ($cmd+" "+$mesh+";");
+		print ("BINDING: "+$mesh+"\n");
+		eval $cmd;
+	}
+
+	//IMPORT WEIGHTS
+	for($mesh in $mesh_list)
+	{
+		print ("IMPORTING WEIGHTS FOR: "+$mesh+"\n");
+		select -r $mesh;
+		sds_poly_smooth_weights_import1 $mesh;
+	}
+	select -cl;
+
+/////////////////////////////////////////////////////////////////////////////
+
+	//DELETE UNUSED DISPLAY LAYERS
+	string $layers[] = `ls -type displayLayer`;
+	for($layer in $layers)
+	{
+		if(`strcmp "defaultLayer" $layer`!=0)
+		{
+			if(`connectionInfo -is ($layer+".drawInfo")`==0)
+			{
+				print ("DELETING UNUSED DISPLAY LAYER: "+$layer+"\n");
+				delete $layer;
+			}
+		}
+	}
+
+//////////////////////////////////////////////////////////////////////////////////
+
+	print "ALL FINISHED IMPORTING DEFORMATION DATA\n";
+}

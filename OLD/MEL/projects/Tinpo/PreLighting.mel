@@ -1,0 +1,971 @@
+// PreLighting.mel (c) 2004 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	This is called by Insight to create a lit file
+Use:
+	PreLighting argList
+Options:
+	argList (string)- A semicolon delimited string containing all the arguments
+	
+	argList construction	- someVar=someValue;nextVar=nextValue
+	
+	arguments:
+		- filename	(string)	The file to operate on
+		- sequence	(string) 	The sequence the shot group belongs to, e.g. "009"
+		- shotgroup	(string) 	The shot group letter
+		- sequenceid	(int)	 	The insight sequence id number
+		- host		(string)	Who is calling this process? "insight" or "maya"
+		- returnpath	(string)	The callback to execute when done
+		- arguments	(string)	The argument list to send to the callback
+		- seqxml	(string)	If specified, the script will read this xml file for the seq info, rather than asking insight
+	
+Documentation:
+	Does the following:
+	
+	1. Set up paths, variables, start log etc...
+	2. Read the SG xml file and build scene membership arrays.
+	3. Populate the scene with assets and cameras
+	4. Create the Scene Open script node. This calls the Asset Syncher, the light fix script, and the script that tells cloth to recieve
+	cache if it is available.
+	5. Sets the fileInfo for setting the animation cache directory
+	6. Creates the expression for reading the cache
+	7. Set the render globals for lighting
+	8. Switch all textures to low res
+	9. Switch all assets to low res
+	10. Set the frame range
+	11. Back up any previously existing version of this file
+	12. Set the fileInfo to indicate this is a lit file, and save the file
+	13. Check that the file has saved
+	14. If we get the SG xml from Insight, write it back out to disk so that version is up to date
+Examples:
+
+Notes:
+	Tested on Maya5 Win2000 only
+	
+Bugs:
+
+Original:	08/29/04
+Revisions:	09/06/04	Rev 1.0
+		- Added fix to unlock these attributes
+			defaultRenderGlobals.byFrameStep defaultRenderGlobals.motionBlur time1.outTime  
+		
+		09/15/04	Rev 1.1
+		- Fixed it so that if an asset is omitted, we won't try to load it!
+		- Revision made
+		
+		08/25/05	Rev 1.2
+		- Updating for new lighting pipeline
+		
+		08/26/05	Rev 1.3
+		- Implementing the hold file.
+
+		08/21/06	Rev 1.4
+		- Making sourcing of "LightingRenderGlobals.mel" optional.
+
+		09/11/06	Rev 1.5
+		- Added code to create/update qubeJobHistory.xml file
+		
+To-do's:
+		- Remove the keyframes from cameraMain.curCamera - this recieves it's value from the cache
+		- Remove any reference to "persp" and replace with index 0
+		- Replace hard paths with calls to getPath
+		
+		
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source loadAllPlugins.mel;
+source parseXML.mel;
+source fileIO.mel;
+source rfxCameras.mel;
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+proc string parseCBArgs (string $cbArgs)
+{
+
+	string $tokens[];
+	tokenize ($cbArgs,",",$tokens);
+	string $cb = "";
+	for ($i=0;$i<size($tokens);$i++)
+	{
+		$cb += $tokens[$i];
+		if ($i < size($tokens)-1)
+		{
+			if ($i % 2) $cb += " ";
+			else $cb += "=";
+		}
+	}
+	return $cb;
+	// send: arg1,value,arg2,value
+	// "arg1=value arg2=value"
+}
+// -----------------------------------------------------------------------------------------------
+proc string getSGPath (string $seq, string $shot)
+{
+	string $path = getPath ("ShotBase",{$seq,$shot});
+	
+	return $path;	
+	
+}
+// -----------------------------------------------------------------------------------------------
+proc string process_assetPath(string $oldPath)
+{
+	string $newPath;
+	
+	string $tokens[];
+	tokenize ($oldPath,"\\",$tokens);
+	
+	int $start = 0;
+	$newPath = `workspace -q -active`+"/";
+	for ($i=0;$i<size($tokens);$i++)
+	{
+		if ($tokens[$i] == "cpsv") $start = 1;
+		if ($start)
+		{
+			$newPath += "/"+$tokens[$i];	
+		}
+	}
+	
+	
+	return $newPath;
+}
+// -----------------------------------------------------------------------------------------------
+/*
+global proc sortCamerasByIndex(string $cameras[], int $indices[])
+{
+	string $tmp_cameras[] = $cameras;
+	int $tmp_indices[] = $indices;
+	
+	string $sorted_cameras[];
+	int $sorted_indices[];
+	
+	int $curIndex = 0;
+	for ($i=0;$i<size($cameras);$i++)
+	{
+		// find the lowest index that is greater than curIndex
+		int $searchIndex = 9999;
+		int $index;
+		for ($j=0;$j<size($cameras);$j++)
+		{
+			if ($indices[$j]>$curIndex && $indices[$j] < $searchIndex)
+			{
+				$searchIndex = $indices[$j];	
+				$index = $j;
+			}
+		}
+		// searchIndex = lowest index that is greater than curIndex
+		// index = index into array where search index occurs
+		$curIndex = $searchIndex;
+		$sorted_cameras[size($sorted_cameras)]=$cameras[$index];
+		$sorted_indices[size($sorted_indices)]=$curIndex;
+		
+	}
+	$cameras = $sorted_cameras;
+	$indices = $sorted_indices;
+}
+*/
+// ---------------------------------------------------------------------------------------------------
+// resolveFilename: take the filename of an asset and make it relative to the current project
+// ---------------------------------------------------------------------------------------------------
+proc string resolveFilename (string $filename)
+{
+	string $resolved = `workspace -q -act`;
+	string $buf[];
+	tokenize ($filename,"\\/",$buf);
+	int $startCopying = 0;
+	for ($i=0;$i<size($buf);$i++)
+	{
+		if ($buf[$i] == "cpsv")
+			$startCopying = 1;
+		if ($startCopying)
+			$resolved += "/"+$buf[$i];	
+	}
+	return $resolved;
+}
+// ---------------------------------------------------------------------------------------------------
+// getAssetsFromXML: populate asset arrays with info from shot group xml
+// ---------------------------------------------------------------------------------------------------
+proc getAssetsFromXML(
+	string $xml,
+	string $xNames[],
+	string $xNamespaces[],
+	string $xPaths[],
+	int $xAssetTypeID[],
+	int $xOmitted[]
+	)
+{
+	string $assetsXML[] = xml_getTag ($xml,"Asset");
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		$xOmitted[$i] = (int)xml_getVar ($assetsXML[$i],"Omitted");
+		
+		$xNames[$i] = xml_getVar ($assetsXML[$i],"Name");
+		$xNamespaces[$i] = xml_getVar ($assetsXML[$i],"Namespace");
+		// 09/12/05 - update for point caching
+		//$xPaths[$i] = resolveFilename(xml_getVar ($assetsXML[$i],"Path"))+"/"+$name+"_live.ma";
+		$xPaths[$i] = resolveFilename(xml_getVar ($assetsXML[$i],"Path"));	// append file name later when we have decided whether it is pointCaching or not
+		$xAssetTypeID[$i] = (int)xml_getVar ($assetsXML[$i],"AssetTypeID");		
+	}	
+}
+// -----------------------------------------------------------------------------------------------
+// getCamerasFromXML: populate camera arrays with info from shot group xml
+// -----------------------------------------------------------------------------------------------
+proc getCamerasFromXML(
+	string $xml,
+	string $xCamNames[],
+	string $xCamShapeNames[],
+	int $xCamIndex[],
+	int $xBgPlate[],
+	string $xCamImageName[],
+	float $xCamSizeX[],
+	float $xCamSizeY[],
+	float $xCamOffsetX[],
+	float $xCamOffsetY[],
+	float $xCamDepth[],
+	float $xCamRotate[]
+	)
+{
+	string $camerasXML[] = xml_getTag ($xml,"Camera");
+	
+	for ($i=0;$i<size($camerasXML);$i++)
+	{
+		$xCamNames[$i] = xml_getVar($camerasXML[$i],"Name");	
+		$xCamShapeNames[$i] = xml_getVar($camerasXML[$i],"ShapeName");
+		$xCamIndex[$i] = (int)xml_getVar($camerasXML[$i],"Index");
+		string $bgPlateVal = xml_getVar($camerasXML[$i],"BgPlate");
+		if ($bgPlateVal != "")
+			$xBgPlate[$i] = (int)$bgPlateVal;
+		else
+			$xBgPlate[$i] = 0;
+		
+		if ($xBgPlate[$i])
+		{
+			$xCamImageName[$i] = xml_getVar($camerasXML[$i],"imageName");
+			$xCamSizeX[$i] = xml_getVar($camerasXML[$i],"sizeX");
+			$xCamSizeY[$i] = xml_getVar($camerasXML[$i],"sizeY");
+			$xCamOffsetX[$i] = xml_getVar($camerasXML[$i],"offsetX");
+			$xCamOffsetY[$i] = xml_getVar($camerasXML[$i],"offsetY");
+			$xCamDepth[$i] = xml_getVar($camerasXML[$i],"depth");
+			$xCamRotate[$i] = xml_getVar($camerasXML[$i],"rotate");
+		}
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// typeFromFoldername: find out a type - character,prop, etc, from the foldername
+// ---------------------------------------------------------------------------------------------------
+proc int typeFromFoldername(string $foldername)
+{
+	string $enums[] = {"characters","vehicles","props","sets"};
+	string $buf[];
+	tokenize($foldername,"/",$buf);
+	int $index = stringArrayFindIndex ($buf[size($buf)-2],$enums);
+	return ($index==-1)?4:$index;
+}
+// ---------------------------------------------------------------------------------------------------
+proc setRenderRes()
+{
+	string $charGrps[] = findAssetsByType ("cp",0);
+	for ($grp in $charGrps)
+	{
+		if (!`objExists ($grp+".res")`)
+			continue;
+			
+		if (`getAttr -type ($grp+".res")` != "enum")
+			continue;
+		
+		string $enumNames = `addAttr -q -en ($grp+".res")`;
+		string $buf[];
+		tokenize ($enumNames,":",$buf);
+		int $index = stringArrayFindIndex ("Render",$buf);
+		if ($index != -1)
+		{
+			catch (`setAttr ($grp+".res") $index`);
+			continue;	
+		}
+		$index = stringArrayFindIndex ("High",$buf);
+		if ($index != -1)
+		{
+			catch (`setAttr ($grp+".res") $index`);
+			continue;	
+		}
+		
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc int do_preLighting(string $logFile[])
+{
+	global string $PL_sequence;
+	global string $PL_shotGroup;
+	global string $PL_host;
+	global int $PL_seqID;
+	global string $PL_sgXML;
+	global string $PL_fileName;
+	global string $PL_CB_Path;
+	global string $PL_CB_Args;
+	global string $PL_qubeJobName;
+
+	int $qubeJobId;
+	
+	// 1. Setup paths, variables, start log
+	
+	string $basePath = getSGPath ($PL_sequence,$PL_shotGroup);
+	print ("Path= "+$basePath+"\n");
+	
+	string $fileName = $PL_fileName;
+	
+	if ($fileName == "")
+	{
+		$fileName = $basePath+"/"+$PL_sequence+"_"+$PL_shotGroup+"_lit.ma";	
+	}
+	
+	$logFile[0] = $basePath+"/shotGroupInfo/PreLighting_log.html";
+	
+	string $SG_xml;
+	if ($PL_sgXML != "")
+	{
+		$SG_xml = $PL_sgXML;	
+	}
+	else
+	{
+		$SG_xml = $basePath+"/shotGroupInfo/"+$PL_sequence+"_"+$PL_shotGroup+"_structure.xml";
+	}
+
+	// -------------------------------------------------------------------
+	// Get qube job id of this process and update qubeHistory.xml
+	// -------------------------------------------------------------------
+	string $clusters[];
+	getFarmClusters ($clusters,{});
+	if ($PL_qubeJobName == "")
+	{
+		string $searchName = "PreLighting*"+$PL_sequence+"*"+$PL_shotGroup;
+		$qubeJobId = getQubeJobIdFromName($searchName,$clusters[0],"--running",0);
+	}
+	else
+	{
+		$qubeJobId = getQubeJobIdFromName($PL_qubeJobName,$clusters[0],"--running",1);
+	}
+	// update qubeJobHistory.xml
+	updateQubeJobHistory ($PL_sequence, $PL_shotGroup, "PreLighting", $qubeJobId,1, {}, {}, {});
+
+	// -------------------------------------------------------------------
+	// Start html log
+	// -------------------------------------------------------------------
+	
+	
+	string $msg;
+	string $html_head = html_writeHead("Pre Lighting Log");
+	string $html_bodyBegin = html_beginBody();
+	string $html_bodyEnd = html_endBody();
+	string $html_end = html_end();
+	
+	string $html_content = html_startBold();
+	$msg = "Pre Lighting log\n\n"+$fileName+"\n\n";
+	$html_content += html_convert($msg); 
+	print $msg;
+	$html_content += html_endBold();
+	$msg = getSystemDate("both")+"\n";
+	$msg += "Qube Job ID: "+$qubeJobId+"\n\n";
+	print $msg;
+	$html_content += html_convert($msg);
+	
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// Don't let anything new through while we work on the pipe
+	/*
+	string $html_content = html_startBold();
+	$msg = "\n\n\nPre Lighting 8/25/05: Lighting pipeline is temporarily down for some renovations. Exiting.\n\n";
+	print $msg;
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	return false;
+	*/
+	
+	$msg = "Pre Lighting was called with the following arguments:\n\n";
+	print $msg;
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	$msg = "filename="+$fileName+"\n";
+	$msg += "sequence="+$PL_sequence+"\n";
+	$msg += "shotgroup="+$PL_shotGroup+"\n";
+	$msg += "sequenceid="+$PL_seqID+"\n";
+	$msg += "host="+$PL_host+"\n";
+	$msg += "returnpath="+$PL_CB_Path+"\n";
+	$msg += "arguments="+$PL_CB_Args+"\n";
+	$msg += "sgxml="+$SG_xml+"\n";
+	print $msg;
+	$html_content += html_convert($msg); 
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// -----------------------------------------------------------------------------------------------
+	// 2. Read the SG xml file
+	
+	
+	$msg = "\nPreLighting: Reading Shot Group XML file "+$SG_xml+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// 08/25/05 - check for the existence of the SG xml file
+	if (!`filetest -f $SG_xml`)
+	{
+		$msg = "\nPreLighting: Shot Group XML file not found. Can't continue.\n\n";
+		print ($msg);
+		$html_content += html_startBold();$html_content += html_convert($msg); $html_content += html_endBold();
+		writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));		
+		return false;
+	}
+	
+	
+	string $xml = readXML ($SG_xml,0);
+	
+	string $xNamespaces[],$xAssetNames[],$xPaths[];
+	int $xAssetTypeID[],$xOmitted[];
+	
+	getAssetsFromXML (
+		$xml,
+		$xAssetNames,
+		$xNamespaces,
+		$xPaths,
+		$xAssetTypeID,
+		$xOmitted
+	);
+	// 09/12/05 - update for point caching
+	// xPaths now doesn't include the filename. Find out if we have any point caching to do, then append file name
+	string $pointCacheFilenames[];
+	int $dummy[];
+	getPointCacheAssets ($PL_sequence, $PL_shotGroup, $pointCacheFilenames, $dummy);
+	int $pointCacheAvail[];
+	for ($i=0;$i<size($xPaths);$i++)
+	{
+		for ($j = 0; $j < size ($pointCacheFilenames);$j++)
+		{
+			string $searchName = resolveFilename (dirname ($pointCacheFilenames[$j])); // dirname is because xPath items are just directories
+			if ($xPaths[$i] == $searchName)
+			{
+				$pointCacheAvail[$i] = 1;
+				break;	
+			}	
+		}	
+		if ($pointCacheAvail[$i])
+		{
+			$xPaths[$i] = $xPaths[$i]+"/"+$xAssetNames[$i]+"_cachingProxy.ma";	
+		}
+		else
+		{
+			$xPaths[$i] = $xPaths[$i]+"/"+$xAssetNames[$i]+"_live.ma";
+		}
+	}
+	// 09/12/05 - end of point cache update
+	
+	// output some info
+	$msg = "\nPreLighting: Asset Membership for file "+$fileName+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	$msg = "";
+	for ($i=0;$i<size($xNamespaces);$i++)
+	{
+		$msg += "NameSpace = "+$xNamespaces[$i]+"\n\tPath = "+$xPaths[$i]+"\n\tAssetTypeID = "+$xAssetTypeID[$i]+"\n\tAOmitted = "+$xOmitted[$i]+"\n\n";	
+	}
+	  
+	print ($msg);
+	$html_content += html_convert($msg); 
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	
+	
+	// Get cameras from the xml
+	string $xCamNames[], $xCamShapeNames[];
+	int $xCamIndex[], $xBgPlate[];
+	string $xCamImageName[];
+	float $xCamSizeX[], $xCamSizeY[], $xCamOffsetX[], $xCamOffsetY[], $xCamDepth[], $xCamRotate[];
+	getCamerasFromXML(
+		$xml,
+		$xCamNames,
+		$xCamShapeNames,
+		$xCamIndex,
+		$xBgPlate,
+		$xCamImageName,
+		$xCamSizeX,
+		$xCamSizeY,
+		$xCamOffsetX,
+		$xCamOffsetY,
+		$xCamDepth,
+		$xCamRotate
+	);
+	// output some info
+	$msg = "\nPreLighting: Camera Membership for file "+$fileName+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	$msg = "";
+	for ($i=0;$i<size($xCamNames);$i++)
+	{
+		$msg += "Name = "+$xCamNames[$i]+"\n\BG Plate = "+$xBgPlate[$i]+"\n\n";	
+			
+	}    
+	print ($msg);
+	$html_content += html_convert($msg); 
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// grab shot group frame range
+	int $shotGroupStart = 9999,$shotGroupEnd = -9999;
+	string $shotXML[] = xml_getTag ($xml,"Shot");
+	for ($i=0;$i<size($shotXML);$i++)
+	{
+		int $frame = (int)xml_getVar ($shotXML[$i],"FrameRangeStart");	
+		$shotGroupStart = ($frame<$shotGroupStart)?$frame:$shotGroupStart;
+		$frame = (int)xml_getVar ($shotXML[$i],"FrameRangeEnd");
+		$shotGroupEnd = ($frame>$shotGroupEnd)?$frame:$shotGroupEnd;		
+	}
+	$msg = "\nPreLighting: Shot Group frame range is "+$shotGroupStart+" - "+$shotGroupEnd+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold(); $html_content += html_convert($msg); $html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	
+	// -----------------------------------------------------------------------------------------------
+	// 3. Populate scene with assets
+	// set the file type first
+	file -type "mayaAscii";
+	
+	// Check for asset existance
+	// 09/12/05 - update for point caching
+	$msg = "PreLighting: Peforming Asset Existence check\n\n";
+	print ($msg);
+	$html_content += html_convert($msg); 
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	string $missing[];
+	for ($i=0;$i<size($xNamespaces);$i++)
+	{
+		// 09/12/05 - update for point caching and proxy references...need to check for both files, even though only one will be in the list
+		if ($pointCacheAvail[$i])
+		{
+			string $pointCacheAsset = substitute ("_cachingProxy",$xPaths[$i],"_caching");
+			// check for caching and cachingProxy asset
+			if (!`filetest -f $pointCacheAsset` && !$xOmitted[$i])
+				$missing[size($missing)] = $pointCacheAsset;	
+		}
+		// normal check will work for cachingProxy
+		if (!`filetest -f $xPaths[$i]` && !$xOmitted[$i])
+			$missing[size($missing)] = $xPaths[$i];
+	}
+	
+	// update the missing assets file.
+	saveMissingAssets ("PreLighting",$PL_sequence, $PL_shotGroup, $missing);
+	//
+	// -------------------------------------------------------------------------------------
+	// 08/26/05 - Check hold file to see if we should go forward
+	// -------------------------------------------------------------------------------------
+	int $hold = queryHoldStatus ("PreLighting",$PL_sequence,$PL_shotGroup,$xAssetNames);
+	
+	if ($hold)
+	{
+		$msg = "\nPreLighting: This shot is on hold for technical reasons. Exiting...\n\n";	
+		print ($msg);
+		$html_content += html_startBold();$html_content += html_convert($msg); $html_content += html_endBold();
+		writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));	
+		return false;
+	}
+	// -------------------------------------------------------------------------------------
+	
+	if (size($missing))
+	{
+		$missing = stringArrayRemoveDuplicates($missing);
+		$msg = "PreLighting: ERROR! The following assets don't exist:\n\n";
+		print ($msg);
+		$html_content += html_startBold();
+		$html_content += html_convert($msg); 
+		$html_content += html_endBold();	
+		for ($asset in $missing)
+		{
+			$msg = $asset+"\n";
+			print ($msg);	
+			$html_content += html_convert($msg); 
+		}	
+		$msg = "\nPreLighting: Cannot continue.\n\n";
+		print ($msg);
+		$html_content += html_startBold();$html_content += html_convert($msg); $html_content += html_endBold();	
+		writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+		return 0;
+	}
+	
+	
+	$msg = "PreLighting: Creating shot builder xml...\n\n";
+	print ($msg);
+	$html_content += html_startBold();$html_content += html_convert($msg); $html_content += html_endBold();	
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// -------------------------------------------------------------------------------------------
+	// 12/10/05 - Setup scene to render with Mental Ray as default. This sets basics for the projects...resolution, output format and so on.
+	// -------------------------------------------------------------------------------------------
+	print ("Setting Mental Ray Globals...\n");
+	setupMentalRay();
+	// -------------------------------------------------------------------------------------------
+	// Create the shot builder xml, which we will feed to buildShot
+	// -------------------------------------------------------------------------------------------
+	string $output_xml;
+	
+	// Header
+	$output_xml = "<Desc ";
+	$output_xml += "Sequence=\""+$PL_sequence+"\" ";
+	$output_xml += "ShotGroup=\""+$PL_shotGroup+"\" ";
+	$output_xml += "SceneType=\"Lighting\" ";
+	$output_xml += ">\n";
+	// Shots
+	// shotXML[] is the shots from the shot group xml
+	$output_xml += "\t<Shots>\n";
+	for ($i=0;$i<size($shotXML);$i++)
+	{
+		$output_xml += "\t\t<Shot ";
+		$output_xml += "ShotNumber=\""+xml_getVar($shotXML[$i],"ShotNumber")+"\" ";
+		$output_xml += "FrameRangeStart=\""+xml_getVar($shotXML[$i],"FrameRangeStart")+"\" ";
+		$output_xml += "FrameRangeEnd=\""+xml_getVar($shotXML[$i],"FrameRangeEnd")+"\" ";
+		$output_xml += "Omitted=\""+xml_getVar($shotXML[$i],"Omitted")+"\" ";
+		$output_xml += "/>\n";	
+	}
+	$output_xml += "\t</Shots>\n";
+	// Assets
+	$output_xml += "\t<Assets>\n";
+	string $assetTypeEnum[] = { "Character","Vehicle","Prop","Set","Misc"};
+	for ($i=0;$i<size($xNamespaces);$i++)
+	{
+		// collect all the data
+		int $assetID = -1;
+		string $path = dirname ($xPaths[$i]);
+		string $name = dirname ($path);
+		string $foldername = dirname ($path);
+		string $basename = basename ($xPaths[$i],"");
+		int $assetTypeID = typeFromFoldername($path)+1;
+		string $assetType = $assetTypeEnum [$assetTypeID];
+		string $refnode = $xNamespaces[$i]+"RN";
+		
+		// create the xml
+		$output_xml += "\t\t<Asset ";
+		$output_xml += "AssetID=\""+$assetID+"\" ";
+		$output_xml += "Name=\""+$name+"\" ";
+		$output_xml += "BaseName=\""+$basename+"\" ";
+		$output_xml += "AssetTypeID=\""+$assetTypeID+"\" ";
+		$output_xml += "FolderName=\""+$foldername+"\" ";
+		$output_xml += "Path=\""+$path+"\" ";
+		$output_xml += "AssetType=\""+$assetType+"\" ";
+		$output_xml += "Namespace=\""+$xNamespaces[$i]+"\" ";
+		$output_xml += "RefNode=\""+$refnode+"\" ";
+		// include asset even if deferred in shot group xml
+		//$output_xml += "Omitted=\""+$xOmitted[$i]+"\" ";
+		$output_xml += "Omitted=\"0\" ";
+	
+		$output_xml += "/>\n"; 
+	}
+	$output_xml += "\t</Assets>\n";
+	
+	// Cameras
+	$output_xml += "\t<Cameras>\n";
+	
+	// grab directly from shot group xml
+	string $camerasXML[] = xml_getTag ($xml,"Camera");
+	for ($i=0;$i<size($camerasXML);$i++)
+		$output_xml += "\t\t"+$camerasXML[$i]+"\n";
+		
+	$output_xml += "\t</Cameras>\n";
+	
+	// Cache options
+	
+	string $cacheDir = "/showWork/seq"+$PL_sequence+"/sg"+$PL_shotGroup+"/cache/animation";
+	string $cache_itt = "smooth";
+	string $cache_ott = "smooth";
+	string $cache_pre = "linear";
+	string $cache_pst = "linear";
+	string $shotsToBake = "all";
+	
+	$output_xml += "\t<Cache CacheDir=\""+$cacheDir+"\" ";
+	$output_xml += "BakeShot=\""+$shotsToBake+"\" ";
+	$output_xml += "BakeInTangentType=\""+$cache_itt+"\" ";
+	$output_xml += "BakeOutTangentType=\""+$cache_ott+"\" ";
+	$output_xml += "BakePreInfinityType=\""+$cache_pre+"\" ";
+	$output_xml += "BakePostInfinityType=\""+$cache_pst+"\" ";
+	$output_xml += "/>\n";
+	
+	$output_xml += "</Desc>\n";
+	
+	// done creating xml, save to disk
+	string $shotBuilderXML = $basePath+"/shotGroupInfo/"+$PL_sequence+"_"+$PL_shotGroup+"_preLighting.xml";
+	writeFile ($shotBuilderXML,$output_xml);
+	
+	// remove after testing.
+	//return false;
+	
+	// -------------------------------------------------------------------------------------------
+	// Done creating shot builder xml
+	// -------------------------------------------------------------------------------------------
+	
+	// We are ready to call buildShot to populate the scene
+	$msg = "PreLighting: Populating the scene...\n\n";
+	print ($msg);
+	$html_content += html_startBold();$html_content += html_convert($msg); $html_content += html_endBold();	
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	fileInfo "cacheBaker" "animCache";
+	buildShot ($shotBuilderXML);	// this is the proc that does the work of building the scene.
+	
+	
+	
+	// done populating scene
+	$msg = "PreLighting: Successfully populated "+$fileName+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold(); $html_content += html_convert($msg); $html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	
+	// -----------------------------------------------------------------------------------------------
+	//7. Set the render globals for lighting
+	
+	$msg = "PreLighting: Setting Default Render Globals for Lighting\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	string $defGlobals = `workspace -q -active`+"/mel/LightingRenderGlobals.mel";
+	if (`filetest -f $defGlobals`)
+	{
+		string $srcCmd = "source \""+`workspace -q -active`+"/mel/LightingRenderGlobals.mel\"";
+		eval ($srcCmd);
+	}
+	
+	// -----------------------------------------------------------------------------------------------
+	//8. Switch all textures to low res
+	$msg = "PreLighting: Setting texture resolution to low\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	setTextureRes "low";
+	
+	// -----------------------------------------------------------------------------------------------
+	// 9. Switch all assets to low res
+	
+	$msg = "PreLighting: Setting asset resolution\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// No.
+	/*
+	string $assets[] = findAssetsByType ("cpefsdvwl",0);
+	for ($asset in $assets)
+	{
+		if (`objExists ($asset+".res")`)
+			setAttr ($asset+".res") 0;	
+		// set showGeo to "render"
+		if (`objExists ($asset+".showGeo")`)
+			setAttr ($asset+".showGeo") 0;	
+		
+	}
+	*/
+	setRenderRes();
+	// -----------------------------------------------------------------------------------------------
+	// 10. Set playback range
+	$msg = "\nPreLighting: Setting playback range. Shot group Start - "+$shotGroupStart+"    Shot Group End - "+$shotGroupEnd+"\n\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	playbackOptions -min $shotGroupStart;
+	playbackOptions -ast $shotGroupStart;
+	playbackOptions -max $shotGroupEnd;
+	playbackOptions -aet $shotGroupEnd;
+	
+	// -----------------------------------------------------------------------------------------------
+
+	// 11. Back up any previously existing version of the file
+	
+	if (`filetest -f $fileName`)
+	{
+		if (!`filetest -d ($basePath+"/archive")`)
+		{
+			int $success = `sysFile -md ($basePath+"/archive")`;
+			if (!$success)
+			{
+				$msg = "\nPre Lighting: Error - Couldn't create archive directory to back up existing lit file\n";	
+				print ($msg);
+				$html_content += html_startBold();
+				$html_content += html_convert($msg); 
+				$html_content += html_endBold();
+				writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+				return false;	
+			}
+		}
+		int $c = 1;
+		while (`filetest -f ($basePath+"/archive/"+$PL_sequence+"_"+$PL_shotGroup+"_lit."+$c+".ma")`) $c++;
+		// back up the old _lay file
+		string $archive = $basePath+"/archive/"+$PL_sequence+"_"+$PL_shotGroup+"_lit."+$c+".ma";
+		//print ("cp "+$fileName+" "+$archive+"\n");
+		$success = copyFile ($fileName,$archive);
+		if (!$success)
+		{
+			$msg = "\nPre Lighting Error - Couldn't back up existing lit file\n";	
+			print ($msg);
+			$html_content += html_startBold();
+			$html_content += html_convert($msg); 
+			$html_content += html_endBold();
+			writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+			return false;	
+		}
+		$msg = "\nPre Layout: Successfully archived existing lit file to "+$archive+"\n";	
+		print ($msg);
+		$html_content += html_startBold();
+		$html_content += html_convert($msg); 
+		$html_content += html_endBold();
+		writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));	
+			
+	}
+	
+	// -----------------------------------------------------------------------------------------------
+	
+	// fix locked attrs
+	if (`objExists "time1.outTime"`)
+		setAttr -l 0 "time1.outTime";
+	if (`objExists "defaultRenderGlobals.motionBlur"`)
+		setAttr -l 0 "defaultRenderGlobals.motionBlur";
+	if (`objExists "defaultRenderGlobals.byFrameStep"`)
+		setAttr -l 0 "defaultRenderGlobals.byFrameStep";	
+			
+			
+	file -rename $fileName;
+	file -type "mayaAscii" -save;
+	
+	// -----------------------------------------------------------------------------------------------
+	//13. Check that the file has saved
+	if (!`filetest -f $fileName`)
+	{
+		$msg = "\nPre Lighting: Couldn't save "+$fileName+"\n";	
+		print ($msg);
+		$html_content += html_startBold();
+		$html_content += html_convert($msg); 
+		$html_content += html_endBold();
+		writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+		return false;		
+	}
+	
+	$msg = "\nPre Lighting: Successfully saved "+$fileName+"\n";	
+	print ($msg);
+	$html_content += html_startBold();
+	$html_content += html_convert($msg); 
+	$html_content += html_endBold();
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	// -----------------------------------------------------------------------------------------------
+	//14. update the shot database
+	// 
+	
+	$msg = "\nPreLighting: Updating shot database.\n\n";
+	print ($msg);
+	$html_content += html_convert($msg); 
+		
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	// George - this is fixed now.
+	buildShotdb($PL_sequence,$PL_shotGroup);
+	
+	$msg = "PreLighting: DONE\n\n";
+	print ($msg);
+	$html_content += html_convert($msg); 
+		
+	writeFile ($logFile[0],($html_head+$html_bodyBegin+$html_content+$html_bodyEnd+$html_end));
+	
+	
+	
+	return true;
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc PreLighting(string $args) 
+{	
+	
+	loadPlugins;
+	eval ("source \"argList.mel\"");
+
+
+	global string $PL_sequence;		// The sequence
+	global string $PL_shotGroup;		// The shot
+	global int $PL_seqID;			// Soon to Obselete - This will be obtained by asking Insight
+	global string $PL_host;			// Who is calling this process? "insight" or "maya"
+	global string $PL_CB_Path;		// Path to web service to perform a callback to Insight through
+	global string $PL_CB_Args;		// Args to send to web service
+	global string $PL_sgXML;		// Soon to be obselete
+	global string $PL_fileName;		// The filename - soon to be obselete. We will derive from sequence and shot		
+	global string $PL_qubeJobName;		// Job name passed from calling process
+
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$PL_sequence = getArgValue ($args,"sequence");
+	$PL_shotGroup = getArgValue ($args,"shotgroup");
+	$PL_seqID = (int)getArgValue ($args,"sequenceid");
+	$PL_host = getArgValueDefault ($args,"host","maya"); $PL_host = tolower ($PL_host);
+	$PL_CB_Path = getArgValue ($args,"returnpath");
+	$PL_CB_Args = getArgValue ($args,"arguments");
+	$PL_fileName = getArgValue ($args,"filename");
+	$PL_qubeJobName = getArgValue ($args,"qubeJobName");
+	$PL_sgXML = "";
+
+	
+	
+	// ------------------------------------------------------
+	// Call the main proc
+	// ------------------------------------------------------
+	// main body of procedure
+	string $logFile[];
+	int $pass = do_preLighting ($logFile);
+	
+	//
+	if ($PL_host == "maya" && !`about -batch` && `filetest -f $logFile[0]`)
+		showHelp -a $logFile[0];
+	
+	// perform a callback to Insight
+	if ($PL_host == "insight" && $pass)
+	{
+		string $res = insightCallWebservice ($PL_CB_Path,$PL_CB_Args);
+	}
+	
+	
+}

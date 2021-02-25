@@ -1,0 +1,835 @@
+// Copyright (C) 2006-2010 IDMT.
+//
+// Script File
+//
+// Creation Date:  
+//
+//
+//  Procedure Name:
+//      checkScene
+//
+//  Description:
+//      This procedure invokes the checkScene operations.
+
+//
+//  Input Arguments:
+//
+//  Return Value:
+//      None.
+//
+//
+//	Notes:
+//
+//
+//	Here is an overview of how the contents of the file are broken
+//	down:
+//
+//	i) Procedures that implement specific check operations:
+//
+//	
+//
+//   ii) Procedures for running individual optimizations, via the
+//		"check Now" buttons:
+//		
+//		- scOpt_setOptionVars()
+//		- scOpt_SaveAndCleanOptionVars()
+//		- scOpt_performOnecheck()
+//		
+//  iii) Procedures to support user-defined optimization steps:
+//
+//		- usercheck_checkSceneCallback()
+//		- usercheck_checkSceneSetup()
+//		- usercheck_CreateUI()
+//		- usercheck_GetCommand()
+//		- usercheck_GetControlName()
+//		- usercheck_GetDefaultValue()
+//		- usercheck_GetLabel()
+//		- usercheck_GetNumchecks()
+//		- usercheck_GetOptionVarName()
+//		- usercheck_GetOptionVars()
+//		- usercheck_Listchecks()
+//		- usercheck_PerformcheckScene()
+//		- usercheck_SetOptionVars()
+//		
+//    iv) Procedures to set up the "check Scene Size" UI:
+//    
+//    	- checkOptions() - brings up the dialog
+//    	- checkSceneTabUI() - builds the controls for the
+//    							individual optimizations
+//    	- checkSceneSetup() - sets the state of the checkboxes
+//    							based on the stored optionVar values
+//    	- checkSceneCallback() - sets the optionVar values
+//    							   based on the state of the checkboxes
+//    	- setOptionVars() - ensures that all optionVars have been set,
+//    						and optionally restores the factory default
+//    						settings
+//    						
+//	v) Procedures to actually do the check:		
+//	
+//		- performcheckScene() 
+//			- invoked to perform the selected check operations 
+//			  when the user presses the button from the dialog
+//		
+//
+//	How Progress Reporting/Interruptability Works
+//	---------------------------------------------
+//
+//	There are several functions that were added to give all the various
+//	optimization steps a common framework to use for reporting progress and
+//	recording their results:
+//
+//		check_ShouldReportProgress() - detemines whether or not
+//										 the various check steps should
+//										 record their progress.  Since these
+//										 functions can be called outside the
+//										 context of the check Scene Size
+//										 opteration, so they need to know when
+//										 they should use progress reporting.
+//
+//		check_StartProgress() - called before an operation begins
+//		check_SetProgress() - called as the operation is running, to 
+//								update the progress bar.
+//		check_EndProgress() - called to signal that the operation is 
+//								finished.
+//		check_CheckInterrupt() - called between check operations to
+//								   detect when a previous operation has
+//								   been interrupted.
+//		check_Summary() - called to report the results of check 
+//							operations.
+//
+//
+//
+//-----------------------------------------------------------------------------
+		
+
+//
+//	checkScene:
+//		$option = 0: does the default check operation
+//		$option = 1: does the check operation
+//		$option = 2: option window for check
+//		$pp indicate which step: model/setup/anim/effect/render
+//
+global proc checkScene (int $option, int $pp)
+{
+	//	call the initialization function to register user check operations
+	//
+	if ($pp == 1)
+		check_RegisterCheckModel();
+	else if ($pp == 2)
+		check_RegisterCheckSetup();
+	else if ($pp == 3)
+		check_RegisterCheckAnim();
+	else if ($pp == 4)
+		check_RegisterCheckEffect();
+	else if ($pp == 5)
+		check_RegisterCheckRender();
+
+	if ($option == 0) {	
+		// Do the check
+		setOptionVars (true);
+		performcheckScene();
+	} else if ($option == 1) {	
+		// Do the check
+		setOptionVars (false);
+		performcheckScene();
+	} else if ($option == 2) {
+		// Option window for the check work
+		checkOptions($pp);
+	}
+}
+
+
+global proc check_Initialize()
+{
+	global string $gCheckSummary[];
+	global string $gCheckSteps[];
+	global int $gCheckInterrupted;
+
+	$gCheckSummary = {};
+	$gCheckSteps = {};
+	$gCheckInterrupted = 0;
+}
+
+global proc check_GetSummary( string $summary[], string $steps[] )
+{
+	global string $gCheckSummary[];
+	global string $gCheckSteps[];
+	
+	$summary = $gCheckSummary;
+	$steps = $gCheckSteps;
+}
+
+global proc check_EnableProgressReporting( int $enable )
+{
+	//	global variable that determines whether progress
+	//	reporting is enabled
+	global int $gCheckProgressReporting;
+	
+	$gCheckProgressReporting = $enable;
+}
+	
+global proc performcheckScene ()
+{
+	//set lastmodified time
+//	string $time[] = `ls -type time`;	// modified by huangzhongwei 20061026
+	string $time[] = {"time1"};
+
+	zjObjectAddAttr($time[0], "modtime", "long" , 0, 00000000, 99999999);
+	string $ct = `about -currentDate`;
+	int $date = substituteAllString($ct, "/", "");
+	setAttr ($time[0] + ".modtime") $date;
+
+	string $result = "OK";
+	
+	//
+	//	We will use catch statements around each individual optimization
+	//	step to detect any errors (syntax errors or other error conditions)
+	//	that may occur.  This is important so that errors in one step
+	//	do not cause the whole process to abort.  Also, since the optimization
+	//	steps mess around with the progress bar and the global cursor state,
+	//	it is important that we restore these things to their previous
+	//	states before this function exits.
+	//
+	int $errorCount = 0;
+
+	check_Initialize();
+
+	
+	if (!`about -batch` && $result != "OK") {
+		return;
+	}
+
+	print "\n";
+
+	//	turn on progress reporting
+	//
+	check_EnableProgressReporting(1);
+
+	$errorCount += usercheck_PerformcheckScene();
+
+	//	turn off progress reporting
+	//
+	check_EnableProgressReporting(0);
+
+	string $stepsRun[];
+	string $summaries[];
+	check_GetSummary( $summaries, $stepsRun );
+
+	print( "\nCheck Scene Summary:\n" );
+	print( "----------------------------\n" );
+	for( $i = 0; $i < size($summaries); $i++ )
+	{
+		print "- ";
+		print( $summaries[$i] );
+		print "\n";
+	}
+	print "\n";
+
+	string $msg = "Scene Checked ";
+	if( $errorCount > 0 )
+	{
+		$msg += ( " with " + $errorCount + " errors ");
+	}
+	
+	$msg += "(";
+	
+	for( $i = 0; $i < size($stepsRun); $i++ )
+	{
+		$msg += $stepsRun[$i];
+
+		if( $i < size($stepsRun)-1 )
+		{
+			$msg += ", ";
+		}
+	}
+
+	$msg += ") - see Script Editor for details.\n";
+	
+	//	If any errors occurred during optimization, output a warning at
+	//	the end to let the user know.
+	//
+	if( $errorCount > 0 )
+	{
+		warning $msg;
+	}
+	else
+	{
+		print $msg;
+	}
+
+	//	if an error occurred in one of the stages, then it wouldn't have 
+	//	called check_EndProgress(), therefore the progress bar and wait
+	//	cursor would be in the wrong state.  We'll call it here.
+	//	
+	if( $errorCount )
+	{
+		check_EndProgress();
+	}
+}
+
+//
+//  Procedure Name:
+//      setOptionBoxCommandName
+//
+//  Description:
+//      Set the command name of the option box window.  The command name
+//		is required to set up some common option box behaviour, for 
+//		example the label of the help menu item.
+//
+//	Note:
+//		If setOptionBoxHelpTag() is used then this method has
+//		no effect.
+//
+//  Input Arguments:
+//      The name of the command.
+//
+//  Return Value:
+//      None.
+//
+proc setOptionBoxCommandName(string $commandName) {
+
+	string $helpItem = getOptionBoxHelpItem();
+	menuItem -edit
+		-label ("Help on " + $commandName)
+		-command ("zjHelpCallback " + $commandName)
+		$helpItem;
+}
+
+//
+//	option box layout for check
+//
+global proc checkOptions (int $pp)
+{
+	string $commandName = "checkScene";
+	string $callback = ($commandName + "Callback");
+	string $setup = ($commandName + "Setup");
+
+	string $layout = getOptionBox();
+	setParent $layout;
+
+	setOptionBoxCommandName($commandName);
+
+	string $tabLayout = `tabLayout -scrollable 1`;
+	tabLayout -edit
+        -tabsVisible false
+        -preSelectCommand ("createcheckSceneTabUI " + $tabLayout + ", " + $pp)
+        $tabLayout;
+	columnLayout -adj true;
+		setParent ..;
+	tabLayout -edit
+        $tabLayout;
+
+	createcheckSceneTabUI($tabLayout, $pp);
+
+
+	//  Std buttons for options.
+    //
+	string $applyBtn = getOptionBoxApplyBtn();
+	button -edit -l "Check"
+        -command ($callback + " " + $tabLayout + " " + 1 + "; performcheckScene")
+        $applyBtn;
+    string $saveBtn = getOptionBoxSaveBtn();
+    button -edit
+        -command ($callback + " " + $tabLayout + " " + 0 + "; hideOptionBox")
+        $saveBtn;
+    string $resetBtn = getOptionBoxResetBtn();
+    button -edit
+        -command ($setup + " " + $tabLayout + " " + 1)
+        $resetBtn;
+
+	string $pptitle = "Model";
+	if ($pp == 2)
+		$pptitle = "Setup";
+	else if ($pp == 3)
+		$pptitle = "Animation";
+	else if ($pp == 4)
+		$pptitle = "Effect";
+	else if ($pp == 5)
+		$pptitle = "Render";
+    setOptionBoxTitle("Check " + $pptitle + " Scene Options");
+
+
+	showOptionBox();
+}
+
+
+global proc createcheckSceneTabUI (string $tabLayout, int $pp)
+{
+    string $tab[] = `tabLayout -query -childArray $tabLayout`;
+    int $currentTabIndex = `tabLayout -query -selectTabIndex $tabLayout`;
+
+    if (0 == `columnLayout -query -numberOfChildren $tab[$currentTabIndex-1]`) {
+
+        setParent $tab[$currentTabIndex-1];
+
+        string $label;
+        int $index;
+
+        setUITemplate -pushTemplate attributeEditorTemplate;
+
+        waitCursor -state 1;
+
+        if (1 == $currentTabIndex) {
+
+			// For different platforms looks better if we use different
+			// heights for the button size
+			
+			int $useHeight = 18;
+			if (`about -nt`) $useHeight = 14;
+				
+			
+			usercheck_CreateUI($pp);
+
+			//separator -w 490;
+
+			setParent ..;
+
+		}
+
+		eval (("checkSceneSetup " + $tabLayout + " " + 0));
+
+        waitCursor -state 0;
+        setUITemplate -popTemplate;
+	}
+}
+
+//
+//	intialize the options for check
+//
+global proc setOptionVars(int $forceFactorySettings)
+{
+	usercheck_SetOptionVars($forceFactorySettings);
+}
+
+
+
+//
+//	callback to set the values based on current settings
+//
+global proc checkSceneCallback(string $parent, int $doIt)
+{
+    setParent $parent;
+	
+
+	usercheck_checkSceneCallback( $parent, $doIt );
+}
+
+//
+//	reset the option values
+//
+global proc checkSceneSetup(string $parent, int $forceFactorySettings)
+{
+	setOptionVars($forceFactorySettings);
+	
+
+	usercheck_checkSceneSetup( $parent, $forceFactorySettings );
+}
+
+
+
+//==============Begin Support for individual check buttons==============
+//
+//	Added some routines to temporarily override the optionVar settings for the
+//	checkScene operation to allow us to fire off each check operation 
+//	individually.
+//
+//	Next to each check in the "check Scene" dialog I've added
+//	a button "check Now".  This button invokes scOpt_performOnecheck()
+//	to temporarily disable all check operations but that one, invokes
+//	the scene check, then restores the optionVars to their previous state.
+//
+
+global proc string [] scOpt_allcheckOptionVars()
+{
+	string $optionVars[] = {
+	};
+
+	string $userchecks[] = usercheck_GetOptionVars();
+	for( $usercheck_OptVar in $userchecks )
+	{
+		$optionVars[size($optionVars)] = $usercheck_OptVar;
+	}
+	
+	return $optionVars;
+}
+
+global proc scOpt_saveAndClearOptionVars( int $clear )
+//
+//	Description:
+//
+//		If $clear=1, finds all option variables associated with scene 
+//		check operations, zeroes them, and stores their previous values
+//		somewhere.  If $clear=0, then the proc restores the saved optionVar
+//		values.  This allows easy "pushing" and "popping" of these optionVar
+//		values.
+//
+//		In addition to the fixed set of built-in check operations, the 
+//		function must also deal with user-defined check operations that
+//		may have been added dynamically.
+//
+{
+	global string $gCheckSceneOptionVars[];
+
+	string $optionVars[] = scOpt_allcheckOptionVars();
+
+	int $numOptionVars = size($optionVars);
+
+	for( $i = 0; $i < $numOptionVars; $i++ )
+	{
+		if( $clear == 1 )
+		{
+			$gCheckSceneOptionVars[2*$i] = $optionVars[$i];
+			$gCheckSceneOptionVars[2*$i+1] = 
+				`optionVar -query $optionVars[$i]`;
+			optionVar -intValue $optionVars[$i] false;
+		}
+		else
+		{
+			int $val = $gCheckSceneOptionVars[2*$i+1];
+			optionVar -intValue $gCheckSceneOptionVars[2*$i] $val;
+		}
+	}
+}
+
+global proc scOpt_setOptionVars( string $which[] )
+{
+	for( $var in $which )
+	{
+		optionVar -intValue $var true;
+	}
+}
+
+global proc scOpt_performOnecheck( string $which[] , int $pp)
+{
+	scOpt_saveAndClearOptionVars(1);
+	scOpt_setOptionVars( $which );
+
+	checkScene( 1, $pp );
+
+	scOpt_saveAndClearOptionVars(0);
+}
+//
+//
+//=======End Support for individual optimization buttons=======================
+	
+
+
+//==============BEGIN Support for user-defined check steps===================
+//
+//	We added some functions for users to be able to add their own scene check
+//	operations to the list in the "check Scene Size" options dialog.
+//
+//	Routines:
+//
+//		usercheck_Addcheck(): register a new user-defined check operation.
+//								  (routine is actually in usercheck_Addcheck.mel).
+//
+//		usercheck_GetNumchecks(),
+//		usercheck_GetOptionVarName(),
+//		usercheck_GetDefaultValue(),
+//		usercheck_GetControlName(),
+//		usercheck_GetLabel(),
+//		usercheck_GetCommand(): retrieving attributes of user-defined check 
+//								  operations
+//
+//		usercheck_Listchecks(): prints a list of all registered 
+//									user-defined check operations.
+//
+//		usercheck_GetOptionVars(): lists all option variables for user-defined
+//									 check operations.
+//
+//		usercheck_SetOptionVars(),
+//		usercheck_checkSceneSetup(),
+//		usercheck_checkSceneCallback(): functions for synchronizing option 
+//											vars with UI checkboxes for check
+//											operations
+//
+//		usercheck_CreateUI(): builds the checkboxes for the user-defined 
+//								check operations
+//
+//		usercheck_PerformcheckScene(): actually does the user-defined check
+//										   operations.
+//
+//------------------------------------------------------------------------------
+
+global proc int usercheck_GetNumchecks()
+//
+//	Description:
+//
+//		Returns the number of user-defined check operations
+//		that have been registered.  They are identified by
+//		number from 0..n-1.
+//
+{
+	global string $gUserScenechecks[];
+	int $len = size($gUserScenechecks)/4;
+	return $len;
+}
+
+global proc string usercheck_GetOptionVarName( int $checkNum )
+//
+//	Description:
+//
+//		Returns the option variable associated with the specified
+//		user check operation.  The value of this variable indicates
+//		whether or not that particular operation will be performed
+//		the next time an "check Scene Size" operation is invoked.
+//
+{
+	global string $gUserScenechecks[];
+	return ( "ucOptVar_" + $gUserScenechecks[4*$checkNum] );
+}
+
+global proc int usercheck_GetDefaultValue( int $checkNum )
+//
+//	Description:
+//
+//		Returns the default value (on or off) of the specified
+//		user-defined check operation.
+//
+{
+	global string $gUserScenechecks[];
+	return $gUserScenechecks[4*$checkNum+2];
+}
+
+global proc string usercheck_GetControlName( int $checkNum )
+//
+//	Description:
+//
+//		Returns the name of the checkBox control group in the
+//		check Scene Size dialog that is associated with the 
+//		specified user check operation.  The state of this
+//		checkbox and the corresponding option variable (see
+//		usercheck_GetOptionVarName()) are synchronized when
+//		that dialog is created or destroyed.
+//
+{
+	global string $gUserScenechecks[];
+	return ( "uc_Ctl" + $gUserScenechecks[4*$checkNum] );
+}
+
+global proc string usercheck_GetLabel( int $checkNum )
+//
+//	Description:
+//
+//		Returns the text that should be used to label the
+//		specified user-defined check operation in the
+//		check Scene Size dialog.
+//
+{
+	global string $gUserScenechecks[];
+	return ( $gUserScenechecks[4*$checkNum+1] );
+}
+
+global proc string usercheck_GetCommand( int $checkNum )
+//
+//	Description:
+//
+//		Returns the command string that should be executed to
+//		perform the specified user-defined check operation.
+//
+{
+	global string $gUserScenechecks[];
+	return ( $gUserScenechecks[4*$checkNum+3] );
+}
+
+global proc usercheck_Listchecks()
+//
+//	Description:
+//
+//		Returns the command string that should be executed to
+//		perform the specified user-defined check operation.
+//
+{
+	int $num = usercheck_GetNumchecks();
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $label = usercheck_GetLabel($i);
+		string $cmd = usercheck_GetCommand($i);
+		int $def = usercheck_GetDefaultValue($i);
+		string $control = usercheck_GetControl($i);
+		string $optionVarName = usercheck_GetOptionVarName($i);
+
+		print( "User-Defined check Operation " + ($i+1) + "\n" );
+		print( "--------------------------------\n" );
+
+		print( "Name: " + $label + "\n" );
+		print( "Command: " + $cmd + "\n" );
+		print( "Default value: " + $def + "\n" );
+		print( "OptionVar: " + $optionVarName + "\n" );
+		print( "Control: " + $control + "\n" );
+	}
+}
+
+global proc string[] usercheck_GetOptionVars()
+//
+//	Description:
+//
+//		Returns a list of all option variables associated
+//		with user-defined check operations.
+//
+{
+	string $res[] = {};
+	int $num = usercheck_GetNumchecks();
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		$res[size($res)] = $optionVarName;
+	}
+
+	return $res;
+}
+
+global proc usercheck_SetOptionVars( int $forceFactorySettings )
+//
+//	Description:
+//
+//		Called when the option variables for check operations are
+//		either being initialized from scratch (at startup), or 
+//		reset to factory settings.  We simply retrieve the appropriate
+//		default values and set the option variables accordingly.
+//
+//		This routine is called from setOptionVars() below.
+//
+{
+	int $num = usercheck_GetNumchecks();
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		string $defaultValue = usercheck_GetDefaultValue($i);
+
+		if ($forceFactorySettings || !`optionVar -exists $optionVarName`)
+		{
+			int $defaultInt = $defaultValue;
+			optionVar -intValue $optionVarName $defaultInt;
+		}
+	}
+}
+
+global proc usercheck_checkSceneSetup( string $parent, 
+										   string $forceFactorySettings )
+//
+//	Description:
+//
+//		Called when the check Scene Size dialog is created, to
+//		synchronize the check boxes in that dialog with the values
+//		of the corresponding optionVars.
+//
+//		This routine is called from checkSceneSetup() below.
+//
+//
+{
+	int $num = usercheck_GetNumchecks();
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		string $controlName = usercheck_GetControlName($i);
+
+		if( `checkBoxGrp -exists $controlName` )
+		{
+			checkBoxGrp -edit -value1 `optionVar -query $optionVarName` $controlName;
+		}
+	}
+}
+
+global proc usercheck_checkSceneCallback( string $parent, string $doIt )
+//
+//	Description:
+//
+//		Called when the current state of the checkboxes in the check
+//		Scene Size dialog needs to be saved to option variables.
+//
+//		This routine is called from checkSceneCallback() below.
+//
+{
+	int $num = usercheck_GetNumchecks();
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		string $controlName = usercheck_GetControlName($i);
+
+		optionVar -intValue $optionVarName 
+				  `checkBoxGrp -query -value1 $controlName`;
+	}
+}
+
+global proc usercheck_CreateUI(int $pp)
+//
+//	Description:
+//
+//		Called to create the UI for user-defined check operations.  
+//		Each operation's UI consists of a checkbox to enable/disable the 
+//		operation, and an "check Now" button that can be used to execute 
+//		just that operation.
+//
+//		This function is called from createcheckSceneTabUI() below.
+//
+{
+	int $num = usercheck_GetNumchecks();
+
+	int $useHeight = 18;
+	if (`about -nt`) $useHeight = 14;
+	
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		string $controlName = usercheck_GetControlName($i);
+		string $labelName = usercheck_GetLabel($i);
+		string $cmd = ( "scOpt_performOnecheck( { \"" + $optionVarName + "\" } ," + $pp + ")" );
+
+		rowLayout -nc 2 -cat 2 "left" 0 -cw 1 300 -cw 2 200;
+
+		if( $i == 0 ) 
+		{
+			checkBoxGrp -ncb 1 -label "Check" -label1 $labelName $controlName;
+		}
+		else
+		{
+			checkBoxGrp -ncb 1 -label1 $labelName $controlName;
+		}
+
+		button -l "check now" 
+			-height $useHeight 
+			-c $cmd;			
+
+		setParent ..;
+	}
+}
+
+global proc int usercheck_PerformcheckScene()
+//
+//	Description:
+//
+//		Called to actually perform the check scene operations
+//		that are currently enabled (via their optionVars).
+//
+//		This function is called from performcheckScene() below.
+//		Returns the number of errors (if any) that occurred when
+//		invoking the operation.
+//
+{
+	int $num = usercheck_GetNumchecks();
+	int $errorCount = 0;
+
+	for( $i = 0; $i < $num; $i++ )
+	{
+		string $optionVarName = usercheck_GetOptionVarName($i);
+		string $cmd = usercheck_GetCommand($i);
+
+		if( `optionVar -query $optionVarName` && check_CheckInterrupt() )
+		{
+			$errorCount += catch( eval( $cmd ) );
+		}
+	}
+	
+	return $errorCount;
+}
+
+//
+//
+//==============END support for user-defined check operations================

@@ -1,0 +1,56 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//THIS WILL ADD CLAMPS BASED ON AN INITIAL OBJECTS SHADE MIN AND SHADE MAX VALUES
+
+global proc mwAddLumClamps()
+{
+	$tmp = `ls -sl`;
+	string $ramp[] = `ls ("*"+$tmp[0]+"*LUMINANCE_RAMP")`;
+	string $shaderRamp = `substitute ($tmp[0]+"_") $ramp[0] ""`;
+	string $shader = `substitute "LUMINANCE_RAMP" $shaderRamp "surfaceShader"`;
+
+	//CREATE PMA NODE
+	string $pma = `createNode plusMinusAverage`;
+	connectAttr -f ($ramp[0]+".colorEntryList[1].colorR") ($pma+".input2D[0].input2Dx");
+	connectAttr -f ($ramp[0]+".colorEntryList[1].colorR") ($pma+".input2D[0].input2Dy");
+	connectAttr -f ($shader+".shadeMin") ($pma+".input2D[1].input2Dx");
+	connectAttr -f ($shader+".shadeMax") ($pma+".input2D[1].input2Dy");
+	$pma = `rename $pma ($tmp[0]+"_baseLum_PMA")`;
+	setAttr ($pma+".operation") 2;
+
+	//GET ALL LUMINANCE RAMPS FOR THIS SHADER
+	string $rampList[] = `ls ("*"+$shaderRamp)`;
+	for($node in $rampList)
+	{
+		if(`strcmp $node $ramp[0]`!=0)
+		{
+			//CREATE PMA NODE
+			string $pma1 = `createNode plusMinusAverage`;
+			connectAttr -f ($node+".colorEntryList[1].colorR") ($pma1+".input2D[0].input2Dx");
+			connectAttr -f ($node+".colorEntryList[1].colorR") ($pma1+".input2D[0].input2Dy");
+			connectAttr -f ($pma+".output2Dx") ($pma1+".input2D[1].input2Dx");
+			connectAttr -f ($pma+".output2Dy") ($pma1+".input2D[1].input2Dy");
+
+			//CREATE CLAMP NODE
+			string $clamp = `createNode clamp`;
+			connectAttr -f ($pma1+".output2Dx") ($clamp+".inputR");
+			connectAttr -f ($pma1+".output2Dy") ($clamp+".inputG");
+			connectAttr -f ($clamp+".outputR") ($node+".colorEntryList[0].position");
+			connectAttr -f ($clamp+".outputG") ($node+".colorEntryList[1].position");
+			string $trans = `substitute ("_"+$shaderRamp) $node ""`;
+			$pma1 = `rename $pma1 ($trans+"_Lum_PMA")`;
+			setAttr ($pma1+".operation") 2;
+			$clamp = `rename $clamp ($trans+"_Lum_CLAMP")`;
+			setAttr ($clamp+".max") 1 1 1;
+		}
+	}
+	print "ALL DONE ADDING LUMINANCE CLAMPS PER TRANSFORM\n\n";
+}

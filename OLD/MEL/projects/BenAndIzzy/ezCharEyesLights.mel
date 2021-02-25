@@ -1,0 +1,74 @@
+global proc ezCharEyesLights()
+{
+	radioButtonGrp -e -select 2 LayerEditorTypeRadio;
+	tabLayout -edit -selectTab RenderLayerTab DisplayLayerUITabLayout;
+
+	string $adj[] = `ls -type renderLayer "eyesSpec*"`;
+	if (!`objExists $adj[0]`)
+	{
+		createRenderLayer -name "eyesSpec" -e -mc -number 1 -noRecurse;
+		ezMentalRayRG("eyesSpec");
+	}
+	layerEditorLayerButtonSelect 0 eyesSpec;
+	updateHighlightSelectIcon;
+
+	currentTime -31;
+	string $eyes[] = `ls -sl`;
+	string $buffer[];
+	for ($eye in $eyes)
+	{
+		tokenize $eye ":" $buffer;
+		tokenize $buffer[size($buffer)-1] "_" $buffer;
+		
+		string $char = $buffer[0];
+		string $head[]= `ls ("*:" + $char + "_head") ($char + "_head")`;
+		if (!`objExists $head[0]`)	error "头骨命名错误，请检查！";
+		
+		string $headp[];
+		$headp=`ls ("*:" + $char +"_*_hi_head") ($char +"_*_hi_head")`;
+		if (!`objExists $headp[0]`)
+		{
+			$headp=`ls ("*:" + $char +"_*_hi_body") ($char +"_*_hi_body")`;
+			if (!`objExists $headp[0]`)	error "头部模型命名错误，请检查！";
+		}
+
+
+		string $side = $buffer[1];
+		int $adj = -1;
+		if ($side == "left" || $side == "l")	$adj = 1;
+		
+		select -r $eye;
+		SelectLightsIlluminatingObject;
+		string $lights[] = `ls -sl`;
+		for ($light in $lights)
+		{
+			if (`objExists ($light + ".emitSpecular")`)	setAttr ($light + ".emitSpecular") 0;
+		}
+
+		defaultPointLight(0.8, 1,1,1, 0, 0, 0,0,0, 1, 0);
+		string $addLight[] = `ls -sl`;
+		setAttr ($addLight[0]+".scaleX") 1;
+		setAttr ($addLight[0]+".scaleY") 1;
+		setAttr ($addLight[0]+".scaleZ") 1;	
+
+		string $lightSet[] = `listConnections -type objectSet -p true $addLight[0]`;
+		disconnectAttr ($addLight[0]+".instObjGroups[0]") $lightSet[0];
+		select -r $addLight[0];select -add $eye;
+		zjMakeLightLinks();
+		setAttr ($addLight[0] + ".emitDiffuse") 0;
+		parent $addLight[0] $head[0];
+		setAttr ($addLight[0] + ".tx") (0.6*$adj+0.3);
+		setAttr ($addLight[0] + ".ty") 1.5;
+		setAttr ($addLight[0] + ".tz") 1.5;
+
+		string $eyesGroup[] = `pickWalk -d up $eye`;
+		editRenderLayerMembers  eyesSpec $lights $addLight[0] $headp[0] $eyesGroup;
+		
+		select -r $headp[0];
+		hyperShade -assign ezmatte_lambert;
+
+		select -cl;
+	}
+}
+
+

@@ -1,0 +1,218 @@
+global proc ezRenderReplaceFxCloth()
+{
+	string $name = `file -q -sceneName -shortName`;
+	string $buff[];
+	tokenize $name "_" $buff;
+
+	string $proj = $buff[0];
+	string $episode = $buff[1];
+	string $scene = $buff[2];
+
+	if ($proj == "ez")	$proj = "BenAndIzzy";
+
+	string $path = `getenv project_path` + "/" + $proj + "/Production/Animation/episode_" + $episode + "/scene_" + $scene + "/3deffect/";
+	string $file = $path + "*.mb";
+	string $catchFiles[] = `getFileList -filespec $file`;
+	int $yasminehair = 0;
+	if (size($catchFiles) == 0)
+		error "不存在对应的3deffect文件，请检查确认！";
+	
+	for ($im in $catchFiles)
+	{
+		//if (`gmatch $im "*hairrings*"`)
+		//		$yasminehair = 1;
+		//file -import -type "mayaBinary" -rpr "" -options "v=0"  -pr ($path+$im);
+		string $ns = `substring $im 1 (size($im)-3)`;
+		file -r -gr -ns $ns ($path+$im);
+	}
+
+	
+	string $baked[] = `ls "*_BAKED"`;
+	string $cloth[];
+	for ($i=0;$i<size($baked) ; $i++)
+	{
+		$cloth[$i] = ezRenderInitialName($baked[$i]);
+	}
+	$cloth = stringArrayRemove({""},$cloth);
+
+	string $intHair[],$repHair[];
+	if ($yasminehair)
+	{
+		string $birdehair[] = `ls -l "*:*yasmine_c_hi_bridehair_1"`;
+		string $headhair[]  = `ls -l "*:*yasmine_c_hi_headhair_1"`;
+		string $earrings[]  = `ls -l "*:*yasmine_??*_hi_earrings"`;
+		string $total[] = stringArrayCatenate($birdehair,$headhair);
+		$total = stringArrayCatenate($total,$earrings);
+
+		string $shape[];
+		for ($hair in $total)
+		{
+			if (startsWith($hair,"|fx_hair|"))
+			{
+				string $par[] = `listRelatives -f -p $hair`;
+				if (stringArrayCount($hair,$birdehair))		$repHair[0] = $par[0];
+				if (stringArrayCount($hair,$headhair))		$repHair[1] = $par[0];
+				if (stringArrayCount($hair,$earrings))
+				{
+					if (`gmatch $hair "*:*left*"`)		$repHair[2] = $hair;
+					if (`gmatch $hair "*:*right*"`)		$repHair[3] = $hair;
+				}
+			}
+			else 
+			{
+				if (stringArrayCount($hair,$birdehair))		$intHair[0] = $hair;
+				if (stringArrayCount($hair,$headhair))		$intHair[1] = $hair;
+				if (stringArrayCount($hair,$earrings))
+				{
+					if (`gmatch $hair "*:*left*"`)		$intHair[2] = $hair;
+					if (`gmatch $hair "*:*right*"`)		$intHair[3] = $hair;
+				}
+			}
+					
+		}
+	}
+
+
+	//renderLayer
+	radioButtonGrp -e -select 2 LayerEditorTypeRadio;
+	tabLayout -edit -selectTab RenderLayerTab DisplayLayerUITabLayout;
+	layerEditorLayerButtonSelect 0 defaultRenderLayer;
+	updateHighlightSelectIcon;
+	string $layers[] = `ls -type renderLayer`;
+	for ($layer in $layers)
+	{
+		if (!(`gmatch $layer "*defaultRenderLayer*"` && `gmatch $layer "*defaultRenderLayer*"`))
+		{
+			layerEditorLayerButtonSelect 0 $layer;
+			updateHighlightSelectIcon;
+			
+			string $group[] = `editRenderLayerMembers -q -fn $layer`;
+
+			for ($tem in $group)
+			{
+				string $objLayer[] = `listRelatives -ni -f -ad $tem`;
+				for ($temCloth in $cloth )
+				{
+					string $buff[];
+					tokenize $temCloth "---" $buff;
+					string $cth = $buff[0];
+					string $shape[] = `listRelatives -f -s -ni $cth`;
+					
+					string $fth = $buff[1];
+					if (stringArrayCount($cth,$objLayer) || stringArrayCount($shape[0],$objLayer))
+					{
+						//print ($layer+"----"+$cth+"\n");
+						
+						editRenderLayerMembers -noRecurse $layer $fth;
+
+						string $mat[] = `listConnections -type shadingEngine $shape[0]`;
+						sets -e -forceElement $mat[0] $fth;
+					}
+				}
+				if ($yasminehair)
+				{
+					for ($i=0;$i<4;$i++)
+					{
+						string $shape[] = `listRelatives -f -s -ni $intHair[$i]`;
+						if (stringArrayCount($intHair[$i],$objLayer) || stringArrayCount($shape[0],$objLayer))
+						{
+							editRenderLayerMembers -noRecurse $layer $repHair[$i];
+
+							string $mat[] = `listConnections -type shadingEngine $shape[0]`;
+							sets -e -forceElement $mat[0] $repHair[$i];
+						}
+					}
+				}
+			}
+		}
+	}
+	layerEditorLayerButtonSelect 0 defaultRenderLayer;
+	updateHighlightSelectIcon;
+	select -cl;
+
+	
+	//displayLayer
+	radioButtonGrp -e -select 1 LayerEditorTypeRadio;
+	tabLayout -edit -selectTab DisplayLayerTab DisplayLayerUITabLayout;
+	string $dislayer[] = `ls -type displayLayer "fx_norender"`;
+	if (!`objExists $dislayer[0]`)
+		createDisplayLayer -name "fx_norender" -number 1 -empty;
+	setAttr fx_norender.visibility 0;setAttr fx_norender.displayType 0;
+	for ($temCloth in $cloth )
+	{	
+		string $buff[];
+		tokenize $temCloth "---" $buff;
+		editDisplayLayerMembers fx_norender $buff[0];
+
+		if (endsWith($buff[0],"yasmine_c_hi_cloth_belt_rag_1"))
+		{	
+			string $addCloth = `substring $buff[0] 1 (size($buff[0])-1)`;
+			$addCloth += 2 ;
+			editDisplayLayerMembers fx_norender $addCloth;
+		}
+		if (endsWith($buff[0],"roxanne_c_hi_hair_1"))
+		{	
+			string $hair[] = `listRelatives -p -f $buff[0]`;
+			editDisplayLayerMembers fx_norender $hair;
+		}
+	}
+	if ($yasminehair)
+	{
+		for ($i=0;$i<4;$i++)
+		{
+			if ($i == 0 || $i == 1)
+			{
+				string $par[] = `listRelatives -f -p $intHair[$i]`;
+				editDisplayLayerMembers fx_norender $par[0];
+			}
+			else 
+				editDisplayLayerMembers fx_norender $intHair[$i];
+		}
+	}
+}
+
+global proc string ezRenderInitialName(string $fxCloth)
+{
+	string $moCloth;
+	string $cn;
+	
+	if ($fxCloth == "yasmine_cloth1_BAKED" || $fxCloth == "yasmine_c_hi_cloth_BAKED")
+	{
+		// yasmine_c_hi_cloth|yasmine_c_hi_cloth_2
+		string $name[] = `ls "*:*yasmine_c_hi_cloth|*:*yasmine_c_hi_cloth_2" "yasmine_c_hi_cloth|yasmine_c_hi_cloth_2"`;
+		if (`objExists $name[0]`)	$cn = $name[0];
+	}
+	else if ($fxCloth == "yasmine_syCloth2ShapeTrf_BAKED"|| $fxCloth == "yasmine_c_hi_cloth_belt_BAKED")
+	{
+		//yasmine_c_hi_cloth_belt_rag_1 
+		string $name[] = `ls "*:*yasmine_c_hi_cloth_belt_rag_1" "yasmine_c_hi_cloth_belt_rag_1"`;
+		if (`objExists $name[0]`)	$cn = $name[0];
+	}
+	else if ($fxCloth == "syCloth1ShapeTrf_BAKED")
+	{
+		//roxanne_c_hi_hair 
+		string $name[] = `ls "roxanne_head|roxanne_c_hi_hair|roxanne_c_hi_hair_1" "*:roxanne_head|*:roxanne_c_hi_hair|*:roxanne_c_hi_hair_1"`;
+		if (`objExists $name[0]`)	$cn = $name[0];
+		
+		string $hairs[] = `ls "*fx_group|*:roxanne_c_hi_hair"`;
+		if (`objExists $hairs[0]`)	$fxCloth = $hairs[0];
+	}
+	else 
+	{
+		//custom
+		string $mid = `substring $fxCloth 1 (size($fxCloth)-6)`;
+		string $name[] = `ls ("*:*"+$mid) $mid`;
+		if (`objExists $name[0]`)	$cn = $name[0];
+	}
+		
+	
+	string $iCloth[] = `ls -l ("*"+$cn) ("*:*"+$cn)`;
+	if (`objExists $iCloth[0]`)
+	{	
+		$moCloth = $iCloth[0]+"---"+$fxCloth;
+		return $moCloth;
+	}
+	else 
+		return "";
+	
+}

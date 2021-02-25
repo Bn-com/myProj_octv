@@ -1,0 +1,2476 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÒüêÉ
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycRowCreateCurveInPolygon()
+{
+	string $SelectObj[]=`ls -sl`;
+	if (size($SelectObj)==1)
+	{
+		string $EdgeBuffer[];
+		int $EdgeMatch=`gmatch $SelectObj[0] "*.e*"`;
+		if ($EdgeMatch==0)
+		{
+			print "Please select polygon edge!";
+			return;
+		}
+		else
+		{
+			string $RowEdgeNumber[]=getRingEdges($SelectObj[0]);
+			int $AllRowEdgeNumber=size($RowEdgeNumber);
+			float $PositionOnCurve[];
+			int $Step=`intSliderGrp -q -v stepOfLineSample`;
+			if ($Step>size($RowEdgeNumber))
+			{
+				print "Step error!";
+				return;
+			}
+			int $model=(size($RowEdgeNumber)+1)%$Step;
+			//print $model;
+			//print "\n";
+			for ($i=0;$i<size($RowEdgeNumber)/$Step;$i++)
+			{
+				select $RowEdgeNumber[$i*$Step];
+				loopSelect;
+				string $ListLoopSelect[]=`ls -sl`;
+				if (size($ListLoopSelect)==1)
+				{
+					performSelContiguousEdges 0;
+				}
+				waitCursor -state on;
+				ycPolyTransCurves;
+				waitCursor -state off;
+				//CenterPivot;
+				string $ListMadeCurve[]=`ls -sl`;
+				float $LsCurvePivotsPosition[];
+				$LsCurvePivotsPosition=`xform -q -pivots $ListMadeCurve[0]`;
+				$PositionOnCurve[$i*3]=$LsCurvePivotsPosition[0];
+				$PositionOnCurve[$i*3+1]=$LsCurvePivotsPosition[1];
+				$PositionOnCurve[$i*3+2]=$LsCurvePivotsPosition[2];
+				delete $ListMadeCurve[0];
+			}
+			if ($model>0)
+			{
+				select $RowEdgeNumber[$AllRowEdgeNumber-1];
+				loopSelect;
+				string $ListLoopSelect[]=`ls -sl`;
+				if (size($ListLoopSelect)==1)
+				{
+					performSelContiguousEdges 0;
+				}
+				ycPolyTransCurves;
+				string $ListMadeCurve[]=`ls -sl`;
+				float $LsCurvePivotsPosition[];
+				$LsCurvePivotsPosition=`xform -q -pivots $ListMadeCurve[0]`;
+				int $PositionOnCurveSize=size($PositionOnCurve);
+				$PositionOnCurve[$PositionOnCurveSize]=$LsCurvePivotsPosition[0];
+				$PositionOnCurve[$PositionOnCurveSize+1]=$LsCurvePivotsPosition[1];
+				$PositionOnCurve[$PositionOnCurveSize+2]=$LsCurvePivotsPosition[2];
+				delete $ListMadeCurve[0];
+			}
+			string $CreateMainCurveString = "curve ";
+			for ($k=0;$k<size($PositionOnCurve)/3;$k++)
+			{
+				$CreateMainCurveString = $CreateMainCurveString + " -p "+$PositionOnCurve[$k*3]+" "+$PositionOnCurve[$k*3+1]
+							+ " " + $PositionOnCurve[$k*3+2]+ " ";
+			}
+			eval ($CreateMainCurveString);
+			CenterPivot;
+		}
+	}
+	else
+	{
+		print "Please select one edge!";
+		return;
+	}
+
+	string $EdgeBuffer[];
+	tokenize $SelectObj[0] "." $EdgeBuffer;
+	int $EdgeBufferSize=size($EdgeBuffer);
+	string $CurveName=$EdgeBuffer[0];
+	if ($EdgeBufferSize>2)
+	{
+		for ($i=1;$i<$EdgeBufferSize-1;$i++)
+		{
+			$CurveName=$CurveName+"."+$EdgeBuffer[$i];
+		}
+	}
+	string $SelectedCuver[]=`ls -sl`;
+	rename $SelectedCuver[0] ($CurveName+"_Curve");
+}
+
+global proc ycColumnCreateCurveInPolygon()
+{
+	string $SelectObj[]=`ls -sl`;
+	if (size($SelectObj)!=1)
+	{
+		print "Please select one object!";
+		return;
+	}
+
+	string $EdgeBuffer[];
+	int $EdgeMatch=`gmatch $SelectObj[0] "*.e*"`;
+	if ($EdgeMatch==0)
+	{
+		print "Please select polygon edge!";
+		return;
+	}
+	else
+	{
+		ringSelect;
+		string $curveMe[]=`ls -sl`;
+		string $ListEdge[]= `filterExpand -sm 32 -expand true $curveMe`;
+		float $VertexPositionList[];
+		int $ringEdgeCount=size($ListEdge);
+		string $VertexLoop[];
+		int $VertexLoopCount;
+
+		for ($i=0;$i<size($ListEdge);$i++)
+		{
+			select $ListEdge[$i];
+			loopSelect;
+			//performSelContiguousEdges 0;
+			$VertexLoop=AllEdgeList();
+			$VertexLoopCount=size($VertexLoop);
+
+			for ($j=0;$j<size($VertexLoop);$j++)
+			{
+				float $TempPointPosition[]=`xform -q -worldSpace -translation $VertexLoop[$j]`;
+				$VertexPositionList[($j*3)+($VertexLoopCount*$i*3)]=$TempPointPosition[0];
+				$VertexPositionList[($j*3+1)+($VertexLoopCount*$i*3)]=$TempPointPosition[1];
+				$VertexPositionList[($j*3+2)+($VertexLoopCount*$i*3)]=$TempPointPosition[2];
+			}
+		}
+
+		if ($ringEdgeCount<2)
+		{
+			error "Please select a polygon tube";
+		}
+
+		int $Step=`intSliderGrp -q -v stepOfLineSample`;
+		float $CreateCurvePosition[];
+		int $EingSelectCount=0;
+		
+		for ($i=0;$i<$VertexLoopCount;$i++)	//.-.-.-.-.-.
+		{
+			string $CreateCurveString="curve ";
+			for ($j=0;$j<$ringEdgeCount;$j++)	//| | | |
+			{
+				$CreateCurveString=$CreateCurveString+" -p "+$VertexPositionList[$i*3+$j*$VertexLoopCount*3]+" "+$VertexPositionList[$i*3+$j*$VertexLoopCount*3+1]
+						+ " " + $VertexPositionList[$i*3+$j*$VertexLoopCount*3+2]+ " ";
+			}
+			eval ($CreateCurveString);
+			CenterPivot;
+			
+			string $LsCurve[]=`ls -sl`;
+			float $LsCurvePivotsPosition[];
+			$LsCurvePivotsPosition=`xform -q -pivots $LsCurve[0]`;
+			$CreateCurvePosition[$EingSelectCount*3]=$LsCurvePivotsPosition[0];
+			$CreateCurvePosition[$EingSelectCount*3+1]=$LsCurvePivotsPosition[1];
+			$CreateCurvePosition[$EingSelectCount*3+2]=$LsCurvePivotsPosition[2];
+			delete $LsCurve[0];
+			$EingSelectCount++;
+		}
+		string $CreateMainCurveString = "curve ";
+		if ($Step==1)
+		{
+			for ($k=0;$k<$VertexLoopCount;$k++)
+			{
+				$CreateMainCurveString = $CreateMainCurveString + " -p "+$CreateCurvePosition[$k*3]+" "+$CreateCurvePosition[$k*3+1]
+							+ " " + $CreateCurvePosition[$k*3+2]+ " ";
+			}
+			eval ($CreateMainCurveString);
+			CenterPivot;
+		}
+		else
+		{
+			int $CurveSnap=$VertexLoopCount/$Step;
+			int $CurveModel=$VertexLoopCount%$Step;
+			print $CurveModel;
+			if ($CurveModel==1)
+			{
+				for ($k=0;$k<$VertexLoopCount;$k=$k+$Step)
+				{
+					$CreateMainCurveString = $CreateMainCurveString + " -p "+$CreateCurvePosition[$k*3]+" "+$CreateCurvePosition[$k*3+1]
+								+ " " + $CreateCurvePosition[$k*3+2]+ " ";
+				}
+			}
+			else
+			{
+				for ($k=0;$k<$VertexLoopCount;$k=$k+$Step)
+				{
+					$CreateMainCurveString = $CreateMainCurveString + " -p "+$CreateCurvePosition[$k*3]+" "+$CreateCurvePosition[$k*3+1]
+								+ " " + $CreateCurvePosition[$k*3+2]+ " ";
+				}
+				$CreateMainCurveString = $CreateMainCurveString + " -p "+$CreateCurvePosition[($VertexLoopCount-1)*3]+" "+$CreateCurvePosition[($VertexLoopCount-1)*3+1]
+							+ " " + $CreateCurvePosition[($VertexLoopCount-1)*3+2]+ " ";
+			}
+			eval ($CreateMainCurveString);
+			CenterPivot;
+		}
+	}
+
+	string $EdgeBuffer[];
+	tokenize $SelectObj[0] "." $EdgeBuffer;
+	int $EdgeBufferSize=size($EdgeBuffer);
+	string $CurveName=$EdgeBuffer[0];
+	if ($EdgeBufferSize>2)
+	{
+		for ($i=1;$i<$EdgeBufferSize-1;$i++)
+		{
+			$CurveName=$CurveName+"."+$EdgeBuffer[$i];
+		}
+	}
+	string $SelectedCuver[]=`ls -sl`;
+	rename $SelectedCuver[0] ($CurveName+"_Curve");
+}
+		
+global proc string[] AllEdgeList()
+{
+	string $selection[] = `ls -sl -fl`;
+	if (size($selection)==1)
+	{
+		error "Only one edge";
+	}
+	string $curveMe[] = `filterExpand -sm 32 -expand true $selection`;
+	string $VertexList[];
+	for ($i=0;$i<size($curveMe);$i++)
+	{
+		string $edgeVrtsConv[] = `polyListComponentConversion -fe -tv $curveMe[$i]`;
+		$edgeVrtsConv=`filterExpand -sm 31 -expand true $edgeVrtsConv`;
+
+		if (($i+1)<size($curveMe))
+		{
+			string $SecondEdgeVrtsConv[]= `polyListComponentConversion -fe -tv $curveMe[$i+1]`;
+			$SecondEdgeVrtsConv=`filterExpand -sm 31 -expand true $SecondEdgeVrtsConv`;
+
+			int $TestConditional=0;
+
+			int $compare=`strcmp $edgeVrtsConv[0] $SecondEdgeVrtsConv[0] `;
+			int $compare1=`strcmp $edgeVrtsConv[0] $SecondEdgeVrtsConv[1] `;
+
+			if ($compare==0||$compare1==0)
+			{
+				$VertexList[$i]=$edgeVrtsConv[1];
+			}
+			else
+			{
+				$VertexList[$i]=$edgeVrtsConv[0];
+			}
+		}
+		else
+		{
+			string $SecondEdgeVrtsConv[]= `polyListComponentConversion -fe -tv $curveMe[$i-1]`;
+			$SecondEdgeVrtsConv=`filterExpand -sm 31 -expand true $SecondEdgeVrtsConv`;
+			int $TestConditional=0;
+
+			int $compare=`strcmp $SecondEdgeVrtsConv[0] $edgeVrtsConv[0]`;
+			int $compare1=`strcmp $SecondEdgeVrtsConv[1] $edgeVrtsConv[0]`;
+
+			if ($compare==0&&$compare1==0)
+			{
+				$VertexList[$i]=$edgeVrtsConv[1];
+				$VertexList[$i+1]=$edgeVrtsConv[0];
+			}
+			else
+			{
+				$VertexList[$i]=$edgeVrtsConv[0];
+				$VertexList[$i+1]=$edgeVrtsConv[1];
+			}
+		}
+	}
+	return $VertexList;	
+}
+///////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////
+global proc ycPolyTransCurves()
+{
+	string $cly_selection[] = `ls -sl -fl`;
+	string $curveMe[] = `filterExpand -sm 32 -expand true $cly_selection`;
+	string $cly_face[] = `polyListComponentConversion -ff -te $cly_selection`; // filter faces to edges adding them to the edge selection list
+	string $cly_faceFE[] = `filterExpand -sm 32 -expand true $cly_face`;
+	int $s;
+	for ( $fe in $cly_faceFE ){
+	int $s = `size( $curveMe )`;
+	$curveMe[$s] = $fe;
+	}
+	string $cly_isolatedEdges[];
+	string $cly_HeadOrTailEdges[];
+	string $cly_Done[];          // Send edges whose neighbors have already been accounted for to an ("Hey! ignore me I am done!") array.
+	string $cly_curves[];
+	waitCursor -st on;
+	// Assign edges to arrays organizing by number of neighboring selection edges _____________________________________________.
+	for ( $c in $curveMe ) {
+		string $cly_SizeESwitch[];  // error Switch
+		string $cly_SizeVSwitch[]; // edge Vertice Switch
+		string $cly_edgeVrtsConv[] = `polyListComponentConversion -fe -tv $c`;
+		string $cly_edgeVrtsFEV[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConv`;
+		for ( $fEV in $cly_edgeVrtsFEV ) {
+			string $cly_edgeEdgeConv[] = `polyListComponentConversion -fv -te $fEV`;
+			string $cly_edgeVrtsFE[] = `filterExpand -sm 32 -expand true $cly_edgeEdgeConv`;
+			for ( $fE in $cly_edgeVrtsFE ) {
+				for ( $r in $curveMe )
+					if ( $fE == $r ) {
+						$s = `size( $cly_SizeESwitch )`;
+						$cly_SizeESwitch[$s] = $r;
+					}
+				if ( $fE != $c )
+					for ( $u in $curveMe )
+						if ( $fE == $u ) {
+							$s = `size( $cly_SizeVSwitch )`;
+							$cly_SizeVSwitch[$s] = $u;
+						}
+				if ( size( $cly_SizeESwitch ) > 2 ) {
+					string $clyIinput = `confirmDialog -title "Error: Intersecting Edges"
+						-message " Selections made for Curve Creation are Intersecting.\n           Selections for Multiple Curve Creation\n                      Cannot Cross Paths..."
+						-button "Show Me"
+						-db "Show Me"
+						-button "Cancel"`;
+					if ($clyIinput == "Cancel" ){
+						select -r $cly_selection;
+						error "Your Edge Selections have two or more Competing Directions/Intersections which are not Allowed.";
+					}
+					if ($clyIinput == "Show Me" ){
+						select -r $cly_SizeESwitch;
+						error "Your Edge Selections have two or more Competing Directions/Intersections which are not Allowed.";
+					}
+				}
+			}
+			$cly_SizeESwitch = {};
+		}
+		if ( size( $cly_SizeVSwitch ) == 0 ) {
+			$s = `size( $cly_isolatedEdges )`;
+			$cly_isolatedEdges[$s] = $c;            // locate isolated edges ( edges whose vertices are not shared with any other in the selection list )
+		}
+		else if ( size( $cly_SizeVSwitch ) == 1 ) {
+			$s = `size( $cly_HeadOrTailEdges )`;
+			$cly_HeadOrTailEdges[$s] = $c;          // locate unclosed edgeloop selections using edges which share only 1 of it's two vertices with another edge in an array.
+		}
+
+		string $cly_SizeVSwitch[] = {};
+	}
+
+	// Calculate Isolated Edges _________________________________________________________________________________________
+
+	for ( $i in $cly_isolatedEdges ) {
+		string $cly_edgeVrtsConv[] = `polyListComponentConversion -fe -tv $i`;
+		string $cly_edgeVrtsFEV[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConv`;
+		float $hP[] = `xform -q -t $cly_edgeVrtsFEV[0]`;      // CV position for Curve placement
+		float $tP[] = `xform -q -t $cly_edgeVrtsFEV[1]`;
+		curve -d 1 -p $hP[0] $hP[1] $hP[2] -p $tP[0] $tP[1] $tP[2] -k 0 -k 1;
+		string $wireMe[] = `ls -sl`;
+		$s = `size( $cly_curves )`;
+		$cly_curves[$s] = $wireMe[0];
+		xform -cp $wireMe;
+		$s = `size( $cly_Done )`;
+		$cly_Done[$s] = $i;
+	}
+
+	// ___________________________________________________________________________________________________________________
+
+	if ( size( $cly_Done ) < size( $cly_HeadOrTailEdges ) ) {
+		select -r $curveMe;
+		select -d $cly_Done;
+		string $curveMeDiff[] = `ls -sl -fl`;
+		cly_openCurves $curveMeDiff $cly_Done $cly_curves $cly_HeadOrTailEdges;
+		}
+	if ( size( $cly_Done ) < size( $curveMe ) ) {
+		select -r $curveMe;
+		select -d $cly_Done;
+		string $curveMeDiff[] = `ls -sl -fl`;
+		cly_closedCurves $curveMe $curveMeDiff $cly_Done $cly_curves;
+	}
+	select -r $cly_curves;
+	waitCursor -st off;
+}
+
+global proc cly_openCurves( string $curveMeDiff[], string $cly_Done[], string $cly_curves[], string $cly_HeadOrTailEdges[] )
+{
+
+	// Head And Tail No Body
+	int $s;
+	for ( $HT in $cly_HeadOrTailEdges ) {
+		string $cly_passMe = "false";
+		for ( $d in $cly_Done )
+			if ( $HT == $d )
+				$cly_passMe = "true";
+		if ( $cly_passMe == "false" ) {
+			string $cly_edgeVrtsConv[] = `polyListComponentConversion -fe -tv $HT`;
+			string $cly_edgeVrtsFEV[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConv`;
+			string $cly_found = "lost";
+			string $cly_intersectingVtx;
+			string $cly_tail;
+			string $cly_head;
+			for ( $fEV in $cly_edgeVrtsFEV ) {
+				string $cly_edgeEdgeConv[] = `polyListComponentConversion -fv -te $fEV`;
+				string $cly_edgeVrtsFE[] = `filterExpand -sm 32 -expand true $cly_edgeEdgeConv`;
+				for ( $fE in $cly_edgeVrtsFE )
+					if ( $fE != $HT )
+						for ( $t in $cly_HeadOrTailEdges ){
+							string $cly_passMeT = "false";
+							for ( $o in $cly_Done )
+								if ( $t == $o )
+									$cly_passMeT = "true";
+							if ( $cly_passMeT == "false" )
+								if ( $fE == $t ) {
+									$cly_intersectingVtx = $fEV;
+									$s = `size( $cly_Done )`;
+									$cly_Done[$s] = $HT;
+									$s = `size( $cly_Done )`;
+									$cly_Done[$s] = $t;
+									$cly_found = "found";
+									string $cly_TailVrtsConv[] = `polyListComponentConversion -fe -tv $t`;
+									string $cly_TailVrtsFEV[] = `filterExpand -sm 31 -expand true $cly_TailVrtsConv`;
+									for ( $c in $cly_TailVrtsFEV )
+										if ( $c != $cly_intersectingVtx )
+											$cly_tail = $c;
+									break;
+								}
+						}
+			}
+			if ( $cly_found == "found" ) {
+				for ( $fEV in $cly_edgeVrtsFEV )
+					if ( $fEV != $cly_intersectingVtx )
+						if ( $fEV != $cly_tail )
+							$cly_head = $fEV;
+				float $hP[] = `xform -q -t $cly_head`;      // CV position for Curve placement
+				float $iP[] = `xform -q -t $cly_intersectingVtx`;
+				float $tP[] = `xform -q -t $cly_tail`;
+				curve -d 1 -p $hP[0] $hP[1] $hP[2] -p $iP[0] $iP[1] $iP[2] -p $tP[0] $tP[1] $tP[2];//-k 0 -k 1 -k 1 -k 1;
+				string $wireMe[] = `ls -sl`;
+				$s = `size( $cly_curves )`;
+				$cly_curves[$s] = $wireMe[0];
+				xform -cp $wireMe;
+				$cly_found = "lost";
+			}
+		}
+	}
+
+	// Head and Tail with Body________________________________________________________________________________________________
+	int $p;
+	select -r $curveMeDiff;
+	select -d $cly_Done;
+	string $Cdifference[] = `ls -sl -fl`;       // Selections still uncalculated
+	select -r $cly_HeadOrTailEdges;
+	select -d $cly_Done;
+	string $HTdifference[] = ` ls -sl -fl`; // Heads and Tails still uncalculated
+	while ( size( $HTdifference ) > 0) {
+		$s = `size( $cly_Done )`;
+		$cly_Done[$s] = $HTdifference[0];
+		string $lastEdgeSelect = {};
+		string $placeOrder[];                  // Send each intersecting vertice to an array for curve placement order.
+		string $cly_edgeVrtsConv[] = `polyListComponentConversion -fe -tv $HTdifference[0]`;
+		string $cly_edgeVrtsFEV[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConv`;
+		string $cly_Head;
+		for ( $fEV in $cly_edgeVrtsFEV ) {   //  Head and First Connection calculation ///////////////////////////////
+			string $cly_edgeEdgeConv[] = `polyListComponentConversion -fv -te $fEV`;
+			string $cly_edgeVrtsFE[] = `filterExpand -sm 32 -expand true $cly_edgeEdgeConv`;
+			for ( $fE in $cly_edgeVrtsFE )
+				if ( $fE != $HTdifference[0] )
+					for ( $c in $Cdifference )
+						if ( $c == $fE ) {
+							$lastEdgeSelect = $c ;    // assign the edge to the next selection
+							if ( $fEV == $cly_edgeVrtsFEV[0])
+								$cly_Head = $cly_edgeVrtsFEV[1];
+							else
+								if ( $fEV == $cly_edgeVrtsFEV[1])
+									$cly_Head = $cly_edgeVrtsFEV[0];
+							$p = `size( $placeOrder )`;
+							$placeOrder[$p] = $cly_Head;
+							$p = `size( $placeOrder )`;
+							$placeOrder[$p] = $fEV;
+							$s = `size( $cly_Done )`;
+							$cly_Done[$s] = $lastEdgeSelect; // Remove next Selection From the Active list
+							break;
+						}
+		}
+		//Last Selection Loop/////////////////////////////////////////////////////////////////////////////////////////
+		while ( $lastEdgeSelect != $cly_Done[0] ) {
+			string $cly_edgeVrtsConvB[] = `polyListComponentConversion -fe -tv $lastEdgeSelect`;
+			string $initialEdge = $lastEdgeSelect;
+			$lastEdgeSelect = $cly_Done[0];
+			string $cly_edgeVrtsFEVB[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConvB`;
+			for ( $EV in $cly_edgeVrtsFEVB ) {
+				select -r $curveMeDiff;
+				select -d $cly_Done;
+				string $CdifferenceB[] = ` ls -sl -fl`;                 // Selections still uncalculated
+				string $cly_edgeEdgeConv[] = `polyListComponentConversion -fv -te $EV`;
+				string $cly_edgeVrtsFE[] = `filterExpand -sm 32 -expand true $cly_edgeEdgeConv`;
+				for ( $fE in $cly_edgeVrtsFE )
+					if ( $fE != $initialEdge )
+						for ( $cDif in $CdifferenceB )
+							if ( $cDif == $fE ) {
+								$lastEdgeSelect = $cDif ;
+								$s = `size( $cly_Done )`;
+								$cly_Done[$s] = $lastEdgeSelect;
+								$p = `size( $placeOrder )`;
+								$placeOrder[$p] = $EV;
+								for ( $isHead in $HTdifference )
+									if ( $isHead == $cDif ) {   // then end on this tail
+										$lastEdgeSelect = $cly_Done[0];  // activate Break loop Switch
+										string $cly_TailVrtsEnd[] = `polyListComponentConversion -fe -tv $cDif`;
+										string $cly_TailVrtsFEnd[] = `filterExpand -sm 31 -expand true $cly_TailVrtsEnd`;
+										for ( $end in $cly_TailVrtsFEnd )
+											if ( $end != $EV ) {
+												$p = `size( $placeOrder )`;
+												$placeOrder[$p] = $end;
+											///////////////////////////////////////////////////////////////////////////////
+											string $concatCurvePnts = {};
+											int $knt;
+											for ( $po in $placeOrder ) {
+												float $xF[] = `xform -q -t $po`;
+												string $conInsert = ( " -k "+$knt+" -p "+" "+$xF[0]+" "+$xF[1]+" "+$xF[2]+" " );
+												$knt++;
+												$concatCurvePnts += $conInsert;
+											}
+											string $cly_concatCurve = ( "curve -d 1 "+ $concatCurvePnts );
+											eval $cly_concatCurve;
+											string $wireMe[] = `ls -sl`;
+											$s = `size( $cly_curves )`;
+											$cly_curves[$s] = $wireMe[0];
+											xform -cp $wireMe;
+											$placeOrder = {};
+											//////////////////////////////////////////////////////////////////////////////
+											}
+									}
+									else
+										$lastEdgeSelect = $cDif;
+								break;
+							}
+			}
+		}
+		$placeOrder = {};
+		select -r $cly_HeadOrTailEdges;
+		select -d $cly_Done;
+		$HTdifference = `ls -sl -fl`;
+	}
+}
+
+global proc cly_closedCurves( string $curveMe[], string $curveMeDiff[], string $cly_Done[], string $cly_curves[] )
+{
+	select -r $curveMeDiff;
+	select -d $cly_Done;
+	string $Cdifference[] = `ls -sl -fl`;       // Selections still uncalculated
+	string $lastEdgeSelect = $Cdifference[0];   // Select an edge in a closed selection
+	int $s = `size( $cly_Done )`;
+	$cly_Done[$s] = $lastEdgeSelect;
+	string $placeOrder[];                  // Send each intersecting vertice to an array for curve placement order.
+	string $cly_headConv[] = `polyListComponentConversion -fe -tv $lastEdgeSelect`;
+	string $cly_headVs[] = `filterExpand -sm 31 -expand true $cly_headConv`;
+	string $cly_headV = $cly_headVs[1];
+	int $p = `size( $placeOrder )`;
+	$placeOrder[$p] = $cly_headV;
+
+	while ( size( $cly_Done ) < size( $curveMe ) ) {
+		string $cly_edgeVrtsConvB[];
+		if (( `objExists $lastEdgeSelect` ) == 1 ) {
+			$cly_edgeVrtsConvB = `polyListComponentConversion -fe -tv $lastEdgeSelect`;
+			$lastEdgeSelect = {};
+		}
+		else {
+			select -r $curveMeDiff;
+			select -d $cly_Done;
+			string $CdifferenceB[] = ` ls -sl -fl`;
+			$lastEdgeSelect = $CdifferenceB[0];
+			$s = `size( $cly_Done )`;
+			$cly_Done[$s] = $lastEdgeSelect;
+			$cly_edgeVrtsConvB = `polyListComponentConversion -fe -tv $lastEdgeSelect`;
+			$cly_headVs = `filterExpand -sm 31 -expand true $cly_edgeVrtsConvB`;
+			$cly_headV = $cly_headVs[1];
+			$p = `size( $placeOrder )`;
+			$placeOrder[$p] = $cly_headV;
+		}
+		$initialEdge = $lastEdgeSelect;
+		string $cly_edgeVrtsFEVB[] = `filterExpand -sm 31 -expand true $cly_edgeVrtsConvB`; // Edge`s Verts
+		for ( $EV in $cly_edgeVrtsFEVB ) {
+			string $EVBreak = "false";
+			select -r $curveMeDiff;
+			select -d $cly_Done;
+			string $CdifferenceB[] = ` ls -sl -fl`;                 // Selections still uncalculated
+			string $cly_edgeEdgeConv[] = `polyListComponentConversion -fv -te $EV`;
+			string $cly_edgeVrtsFE[] = `filterExpand -sm 32 -expand true $cly_edgeEdgeConv`; // Neighboring Edges
+			for ( $fE in $cly_edgeVrtsFE ) {
+				if ( $fE != $initialEdge )
+					for ( $cDif in $CdifferenceB )
+						if ( $cDif == $fE ) {                // If an uncalculated edge = 1 of the neighboring edges
+							$s = `size( $cly_Done )`;
+							$cly_Done[$s] = $fE;
+							$lastEdgeSelect = $fE;
+							$p = `size( $placeOrder )`;
+							$placeOrder[$p] = $EV;
+							$EVBreak = "true";
+							string $cly_headCheck[] = `polyListComponentConversion -fe -tv $lastEdgeSelect`;
+							string $cly_headCheckFE[] = `filterExpand -sm 31 -expand true $cly_headCheck`;
+							for ( $HC in $cly_headCheckFE ) {
+								if ( $HC == $cly_headV ) {
+									$p = `size( $placeOrder )`;
+									$placeOrder[$p] = $HC;
+									///////////////////////////////////////////////////////////////////////////////
+									string $concatCurvePnts = {};
+									int $knt;
+									for ( $po in $placeOrder ) {
+										float $xF[] = `xform -q -t $po`;
+										string $conInsert = ( " -k "+$knt+" -p "+" "+$xF[0]+" "+$xF[1]+" "+$xF[2]+" " );
+										$knt++;
+										$concatCurvePnts += $conInsert;
+									}
+									string $cly_concatCurve = ( "curve -d 1 "+ $concatCurvePnts );
+									eval $cly_concatCurve;
+									string $wireMe[] = `ls -sl`;
+									$s = `size( $cly_curves )`;
+									$cly_curves[$s] = $wireMe[0];
+									xform -cp $wireMe;
+									//////////////////////////////////////////////////////////////////////////////
+									$placeOrder = {};
+								}
+							}
+							break;
+						}
+			}
+			if ( $EVBreak == "true" )
+				break;
+		}
+	}
+}
+
+// The End ( cly_closedCurves )
+global proc setJointIKSp ( string $joint1st, string $jointend, string $ikcurve )
+{
+	select -r ( $joint1st + ".rotatePivot" );
+	select -add ( $jointend + ".rotatePivot" );
+	select -add $ikcurve;
+	ikHandle -sol ikSplineSolver -ccv false -pcv false;
+}
+
+global proc renamelist ( string $newname )
+{
+	string $ali[] = `ls -sl`;
+	int $i, $al = `size $ali`;
+	for ( $i = 0; $i < $al; $i++ )
+		rename $ali[$i] ( $newname + $i );
+}
+
+global proc cthair( string $ccname, string $csname )
+{
+	int $i, $j, $k, $l, $segu, $segv;
+	string $hs, $cc, $cs, $cmd;
+	float $vp[], $cx[], $cy[], $cz[];
+	string $ali[] = `ls -l -sl`;
+	int $al = `size $ali`;
+	for ( $i = 0; $i < $al; $i++ )
+	{
+		$hs = $ali[$i];
+		$cc = $ccname + $i;
+		$cs = $csname + $i;
+
+		$j = `getAttr ( $hs + ".formU" )`;
+		$k = `getAttr ( $hs + ".formV" )`;
+		if ( $j == 2 && $k == 0 )
+		{
+			reverseSurface -d 3 -ch 0 -rpo 1 $hs;
+			reverseSurface -d 0 -ch 0 -rpo 1 $hs;
+		}
+		else
+			if ( $j != 0 || $k != 2 )
+				continue;
+
+		$segu = `getAttr ( $hs + ".spansU" )`;
+		$segu += `getAttr ( $hs + ".degreeU" )`;
+		$segv = `getAttr ( $hs + ".spansV" )`;
+
+		$l = $segv / 2;
+		$vp = `getAttr ( $hs + ".cv[0][0]" )`;
+		$cx[0] = $vp[0];
+		$cy[0] = $vp[1];
+		$cz[0] = $vp[2];
+		$vp = `getAttr ( $hs + ".cv[0][" + $l + "]" )`;
+		$cx[0] += $vp[0];
+		$cy[0] += $vp[1];
+		$cz[0] += $vp[2];
+		$cx[0] *= 0.5;
+		$cy[0] *= 0.5;
+		$cz[0] *= 0.5;
+
+		$cmd = "curve -d 3 -p " + $cx[0] + " " + $cy[0] + " " + $cz[0];
+
+		select -d;
+		joint -p $cx[0] $cy[0] $cz[0] -n ( $cs + "j0" );
+
+		for ( $j = 3; $j < $segu; $j++ )
+		{
+			$k = $j - 2;
+			$vp = `getAttr ( $hs + ".cv[" + $j + "][0]" )`;
+			$cx[$k] = $vp[0];
+			$cy[$k] = $vp[1];
+			$cz[$k] = $vp[2];
+			$vp = `getAttr ( $hs + ".cv[" + $j + "][" + $l + "]" )`;
+			$cx[$k] += $vp[0];
+			$cy[$k] += $vp[1];
+			$cz[$k] += $vp[2];
+			$cx[$k] *= 0.5;
+			$cy[$k] *= 0.5;
+			$cz[$k] *= 0.5;
+
+			$cmd += " -p " + $cx[$k] + " " + $cy[$k] + " " + $cz[$k];
+
+			joint -p $cx[$k] $cy[$k] $cz[$k] -n ( $cs + "j" + $k );
+			joint -e -zso -oj xyz ( $cs + "j" + ( $k - 1 ) );
+		}
+
+		$cmd += " -n " + $cc;
+		eval $cmd;
+		reverseCurve -ch 0 -rpo 1 $cc;
+
+		select -r ( $cs + "j" + ( $segu - 3 ) );
+		rename ( $cs + "end" );
+
+		setJointIKSp ( $cs + "j0" ) ( $cs + "end" ) $cc;
+
+		select -r ( $cs + "j0" );
+		select -add $hs;
+		newSkinCluster "-mi 2 -dr 4";
+	}
+}
+
+global proc AlongPloyCreateCurve()
+{
+	string $PolyHairList[]=`ls -sl`;
+	string $MeshNodeType[]=`listRelatives  -type "mesh" $PolyHairList`;
+	if (size($PolyHairList)==size($MeshNodeType))
+	{
+		for ($i=0;$i<size($PolyHairList);$i++)
+		{
+			float $HairBoundingBox[]=`xform -q -boundingBox $PolyHairList[$i]`;
+			float $MoveDistanceX=0,$MoveDistanceY=0,$MoveDistanceZ=-0.01;
+			polyCube -w 100 -h 0.001 -d 100 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -n "ycSampleBox";	
+			move 	$HairBoundingBox[3] $HairBoundingBox[4] $HairBoundingBox[5];	
+			float $RotateDegreeX=60,$RotateDegreeY=0,$RotateDegreeZ=0;
+			rotate -r -os $RotateDegreeX $RotateDegreeY $RotateDegreeZ  ycSampleBox;
+			if ($MoveDistanceX!=0)
+			{
+				print "The $MoveDistanceX isn't equal zero";
+			}
+			if ($MoveDistanceY!=0)
+			{
+				print "The $MoveDistanceY isn't equal zero";
+			}
+			if ($MoveDistanceZ==0)
+			{
+				continue;
+			}
+			else
+			{
+				float $MoveDistanceZTemp=$HairBoundingBox[5];
+				float $MoveDistanceYTemp=$HairBoundingBox[4];
+				$MoveDistanceY=$MoveDistanceZ;
+				string $AllBox[],$AllHair[];
+				int $AllBoxNum=0,$AllHairNum=0;
+				while (($MoveDistanceZTemp>$HairBoundingBox[2])&&($MoveDistanceYTemp>$HairBoundingBox[1]))
+				{
+					duplicate -rr -n ("ycSampleBox"+$AllBoxNum);
+					move -r $MoveDistanceX $MoveDistanceY $MoveDistanceZ ("ycSampleBox"+$AllBoxNum);
+					$MoveDistanceZTemp=$MoveDistanceZTemp+$MoveDistanceZ;
+					$MoveDistanceYTemp=$MoveDistanceYTemp+$MoveDistanceY;
+					$AllBox[$AllBoxNum]="ycSampleBox"+$AllBoxNum;
+					$AllBoxNum++;
+				}
+				for ($j=0;$j<size($AllBox);$j++)
+				{
+					select $PolyHairList[$i];
+					duplicate -rr -n ($PolyHairList[$i]+$j);
+					$AllHair[$AllHairNum]=$PolyHairList[$i]+$j;
+					$AllHairNum++;
+				}
+				float $CurvePointPosition[];
+				for ($j=0;$j<size($AllBox);$j++)
+				{
+					string $AllBoxShape[]=`listRelatives -c $AllBox[$j]`;
+					string $AllHairShape[]=`listRelatives -c $AllHair[$j]`;
+					select $AllBox[$j];
+					select -add $AllHair[$j];
+					polyBoolOp -op 3 -ch 1 $AllBoxShape[0] $AllHairShape[0];
+					CenterPivot;
+					string $SampleCircle[]=`ls -sl`;
+
+					float $PivotPosition[]=`xform -q -pivots $SampleCircle[0]`;
+			//get position
+					$CurvePointPosition[$j*3]=$PivotPosition[0];
+					$CurvePointPosition[$j*3+1]=$PivotPosition[1];
+					$CurvePointPosition[$j*3+2]=$PivotPosition[2];
+					delete $SampleCircle[0];
+					delete $AllBox[$j];
+					delete $AllHair[$j];
+				}
+				select -cl;
+				string $CreateCurveString="curve ";
+				for ($j=0;$j<size($CurvePointPosition)/3;$j++)
+				{
+					if (($CurvePointPosition[$j*3]==0.00)&&($CurvePointPosition[$j*3+1]==0.00)&&($CurvePointPosition[$j*3+1]==0.00))
+					{
+						continue;
+					}
+					else
+					{
+						$CreateCurveString=$CreateCurveString+" -p "+$CurvePointPosition[$j*3]+" "+$CurvePointPosition[$j*3+1]
+							+ " " + $CurvePointPosition[$j*3+2]+ " ";
+					}
+				}
+				delete ycSampleBox;
+				eval ($CreateCurveString);
+				string $ListCurveName[]=`ls -sl`;
+				rename $ListCurveName[0] ("yc"+$PolyHairList[$i]+"Curve");
+
+			}
+		}
+	}
+	else
+	{
+		print "Please select polygon object!";
+		return;
+	}
+}
+
+/// CONNECT EDGES/VERTICES/FACES WITH SLIDE //////
+global proc connectVertsEdgesFacesSlide()
+{
+	if ( size(`filterExpand -sm 31`) > 0 ) connectVerticesSlide();
+	if ( size(`filterExpand -sm 32`) > 0 ) connectEdgesSlide();
+	if ( size(`filterExpand -sm 34`) > 0 ) connectFacesSlide();
+}
+
+/// CONNECT EDGES/VERTICES/FACES WITHOUT SLIDE //////
+global proc connectVertsEdgesFaces()
+{
+	string $selection[] = `ls -sl -fl`;
+	string $Edges[];
+	string $Faces[];
+
+	string $EdgeFilter[] = `filterExpand -sm 32`;
+	string $FaceFilter[] = `filterExpand -sm 34`;
+	string $VertFilter[] = `filterExpand -sm 31`;
+
+	string $object = objectName($selection[0]);
+	select ($object+".vtx[*]");
+	string $size[] = `ls -sl -fl`;
+
+	if ( size($EdgeFilter) > 0 ) { DivideEdges($EdgeFilter); }
+	if ( size($FaceFilter) > 0 ) { DivideFaces($FaceFilter); }
+
+	select ($object+".vtx[*]");
+	select -d $size;
+
+	select -add $VertFilter; 
+	connectVertices();
+}
+
+/// SPLIT AROUND VERTICES/EDGES/FACES ///////////
+global proc splitAroundVertsEdgesFaces()
+{
+	if ( size(`filterExpand -sm 31`) > 0 ) splitAroundVerts();
+	if ( size(`filterExpand -sm 32`) > 0 ) splitAroundEdges();
+	if ( size(`filterExpand -sm 34`) > 0 ) splitAroundFaces();
+}
+
+/// EDGE LOOP SPLIT ///////
+global proc loopSplit()
+{
+	string $selection[] = `filterExpand -sm 32`;
+	for ( $sel in $selection )
+	{
+		string $ringEdges[] = getRingEdges($sel);
+		string $NodeName = SplitEdges($ringEdges);
+		addSlideAttr( $ringEdges, $NodeName );
+		select $NodeName;
+		rename $NodeName "loopSplit";
+	}
+}
+
+/// MULTI EDGE LOOP SPLIT ////////
+global proc multiLoopSplit()
+{
+	string $selection[] = `filterExpand -sm 32`;
+	if ( size($selection) == 1 ) 
+	{ 
+		loopSplit(); 
+	} 
+	else 
+	{
+		string $Edges[] = MultiLoopOrder($selection);
+		string $NodeName = SplitEdges($Edges);
+		addSlideAttr( $Edges, $NodeName );
+		select $NodeName;
+		rename $NodeName "multiLoopSplit";
+	}
+}
+
+/// RING SELECT //////////
+global proc ringSelect()
+{
+	string $selection[] = `filterExpand -sm 32`;
+
+	for ( $sel in $selection )
+	{
+		string $ringEdges[] = getRingEdges($sel);
+		select -add $ringEdges;
+	}
+}
+
+/// SELECT OUTLINE ////////////
+global proc selectOutline()
+{
+	string $Faces[] = `ls -sl -fl`;
+	string $Edges[] = getEdges();
+	string $Result[];
+	int $i = 0;
+
+	for ( $Edge in $Edges )
+	{
+		if ( size(ArrayIntersector($Faces, edge2Face($Edge))) == 2 )
+		$Result[$i++] = $Edge;
+	}
+	select $Edges; select -d $Result;
+}
+
+/// EXTRUDE VERTEX SEPERATED /////////
+global proc extrudeVertex()
+{
+	string $vert[] = `filterExpand -sm 31`;
+	for ( $v in $vert )
+	{
+		string $Edges[] = OrderEdges(vertex2Edge($v));
+		string $NodeName = SplitEdges($Edges);
+		addSlideAttr( $Edges, $NodeName );
+		rename $NodeName "extrudeVertex";
+	}
+
+	for ( $ve in $vert )
+	{
+		select $ve;
+		moveVertexAlongDirection -n 5;
+	}
+	select $vert; 
+	MoveNormalTool;
+}
+
+/// EXTRUDE VERTEX TOGETHER ///////////
+global proc extrudeVertexTo()
+{
+	string $Vertices[] = `filterExpand -sm 31`;
+
+	connectVertices();
+
+	select $Vertices;
+	GrowPolygonSelectionRegion;
+	GrowPolygonSelectionRegion;
+	polyMergeVertex  -d 0.0001 -ch 1;
+
+
+	string $Edges[] = splitAroundVertsOrder($Vertices);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName ); 
+
+	for ( $ve in $Vertices )
+	{
+		select $ve;
+		moveVertexAlongDirection -n 5;
+	}
+	MoveNormalTool;
+	select $NodeName;
+	rename $NodeName "extrudeVertex";
+
+}
+
+/// CHAMFER VERTEX /////////////
+global proc chamferVertex()
+{
+	string $vert[] = `filterExpand -sm 31`;
+	for ( $v in $vert )
+	{
+		string $Edges[] = OrderEdges(vertex2Edge($v));
+		string $NodeName = SplitEdges($Edges);
+		addSlideAttr( $Edges, $NodeName );
+		rename $NodeName "chamferVertex";
+	}
+	select $vert;
+	DeleteVertex;
+}
+
+/// CHAMFER VERTEX TOGETHER ////////////
+global proc chamferVertexTo()
+{
+	string $Vertex[] = `filterExpand -sm 31`;
+
+	string $Edges[] = splitAroundVertsOrder($Vertex);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName ); 
+
+	select $Vertex; getEdges();
+	DeleteEdge;
+	select $NodeName;
+	rename $NodeName "chamferVertices";
+}
+
+global proc quadSelection()
+{
+	string $sel[] = `filterExpand -sm 32`;
+	convert2Quad($sel[0]);
+}
+
+
+global proc convert2Quad( string $Edge )
+{
+	string $Faces[] = edge2Face($Edge);
+	if ( size(face2Vertex($Faces[0])) == 3 && size(face2Vertex($Faces[1])) == 5 )
+	{
+		string $V[] = edge2Vertex($Edge);
+
+		string $NewEdge = inverseEdgeFromVertex( $V[0], $Edge, $Faces[1] );
+		string $NewVert = inverseVertexFromEdge( $V[0], $NewEdge );
+		string $NewEdge = inverseEdgeFromVertex( $NewVert, $NewEdge, $Faces[1] );
+		string $NewVert = inverseVertexFromEdge( $NewVert, $NewEdge );
+
+		select $Edge $NewVert;
+		connectVertsEdgesFaces();
+		select -d $NewVert;
+	}
+
+	if ( size(face2Vertex($Faces[1])) == 3 && size(face2Vertex($Faces[0])) == 5 )
+	{
+		string $V[] = edge2Vertex($Edge);
+
+		string $NewEdge = inverseEdgeFromVertex( $V[0], $Edge, $Faces[0] );
+		string $NewVert = inverseVertexFromEdge( $V[0], $NewEdge );
+		string $NewEdge = inverseEdgeFromVertex( $NewVert, $NewEdge, $Faces[0] );
+		string $NewVert = inverseVertexFromEdge( $NewVert, $NewEdge );
+
+		select $Edge $NewVert;
+		connectVertsEdgesFaces();
+		select -d $NewVert;
+	}
+} 
+
+/// CONNECT EDGES /////
+global proc connectEdgesSlide()
+{
+	string $selection[] = `filterExpand -sm 32`;
+	string $Edges[] = OrderEdges($selection);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName );
+
+	select $NodeName;
+	rename $NodeName "connectEdges";
+}
+
+/// CONNECT VERTICES ///////////
+global proc connectVerticesSlide()
+{
+	string $Vertices[] = `filterExpand -sm 31`;
+	string $Edges[] = splitAroundVertsOrder($Vertices);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName );
+
+	select $Vertices;
+	GrowPolygonSelectionRegion;
+	GrowPolygonSelectionRegion;
+	polyMergeVertex  -d 0.0001 -ch 1;
+
+	string $Slide = $NodeName+".Slide";
+	setAttr $Slide 0.999999;
+
+	select $NodeName;
+	rename $NodeName "connectVertices";
+}
+
+/// CONNECT FACES ///////////
+global proc connectFacesSlide()
+{
+	string $Faces[] = `filterExpand -sm 34`;
+	string $Edges[] = getEdges();
+	string $Result[];
+	int $i = 0;
+
+	for ( $Edge in $Edges )
+	{
+		if ( size(ArrayIntersector($Faces, edge2Face($Edge))) == 2 )
+		{
+			$Result[$i++] = $Edge;
+		}
+	}
+	string $EdgesOrder[] = OrderEdges($Result);
+	string $NodeName = SplitEdges($EdgesOrder);
+	addSlideAttr( $EdgesOrder, $NodeName ); 
+	select $NodeName;
+	rename $NodeName "connectFaces";
+}
+
+/// SPLIT AROUND EDGES ////////////
+global proc splitAroundEdges()
+{
+	string $selection[] = `filterExpand -sm 32`;
+	getVerts(); getEdges();
+	select -d $selection;
+	string $Edges[] = OrderEdges(`ls -sl -fl`);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName );
+	select $NodeName;
+	rename $NodeName "splitAroundEdges";
+}
+
+/// SPLIT AROUND VERTICES ///////////
+global proc splitAroundVerts()
+{
+	string $selection[] = `filterExpand -sm 31`;
+	string $Edges[] = splitAroundVertsOrder($selection);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName ); 
+	select $NodeName;
+	rename $NodeName "SplitAroundVerts";
+}
+
+/// SPLIT AROUND FACES //////////
+global proc splitAroundFaces()
+{
+	getEdges();
+	string $selection[] = `filterExpand -sm 32`;
+	getVerts(); getEdges(); select -d $selection;
+	string $Edges[] = OrderEdges(`ls -sl -fl`);
+	string $NodeName = SplitEdges($Edges);
+	addSlideAttr( $Edges, $NodeName );
+	select $NodeName;
+	rename $NodeName "splitAroundFaces";
+}
+
+/// CONNECT EDGES WITHOUT SLIDE ////////////
+global proc DivideEdges(string $Edges[])
+{
+	string $ObjectName = objectName($Edges[0]);
+	select ($ObjectName+".vtx[*]");
+	string $all[] = `ls -sl -fl`;
+	polySubdivideEdge -ws 0 -s 0 -dv 1 -ch 1 $Edges;
+	select ($ObjectName+".vtx[*]");
+	select -d $all;
+}
+
+/// CONNECT FACES WITHOUT SLIDE ////////////
+global proc string[] DivideFaces(string $Faces[])
+{
+	string $Edges[] = getEdges();
+	string $Result[];
+	int $i = 0;
+
+	for ( $Edge in $Edges )
+	{
+		if ( size(ArrayIntersector($Faces, edge2Face($Edge))) == 2 )
+		{
+			$Result[$i++] = $Edge;
+		}
+	}
+	string $Verts[] = DivideEdges($Result);
+	return $Verts;
+}
+
+/// CONNECT VERTICES WITHOUT SLIDE //////////////////
+global proc connectVertices()
+{
+	/// STRING ///
+	string $Vertices[] = `ls -sl -fl`;
+	string $Faces[] = get2VertFaces($Vertices);
+	string $NewVertexList[];
+	string $NewEdgeList[];
+	string $VertexList[];
+	string $EdgeList[];
+	string $loopEdge;
+	string $loopVertex;
+	string $V;
+	int    $stop = 0;
+	int    $i    = 0;
+	int    $i2   = 0;
+	int    $a    = 0;
+	//////////////
+
+	for ( $Face in $Faces )
+	{
+		string $EdgeList[]={""}; /// RESET EDGELIST
+		string $Verts[] = ArrayIntersector($Vertices, face2Vertex($Face)); /// GET THE SELECTED VERTICES AROUND THE FACE
+		string $E[] = ArrayIntersector( vertex2Edge($Verts[0]), face2Edge($Face) ); /// FIND THE EDGES FROM A RANDOM VERTEX
+
+		$loopEdge   = $E[0];      /// ASSIGN LOOPEDGE
+		$loopVertex = $Verts[0];  /// ASSIGN LOOPVERTEX
+
+		$EdgeList[$i++]        = $loopEdge;
+		$VertexList[$i2++]     = $loopVertex;
+
+
+		while ( $stop != 1 )
+		{
+			$V = inverseVertexFromEdge( $loopVertex, $loopEdge ); /// FIND THE INVERSE VERTEX
+			string $VArray[] = {$V}; /// PUT IT IN A ARRAY
+			
+			if ( size(ArrayIntersector($VArray, $Verts)) == 1 ) 
+			{ 
+				string $NewEdge = inverseEdgeFromVertex( $V, $loopEdge, $Face );
+				$loopVertex = $V;
+				$loopEdge   = $NewEdge;
+				if ( $loopVertex == $Verts[0] ) 
+				{ 
+					$stop = 1; break; 
+				}
+				$EdgeList[$i++]    = $NewEdge; 
+				$VertexList[$i2++] = $loopVertex;
+			} 
+			else 
+			{
+				string $NewEdge  = getNextEdge( $loopEdge, $Verts, $Face ); 
+				string $Vertex[] = ArrayIntersector($Vertices, edge2Vertex($NewEdge));
+				$loopVertex = $Vertex[0];
+				$loopEdge = inverseEdgeFromVertex( $loopVertex, $NewEdge, $Face ); 
+				if ( $loopVertex == $Verts[0] ) 
+				{
+					$EdgeList[$i++]    = $NewEdge;
+					$VertexList[$i2++] = $loopVertex;
+					$stop = 1; 
+					break; 
+				}
+				$EdgeList[$i++]    = $loopEdge; 
+				$VertexList[$i2++] = $loopVertex;
+			}
+		}
+		string $SplitVertexList[] = SplitReturnVerts($EdgeList);
+
+		$i  = 0;  
+		$stop = 0;
+
+		string $NewVertexList[] = addStringArrays( $NewVertexList, $SplitVertexList);
+		string $NewEdgeList[]   = addStringArrays( $NewEdgeList, $EdgeList);  
+
+		$a++;
+		if ( $a == size($Faces) ) 
+		{
+			int $v = 0;
+
+				for ( $v = 0; $v < size($VertexList); $v++ )
+				{
+				float $Pose[] = `pointPosition -w $VertexList[$v]`;
+				move $Pose[0] $Pose[1] $Pose[2] $NewVertexList[$v];
+				}
+			select $VertexList $NewVertexList;
+			polyMergeVertex -d 0.00001 -ch 1;
+		}
+	}
+}
+
+global proc string[] addStringArrays (string $array1[], string $array2[])
+{
+	string $x;
+
+	//...add the two arrays together
+	for ($x in $array2)
+	{
+		$array1[size($array1)] = $x;
+	}
+
+	return ($array1);
+}
+
+/// SPLIT A LIST OF EDGE ///////////
+global proc string SplitEdges( string $EdgeList[] )
+{
+	string $polySplit = "polySplit -ch on -s 1 ";
+	float $length = 0.5;
+	string $epFlag = "-ep";
+	int $loop = 0;
+	int $EdgeIndexList[] = getIndexList($EdgeList);
+	for ( $loop = 0; $loop < size($EdgeIndexList); $loop++ )
+	{
+		$polySplit = $polySplit + " " + $epFlag + " " + $EdgeIndexList[$loop] + " " + $length;
+	}
+	string $ObjectName = objectName($EdgeList[0]);
+	$polySplit = $polySplit + " " + $ObjectName;
+	string $NodeName[] = eval($polySplit);
+
+	return $NodeName[0];
+}
+
+/// SPLIT A LIST OF EDGE AND RETURN THE NEW VERTICES ///////////
+global proc string[] SplitReturnVerts( string $EdgeList[] )
+{
+	string $polySplit = "polySplit -ch on -s 1 ";
+	float $length = 0.5;
+	string $epFlag = "-ep";
+	int $loop = 0;
+	string $VertexList[];
+
+	string $ObjectName = objectName($EdgeList[0]);
+	select ($ObjectName+".vtx[*]"); 
+	string $AllVerts[] = `ls -sl -fl`;
+
+	int $EdgeIndexList[] = getIndexList($EdgeList);
+	for ( $loop = 0; $loop < size($EdgeIndexList); $loop++ )
+	{
+		$polySplit = $polySplit + " " + $epFlag + " " + $EdgeIndexList[$loop] + " " + $length;
+	}
+
+	$polySplit = $polySplit + " " + $ObjectName;
+	string $NodeName[] = eval($polySplit);
+
+	select ($ObjectName+".vtx[*]"); select -d $AllVerts;
+	string $Vertices[] = `ls -sl -fl`;
+
+	for ( $i = 0; $i < size($EdgeList); $i++ )
+	{
+		string $V[] = edge2Vertex($EdgeList[$i]);
+		string $Inter[] = ArrayIntersector($Vertices, $V);
+		$VertexList[$i] = $Inter[0];
+	}
+	return $VertexList;
+}
+
+/// ADD A SLIDE ATTRIBUTE TO A NODE ///////////
+global proc addSlideAttr( string $EdgeList[], string $NodeName )
+{
+	int $sliceList[];
+	for ( $i = 0; $i < size($EdgeList)-1; $i++ )
+	{
+		if ( size(ArrayIntersector( edge2Face($EdgeList[$i]), edge2Face($EdgeList[$i+1]) )) == 1 ) 
+		{
+		$sliceList[$i] = 1; 
+		} 
+		else 
+		{
+			$sliceList[$i] = 0;
+		}
+	}
+
+	int $list[];
+	$list[0] = 0;
+	for ( $i = 1; $i < size($EdgeList); $i++ )
+	{
+		if ( $sliceList[$i-1] == 1 ) 
+		{
+		$list[$i] = $list[$i-1];
+		} 
+		else 
+		{
+			$list[$i] = abs($list[$i-1]-1);
+		}
+
+	}
+
+	addAttr -ln Slide -min 0.0001 -max 0.9999 -dv 0.5 -at "float" $NodeName;
+	setAttr -k 1 ($NodeName+".Slide");
+	string $exp = "float $Slide = "+$NodeName+".Slide;\n";
+	for ( $i = 0; $i < (size($EdgeList)); $i++ )
+	{
+		$exp += $NodeName +".edge["+$i+"] = abs($Slide -"+$list[$i]+");\n";
+	}
+	expression -n ($NodeName+"Slide") -s $exp -o $NodeName -ae 1;
+}
+
+global proc int IsEdgesShareVtx(string $firstEdge ,string $secondEdge )
+{
+	int $result = 0;
+	string $edgeOfFirstEdgeList[] 	= edge2Vertex($firstEdge);
+	string $edgeOfSecondEdgeList[] 	= edge2Vertex($secondEdge);
+	if ($edgeOfFirstEdgeList[0] == $edgeOfSecondEdgeList[0]  ) $result = 1;
+	if ($edgeOfFirstEdgeList[1] == $edgeOfSecondEdgeList[0]  ) $result = 1;
+	if ($edgeOfFirstEdgeList[0] == $edgeOfSecondEdgeList[1]  ) $result = 1;
+	if ($edgeOfFirstEdgeList[1] == $edgeOfSecondEdgeList[1]  ) $result = 1;
+	return $result;
+}
+
+global proc int areVtxConnected(string $firstVtx , string $secondVtx )
+{
+	string $result =0;
+	string $edgeOfFirstVtxList[] = vertex2Edge($firstVtx );
+	string $edgeOfSecondVtxList[] = vertex2Edge($secondVtx );
+	for ( $an1Edge in $edgeOfFirstVtxList)
+	{
+		for ( $an2Edge in $edgeOfSecondVtxList)
+		{
+			if ( $an2Edge == $an1Edge ) $result = 1 ;
+		}
+	}
+	return $result ;
+}
+
+global proc string[] getRingEdges(string $theEdge)
+{
+	string $faces[] = edge2Face($theEdge);
+	string $EdgeList[];
+	$EdgeList[0] = $theEdge;
+
+	string $loopFace = $faces[0];
+	string $loopEdge = $theEdge;
+
+	int $i = 1;
+	int $stop = 0;
+	int $loop = 0;
+
+	while ( $stop != 1 )
+	{
+		if (!(isFaceQuad($loopFace))) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge);
+		$EdgeList[$i++] = $loopEdge;
+		if ( IsEdgeBorder($loopEdge) ) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		if ( $loopEdge == $EdgeList[0] ) 
+		{ 
+			$loop = 1; 
+			$stop = 1; 
+			break; 
+		}
+
+		$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+	}
+
+	if ( size($faces) == 2 ) 
+	{
+		if ( $loop == 0 )
+		{
+			$loopFace = $faces[1];
+			$loopEdge = $theEdge;
+			$EdgeList = inverseArray($EdgeList);
+			$stop = 0;
+
+			while ( $stop != 1 ) 
+			{
+				if (!(isFaceQuad($loopFace)))
+				{ 
+					$stop = 1; 
+					break; 
+				}
+				$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge);
+				$EdgeList[$i++] = $loopEdge;
+				if ( IsEdgeBorder($loopEdge) ) 
+				{ 
+					$stop = 1; 
+					break; 
+				}
+				$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+			}
+		}
+	}
+	return $EdgeList;
+}
+
+global proc string objectName(string $Comp)
+{
+	string $result[];
+	tokenize $Comp "." $result;
+	return $result[0];
+}
+
+
+global proc string[] invert (string $comps[])
+{
+	string $newComps[], $compNum[];
+
+	for ($comp in $comps) 
+	{
+		if (`tokenize $comp "[]" $compNum` > 1) 
+		{
+			int $newCompSize = `size $newComps`;
+			$newComps[$newCompSize] = $compNum[0] + "[*] ";
+		}
+	}
+	select -r $newComps;
+	select -d $comps;
+	string $result[] = `ls -sl -fl`;
+	return $result;
+}
+
+global proc int polyComponentId(string $selection)
+{
+	int $id;
+	string $result[];
+	tokenize $selection "[]" $result;
+	$id = $result[1];
+	return $id;
+}
+
+global proc string[] getVerts()
+{
+	string $verts[]=`polyListComponentConversion -tv`;
+	select -r $verts;
+	string $result[]=`filterExpand -ex true -sm 31`;
+	return $result;
+}
+
+global proc string[] getEdges()
+{
+	string $edges[]=`polyListComponentConversion -te`;
+	select -r $edges;
+	string $result[]=`filterExpand -ex true -sm 32`;
+	return $result;
+}
+
+global proc string[] getFaces()
+{
+	string $faces[]=`polyListComponentConversion -tf`;
+	select -r $faces;
+	string $result[]=`filterExpand -ex true -sm 34`;
+	return $result;
+}
+
+global proc int isFaceQuad(string $face )
+{
+	int $result = 0;
+	if (size(faceToVertex($face)) == 4 ){ $result = 1;}
+	return $result;
+}
+
+global proc int IsEdgeBorder( string $Edge ) 
+{
+	string $result = 0;
+	string $faces[] = edge2Face($Edge);
+	if ( size($faces) < 2 ){ $result = 1 ;}
+	return $result ;
+}
+
+global proc string inverseFacefromEdge( string $Face, string $Edge ) 
+{
+	string $result ;
+	string $FaceOfEdgeList[] = edge2Face($Edge);
+	if ($Face == $FaceOfEdgeList[0]  ) $result = $FaceOfEdgeList[1];
+	else $result = $FaceOfEdgeList[0];
+	return $result;
+}
+
+global proc string[] faceToVertex(string $theFace)
+{
+	string $buffer[];
+	string $listVtx[] = `polyInfo -fv $theFace`;
+	tokenize $theFace "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbVtx = tokenize($listVtx[0] ,$buffer);
+	$nbVtx -= 2;
+	string $listVtxName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listVtxName[$i-2] = ($ObjectName + ".vtx["+$buffer[$i]+"]");
+	}
+	return $listVtxName;
+}
+
+global proc string getNextEdge ( string $Edge, string $vertices[], string $Face )
+{
+	string $Verts[] = ArrayIntersector($vertices, edge2Vertex($Edge));
+	string $V = $Verts[0];
+
+	int $stop = 0;
+	while ( $stop != 1 )
+	{
+		$V = inverseVertexFromEdge( $V, $Edge );
+		string $VArray[] = {$V};
+		if ( size(ArrayIntersector( $VArray, $vertices ) ) == 1 )
+		{
+			$stop = 1; 
+			return $Edge; 
+		}
+		string $EdgeA[] = {$Edge};
+		string $EdgeA2[] = ArrayIntersector(subtractStringArray($EdgeA, vertex2Edge($V)), face2Edge($Face));
+		$Edge = $EdgeA2[0];
+	}
+}
+
+global proc string[] getLoopVerts ( string $vertices[], string $Face )
+{
+	string $Edges[] = ArrayIntersector(vertex2Edge($vertices[0]), face2Edge($Face));
+	string $Edge = $Edges[0];
+	string $V = $vertices[0];
+	string $VertexList[];
+	string $EdgeList[];
+	$VertexList[0] = $V;
+	$EdgeList[0] = $Edge;
+	int $i = 1;
+	int $i2 = 1;
+	int $stop = 0;
+
+
+	while ( $stop != 1 )
+	{
+		$V = inverseVertexFromEdge( $V, $Edge );
+		string $VArray[] = {$V};
+
+		if ( size(ArrayIntersector( $VArray, $vertices ) ) == 1 )
+		{ 
+			$VertexList[$i++] = $V;   
+			Connect2Verts( $VertexList[$i], $VertexList[$i-1], $Face );
+			if ( $V == $VertexList[0] ) 
+			{ 
+				$stop = 1; 
+				break;
+			} 
+		}
+		string $EdgeA[] = {$Edge};
+
+		string $EdgeA2[] = ArrayIntersector(subtractStringArray($EdgeA, vertex2Edge($V)), face2Edge($Face));
+		$Edge = $EdgeA2[0];
+	}
+	return $VertexList;
+}
+
+
+global proc string[] inverseArray( string $list[])
+{
+	string $result[];
+	for ( $i = size($list)-1; $i > - 1; --$i )
+	{
+		$result[ size($result) ] = $list[$i];
+	}
+	return $result;
+}
+
+global proc string[] edge2Face(string $theEdge)
+{
+	string $buffer[];
+	string $listFace[] = `polyInfo -ef $theEdge`;
+	tokenize $theEdge "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbFace = tokenize($listFace[0] ,$buffer);
+	$nbFace -= 2;
+	string $listFaceName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listFaceName[$i-2] = ($ObjectName + ".f["+$buffer[$i]+"]");
+	}
+	return $listFaceName;
+}
+
+
+global proc int getIndex(string $Component)
+{
+	string $result[];
+	tokenize $Component "." $result;
+	tokenize $result[1] "[" $result;
+	tokenize $result[1] "]" $result;
+	int $index = $result[0];
+	return $index ;
+}
+
+global proc int[] getIndexList(string $EdgesList[])
+{
+	int $IndexList[];
+	for ( $i = 0; $i < size($EdgesList); $i++ )
+	{
+		$IndexList[$i] = getIndex($EdgesList[$i]);
+	}
+	return $IndexList;
+}
+
+global proc string oppositeEdgeOnFace(string $theFace ,string $TheEdge)
+{
+	string $result ;
+	string $edgesOfFaceList[] = face2Edge($theFace);
+	for ( $anEdge in $edgesOfFaceList)
+	{
+		if (!(IsEdgesShareVtx($TheEdge ,$anEdge))) $result = $anEdge;
+	}
+	return $result;
+}
+
+
+global proc string[] face2Edge(string $theFace)
+{
+	string $buffer[];
+	string $listEdge[] = `polyInfo -fe $theFace`;
+	tokenize $theFace "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbEdge = tokenize($listEdge[0] ,$buffer);
+	$nbEdge -= 2;
+	string $listEdgeName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listEdgeName[$i-2] = ($ObjectName + ".e["+$buffer[$i]+"]");
+	}
+	return $listEdgeName;
+}
+
+global proc string[] edge2Vertex(string $theEdge)
+{
+	string $buffer[];
+	string $listVertexName[];
+	string $listVextex[] = `polyInfo -ev $theEdge`;
+	tokenize $theEdge "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbVertex = tokenize($listVextex[0] ,$buffer);
+	$nbVertex -= 2;
+	string $listVertexName[];
+	for ($i=2;$i<4;$i++)
+	{
+		$listVertexName[$i-2] = ($ObjectName + ".vtx["+$buffer[$i]+"]");
+	}
+	return $listVertexName;
+}
+
+global proc string[] splitAroundVertsOrder(string $VertexList[])
+{
+	select $VertexList;
+	string $edges[] = getEdges();
+
+	string $EdgeList[];
+	$EdgeList[0] = $edges[0];
+
+	string $Verts[]   = getVerts();
+	string $loopEdge  = $edges[0];
+	string $faces[]   = edge2Face($edges[0]);
+	string $loopFace  = $faces[0];
+	string $loopFace2 = $faces[1];
+	int $stop         = 0;
+	int $Border       = 0;
+	int $i            = 1;
+
+	while ( $stop != 1 )
+	{
+		$loopEdge = getNextEdge( $loopEdge, $VertexList, $loopFace );
+		$EdgeList[$i++] = $loopEdge;
+		if ( IsEdgeBorder($loopEdge) ) 
+		{ 
+			$stop = 1; 
+			$Border = 1; 
+			break; 
+		}
+		if ( $loopEdge == $EdgeList[0] ) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+
+		$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+	}
+
+	if ( $Border == 1 )
+	{
+		string $loopEdge = $EdgeList[0];
+		string $loopFace = $loopFace2;
+
+		string $EdgeList[] = inverseArray($EdgeList);
+
+
+		while ( $stop != 1 )
+		{
+			$loopEdge = getNextEdge( $loopEdge, $VertexList, $loopFace );
+			$EdgeList[$i++] = $loopEdge;
+			if ( IsEdgeBorder($loopEdge) ) { $stop = 1; break; }
+			if ( $loopEdge == $EdgeList[0] ) { $stop = 1; break; }
+
+			$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+		}
+	}
+	return $EdgeList;
+}
+
+global proc Connect2Verts( string $vertex1, string $vertex2, string $face )
+{
+	string $fEdges[] = face2Edge($face);
+	string $Edge1[] = ArrayIntersector( vertex2Edge($vertex1), $fEdges );
+	string $Edge2[] = ArrayIntersector( vertex2Edge($vertex2), $fEdges );
+
+	string $ObjectName = objectName($vertex1);
+	string $all = $ObjectName + ".vtx[*]";
+	select $all; int $Size = size(`ls -sl -fl`);
+
+	string $SplitList[] = {$Edge1[0], $Edge2[0]};
+	SplitEdges( $SplitList );
+
+	string $ve1 = $ObjectName+".vtx["+$Size+"]";
+	$Size++;
+	string $ve2 = $ObjectName+".vtx["+$Size+"]";
+
+	select $vertex1; float $vertPose1[] = `pointPosition -w`;
+	select $vertex2; float $vertPose2[] = `pointPosition -w`;
+
+	select $ve1;
+	move $vertPose1[0] $vertPose1[1] $vertPose1[2]; 
+
+	select $ve2;
+	move $vertPose2[0] $vertPose2[1] $vertPose2[2]; 
+
+	select -add $ve1;
+	polyMergeVertex  -d 0.0001 -ch 1;
+}
+
+global proc string[] get2VertFaces( string $vertices[] )
+{
+	select $vertices;
+	string $fac[] = getFaces();
+	string $faces[];
+
+	for ( $face in $fac )
+	{
+		select $face;
+		string $verts[] = getVerts();
+		select -d $vertices; string $elVert[] = `ls -sl -fl`;
+		select $verts; select -d $elVert;
+		string $fVerts[] = `ls -sl -fl`;
+		int $size = size($fVerts);
+		if ($size > 1)
+		{
+			$faces[ size($faces) ] = $face;
+		}
+	}
+	return $faces;
+}
+
+global proc string[] OrderEdges( string $EdgeList[] )
+{
+	string $faces[] = edge2Face($EdgeList[0]);
+	string $NewEdgeList[];
+	$NewEdgeList[0] = $EdgeList[0];
+
+	string $loopFace = $faces[0];
+	string $loopEdge = $EdgeList[0];
+
+	int $i = 1;
+	int $stop = 0;
+	int $loop = 0;
+
+	while ( $stop != 1 )
+	{
+		$loopEdge = NextEdgeOnFace( $loopFace, $loopEdge, $EdgeList);
+		if ( $loopEdge == "" ) { $stop = 1; break;}
+		$NewEdgeList[$i++] = $loopEdge;
+		if ( IsEdgeBorder($loopEdge) ) { $stop = 1; break;}
+		if ( $loopEdge == $NewEdgeList[0] ) { $loop = 1; $stop = 1; break;}
+		$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+	}
+
+	if ( size($faces) == 2 ) 
+	{
+		if ( $loop == 0 )
+		{
+			$loopFace = $faces[1];
+			$loopEdge = $EdgeList[0];
+			$NewEdgeList = inverseArray($NewEdgeList);
+			$stop = 0;
+
+			while ( $stop != 1 ) 
+			{
+				$loopEdge = NextEdgeOnFace( $loopFace, $loopEdge, $EdgeList);
+				if ( $loopEdge == "" ) { $stop = 1; break; }
+				$NewEdgeList[$i++] = $loopEdge;
+
+				if ( IsEdgeBorder($loopEdge) ) { $stop = 1; break; }
+
+				$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+			}
+		}
+	}
+	return $NewEdgeList;
+}
+
+global proc string NextEdgeOnFace( string $Face, string $Edge, string $EdgeList[] )
+{
+	string $Result = "";
+
+	string $Edges[] = ArrayIntersector( face2Edge($Face), $EdgeList );
+
+	if ( size( $Edges ) == 2 ) 
+	{
+		if ( $Edges[0] == $Edge )
+		{ 
+			$Result = $Edges[1];
+		} 
+		else 
+		{
+			$Result = $Edges[0]; 
+		}
+	}
+	return $Result;
+}
+
+
+global proc string[] face2Vertex(string $theFace)
+{
+	string $buffer[];
+	string $listVtx[] = `polyInfo -fv $theFace`;
+	tokenize $theFace "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbVtx = tokenize($listVtx[0] ,$buffer);
+	$nbVtx -= 2;
+	string $listVtxName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listVtxName[$i-2] = ($ObjectName + ".vtx["+$buffer[$i]+"]");
+	}
+	return $listVtxName;
+}
+
+global proc int AllCompsSize(string $comps[])
+{
+	string $newComps[], $compNum[];
+
+	for ($comp in $comps) 
+	{
+		if (`tokenize $comp "[]" $compNum` > 1) 
+		{
+			int $newCompSize = `size $newComps`;
+			$newComps[$newCompSize] = $compNum[0] + "[*] ";
+		}
+	}
+	int $result = size($newComps);
+	return $result;
+}
+
+global proc string[] ArrayIntersector(string $array1[] ,string $array2[] )
+{
+    string $myIntersector = `stringArrayIntersector`;
+    stringArrayIntersector -edit -intersect $array1 $myIntersector;
+    stringArrayIntersector -edit -intersect $array2 $myIntersector;
+    string $result[]	= `stringArrayIntersector -query $myIntersector`;
+    stringArrayIntersector -edit -reset $myIntersector;
+    return $result;
+}
+
+global proc string[] vertex2Edge(string $theVtx)
+{
+	string $buffer[];
+	string $listEdge[];
+	string $listEdge[] = `polyInfo -ve $theVtx`;
+	tokenize $theVtx "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbVertex = tokenize($listEdge[0] ,$buffer);
+	$nbVertex -= 2;
+	string $listEdgeName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listEdgeName[$i-2] = ($ObjectName + ".e["+$buffer[$i]+"]");
+	}
+	return $listEdgeName;
+}
+
+global proc string[] subtractStringArray (string $array1[], string $array2[])
+{
+	string $x;
+	string $y;
+	string $newArray[];
+	int $itemFound = 0;
+
+
+	for ($x in $array2)
+	{
+		$itemFound = 0;
+		for ($y in $array1)
+		{
+			if ($x == $y) {$itemFound = 1;}
+		}
+		if ($itemFound == 0) {$newArray[size($newArray)] = $x;}
+	}
+
+	return ($newArray);
+}
+
+global proc string[] MultiLoopOrder(string $EdgeList[])
+{
+	select $EdgeList;
+
+	/// STRINGS ///
+	string $Faces[] = getFaces();
+	string $loopFace;
+	string $loopFace1;
+	string $loopFace2;
+	string $loopEdge;
+	string $loopEdge2;
+	string $NewEdgeList[];
+	int $Turn;
+	int $Border = 0;
+	int $AntiFreeze = 0;
+	///////////////
+	/// FIND FACE WHICH SHARE 2 SELECTED EDGES AND FIND THE 2 EDGES ///
+	for ( $Face in $Faces )
+	{
+		string $Edg[] = ArrayIntersector( face2Edge($Face), $EdgeList );
+		if ( size($Edg) > 1 ) 
+		{ 
+			$loopFace1 = $Face;
+			$loopEdge  = $Edg[0];
+			$loopEdge2 = $Edg[1];
+			$Turn      = 1;
+			break; 
+		}
+	} 
+	/// IF NON IS FOUND SELECT A RANDOM EDGE FROM ONE OF THE SELECTED EDGES AND GET A RANDOM FACE FROM THAT EDGE ///
+	if ( $loopFace1 == "" ) 
+	{
+		string $F[] = edge2Face($EdgeList[0]);
+		$loopFace   = $F[0];
+		$loopFace2  = $F[1];
+		$loopEdge   = $EdgeList[0];
+		$Turn = 0;
+	}
+	/// IF THERE IS 2 LOOP EDGES ///
+	if ( $Turn == 1 ) 
+	{
+		$loopFace = inverseFacefromEdge( $loopFace1, $loopEdge );
+		$loopFace2 = inverseFacefromEdge( $loopFace1, $loopEdge2 );
+	}
+	////////////////
+	int $i2 = 1;
+	$NewEdgeList[0] = $loopEdge;
+
+	/// START THE LOOP ///
+	int $stop = 0;
+	while ( $stop != 1 )
+	{
+		string $loopEdgeArray[] = {$loopEdge};
+		/// FIND ALL THE EDGES THAT LOOP-FACE HAS EXEPCT FROM ALL IN THE NEW-EDGE-LIST ///
+		string $Edges[] = subtractStringArray($loopEdgeArray, ArrayIntersector(face2Edge($loopFace), $EdgeList));
+	///////////
+
+		if ( size(subtractStringArray($loopEdgeArray, ArrayIntersector(face2Edge($loopFace), $NewEdgeList))) > 0 )
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		if ( size( $Edges ) > 1 ) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		/// IF THE NEXT EDGE IS NOT A PART OF THE-EDGE-LIST ///
+		if ( size( $Edges ) == 0 ) 
+		{
+			/// IF THE NEW FACE IS QUAD THEN SPLIT TO THE OPPESITE EDGE ///
+			if ( size(face2Edge($loopFace)) == 4 ) 
+			{
+				$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge );
+				$NewEdgeList[$i2++] = $loopEdge;
+
+				if ( IsEdgeBorder($loopEdge) ) 
+				{
+					if ($Turn == 0) 
+					{ 
+						string $NEdgeList[] = Loop($loopFace2, $EdgeList[0], $EdgeList);
+						return $NEdgeList;
+					}
+					$stop = 1; break;
+				}
+				$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+			/// ELSE STOP THE LOOP ///
+		} 
+		else 
+		{
+			$stop = 1; break;
+		}
+	}
+	//////////////////////
+
+	/// IF THE NEXT EDGE IS A PART OF THE-EDGE-LIST ///
+	if ( size( $Edges ) == 1 ) 
+	{
+		
+		if ( IsEdgeBorder($NewEdgeList[0]) ) 
+		{ 
+			$NewEdgeList[$i2++] = $Edges[0]; 
+			$stop = 1; 
+			break; 
+		} 
+		if ( $Turn == 0 ) { $NewEdgeList[$i2++] = $Edges[0]; 
+			string $NEdgeList[] = Loop2($loopFace2, $EdgeList[0], $EdgeList, $NewEdgeList);
+			return $NEdgeList; $stop = 1; break;
+	}
+		
+	string $IFace2 = inverseFacefromEdge($loopFace, $Edges[0]);  /// FIND THE NEXT FACE
+	/// GET ALL THE EDGES FROM THE NEXT FACE EXEPCT EDGES FROM THE-EDGE-LIST ///
+	if ( IsEdgeBorder($Edges[0]) ) 
+	{ 
+		$NewEdgeList[$i2++] = $Edges[0]; 
+		$stop = 1; 
+		break; 
+	}
+	string $NewEdge[] = subtractStringArray($Edges, ArrayIntersector(	face2Edge($IFace2), $EdgeList));
+	////////////////
+	/// IF THERE IS 1 OR MORE EDGES THEN CONTENIUE THE LOOP ///
+	if ( size($NewEdge) == 1 )
+	{
+		$loopEdge = $NewEdge[0];
+		$loopFace = inverseFacefromEdge($IFace2, $NewEdge[0]);
+
+		$NewEdgeList[$i2++] = $Edges[0];
+		$NewEdgeList[$i2++] = $loopEdge;
+		if ( $Edges[0] == $loopEdge2 ) { $stop = 1; $Turn = 0; break; }
+		if ( $Edges[0] == $NewEdgeList[0] ) 
+		{ 
+			$stop = 1; 
+			$Turn = 0; 
+			break; 
+		}
+		if ( IsEdgeBorder($loopEdge) ) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		/// ELSE STOP THE LOOP
+	} 
+	else 
+	{
+		$NewEdgeList[$i2++] = $Edges[0]; 
+		$stop = 1; break;
+	}
+	}
+
+	}
+	///////////////////
+		if ( $Turn == 1 )
+		{
+			$NewEdgeList = inverseArray($NewEdgeList);
+			$stop = 0;
+			$loopEdge = $loopEdge2;
+			$loopFace = $loopFace2;
+			$NewEdgeList[$i2++] = $loopEdge;
+			while ( $stop != 1 )
+			{
+
+			string $loopEdgeArray[] = {$loopEdge};
+			string $Edges[] = subtractStringArray($loopEdgeArray, ArrayIntersector(face2Edge($loopFace), $EdgeList));
+
+			if ( size(subtractStringArray($loopEdgeArray, ArrayIntersector(face2Edge($loopFace), $NewEdgeList))) > 0 )
+			{ $stop = 1; break; }
+
+			if ( size( $Edges ) > 1 ) { $stop = 1; break; }
+
+
+			if ( size( $Edges ) == 0 ) {
+			if ( size(face2Edge($loopFace)) == 4 ) {
+			$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge );
+			$NewEdgeList[$i2++] = $loopEdge;
+			if ( IsEdgeBorder($loopEdge) ) { $stop = 1; break; }
+			$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+		} 
+		else 
+		{
+			$stop = 1; 
+			break;
+		}
+	}
+
+		if ( size( $Edges ) == 1 ) 
+		{
+			string $IFace2 = inverseFacefromEdge($loopFace, $Edges[0]);
+
+			if ( IsEdgeBorder($Edges[0]) ) 
+			{ 
+				$NewEdgeList[$i2++] = $Edges[0]; 
+				$stop = 1; 
+				break; 
+			}
+			string $NewEdge[] = subtractStringArray($Edges, ArrayIntersector(face2Edge($IFace2), $EdgeList));
+			if ( size($NewEdge) == 1 )
+			{
+				$loopEdge = $NewEdge[0];
+				$loopFace = inverseFacefromEdge($IFace2, $NewEdge[0]);
+					if ( IsEdgeBorder($loopEdge) ) 
+					{ 
+						$stop = 1; 
+						break; 
+					}
+				$NewEdgeList[$i2++] = $Edges[0];
+				$NewEdgeList[$i2++] = $loopEdge;
+			} 
+			else 
+			{
+				$NewEdgeList[$i2++] = $Edges[0];
+				$stop = 1; break;
+			}
+		}
+	}
+	}
+
+	return $NewEdgeList;
+}
+
+global proc string[] Loop( string $loopFace, string $loopEdge, string $List[] )
+{
+	string $EdgeList[];
+	int $stop = 0;
+	int $i = 1;
+
+	$EdgeList[0] = $loopEdge;
+
+	while ( $stop != 1 )
+	{
+		if (!(isFaceQuad($loopFace))) { $stop = 1; break; }
+		$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge);
+		$EdgeList[$i++] = $loopEdge;
+		if ( IsEdgeBorder($loopEdge) )   { $stop = 1; break; }
+		if ( $loopEdge == $EdgeList[0] ) { $stop = 1; break; }
+		string $loopEdgeArray[] = {$loopEdge};
+		if ( size(ArrayIntersector($loopEdgeArray, $List)) > 0 ) { $stop = 1; break; }
+
+		$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+	}
+	return $EdgeList;
+}
+
+global proc string[] Loop2( string $loopFace, string $loopEdge, string $List[], string $NewList[] )
+{
+	string $EdgeList[];
+	int $stop = 0;
+	int $i = 1;
+
+	$EdgeList[0] = $loopEdge;
+
+	while ( $stop != 1 )
+	{
+		if (!(isFaceQuad($loopFace))) 
+		{ 
+			$stop = 1; 
+			return $NewList;  
+			break; 
+		}
+		$loopEdge = oppositeEdgeOnFace( $loopFace, $loopEdge);
+		$EdgeList[$i++] = $loopEdge;
+		if ( IsEdgeBorder($loopEdge) )   
+		{ 
+			$stop = 1; 
+			return $NewList; 
+			break; 
+		}
+		if ( $loopEdge == $EdgeList[0] ) 
+		{ 
+			$stop = 1; 
+			break; 
+		}
+		string $loopEdgeArray[] = {$loopEdge};
+		if ( size(ArrayIntersector($loopEdgeArray, $List)) > 0 ) { $stop = 1; break; }
+
+		$loopFace = inverseFacefromEdge( $loopFace, $loopEdge );
+	}
+
+	if ( size($EdgeList) > size($NewList) ) 
+	{ 
+		return $NewList; 
+	} 
+	else 
+	{
+		return $EdgeList; 
+	}
+}
+
+global proc string inverseVertexFromEdge(string $Vertex, string $Edge)
+{
+	string $Verts[] = edge2Vertex($Edge);
+	if ( $Verts[0] == $Vertex ) 
+	{ 
+		return $Verts[1];
+	} 
+	else 
+	{ 
+		return $Verts[0]; 
+	}
+}
+
+global proc string inverseEdgeFromVertex(string $Vertex, string $Edge, string $Face)
+{
+	string $EdgeArray[] = {$Edge};
+	string $Result[] = subtractStringArray( $EdgeArray, ArrayIntersector(face2Edge($Face), vertex2Edge($Vertex)) );
+	return $Result[0];
+}
+
+global proc HomepageLink()
+{
+	string $link = "start explorer \"http://www.maya3d.dk\"";
+	system($link);
+}
+
+global proc Docs()
+{
+	string $link = "start explorer \"http://www.maya3d.dk/MEL/MJPolyTools/MJPolyTools.htm\"";
+	system($link);
+}
+
+global proc Forum()
+{
+	string $link = "start explorer \"http://www.maya3d.dk/Forum/forum.asp?FORUM_ID=2\"";
+	system($link);
+}
+
+global proc float[] face2Normal(string $theFace)
+{
+	string $buffer[];
+	string $Normal[] = `polyInfo -fn $theFace`;
+	tokenize($Normal[0]  ,$buffer);
+	float $normalValue[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$normalValue[$i-2] = $buffer[$i];
+	}
+	return $normalValue;
+}
+
+global proc float[] face2Center(string $theFace)
+{
+	string $buffer[];
+	float $posTemp[];
+	float $vtxPosition[];
+	int $index;
+	float $centerPosition[];
+	string $listVtx[] = face2Vertex($theFace);
+	int $nbVertex = size($listVtx);
+	for ($aVtx in $listVtx)
+	{
+		$posTemp =`pointPosition -w $aVtx`;
+		$centerPosition[0] =$centerPosition[0]  +  $posTemp[0];
+		$centerPosition[1] =$centerPosition[1]  +  $posTemp[1];
+		$centerPosition[2] =$centerPosition[2]  +  $posTemp[2];
+	}
+	$centerPosition[0] =$centerPosition[0]  / $nbVertex ;
+	$centerPosition[1] =$centerPosition[1]  / $nbVertex ;
+	$centerPosition[2] =$centerPosition[2]  / $nbVertex ;
+	return $centerPosition;
+}
+
+global proc string[] vertex2Face(string $theVtx)
+{
+	string $buffer[];
+	string $listFace[] = `polyInfo -vf $theVtx`;
+	tokenize $theVtx "." $buffer;
+	string $ObjectName = $buffer[0];
+	int $nbFace = tokenize($listFace[0] ,$buffer);
+	$nbFace -= 2;
+	string $listFaceName[];
+	for ($i=2;$i<size($buffer);$i++)
+	{
+		$listFaceName[$i-2] = ($ObjectName + ".f["+$buffer[$i]+"]");
+	}
+	return $listFaceName;
+}
+
+global proc string[] multiVertex2Face(string $vertex[])
+{
+	string $result[];
+	for ($aVtx in $vertex)
+	{
+		string $temp[] = vertex2Face($aVtx);
+		$result = AppendStringsToStringArray($temp ,$result );
+	}
+	$result = AWRemoveDuplicateStringsFromStringArray($result);
+	return $result ;
+}
+
+global proc string getShareEdgeFrom2Faces ( string $Faces[] )
+{
+	for ( $Edge in face2Edge($Faces[0]) )
+	{
+		for ( $Edge2 in face2Edge($Faces[1]) )
+		{
+			if ( $Edge == $Edge2 ) { return $Edge; }
+		}
+	}
+
+}
+
+global proc string getOppositeEdgeFromVertex( string $Edge, string $Vertex )
+{
+	string $Edges[] = vertex2Edge($Vertex);
+	string $Faces[] = edge2Face($Edge);
+	for ( $E in $Edges )
+	{
+		if ( size(ArrayIntersector($Faces, edge2Face($E)) ) == 0 ) 
+		{ 
+			return $E; 
+		}
+	}
+	return $Edge;
+}
+
+global proc loopSelect()
+{
+	string $E[] = `filterExpand -sm 32`;
+
+	for ( $Ed in $E )
+	{
+		$Edge = $Ed;
+
+		string $EdgeList[];
+		string $loopVertex;
+		string $loopEdge;
+		int $i = 0;
+		int $a = 0;
+
+		string $Verts[] = edge2Vertex($Edge);
+
+		$loopEdge           = $Edge;
+		$loopVertex         = $Verts[1];
+
+		$EdgeList[$i++] = $loopEdge;
+
+		int $stop = 0;
+		while ( $stop != 1 )
+		{
+			string $AllFaces[] = vertex2Face($loopVertex);   
+			if ( size($AllFaces) != 4 ) { $stop = 1; break;  }
+
+			$loopEdge   = getOppositeEdgeFromVertex( $loopEdge, $loopVertex );
+			$loopVertex = inverseVertexFromEdge( $loopVertex, $loopEdge );
+
+			if ($loopEdge == $Edge ) { $stop = 1; $a = 1; break; }
+
+			$EdgeList[$i++] = $loopEdge;
+		}
+		select -add $EdgeList;
+
+		string $EdgeList[] = inverseArray($EdgeList);
+		$loopEdge   = $Edge;
+		$loopVertex = $Verts[0];
+
+		$stop = 0;
+		while ( $stop != 1 )
+		{
+			if ( $a == 1 ) { $stop = 1; break; }
+
+			string $AllFaces[] = vertex2Face($loopVertex);   
+			if ( size($AllFaces) != 4 ) { $stop = 1; break; }
+
+			$loopEdge   = getOppositeEdgeFromVertex( $loopEdge, $loopVertex );
+			$loopVertex = inverseVertexFromEdge( $loopVertex, $loopEdge );
+
+			$EdgeList[$i++] = $loopEdge;
+		}
+		select -add $EdgeList;
+	}
+
+}
+
+global proc string[] getVertexList(string $SelectedEdge)
+{
+	loopSelect;
+	//performSelContiguousEdges 0;
+	string $SelectedEdgeList[]=`ls -sl`;
+	//print $SelectedEdgeList;
+	string $VertexList[];
+	int $VertexNumber=0;
+	for ($i=0;$i<size($SelectedEdgeList);$i++)
+	{
+		if ($i==0)
+		{
+			string $EdgeTwoVertex[]=`edge2Vertex($SelectedEdgeList[$i])`;
+			$VertexList[$VertexNumber]=$EdgeTwoVertex[0];
+			$VertexNumber++;
+			$VertexList[$VertexNumber]=$EdgeTwoVertex[1];
+			$VertexNumber++;
+		}
+		else
+		{
+			string $EdgeTwoVertex[]=`edge2Vertex($SelectedEdgeList[$i])`;
+			$VertexList[$VertexNumber]=$EdgeTwoVertex[1];
+			$VertexNumber++;
+		}
+	}
+	return $VertexList;
+}
+////////////////////////////////////////////////////////////////

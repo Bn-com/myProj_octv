@@ -1,0 +1,185 @@
+//useful for renderLayer tools 
+
+global int $C =1;
+global int $R =1;
+global int $M =1;
+global int $P =1;
+
+global proc AssignMaterial( int $type){
+if ($type == 1)
+{
+sets -e -forceElement MatteSG;
+}
+if ($type == 2)
+{
+sets -e -forceElement ShadowSG;
+}
+if ($type == 3)
+{
+//sets -e -forceElement DepthShaderSG;
+hyperShade -assign DepthShader;
+}
+if ($type == 4)
+{
+sets -e -forceElement initialShadingGroup;
+}
+}
+
+
+
+
+
+//create render  material
+
+
+global proc createMatte () {
+if(`objExists MatteSG`){
+  warning ("Material already exists");
+}else{
+shadingNode -asShader lambert -n Matte ;
+sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+connectAttr -f Matte.outColor MatteSG.surfaceShader;
+setAttr "Matte.color" -type double3 0 0 0 ;
+setAttr "Matte.diffuse" 0;
+setAttr "Matte.translucenceFocus" 0;
+setAttr Matte.matteOpacityMode 0;
+}
+}
+
+global proc createShadow () {
+if(`objExists ShadowSG`){
+  warning ("Material already exists");
+}else{
+shadingNode -asShader useBackground -n Shadow ;
+sets -renderable true -noSurfaceShader true -empty -name ShadowSG;
+connectAttr -f Shadow.outColor ShadowSG.surfaceShader;
+setAttr "Shadow.reflectivity" 0;
+setAttr "Shadow.reflectionLimit" 0;
+}
+}
+
+global proc createDepth () {
+if(`objExists DepthShader`){
+  warning ("Material already exists");
+}else{
+file -import -type "mayaBinary" (`getenv "DEV_PATH"` + "/Maya/shaders/MOEBIUS_SHADER_DEPTH.mb");
+}
+}
+
+
+// selection mask
+proc selectionMask (){
+setObjectPickMask "All" 0;
+setObjectPickMask "Surface" true;
+}
+
+global proc zlTDTools (){
+
+selectionMask; //make sure selection Mask
+
+global int $shaderType;
+
+$shaderType = 1; // set MatteSG is default
+
+string $winam = "renderstatswin";
+if (`window -exists $winam`)
+     deleteUI $winam;
+window -t "render Stats control"  -w 200 -h 55 $winam;
+columnLayout -adjustableColumn true;
+button -label "Create Matte" -c "createMatte" ;
+separator;
+separator;
+button -label "Create Shadow" -c "createShadow" ;
+separator;
+separator;
+button -label "Create Depth"  -c "createDepth" ;
+separator;
+separator;
+radioCollection;
+radioButton -h 15 -sl -onc "global int $shaderType; $shaderType = 1" -l "Matte" asMatte ;
+separator;
+radioButton -h 15 -onc "global int $shaderType; $shaderType = 2" -l "Shadow" asShadow ;
+separator;
+radioButton -h 15 -onc "global int $shaderType; $shaderType = 3" -l "Depth" asDepth ;
+separator;
+radioButton -h 15 -onc "global int $shaderType; $shaderType = 4" -l "Lambert" asLambert ;
+setParent..;
+separator;
+separator;	       
+button -label "assign material" -c "global int $shaderType; AssignMaterial $shaderType"  asassignmaterial;
+separator;
+separator;
+setParent ..;
+radioButtonGrp -numberOfRadioButtons 2
+-label "CasesShadowS"  -cc1 "global int $C; $C = 0" -label1  "OFF" 
+                       -cc2 "global int $C; $C = 1" -label2 "ON" setcasesShadow;
+
+radioButtonGrp -e -select 2 setcasesShadow;
+
+
+radioButtonGrp -numberOfRadioButtons 2
+-label "ReceiveShadow" -cc1 "global int $R; $R = 0" -label1  "OFF" 
+                       -cc2 "global int $R; $R = 1" -label2  "ON" setReShadow;
+
+radioButtonGrp -e -select 2 setReShadow;
+
+
+radioButtonGrp -numberOfRadioButtons 2
+-label "MotionBlur"   -cc1 "global int $M; $M = 0" -label1  "OFF" 
+                      -cc2 "global int $M; $M = 1" -label2 "ON"  setmotionblur;
+
+radioButtonGrp -e -select 2 setmotionblur;
+
+radioButtonGrp -numberOfRadioButtons 2
+-label "PrimaryVisibility" -cc1 "global int $P; $P = 0"  -label1 "OFF" 
+                           -cc2 "global int $P; $P = 1"  -label2 "ON" setprimary;
+			   
+radioButtonGrp -e -select 2 setprimary;
+
+separator;
+separator;
+setParent ..;			   
+button -label "Assign Render Stats" -c "renderstats" assignstats;
+separator;
+setParent ..;
+button -label "cloes" -c "deleteUI -window renderstatswin"  cloesgui;
+setParent ..;
+showWindow $winam;
+}
+
+global proc renderstats()
+{
+	global int $C;
+	global int $M;
+	global int $R;
+	global int $P;
+	
+	$selectShape = `ls -selection -dag `;
+      for($tmp in $selectShape){
+      if(`objExists ($tmp+".primaryVisibility")`){
+
+	// added by huangzhongwei, 20070918
+	if (`getAttr -lock ($tmp + ".castsShadows")`)
+	{
+		setAttr -lock false ($tmp + ".castsShadows");
+	}
+	if (`getAttr -lock ($tmp + ".primaryVisibility")`)
+	{
+		setAttr -lock false ($tmp + ".primaryVisibility");
+	}
+	if (`getAttr -lock ($tmp + ".motionBlur")`)
+	{
+		setAttr -lock false ($tmp + ".motionBlur");
+	}
+	if (`getAttr -lock ($tmp + ".receiveShadows")`)
+	{
+		setAttr -lock false ($tmp + ".receiveShadows");
+	}
+
+      setAttr ($tmp + ".castsShadows") $C;
+      setAttr ($tmp + ".primaryVisibility") $P;
+      setAttr ($tmp + ".motionBlur") $M;
+      setAttr ($tmp + ".receiveShadows") $R;
+}
+}
+}

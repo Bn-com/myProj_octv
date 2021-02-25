@@ -1,0 +1,193 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: CJWRenderlLayersTool
+//	Author: Justin.Chan
+//	Created: 2011/12/12 
+//
+//	Update/Change: 
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+//////////////////////////////////////////////控制窗口
+global proc CJWRenderlLayersTool()
+{
+if (`window -ex CJWRenderlLayersToolWin`)
+    deleteUI CJWRenderlLayersToolWin;
+window -title "一键分层工具" CJWRenderlLayersToolWin;
+string $AboutColayout = `columnLayout -adjustableColumn true`;
+       menuBarLayout;//菜单栏
+	 menu -label "编辑";
+           menuItem -label "删除全部渲染分层" -command "DeleterenderLayersTool" ;
+	 menu -label "帮助说明";
+           menuItem -label "操作说明..." -command "colorOccNormalLayersToolHelp";
+
+             setParent ..;
+string $HbAutoTools = `frameLayout -label "请先选择需要分层的模型(场景或角色)"  -labelAlign "bottom" -cl 0   -cc "" -borderStyle "etchedIn"`;
+        columnLayout -adj 1 ;//竖型布局
+	text "所选物体会被自动分为: Color OCC Normal 三层";
+	button -height 30 -width 90 -bgc 0.8 0.8 0.8 -l "所选模型分层"  -c "Activation";
+             setParent ..;
+             setParent ..;
+string $HbAutoTools = `frameLayout -label "请选择需要分层的模型(不要选组)"  -labelAlign "bottom" -cl 0   -cc "" -borderStyle "etchedIn"`;
+        columnLayout -adj 1 ;//竖型布局
+	text "所选物体会被自动分为:角色阴影 和 角色OCC阴影 两层。 \n注意：角色阴影层只添加一个层，其他材质需要手动附；\n OCC阴影层每个模型会添加一个miLabel属性，\n 默认为'场景',角色模型需手动改为'角色'。";
+	button -height 30 -width 90 -bgc 0 0.7 0.35 -l "所选模型分层"  -c "Activation_02";
+             setParent ..;
+
+showWindow CJWRenderlLayersToolWin;
+}
+CJWRenderlLayersTool;
+
+/////////////////////////////////////////////////////////程序
+
+global proc Activation()
+{	 
+string $objects[] = `ls -l -sl`;
+	if (size($objects) == 0)
+	{
+		error "情选择需要分层额模型!";
+	}
+     string $Name = `promptDialog 
+	 -title"为所分渲染层命名" 
+	 -message"只输入开头类型简写即可，如：\n BG 或 S 或 L 等等···"
+     -button"确认" -button"取消" 
+     -defaultButton"确认" 
+	 -cancelButton"取消" 
+	 -dismissString "取消"`;
+     if($Name=="确认")
+       {  
+        string $getName = `promptDialog -query -text`;
+		string $GetObjectName[]=`ls -sl`;
+string $ColorLayer = `createRenderLayer -name ($getName+"Color") -number 1 -noRecurse $GetObjectName`;
+string $OCCLayer = `createRenderLayer -name ($getName+"OCC") -number 1 -noRecurse $GetObjectName`;
+string $NormalLayer = `createRenderLayer -name ($getName+"Normal") -number 1 -noRecurse $GetObjectName`;
+setAttr defaultRenderLayer.renderable 0;
+renderLayerBuiltinPreset occlusion $OCCLayer;
+renderLayerBuiltinPreset normal $NormalLayer;
+refreshAE;
+
+string $occlusion1[] = `ls -type mib_amb_occlusion`;
+		for ($aa in $occlusion1)
+			{
+				float $aaOutput_mode = `getAttr ($aa+".output_mode")`;
+				if ($aaOutput_mode==0)
+				{
+				setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0.25 0.25 0.25 ;
+				setAttr ($aa+".max_distance") 10;
+				}
+				else if ($aaOutput_mode==3)
+				{setAttr ($aa+".samples") 100;
+				setAttr ($aa+".dark") -type double3 0 0 0 ;
+				setAttr ($aa+".max_distance") 0;			
+			}
+		}
+    }
+
+}
+
+global proc Activation_02()
+{	 
+string $GetObjectName02[] = `ls -l -sl`;
+	if (size($GetObjectName02) == 0)
+		{
+		error "情选择需要分层额模型!";
+		}
+     string $Name = `promptDialog 
+	 -title"为所分渲染层命名" 
+	 -message"只输入开头分层简写即可，如：\n 角色开头简写字母 等等···"
+     -button"确认" -button"取消" 
+     -defaultButton"确认" 
+	 -cancelButton"取消" 
+	 -dismissString "取消"`;
+     if($Name=="确认")
+       {  
+        string $getName = `promptDialog -query -text`;
+		string $GetObjectName[]=`ls -sl`;
+		for ($aa in $GetObjectName)
+			{
+			if (!`objExists ($aa+".miLabel")`)
+				{addAttr -ln "miLabel" -k on  -at "enum" -en "场景:角色:" $aa;}
+			}
+string $ShadowLayer = `createRenderLayer -name ($getName+"Shadow") -number 1 -noRecurse $GetObjectName`;
+string $OCCShadowLayer = `createRenderLayer -name ($getName+"OCCShadow") -number 1 -noRecurse $GetObjectName`;
+
+editRenderLayerGlobals -currentRenderLayer $OCCShadowLayer;
+		if (!`objExists ($getName+"_OCC_Shadow_surfaceShader")`)
+			{
+			shadingNode -asShader surfaceShader -n ($getName+"_OCC_Shadow_surfaceShader");
+			sets -renderable true -noSurfaceShader true -empty -name OCC_Shadow_surfaceShaderSG;
+			connectAttr -f (($getName+"_OCC_Shadow_surfaceShader")+".outColor") OCC_Shadow_surfaceShaderSG.surfaceShader;
+			setAttr (($getName+"_OCC_Shadow_surfaceShader")+".outColor") -type double3 0 0 0 ;
+			setAttr (($getName+"_OCC_Shadow_surfaceShader")+".outMatteOpacity") -type double3 0 0 0 ;
+
+			if (!`objExists ($getName+"OCC_Shadow_mib_amb_occlusion")`)
+				{shadingNode -asShader mib_amb_occlusion -n ($getName+"OCC_Shadow_mib_amb_occlusion");}
+			connectAttr -f (($getName+"OCC_Shadow_mib_amb_occlusion")+".outValue") (($getName+"_OCC_Shadow_surfaceShader")+".outColor");
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".samples") 100;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".dark") -type double3 0.25 0.25 0.25 ;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".max_distance") 10;
+			setAttr (($getName+"OCC_Shadow_mib_amb_occlusion")+".id_inclexcl") 1;
+			}
+sets -e -forceElement OCC_Shadow_surfaceShaderSG $GetObjectName;
+string $camera[] = `ls -type camera `;
+for ($aa in $camera)
+	{
+	editRenderLayerAdjustment ($aa+".backgroundColor");
+	setAttr ($aa + ".backgroundColor") -type double3 1 1 1 ;	
+	}
+editRenderLayerAdjustment "defaultRenderGlobals.enableDefaultLight";
+setAttr "defaultRenderGlobals.enableDefaultLight" 0;
+editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+setAttr "miDefaultOptions.rayTracing" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxSamples";
+setAttr "miDefaultOptions.maxSamples" 2;
+setAttr "miDefaultOptions.contrastR" 0.02;
+setAttr "miDefaultOptions.contrastG" 0.02;
+setAttr "miDefaultOptions.contrastB" 0.02;
+editRenderLayerAdjustment "miDefaultOptions.contrastA";
+setAttr "miDefaultOptions.contrastA" 0.02;
+editRenderLayerAdjustment "miDefaultOptions.filter";
+setAttr miDefaultOptions.filter 1;
+editRenderLayerAdjustment "miDefaultOptions.rayTracing";
+setAttr "miDefaultOptions.rayTracing" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxReflectionRays";
+setAttr "miDefaultOptions.maxReflectionRays" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxRefractionRays";
+setAttr "miDefaultOptions.maxRefractionRays" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxRayDepth";
+setAttr "miDefaultOptions.maxRayDepth" 1;
+editRenderLayerAdjustment "miDefaultOptions.maxShadowRayDepth";
+setAttr "miDefaultOptions.maxShadowRayDepth" 2;
+
+setAttr defaultRenderLayer.renderable 0;
+		}
+}
+///////////////////////////////////////////////////////编辑
+global proc DeleterenderLayersTool()
+{
+     string $d = `confirmDialog -title"删除全部渲染分层" -message"确定删除全部渲染分层吗？"
+                               -button"删除" -button"取消" 
+                                -defaultButton"删除" -cancelButton"取消" -dismissString "确认"`;
+     if($d=="删除")
+		{ 
+layerEditorLayerButtonSelect 0 defaultRenderLayer;
+        string $get[] = `ls -type renderLayer`;
+		for ($aa in $get)
+			{
+				if ($aa!= "defaultRenderLayer")
+				{delete $aa;}
+			}
+		}
+}
+
+global proc colorOccNormalLayersToolHelp()
+{
+    string $help = `confirmDialog -title"帮助说明" 
+	-message"如有报错问题请联系：\n设置组：陈嘉伟"
+	-button"OK" 
+	-cancelButton"OK" `;
+}

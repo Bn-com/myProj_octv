@@ -1,0 +1,341 @@
+global proc s100VConformSceneForVegetationPip()
+{
+string $refVG[] = `s100VMlistVegetationRefNodeFirstLvl` ;
+//print $refVG ;
+
+optionVar -intValueAppend proxyOptionsSharedEdits  1;
+
+
+     int $amount = 0;
+
+     progressWindow
+         -title "Conforming Scene"
+         -progress $amount
+         -status "conforming: 0%"
+		 -maxValue 100
+         -isInterruptable false;
+
+
+
+
+//$i = 17
+	for($i = 0 ; $i < size($refVG) ; $i++)
+	{
+	//print ("\n" +$i +"\n") ;
+	float $iF = $i ;
+	float $sF = size($refVG) ;
+	float $aF = ($iF / $sF) * 100 ;
+
+         $amount = $aF;
+
+         progressWindow -edit
+             -progress $amount
+             -status ("conforming: "+$amount+"%");
+
+
+	$file = `referenceQuery -filename $refVG[$i] ` ;
+	string $root ;
+	//$root = `s100VCRgetRootFolderFromName($file) `;
+	$ref = `s100VCRgetRefFolderFromName($file) `;
+	$cName = `s100getFileNameFromPath($file) `;
+
+	$name = s100VCRgetCleanNameFromPath ($cName) ;
+
+	string $fileRoot[] = `getFileList -filespec ($name + "*.ma") -folder $root`;
+		for($j = 0 ; $j < size($fileRoot) ; $j++)
+		{
+		$fileRoot[$j] = $root + $fileRoot[$j] ;
+        }
+
+
+	string $fileRef[] = `getFileList -filespec($name + "*.ma") -folder $ref`;
+
+		for($j = 0 ; $j < size($fileRef) ; $j++)
+		{
+		$fileRef[$j] = $ref + $fileRef[$j] ;
+        }
+
+
+	string $allFile[] = stringArrayCatenate($fileRoot, $fileRef ) ;
+
+
+	$prox = `proxyManager($refVG[$i])`;
+
+		if($prox == "")
+			$prox = s100proxyAddManager( $refVG[$i] );
+
+
+		for($j = 0 ; $j < size($allFile ) ; $j++)
+		{
+		//print ("\nj=" + $j +"\n") ;
+		s100CheckAndAddProx($refVG[$i],$allFile[$j] );
+        }
+
+	//select $prox ;
+	s100ProxConfForVeg($prox,$allFile);
+
+	/*
+	string $man = `proxyManager ($refVG[$i] )`;
+	print ($man +"\n" ) ;
+	*/
+
+    }
+progressWindow -endProgress ;
+proxyRefreshUI ;
+print "\nProxy scene are conformed\n";
+}
+//nouvelle proc !!!!
+global proc s100ProxConfForVeg(string $prox, string $allFile[])
+{
+//print $allFile ;
+//print  $prox ;
+
+
+string $allRef[] = `s100ProxyReturnRefs($prox) `;
+
+$act = `s100proxyReturnActiveRef($prox)	`;
+
+
+int $checkAll[] ;
+
+string $toReplace[];
+string $tags[];
+
+	for($i = 0 ; $i < size($allRef) ; $i++)
+	{
+	$checkAll[$i] = 0;
+	$tags[$i] = `getAttr ($allRef[$i] +".proxyTag")`;
+		for($j = 0 ; $j < size($allFile) ; $j++)
+		{
+			if(`gmatch $allFile[$j]  ( "*" + $tags[$i]  +".ma")`)
+			{
+			$file = `referenceQuery -filename   $allRef[$i]`;
+			$array = stringToStringArray($file ,"." ) ;
+			$file = $array[0] +".ma" ;
+					if(`gmatch $allFile[$j]  ($file  +"*")`)
+					{
+					$checkAll[$i] = 0;
+                    }else{
+					$checkAll[$i] = 1;
+                    }
+			$toReplace[$i] = $allFile[$j]  ;
+			break ;
+            }
+        }
+
+    }
+
+	for($i = 0 ; $i < size($allRef) ; $i++)
+	{
+		if(size($toReplace[$i])> 0)
+		{
+			if($checkAll[$i])
+			{
+				if(`referenceQuery -f $allRef[$i]` != $toReplace[$i] )
+				{
+				print ("\n\nchange" + $allRef[$i]+"\npath\n"+`referenceQuery -f $allRef[$i]` +" to\n" + $toReplace[$i]) ;
+					if( `file -referenceNode  $allRef[$i] -q -deferReference`)
+					{
+					print "\nno load\n";
+					file -loadReferenceDepth "none" -loadReference  $allRef[$i] $toReplace[$i];
+
+                    }else{
+					print "\nload\n";
+
+					file -loadReference  $allRef[$i] $toReplace[$i];
+                    }
+				}
+            }
+        }
+    }
+
+
+int $chall ;
+
+	for($i = 0 ; $i < size( $checkAll ) ; $i++)
+	{
+	$chall += $checkAll[$i] ;
+    }
+
+	if( $chall >0)
+	{
+	//proxyActivate( $act, true );
+    }
+
+
+
+/*
+print $checkAll ;
+print $tags[1];
+print $toReplace[1] ;
+print $allRef ;
+*/
+}
+
+// fin de nouvelle proc
+
+global proc string s100proxyAddManager( string $currentRefName )
+//
+//	Description:
+//
+//		Given a valid reference node name, we create a proxy manager and hook
+//	up the proxy manager to the reference node. Note that currentRefName must
+//	be a valid reference node name (we don't check here!) and that it must not
+//	already be associated with a proxy manager (we don't check that here
+//	either!).
+//
+{
+	$proxyManager = `createNode proxyManager`;
+	// Set the name of the proxy manager to something similar to that of
+	// the current reference.
+	//
+	string $proxyTag = $currentRefName;
+	int $length = size( $proxyTag );
+	if( $length > 1 ){
+		// If the last two characters are RN, remove them before appending
+		// PM.
+		//
+		if( substring( $proxyTag, $length-1, $length ) == "RN" ){
+			$proxyTag = substring( $proxyTag, 1, $length-2);
+		}
+	}
+	string $proxyName = ($proxyTag + "PM");
+	$proxyManager = `rename $proxyManager $proxyName`;
+
+	// Set proxy tag for current reference to proxyManager's name
+	//
+	//setAttr ($currentRefName + ".proxyTag") -type "string" $proxyTag;
+	string $currTag = `getAttr ($currentRefName + ".proxyTag")`;
+	if( $currTag == "" ){
+		// An empty string gets turned into the string "original". This also
+		// happens in proxyTags.mel, so if you change it here, change it there
+		// too! TODO Replace by a global constant of some sort so we don't have
+		// to do worry about it.
+		//
+		setAttr ($currentRefName + ".proxyTag") -type "string" "original";
+	}
+
+	// Let's hook up the first proxyList entry of the manager to the
+	// current reference.
+	//
+	connectAttr ($proxyManager + ".proxyList[0]") ($currentRefName + ".proxyMsg" );
+
+	// Since this is the active proxy, let's remember it as such. Recall that
+	// the active proxy points to the entry in the proxyList that is the active
+	// one, and not directly to the reference node (to avoid a fan-in).
+	//
+	connectAttr ($proxyManager + ".activeProxy") ($proxyManager + ".proxyList[0]");
+	// If this proxy set is created with shared edits, the original reference
+	// initially owns the edits.
+	//
+		connectAttr ($currentRefName + ".proxyMsg") ($proxyManager + ".sharedEditsOwner");
+
+	return( $proxyManager );
+}
+
+global proc string s100getFileNameFromPath(string $path)
+{
+/*
+$path = `file -q -sn `;
+*/
+
+string $nPath ;
+$array = stringToStringArray($path , "/") ;
+
+$last = size($array) -1 ;
+
+return $array[$last] ;
+
+}
+
+global proc string[] s100VMlistVegetationRefNodeFirstLvl()
+{
+$var = sort(`ls "*:VR_*scN" `);
+string $ret[];
+$j = 0 ;
+	for($i = 0 ; $i < size($var) ; $i++)
+	{
+	string $path  = `referenceQuery -filename $var[$i] `;
+
+		if(`gmatch $path "*MA_V_*"`)
+		{
+		$ret[$j] = `referenceQuery -referenceNode $var[$i] `;
+		$j++;
+
+        }
+
+    }
+
+return $ret;
+
+}
+
+global proc string s100VCRgetCleanNameFromPath(string $path)
+{
+//$name = $lo ;
+//$name = `file -q -sn -shortName `;
+$name = $path;
+$AName = stringToStringArray($name,"_") ;
+
+string $return = "";
+	for($i= 0 ; $i < (size($AName) -1) ;$i++)
+	{
+	 $return+= $AName[$i]  ;
+		if($i < (size($AName) -2))
+				 $return+= "_"  ;
+
+    }
+return $return ;
+
+}
+
+global proc s100CheckAndAddProx(string $refN, string $path)
+{
+/*
+string $refN = $refVG[0] ;
+string $path = $allFile[4] ;
+$path = `file -q -sn `;
+select $refN ;
+*/
+
+
+
+
+optionVar -intValue proxyOptionsSharedEdits 1 ;
+$cName = `s100getFileNameFromPath($path) `;
+$name = `s100VCRgetCleanNameFromPath ($cName) `;
+
+$toSub = ($name +"_") ;
+$sub = substituteAllString($cName ,".ma", "") ;
+$sub = substituteAllString($sub ,$toSub, "") ;
+//print $sub ;
+//print "\n" ;
+/*
+	if ($sub == "Hi")
+	{
+		$sub = "original" ;
+	}
+*/
+$pm = `proxyManager($refN) `;
+$ch = 0 ;
+	if($pm != "")
+	{
+	$ch = usedTag($pm,$sub) ;
+    }
+//print $ch ;
+
+
+
+	if($ch == 0 )
+	{
+	proxyAdd $refN  $path  $sub ;
+    }else{
+
+
+
+
+    }
+
+
+}
+

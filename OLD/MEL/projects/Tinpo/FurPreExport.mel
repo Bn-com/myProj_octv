@@ -1,0 +1,967 @@
+// FurPreExport.mel (c) 2007 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	
+Use:
+	template arg
+
+Arguments:
+	arg (string)	- some argument
+
+Returns:
+	
+Dependancies:
+
+	getInsightShotGroupLength
+	stringArrayFindIndex
+	padNumber
+	getVersion
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	01/26/07
+Revisions:	02/07/07	Rev 1.1
+		- Implemented versioning of the fur files
+		02/08/07	Rev 1.2
+		- Added support for a frames argument in the form of e.g. 1-11,13,18,23-25
+		- Added control over whether the version number is incremented
+		02/12/07	Rev 1.3
+		- Adding support for exporting the fur in single frame mode (from an asset)
+
+		02/19/07	Rev 1.4
+		- Submitting job directly to FurExport (Python wrapper is no longer needed)
+
+		02/26/07	Rev 1.5
+		- Implementing second pass for motion vector generation (FurMotionExport)
+
+		03/21/07	Rev 1.6
+		- Added support for max motion export cpu's in the project globals
+
+		03/23/07	Rev 1.7
+		- Turning off fur export during layoutsubmission
+
+		03/29/07	Rev 1.8
+		- Turned on sequence and shot sensitive paths for task config
+
+		04/07/07	Rev 1.9
+		- Adding the ability to specify, via the globals, and alternate location for fur to be export. Symbolic links will be made in the final location (handled
+		by FurPostExport) to the alternate location.
+		- Tweaked the priorities. FurExport is priority + 2, FurMotionExport is priority + 1, and FurPostExport is priority. This is to handle cases where the cluster is backed up.
+		With equal priorities, often the next shot will begin FurExport before a FurPostExport of a shot that is otherwise done.
+
+		04/11/07	Rev 2.0
+		- Turned on sequence and shot sensitive paths for FurExport.xml 
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// current dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/FurPreExport.2.0.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+}
+// ---------------------------------------------------------------------------------------------------
+// stringToIntArray - takes a string in the form 1-11,13,18,23-25, and flattens it into an int array
+// ---------------------------------------------------------------------------------------------------
+global proc int[] stringToIntArray (string $str)
+{
+	int $res[];
+	string $buf1[];
+	tokenize ($str,",",$buf1);
+	for ($i=0;$i<size($buf1);$i++)
+	{
+		string $buf2[];
+		tokenize ($buf1[$i],"-",$buf2);
+
+		if (size($buf2) == 1)
+			$res[size($res)] = (int)$buf2[0];
+		else
+		{
+			int $inc = ((int)$buf2[1] >= (int)$buf2[0])?1:-1;
+			for ($j=(int)$buf2[0];$j<=(int)$buf2[1];$j+=$inc)
+			{
+				$res[size($res)] = $j;
+			}
+		}
+	}
+	return $res;
+}
+// ---------------------------------------------------------------------------------------------------
+// intArrayToString - takes an int array and outputs a string in the form 1-11,13,18,23-25
+// ---------------------------------------------------------------------------------------------------
+global proc string intArrayToString (int $array[])
+{
+	string $res = "";
+	
+	int $min[],$max[];
+	int $idx = 0;
+
+	$min[0] = $max[0] = $array[0];
+
+	for ($i=0;$i<size($array);$i++)
+	{
+		if ($array[$i] > $max[$idx]+1)
+		{
+			$idx ++;
+			$min[$idx] = $array[$i];
+		}
+		$max[$idx] = $array[$i];
+	}
+	
+	for ($i=0;$i<size($min);$i++)
+	{
+		if ($i)
+			$res += ",";
+		if ($min[$i] == $max[$i])
+			$res += $min[$i];
+		else
+			$res += $min[$i]+"-"+$max[$i];
+	}
+	return $res;
+}
+// ---------------------------------------------------------------------------------------------------
+// getFrames - get the frame range as a string from the appropriate source
+// ---------------------------------------------------------------------------------------------------
+proc string getFrameRange ()
+{
+	global int $gFrameOverrideStart;// Use this start frame instead of frame range from Insight.
+	global int $gFrameOverrideEnd;	// Use this end frame instead of frame range from Insight.
+	global string $gFrames;		// scattered frames option
+	global string $gSequence;		// The sequence
+	global string $gShot;		// The shot
+
+	global string $gTaskType;
+
+	// scattered frames is the first option
+	if ($gFrames != "")
+	{
+		print ($gTaskType+": Exporting scattered frames: "+$gFrames+" \n");	
+		return $gFrames;
+	}
+	// if override isn't set, grab from Insight
+	if ($gFrameOverrideStart == 0 && $gFrameOverrideEnd == 0)
+	{	
+		
+		int $frameRange[];
+	
+		int $success = getInsightShotGroupLength ($gSequence,$gShot,$frameRange);
+		if (!$success)
+		{
+			print ($gTaskType+": Couldn't connect to Insight for frame range info. Can't continue... \n");
+			return "";		
+		}
+		string $result = $frameRange[0]+"-"+$frameRange[1];
+		print ($gTaskType+": Using Insight frame range: "+$result+". \n");	
+		return $result;
+	}
+	// override is set, use it
+	string $result = $gFrameOverrideStart+"-"+$gFrameOverrideEnd;
+	print ($gTaskType+": Using custom frame range: "+$result+"\n");
+	
+	return $result;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// find the FurPreExport globals file. 
+// ---------------------------------------------------------------------------------------------------
+proc string getConfig ()
+{
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	
+	// look in shot first
+	string $file = getPath ("ShotBase",{$gSequence,$gShot})+"/projectGlobals/FurPreExport.xml";
+	if (`filetest -f $file`)
+		return $file;
+
+	// sequence
+	string $file = getPath ("SeqBase",{$gSequence})+"/projectGlobals/FurPreExport.xml";
+	if (`filetest -f $file`)
+		return $file;
+
+	// project wide
+	
+	$file = getPath ("ProjectGlobals",{})+"/FurPreExport.xml";
+
+	if (`filetest -f $file`)
+		return $file;
+	
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+// getFurExportData - get a list of assets for the show that need fur export
+// ---------------------------------------------------------------------------------------------------
+proc string [] getFurExportData ()
+{
+	// get the fur exporting assets for the show
+	string $data[];
+	global string $gTaskType;
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+
+	
+	string $file = getPath ("ShotBase",{$gSequence,$gShot})+"/projectGlobals/FurExport.xml";
+	if (!`filetest -f $file`)
+	{
+		$file = getPath ("SeqBase",{$gSequence})+"/projectGlobals/FurExport.xml";
+	}	
+	if (!`filetest -f $file`)
+	{
+		$file = getPath ("ProjectGlobals",{})+"/FurExport.xml";
+	}
+	
+	if (!`filetest -f $file`)
+	{
+		warning ($gTaskType+": "+$file+" not found. No fur will be exported.");
+		return {};
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+	
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $filename = xml_getVar ($nodes[$i],"filename");
+		string $assetName = xml_getVar ($nodes[$i],"name");
+		$data[size($data)] = $assetName;
+		$data[size($data)] = getPath ("ConformPath",{$filename});
+		
+	}
+
+	return $data;
+}
+// -----------------------------------------------------------------------------------------------
+// Filter the full membership of the shot down to assets are point caching, and are not eliminated by a selective export filter. Asset existence is also checked.
+// -----------------------------------------------------------------------------------------------
+global proc int filterAssetList(
+	string $namespaces[], 
+	string $refNodes[], 
+	int $deferred[], 
+	string $assets[],
+	string $furExportData[]
+)
+{
+	global int $gFurExportMode;
+	global string $gFurExportList;
+	global string $gTaskType;
+
+	string $selectiveFurExportList[];
+
+	if ($gFurExportMode == 2)
+	{
+		tokenize ($gFurExportList,",",$selectiveFurExportList);	
+	}
+
+	string $outNamespaces[];
+	string $outRefNodes[];
+	string $outAssets[];
+	int $outDeferred[];
+
+	for ($i=0;$i<size($assets) && size ($furExportData); $i ++)
+	{
+		string $assetName = getPath ("AssetNameFromFilename",{$assets[$i]});
+		int $index = stringArrayFindIndex ($assetName,$furExportData);
+
+		if ($index == -1)
+		{
+			print ($gTaskType+": "+$assetName+" is not designated as a fur exporting asset. Removing from export list.\n");
+			continue;
+		}
+		// run it through the selective filter if required
+		if ($gFurExportMode == 2)
+		{
+			if (stringArrayFindIndex ($assetName,$selectiveFurExportList) == -1)
+			{
+				print ($gTaskType+": Selective mode - "+$assetName+" removed from export list.\n");
+				continue;
+			}
+		}
+		// check file list
+		if (!`filetest -f $furExportData[$index+1]`)
+		{
+			print ($gTaskType+": "+$furExportData[$index+1]+" doesn't exist. Removing from export list.\n");
+			continue;
+		}
+		
+		// add to the output lists
+		int $c = size ($outNamespaces);
+		$outNamespaces[$c] = $namespaces[$i];
+		$outRefNodes[$c] = $refNodes[$i];
+		$outAssets[$c] = getPath ("ConformPath",{$assets[$i]});
+		$outDeferred[$c] = $deferred[$i];
+	}
+	$namespaces = $outNamespaces;
+	$refNodes = $outRefNodes;
+	$deferred = $outDeferred;
+	$assets = $outAssets;
+
+	return size ($namespaces);
+}
+// ---------------------------------------------------------------------------------------------------
+// buildFurExportPlaylist - build the fur export playlist xml
+// ---------------------------------------------------------------------------------------------------
+proc int buildFurExportPlaylist(
+	string $playlist,
+	string $furExportData[],
+	string $namespaces[],
+	string $assets[],
+	string $frameStr,
+	string $origRangeStr[]
+)
+{
+	global string $gSequence;	// The sequence
+	global string $gShot;		// The shot
+	global int $gIncrementVersion;	// increment version?
+
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global string $gFurSourceFile;		// Only meaningful in single frame mode
+	global string $gFurExportLocation;	// Only meaningful in single frame mode - where to write the files if not defined by the sequence and shot
+	global string $gFurPlaylistLocation;	// Only meaningful in single frame mode - where to put the playlist if not defined by the sequence and shot
+
+	global int $gFurExportWithMotionVectors;// Do motion blur?
+
+	global string $gFurOutputLocation;	// Alternative output location for shot based exports
+
+	string $xml;
+	int $jobCount = 0;
+	int $frames[] = stringToIntArray ($frameStr);
+	string $cacheOut;
+	string $verOut;
+	string $finalOut;
+	int $altOutput = (strip($gFurOutputLocation) != `workspace -q -act` && strip ($gFurOutputLocation) != "");
+	int $motionExpFrames[]; // frames (playlist relative) that need to be processed by FurMotionExport
+
+	$xml = "<Playlist>\n";
+
+	if ($gFurSingleFrameMode)
+	{
+		$cacheOut = "<CacheOutput location=\""+getPath ("ConformPath",{$gFurExportLocation})+"/";
+		$verOut = "<VersionOutput location=\""+getPath ("ConformPath",{$gFurExportLocation})+"/";
+		$finalOut = "<FinalOutput location=\""+getPath ("ConformPath",{$gFurExportLocation})+"/";
+	}
+	else
+	{
+		if ($altOutput)
+		{
+			$cacheOut = "<CacheOutput location=\""+$gFurOutputLocation+"/seq"+$gSequence+"/sg"+$gShot+"/cache/fur"; 
+			$verOut = "<VersionOutput location=\""+$gFurOutputLocation+"/seq"+$gSequence+"/sg"+$gShot+"/cache/fur"; 
+		}
+		else
+		{
+			$cacheOut = "<CacheOutput location=\""+getPath("ShotBase",{$gSequence,$gShot})+"/cache/fur"; 
+			$verOut = "<VersionOutput location=\""+getPath("ShotBase",{$gSequence,$gShot})+"/cache/fur"; 
+		}
+		$finalOut = "<FinalOutput location=\""+getPath("ShotBase",{$gSequence,$gShot})+"/cache/fur"; 
+	}
+	// for each asset and for each frame create a sub-job
+	for ($i=0;$i<size($assets);$i++)
+	{
+		string $assetName = getPath ("AssetNameFromFilename",{$assets[$i]});
+		string $assetType = getPath ("AssetTypeFromFilename",{$assets[$i]});
+		string $filename = "";
+		int $prev = -9999;	
+		// find exporter file name
+		if ($gFurSingleFrameMode)
+		{
+			$filename = $furExportData[1];
+		}
+		else
+		{
+			int $index = stringArrayFindIndex ($assetName,$furExportData);
+			$filename = $furExportData[$index+1];
+		}
+		
+		// complete location
+		string $thisCacheOut = "";
+		if ($gFurSingleFrameMode)
+			$thisCacheOut = $cacheOut + "\" />";
+		else
+			$thisCacheOut = $cacheOut +"/"+$namespaces[$i]+"\" />";
+
+		// complete version location
+		string $thisVerOut = "", $thisFinalOut = "";
+		if ($gFurSingleFrameMode)
+		{
+			$thisVerOut = $verOut + "versions\" />";
+			$thisFinalOut = $finalOut + "versions\" />";;
+		}
+		else
+		{
+			string $version = getVersion ("ShotFur",{$gSequence,$gShot,$namespaces[$i]});
+			int $newVer = ((int)$version)+($gIncrementVersion>0 || $version == "0000");
+			$thisVerOut = $verOut + "/"+$namespaces[$i]+"/versions/"+padNumber ($newVer,4)+"\" />";
+			$thisFinalOut = $finalOut + "/"+$namespaces[$i]+"/versions/"+padNumber ($newVer,4)+"\" />";
+		}
+		
+
+		// create a sub-job for each frame
+		for ($j=0;$j<size($frames);$j++)
+		{
+			int $frameNum = $frames[$j];
+			if ($frameNum > $prev+1 && $gFurExportWithMotionVectors)
+			{
+				// Add an extra frame for motion vector generation
+				$frameNum--;
+				$j--;
+			}
+			else
+			{
+				$motionExpFrames[size($motionExpFrames)] = $jobCount;
+			}
+			$xml += "\t<Job frame=\""+$frameNum+"\" >\n";
+			$xml += "\t\t"+$thisCacheOut+"\n";
+			$xml += "\t\t"+$thisVerOut+"\n";
+			$xml += "\t\t"+$thisFinalOut+"\n";
+			$xml += "\t\t<Asset name=\""+$assetName+"\" type=\""+$assetType+"\" namespace=\""+$namespaces[$i]+"\" filename=\""+$filename+"\" />\n";
+			$xml += "\t</Job>\n";
+	
+			$jobCount ++;
+			$prev = $frameNum;
+		}
+		
+	}
+	
+	$xml += "</Playlist>\n";
+	writeFile ($playlist,$xml);
+
+	// convert $motionExpFrames - an int array of the frames FurMotionExport needs to process into a range string.
+	$origRangeStr[0] = intArrayToString ($motionExpFrames);
+
+	return $jobCount;
+}
+// ---------------------------------------------------------------------------------------------------
+proc int submit_furExport (string $args, int $jobCount, string $playlist)
+{
+	global string $gSequence;	// The sequence
+	global string $gShot;		// The shot
+	global string $gCluster;	// The cluster to send fur export processes to
+	global int $gPriority;		// Priority to submit point cache export processes at
+	global int $gFrameToCpuRatio;	// For every N frames allocate 1 cpu for furExport process
+	global int $gMaxCpus;		// Maximum cpus to allocate for furExport process
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global int $gPointCacheJob;	// Job number of the PointCacheExport process to wait for. If 0 don't wait for anything
+	global int $gFurDebug;
+	global string $gFurExportJobName;
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global int $gFurExportWithMotionVectors;// Do motion blur?
+
+	global string $gTaskType;
+
+	// Add necessary items to argList for FurExport.mel
+	$args = editArgList ($args,"furexportmotionvectors",$gFurExportWithMotionVectors);
+	$args = editArgList ($args,"playlist",$playlist);	// the playlist file to use
+	if ($jobCount > 1)
+		$args = editArgList($args,"playlistItem","QB_FRAME_NUMBER");
+	else
+		$args = editArgList($args,"playlistItem","0");
+
+	string $jobName;
+	if ($gFurSingleFrameMode)
+		$jobName = $gHost+"_FurExport_"+$gFurExportJobName;
+	else
+		$jobName = $gHost+"_FurExport_"+$gSequence+"_"+$gShot;
+
+	string $range = ($jobCount > 1)?("0-"+($jobCount-1)):"";
+	
+	// calculate number of cpus to use 
+	int $nCpus = $jobCount / $gFrameToCpuRatio;
+	$nCpus = ($nCpus > $gMaxCpus)?$gMaxCpus:$nCpus;
+	$nCpus = ($nCpus == 0)?1:$nCpus;
+
+	// If there is a point cache job, we must wait for it
+	string $extraQubeArgs = "";
+	if ($gPointCacheJob != 0)
+		$extraQubeArgs = "--waitfor "+$gPointCacheJob;	
+
+	string $melCmd = "FurExport (\\\\\\\\\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\\\\\\\\\")";
+	
+	string $mayaCmd = "-command \""+$melCmd+"\"";
+	
+	// specify sequence and shot for rfxmaya
+	string $extraRfxMayaArgs;
+	if ($gFurSingleFrameMode != 1)
+		$extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+
+	if ($gFurDebug)
+	{
+		print ($gTaskType+": DEBUG mode. Skipping fur export!\n");
+		return 0;
+	}
+
+	int $jobNumber = submitMaya (
+		$jobName,		// name of the job 
+		$nCpus,			// number of cpus to use - only meaningful if range is set to something
+		($gPriority+2),		// priority to submit at
+		$range,			// range for jobs which have sub-jobs, e.g. Point Cache export
+		$gCluster,		// cluster to submit to
+		"",			// qube pre-exec callback
+		"",			// qube post-exec callback
+		$extraQubeArgs,		// any extra qube args to add
+		true,			// use rfxmaya?
+		false,			// use the maya Render command
+		$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+		$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+	);
+
+	return $jobNumber;
+}
+// ---------------------------------------------------------------------------------------------------
+proc int submit_motionExport (string $args, int $waitFor, string $playlist, string $range)
+{
+	global string $gSequence;	// The sequence
+	global string $gShot;		// The shot
+	global string $gMotionCluster;	// The cluster to send FurMotionExport process to
+	global int $gMotionPriority;	// Priority at which to submit FurMotionExport
+	global int $gFrameToCpuRatio;	// For every N frames allocate 1 cpu for furExport process
+	global int $gMaxCpus;		// Maximum cpus to allocate for furExport process
+	global int $gMotionExportMaxCpus;	// Maximum cpus to allocate for furMotionExport process
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global int $gPointCacheJob;	// Job number of the PointCacheExport process to wait for. If 0 don't wait for anything
+	global int $gFurDebug;
+	global string $gFurExportJobName;
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+
+	global string $gTaskType;
+
+	// Add necessary items to argList for FurMotionExport.mel
+	$args = editArgList ($args,"playlist",$playlist);	// the playlist file to use
+	$args = editArgList($args,"playlistItem","QB_FRAME_NUMBER");
+	
+
+	string $jobName = $gHost+"_FurMotionExport_"+$gSequence+"_"+$gShot;
+
+	int $jobCount = size (stringToIntArray($range));
+	
+	// calculate number of cpus to use 
+	int $nCpus = $jobCount / $gFrameToCpuRatio;
+	$nCpus = ($nCpus > $gMotionExportMaxCpus)?$gMotionExportMaxCpus:$nCpus;
+	$nCpus = ($nCpus == 0)?1:$nCpus;
+
+	// Wait for the FurExport process
+	string $extraQubeArgs = "--waitfor "+$waitFor;	
+
+	string $melCmd = "FurMotionExport (\\\\\\\\\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\\\\\\\\\")";
+	
+	string $mayaCmd = "-command \""+$melCmd+"\"";
+	
+	// specify sequence and shot for rfxmaya
+	string $extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+
+	if ($gFurDebug)
+	{
+		print ($gTaskType+": DEBUG mode. Skipping motion export!\n");
+		return 0;
+	}
+
+	int $jobNumber = submitMaya (
+		$jobName,		// name of the job 
+		$nCpus,			// number of cpus to use - only meaningful if range is set to something
+		($gMotionPriority+1),	// priority to submit at
+		$range,			// range for jobs which have sub-jobs, e.g. Point Cache export
+		$gMotionCluster,	// cluster to submit to
+		"",			// qube pre-exec callback
+		"",			// qube post-exec callback
+		$extraQubeArgs,		// any extra qube args to add
+		true,			// use rfxmaya?
+		false,			// use the maya Render command
+		$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+		$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+	);
+
+	return $jobNumber;
+}
+// ---------------------------------------------------------------------------------------------------
+proc int submit_postExport (string $args, int $waitFor, string $playlist)
+{
+	global string $gSequence;	// The sequence
+	global string $gShot;		// The shot
+	global string $gMotionCluster;	// The cluster to send FurMotionExport process to
+	global int $gMotionPriority;	// Priority at which to submit FurMotionExport
+	global int $gFrameToCpuRatio;	// For every N frames allocate 1 cpu for furExport process
+	global int $gMaxCpus;		// Maximum cpus to allocate for furExport process
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global int $gPointCacheJob;	// Job number of the PointCacheExport process to wait for. If 0 don't wait for anything
+	global int $gFurDebug;
+	global string $gFurExportJobName;
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+
+	global int $gFurExportWithMotionVectors;// Do motion blur?
+
+	global string $gTaskType;
+
+	// Add necessary items to argList for FurPostExport.mel
+	$args = editArgList ($args,"playlist",$playlist);	// the playlist file to use
+	$args = editArgList ($args,"furexportmotionvectors",$gFurExportWithMotionVectors);
+	
+	string $jobName = $gHost+"_FurPostExport_"+$gSequence+"_"+$gShot;
+
+	// Wait for the FurExport or if applicable, the FurMotionExport process
+	string $extraQubeArgs = "--waitfor "+$waitFor;	
+
+	string $melCmd = "FurPostExport (\\\\\\\\\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\\\\\\\\\")";
+	
+	string $mayaCmd = "-command \""+$melCmd+"\"";
+	
+	// specify sequence and shot for rfxmaya
+	string $extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+
+	if ($gFurDebug)
+	{
+		print ($gTaskType+": DEBUG mode. Skipping post export!\n");
+		return 0;
+	}
+
+	int $jobNumber = submitMaya (
+		$jobName,		// name of the job 
+		1,			// number of cpus to use - only meaningful if range is set to something
+		$gMotionPriority,	// priority to submit at
+		"",			// range for jobs which have sub-jobs, e.g. Point Cache export
+		$gMotionCluster,	// cluster to submit to
+		"",			// qube pre-exec callback
+		"",			// qube post-exec callback
+		$extraQubeArgs,		// any extra qube args to add
+		true,			// use rfxmaya?
+		false,			// use the maya Render command
+		$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+		$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+	);
+
+	return $jobNumber;
+}
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+global proc int do_furPreExport (int $jobData[], string $args)
+{
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;		// The sequence
+	global string $gShot;		// The shot
+	global string $gCluster;		// The cluster to send fur export processes to
+	global int $gPriority;		// Priority to submit point cache export processes at
+	global int $gFurExportMode;	// Fur Cache Export mode - 0 = none, 1 = all, 2 = selective
+	global int $gPointCacheJob;	// Job number of the PointCacheExport process to wait for. If 0 don't wait for anything
+	global string $gFurExportList;	// List of assets to export point cache for (if mode is selective)
+	global int $gFrameToCpuRatio;	// For every N frames allocate 1 cpu for furExport process
+	global int $gMaxCpus;		// Maximum cpus to allocate for furExport process
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global int $gFrameOverrideStart;// Use this start frame instead of frame range from Insight.
+	global int $gFrameOverrideEnd;	// Use this end frame instead of frame range from Insight.
+	global string $gFrames;		// scattered frames option
+
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global string $gFurSourceFile;		// Only meaningful in single frame mode
+	global string $gFurExportLocation;	// Only meaningful in single frame mode - where to write the files if not defined by the sequence and shot
+	global string $gFurPlaylistLocation;	// Only meaningful in single frame mode - where to put the playlist if not defined by the sequence and shot
+
+	global int $gFurExportWithMotionVectors;// Do motion blur?
+
+	global string $gTaskType = "FurPreExport";
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskConfig;		// Config file for this task	
+
+	global int $gFurDebug;			// debugging - if set go as far as exporting playlist, then quit without submitting to farm
+
+	// ------------------------------------------------------
+	// local variables
+	// ------------------------------------------------------
+	string $shotDir,$shotInfoDir,$aniFile,$playlist,$frames;
+	string $furExportData[];
+	string $origRangeStr[];	// range string for FurMotionExport - includes all playlist items except for those added
+				// for motion blur
+
+	if ($gFurSingleFrameMode)
+	{
+		$playlist = $gFurPlaylistLocation+"/FurExport_playlist.xml";
+		$frames = "0";
+	}
+	else
+	{
+		// shot mode
+		$shotDir = getPath ("ShotBase",{$gSequence,$gShot});
+		$shotInfoDir = getPath ("ShotInfoDir",{$gSequence,$gShot});
+		$aniFile = $shotDir+"/"+$gSequence+"_"+$gShot+"_"+(($gParentTaskType == "AnimationSubmission")?"ani":"lay")+".ma";
+		$playlist = $shotInfoDir+"/FurExport_playlist.xml";
+	}
+
+	string $namespaces[],$refNodes[],$assets[];
+	int $deferred[];
+
+
+	// Are we exporting fur?
+	if ($gFurExportMode == 0 || $gParentTaskType == "LayoutSubmission")
+	{
+		print ($gTaskType+": furExportMode is set to OFF. Skipping.\n");
+		return true;	
+	}
+
+	// -------------------------------------------------
+	/*
+		Read the project wide fur export list (list defining what assets need fur export)
+		Data is returned in this order: For each asset - the type, the name, and the filename.
+	*/
+	// -------------------------------------------------
+	if ($gFurSingleFrameMode)
+	{
+		// build fur export data from single frame info
+		$furExportData[0] = getPath ("AssetNameFromFilename",{$gFurSourceFile});
+		$furExportData[1] = getPath ("ConformPath",{$gFurSourceFile});
+	}
+	else
+	{
+		print ($gTaskType+": Reading project globals.\n\n");
+		$furExportData = getFurExportData();
+	}
+	
+
+	// -------------------------------------------------
+	/*
+		Get asset list from ani file directly
+	*/
+	// -------------------------------------------------
+	if ($gFurSingleFrameMode)
+	{
+		$namespaces[0] = "";
+		$assets[0] = getPath ("ConformPath",{$gFurSourceFile});
+	}
+	else
+	{
+		print ($gTaskType+": Reading asset list from "+$aniFile+".\n\n");
+		assetListFromMa( $aniFile,$namespaces, $refNodes, $deferred, $assets ); 
+	}	
+
+	// -------------------------------------------------
+	/*
+		Find out if anything needs fur exporting for this shot
+	*/
+	// -------------------------------------------------
+	if (!$gFurSingleFrameMode)
+	{
+		print ($gTaskType+": Searching for assets requiring Fur export for shot "+$gSequence+"_"+$gShot+".\n\n");
+	
+		string $allAssets[] = $assets;	// back this up - it will be needed later in building the lookup table
+	
+		int $numAssets = filterAssetList(
+			$namespaces, 
+			$refNodes, 
+			$deferred, 
+			$assets,
+			$furExportData);
+	
+		
+		if (!$numAssets)
+		{
+			print ($gTaskType+": No assets need fur export for shot "+$gSequence+"_"+$gShot+".\n\n");
+			return true;	
+		}
+	
+		
+		print ("\n"+$gTaskType+": Found the following assets for fur export.\n\n");
+		print $assets;
+		print ("\n");
+	}
+
+	// -------------------------------------------------
+	/*
+		Get the frame range 
+	*/
+	// -------------------------------------------------
+	if (!$gFurSingleFrameMode)
+	{
+		print ($gTaskType+": Getting frame range ...\n");
+		
+		$frames = getFrameRange();
+		if ($frames == "")
+		{
+			print ($gTaskType+": Unable to retrieve frame range. Can't continue.\n");
+			return false; 
+		}
+	}
+
+	// -------------------------------------------------
+	/*
+		Build export playlist
+	*/
+	// -------------------------------------------------
+	print ($gTaskType+": Building export playlist. \n");
+	int $jobCount = buildFurExportPlaylist ($playlist, $furExportData,$namespaces,$assets,$frames, $origRangeStr);
+
+	
+	// to-do: Check that it made it.
+
+	// -------------------------------------------------
+	/*
+		Submit the export job
+	*/
+	// -------------------------------------------------
+
+	
+	print ($gTaskType+": Submitting fur export process. \n");
+	int $jobNumber = submit_furExport ($args, $jobCount, $playlist);
+	print ($gTaskType+": Job Number: "+$jobNumber+"\n");
+
+	// -------------------------------------------------
+	/*
+		If we are doing a motion vector pass, submit it
+	*/
+	// -------------------------------------------------
+	if ($gFurExportWithMotionVectors)
+	{
+		print ($gTaskType+": Submitting fur motion export process. \n");
+		$jobNumber = submit_motionExport ($args, $jobNumber, $playlist,$origRangeStr[0]);
+		print ($gTaskType+": Job Number: "+$jobNumber+"\n");
+	}
+	// -------------------------------------------------
+	/*
+		Unless we are in single frame mode, submit the PostExport pass
+	*/
+	// -------------------------------------------------
+	if (!$gFurSingleFrameMode)
+	{
+		print ($gTaskType+": Submitting post export process. \n");
+		$jobNumber = submit_postExport ($args, $jobNumber, $playlist);
+		print ($gTaskType+": Job Number: "+$jobNumber+"\n");
+	}
+
+	print ($gTaskType+": DONE.\n");
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc int [] FurPreExport(string $args) 
+{
+	loadDependencies();
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;		// The sequence
+	global string $gShot;		// The shot
+	global string $gCluster;		// The cluster to send fur export processes to
+	global int $gPriority;		// Priority to submit fur export processes at
+	global string $gMotionCluster;	// The cluster to send FurMotionExport process to
+	global int $gMotionPriority;	// Priority at which to submit FurMotionExport
+	global int $gFurExportMode;	// Fur Cache Export mode - 0 = none, 1 = all, 2 = selective
+	global int $gPointCacheJob;	// Job number of the PointCacheExport process to wait for. If 0 don't wait for anything
+	global int $gPointCacheMode;	// Point Cache Export mode - 0 = none, 1 = all, 2 = selective. If we are not exporting point cache, no fur export?
+	global string $gFurExportList;	// List of assets to export point cache for (if mode is selective)
+	global int $gFrameToCpuRatio;	// For every N frames allocate 1 cpu for furExport process
+	global int $gMaxCpus;		// Maximum cpus to allocate for furExport process
+	global int $gMotionExportMaxCpus;	// Maximum cpus to allocate for furMotionExport process
+	global string $gHost;		// Who is calling this process? "insight" or "maya"
+	global string $gEmailNotify;	// Person to email if something goes wrong. Not implemented yet.
+	global int $gFrameOverrideStart;// Use this start frame instead of frame range from Insight.
+	global int $gFrameOverrideEnd;	// Use this end frame instead of frame range from Insight.
+	global string $gFrames;		// scattered frames option
+	global int $gIncrementVersion;	// increment version?
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global string $gFurSourceFile;		// Only meaningful in single frame mode
+	global string $gFurExportLocation;	// Only meaningful in single frame mode - where to write the files if not defined by the sequence and shot
+	global string $gFurOutputLocation;	// Alternative output location for shot based exports
+	global string $gFurPlaylistLocation;	// Only meaningful in single frame mode - where to put the playlist if not defined by the sequence and shot
+	global string $gFurExportJobName;	// A job name for the FurExport process (only meaningful in single frame mode)
+	global int $gFurExportWithMotionVectors;// Do motion blur?
+
+	global string $gTaskType;
+	global string $gParentTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global string $gTaskConfig;		// Config file for this task	
+
+	global int $gFurDebug;			// debugging - if set go as far as exporting playlist, then quit without submitting to farm
+
+	// ------------------------------------------------------
+	// get farm defaults
+	// ------------------------------------------------------
+	string $defaultCluster[];
+	int $defaultPriority[];
+
+	getFarmClusters ($defaultCluster,$defaultPriority);
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gTaskType = "FurPreExport";
+	$gParentTaskType = getArgValue ($args,"parentTaskType");
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gTaskConfig = getArgValueDefault ($args,"taskConfig",getConfig());
+
+	$args = argListMergeWithConfig ($args,$gTaskConfig);	// embed default arg values in config into args
+
+	
+	$gCluster = $defaultCluster[4];	// fur export cluster
+	$gPriority = $defaultPriority[4];
+	//$gMotionCluster = $defaultCluster[0]; // process cluster
+	//$gMotionPriority = $defaultPriority[0];	
+	$gMotionCluster = $defaultCluster[4]; // Send motion export to fur export cluster also.
+	$gMotionPriority = $defaultPriority[4];
+	$gFurExportMode = (int)getArgValue ($args,"furExportMode");
+	$gPointCacheJob = (int)getArgValue ($args,"pointCacheJob");
+	$gFurExportList = getArgValue ($args,"furExportList");
+	$gFrameToCpuRatio = (int)getArgValue ($args,"frameToCpuRatio");
+	$gMaxCpus = (int)getArgValue ($args,"maxCpus");
+	$gMotionExportMaxCpus = (int)getArgValue ($args,"maxMotionExportCpus");
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gFrameOverrideStart = (int)getArgValue ($args,"frameOverrideStart");
+	$gFrameOverrideEnd = (int)getArgValue ($args,"frameOverrideEnd");
+	$gFrames = getArgValue ($args,"furframes");
+	$gIncrementVersion = (int)getArgValueDefault ($args,"furincrementVersion","1");
+	$gFurSingleFrameMode = (int)getArgValueDefault ($args,"fursingleframemode","0");
+	$gFurSourceFile = getArgValue ($args,"fursourcefile");
+	$gFurExportLocation = getArgValue ($args,"furexportlocation");
+	$gFurOutputLocation = getArgValueDefault ($args,"outputlocation",`workspace -q -act`);
+	$gFurPlaylistLocation = getArgValue ($args,"furplaylistlocation");
+	$gFurDebug = (int)getArgValueDefault ($args,"furdebug","0");
+	$gFurExportJobName = getArgValue ($args,"furexportjobname");
+	$gFurExportWithMotionVectors = (int)getArgValueDefault($args,"furexportmotionvectors","1");
+
+	if ($gFurSingleFrameMode)
+	{
+		$gSequence = "000";
+		$gShot = "0000";
+		$gFurExportWithMotionVectors = false;
+		$gFurOutputLocation = "";
+	}
+	else
+	{
+		$gFurOutputLocation = getPath ("ConformPath",{$gFurOutputLocation});
+	}
+	
+	int $jobData[];	// job data to return to calling process - job number and number of sub-jobs
+
+	// testing 
+	//$gFurDebug = true;
+
+	do_furPreExport ($jobData, $args);
+
+	return $jobData;
+}

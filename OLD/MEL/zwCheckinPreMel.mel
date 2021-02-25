@@ -1,0 +1,362 @@
+// Checkin之前出各种各样的confirmDialog
+global proc int zwCheckinPreMel(string $version, string $args[])
+{
+	int $rs = true;
+
+	string $project		= $args[0];
+	string $asset_type	= $args[1];
+	string $path		= $args[2];
+	string $mode		= $args[3];
+
+// 前期
+	if (($project == "DiveollyDive2" || $project == "Lionelville" || $project == "Strawberry") && $mode == "texture")
+	{
+		$rs = $rs && zwPreCheckinCheckTx();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+	// 有place3dTexture节点，警告
+	if ($mode == "texture")
+	{
+		$rs = $rs && zwPreCheckinCheckPlace3dTexture();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+	// 前期文件大小异常，警告
+	$rs = $rs && zwPreCheckinCheckSize($project, $asset_type, $path);
+	if (!$rs)
+	{
+		return $rs;
+	}
+
+	// rigging、master文件有keyframe，警告
+	if ($mode == "rigging" || $mode == "master")
+	{
+		$rs = $rs && zwPreCheckinCheckAnimCurve();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+// 动画
+	// 摄像机离原点过远，警告
+	if (!(zwIsRainbowProject($project) || ($project == "ChangBaiShan" || $project == "EarthQuake")))
+	{
+	//	$rs = $rs && zwPreCheckinCheckCameraPosition();
+		zwImportModule("idmt.maya.camera", true);
+		int $CheckPosition = `python "idmt.maya.camera.CheckPosition()"`;
+		$rs = $rs && $CheckPosition;
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+	// 动画使用了导入，警告
+	if ($mode == "anim" || $mode == "layout")
+	{
+		$rs = $rs && zwPreCheckinCheckImport();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+	// WinxClubII, anim, layout：不能有二次参考；没有参考出警告
+	if (zwIsRainbowProject($project) && ($mode == "animation" || $mode == "layout"))
+	{
+		$rs = $rs && zwPreCheckinCheckReference();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+	
+	if ($project == "BubbleGuppies")
+	{
+		$rs = $rs && yyPreCheckinCheckMiddleKeyOnMouth();
+		if (!$rs)
+		{
+			return $rs;
+		}
+	}
+
+	// WinxClubII, animation_xxx_DYN.mb，所有头发系统必须建立缓存，否则警告
+	if (zwIsRainbowProject($project) && $mode == "animation")
+	{
+		string $sceneName = `file -query -sceneName`;
+		$sceneName = `match "[^/\\]+$" $sceneName`;
+		if (`match "_DYN[._]" $sceneName` != "")
+		{
+			$rs = $rs && zwPreCheckinCheckWinxDiskCache();
+			if (!$rs)
+			{
+				return $rs;
+			}
+		}
+	}
+
+	if (zwIsRainbowProject($project) && $mode == "animation")
+	{
+		string $xmlFolder = `file -query -sceneName`;
+		$xmlFolder = `substitute "/[^/]+$" $xmlFolder ""`;
+		string $xmls[] = `getFileList -filespec ($xmlFolder + "/*.xml")`;
+		if (size($xmls) == 0)
+		{
+			string $message = "上传animation 文件需要附带xml 文件，文件夹里没有找到任何xml 文件\n\n点 Continue 继续，点 Cancel 取消Checkin\n";
+			string $result = `confirmDialog -message $message -button "Continue" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+			if ($result == "Cancel")
+			{
+				$rs = false;
+			}
+		}
+	}
+
+	return $rs;
+}
+
+global proc int zwPreCheckinCheckTx()
+{
+	int $rs = true;
+
+	string $message = "不带设置的tx(场景道具)上传可能会覆盖带有设置的master文件，请谨慎确定后上传\n\n点 Continue 继续，点 Cancel 取消Checkin\n";
+	string $result = `confirmDialog -message $message -button "Continue" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+	if ($result == "Cancel")
+	{
+		$rs = false;
+	}
+
+	return $rs;
+}
+
+// 有place3dTexture节点，警告
+global proc int zwPreCheckinCheckPlace3dTexture()
+{
+	int $rs = true;
+
+	string $buf[] = `ls -type "place3dTexture"`;
+	if (size($buf))
+	{
+		string $message = "场景中有place3dTexture节点，是否继续？\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+// 20080826
+// 赵志杰(赵志杰) 14:07:05
+// 关于前期角色文件有时候由于整理不彻底导致文件量过大（超出平均大小）的问题，我计划在checkin的时候先给个提示（“文件大小异常，是否继续？”），如果制作者仍然坚持上传，则该文件在上传后，会同时通知前期环节TD（朱健）检查。
+// 先从bu项目试用，如果效果不错就推广到其他项目。
+// 你们觉得如何？
+// 赵志杰(赵志杰) 14:10:36
+// ok，文件检查值设成20m吧，超过20m预警。在rg/ms环节检查。
+global proc int zwPreCheckinCheckSize(string $project, string $asset_type, string $path)
+{
+	int $rs = true;
+
+	int $limit;
+	if ($asset_type == "characters")
+	{
+		$limit =  20;
+	}
+	else if (`match "environment" $asset_type` != "")
+	{
+		$limit =  80;
+	}
+	else if ($asset_type == "sets")
+	{
+		$limit =  120;
+	}
+	else if ($asset_type == "props")
+	{
+		$limit =  10;
+	}
+	else
+	{
+		return $rs;
+	}
+
+	int $size = `idmtFile -size $path`;
+	$size = $size / 1000000;
+	if ($size > $limit)
+	{
+		string $limitSets = 80;
+		if ($project == "Enyo")
+		{
+			$limitSets = 120;
+		}
+
+		string $message = "文件大小异常，是否继续？点 Cancel 返回检查处理，点 Ignore 忽略继续\n\n（文件大小：" + $size + "M，异常的定义：角色 > 20M，场景 > " + $limitSets + "M，道具 > 10M）\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+// rigging、master文件有keyframe，警告
+global proc int zwPreCheckinCheckAnimCurve()
+{
+	int $rs = true;
+
+	int $find = false;
+	string $animCurves[] = `ls -type "animCurve"`;
+	for ($animCurve in $animCurves)
+	{
+		string $connections[] = `listConnections -source true -destination false $animCurve`;
+		if (!size($connections))	// 排除set driven key
+		{
+			int $keyframeCount = `keyframe -query -keyframeCount $animCurve`;
+			if ($keyframeCount > 1)
+			{
+			//	$find = true;
+				string $attrs[] = `listConnections -source false -destination true -plugs true $animCurve`;
+				for ($attr in $attrs)
+				{
+					$find = true;
+					warning ("有keyframe：" + $attr);
+				}
+			}
+		}
+	}
+	if ($find)
+	{
+		string $message = "前期文件通常不应该有keyframe，有keyframe的属性已经列在Script Editor\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+// 摄像机离原点过远，警告
+global proc int zwPreCheckinCheckCameraPosition()
+{
+	eval "source zwCameraImportExport.mel";
+
+	int $rs = true;
+
+	string $camera = zwCheckCameraPositionEx("");
+	if ($camera != "")
+	{
+		string $message = "摄像机 " + $camera + " 离原点过远，这可能会导致渲染问题，建议往原点靠拢\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+// 20080729
+// 王俊超(王俊超) 20:09:00
+// 动画在上传文件时有些东西应该是参考的，但在制作中因为某些原因将其导入，最后切文件时又忘记了，流到后面环节会对他们造成不良影响。动画希望在切文件的过程中会有一个提示，如×××是导入，请问是否忽略的字样。
+global proc int zwPreCheckinCheckImport()
+{
+	int $rs = true;
+
+	string $buf[] = `ls "*_GEO.version" "*:*_GEO.version" "*_geo.version" "*:*_geo.version" "*_MASTER.version" "*:*_MASTER.version"`;
+	for ($node in $buf)
+	{
+		if (!`reference -query -isNodeReferenced $node`)
+		{
+			string $message = "场景中有导入的物体，点 Cancel 返回检查处理，点 Ignore 忽略继续\n\n" + `substitute "[.]version$" $node ""` + "\n";
+			string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -button "Ignore All" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+			if ($result == "Cancel")
+			{
+				$rs = false;
+				break;
+			}
+			else if ($result == "Ignore All")
+			{
+				$rs = true;
+				break;
+			}
+		}
+	}
+
+	return $rs;
+}
+
+// WinxClubII, anim, layout：不能有二次参考；没有参考出警告
+global proc int zwPreCheckinCheckReference()
+{
+	int $rs = true;
+
+// commented by huangzhongwei@idmt, 20090122, 何子力说不需要检查sets的二次参考
+//	zwCheckTopReference;
+	if (size(`file -query -reference`) == 0)
+	{
+		string $message = "没有使用参考，是否继续？\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+// WinxClubII, animation_xxx_DYN.mb，所有头发系统必须建立缓存，否则警告
+global proc int zwPreCheckinCheckWinxDiskCache()
+{
+	int $rs = true;
+
+	string $msg = "";
+	string $hairSystems[] = `ls -type "hairSystem"`;
+	for ($hairSystem in $hairSystems)
+	{
+		if (!`connectionInfo -isDestination ($hairSystem + ".diskCache")`)
+		{
+			$msg += ("\n" + $hairSystem);
+		}
+	}
+	if ($msg != "")
+	{
+		warning ("以下头发系统没有建立缓存：" + $msg);
+
+		string $buf[];
+		if (`tokenize $msg "\n" $buf` > 20)
+		{
+			$msg = "\n具体信息已经打印在Script Editor.";
+		}
+		string $message = "以下头发系统没有建立缓存，是否继续？\n" + $msg + "\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n";
+		string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($result == "Cancel")
+		{
+			$rs = false;
+		}
+	}
+
+	return $rs;
+}
+
+global proc int yyPreCheckinCheckMiddleKeyOnMouth()
+{
+	int $rs = true;
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT/yyScripts/yyBUMuteMiddleOnMouth_Checkin.py\")");
+	$rs = python("yyBuMuteMiddleMouth_checkin()");
+
+	return $rs;
+}

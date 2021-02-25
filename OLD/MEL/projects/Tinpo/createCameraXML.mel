@@ -1,0 +1,184 @@
+// createCameraXML.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Creates the camera part of the shot group xml. Called by animation submission and post layout
+Use:
+	createCameraXML string $cameraList[]
+Options:
+	cameraList (string array)	- List of cameras
+	
+Dependancies:
+
+	findAllRFXCameras
+
+Documentation:
+
+Examples:
+
+Notes:
+	Tested on Maya5 Win2000 only and Maya7.01 P13 Linux
+	
+Bugs:
+
+Original:	05/23/05
+Revisions:	03/26/07	Rev 1.1
+		- Changing the behavior slightly: If a camera is an rfxCamera and has an imagePlane attached, imagePlane data is exported, regardless of whether RFXexportBgPlate
+		attribute exists. 
+		
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// current dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/createCameraXML.1.1.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc getCameraIndices(string $cameras[], int $indices[], string $shapes[])
+{
+	for ($i=0;$i<size($cameras);$i++)
+	{
+		//string $outConnection[] = `listConnections -s 0 -d 1 -p 1 ($cameras[$i]+".parentMatrix[0]")`;
+		string $outConnection[] = `listConnections -s 0 -d 1 -p 1 ($cameras[$i]+".translate")`;
+		int $match = -1;
+		for ($j=0;$j<size($outConnection);$j++)
+		{
+			string $tokens[];
+			tokenize ($outConnection[$j],".",$tokens);
+				
+			if (`nodeType $tokens[0]`=="choice")
+			{
+				$match = $j;
+				break;	
+			}
+		}
+		
+		if ($match == -1)
+			$indices[$i] = $i;	
+		else
+		{
+			string $plug = $outConnection[$match];
+			string $tokens[];	
+			tokenize ($outConnection[0],"[]",$tokens);
+			$indices[$i] = (int)$tokens[size($tokens)-1];	
+		}
+		
+		string $tmp[] = `listRelatives -s ($cameras[$i])`;
+		$shapes[$i] = $tmp[0];
+	}	
+} 
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+
+global proc string createCameraXML( string $cameraList[]) 
+{
+	loadDependencies();
+
+	// add cameras set to share bg plates to the cameraList
+	string $rfxCams[] = findAllRFXCameras (0);
+	for ($i=0;$i<size($rfxCams);$i++)
+	{
+		// bg sharing?
+		if (!`objExists ($rfxCams[$i]+".RFXexportBgPlate")`)
+			continue;
+			
+		if (stringArrayFindIndex($rfxCams[$i],$cameraList)==-1)
+			$cameraList[size($cameraList)] = $rfxCams[$i];	
+	}
+	
+	int $cameraIndices[];
+	string $cameraShapes[];
+	
+	getCameraIndices($cameraList, $cameraIndices, $cameraShapes);
+	
+	// get imagePlane info
+	int $bgPlate[];
+	string $imageName[];
+	float $offsetX[],$offsetY[];
+	float $sizeX[],$sizeY[];
+	float $depth[];
+	float $rotate[];
+	
+	for ($i=0;$i<size($cameraList);$i++)
+	{
+		// bgPlate attribute - set to 1 if the RFXexportBgPlate attribute exists and if an imagePlane can be found
+		// 03/26/07 - modified behavior:
+		/*
+			if camera is not an rfxCamera RFXexportBgPlate must be present
+			if camera is an rfxCamera and an imagePlane is attached, RFXexportBgPlate is implied
+		*/
+		string $imagePlane[] = `listConnections -s 1 -d 0 -type imagePlane ($cameraShapes[$i]+".imagePlane")`;
+		if (!size($imagePlane))
+		{
+			$bgPlate[$i] = 0;	
+			continue;
+		}
+
+
+		// ok the camera is set to share the image plane and an imageplane has been found. Ok to proceed
+		$bgPlate[$i] = 1;	
+		$imageName[$i] = `getAttr ($imagePlane[0]+".imageName")`;
+		$sizeX[$i] = `getAttr ($imagePlane[0]+".sizeX")`;
+		$sizeY[$i] = `getAttr ($imagePlane[0]+".sizeY")`;
+		$offsetX[$i] = `getAttr ($imagePlane[0]+".offsetX")`;
+		$offsetY[$i] = `getAttr ($imagePlane[0]+".offsetY")`;
+		$depth[$i] = `getAttr ($imagePlane[0]+".depth")`;
+		$rotate[$i] = `getAttr ($imagePlane[0]+".rotate")`;
+	}
+	
+	// create the xml
+	string $xml = "\t<Cameras>\n";
+	for ($i=0;$i<size($cameraList);$i++)
+	{
+		$xml+= "\t\t<Camera ";
+		$xml+= "Name=\""+$cameraList[$i]+"\" ";
+		$xml+= "ShapeName=\""+$cameraShapes[$i]+"\" ";
+		$xml+= "Index=\""+$cameraIndices[$i]+"\" ";
+		$xml+= "BgPlate=\""+$bgPlate[$i]+"\" ";
+		if ($bgPlate[$i])
+		{
+			$xml+= "imageName=\""+$imageName[$i]+"\" ";	
+			$xml+= "sizeX=\""+$sizeX[$i]+"\" ";	
+			$xml+= "sizeY=\""+$sizeY[$i]+"\" ";	
+			$xml+= "offsetX=\""+$offsetX[$i]+"\" ";	
+			$xml+= "offsetY=\""+$offsetY[$i]+"\" ";	
+			$xml+= "depth=\""+$depth[$i]+"\" ";	
+			$xml+= "rotate=\""+$rotate[$i]+"\" ";	
+		}
+		$xml += "/>\n";
+		
+	}
+	$xml += "\t</Cameras>\n";
+	
+	print $xml;
+	
+	/*
+	// debugging - print the info we have so far
+	for ($i=0;$i<size($cameraList);$i++)
+	{
+		print ("name = "+$cameraList[$i]);
+		print ("\t\tIndex = "+$cameraIndices[$i]);
+		print ("\t\tShape = "+$cameraShapes[$i]);
+		print ("\t\bgPlate = "+$bgPlate[$i]);
+		print ("\t\imageName = "+$imageName[$i]);
+		print ("\t\sizeX = "+$sizeX[$i]);
+		print ("\t\sizeY = "+$sizeY[$i]);
+		print ("\t\offsetX = "+$offsetX[$i]);
+		print ("\t\offsetY = "+$offsetY[$i]);
+		print ("\t\depth = "+$depth[$i]);
+		print ("\t\rotate = "+$rotate[$i]);
+		print ("\n");
+	}
+	*/
+	return $xml;
+}

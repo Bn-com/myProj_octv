@@ -1,0 +1,123 @@
+// create ncStereoCamSolve window
+//
+if(`window -exists ncStereoCamSolve`)deleteUI -window ncStereoCamSolve;
+
+string $window = `window -title "修复右眼相机"
+	-backgroundColor 0.4 0.2 0.75
+	ncStereoCamSolve`;
+columnLayout -w 500 -h 600 -adjustableColumn true -rs 5 -backgroundColor 0.571371 0.463284 0.757;
+
+
+	textFieldGrp -label "SQ:" -columnAttach 1 "left" 10 -columnAttach 2 "left" -80 -columnWidth 2 50
+	-backgroundColor 0.571371 0.463284 0.757 sqTextFieldGrp;
+
+	textFieldGrp -label "SC:" -columnAttach 1 "left" 10 -columnAttach 2 "left" -80 -columnWidth 2 50
+	-backgroundColor 0.571371 0.463284 0.757 scTextFieldGrp;
+
+	text -label ("请在新建的空白场景下使用，" + "\n" + "在上面填入要修复的立体相机的镜头号," + "\n" + "修复完成之后请自行保存文件和Checkin.") -h 50 -backgroundColor 0.571371 0.463284 0.757;
+
+	button -label "修复" -c ("ncStereoCamSolve();" + "\n" + "deleteUI -window " + $window)  -backgroundColor 0.4 0.7 0;
+	button -label "取消" -command ("deleteUI -window " + $window) -backgroundColor 0.7 0.7 0.7;
+setParent ..;
+showWindow ncStereoCamSolve;
+
+
+
+global proc ncStereoCamSolve(){
+// import related cameras
+	
+string $sq = `textFieldGrp -q -text sqTextFieldGrp`;
+string $sc = `textFieldGrp -q -text scTextFieldGrp`;
+
+string $cam_sq = $sq;
+string $cam_sc = $sc;
+string $cam_loc = ("//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $cam_sq + "/winxII_sq_" + $cam_sq + "_sc_" + $cam_sc + "/scenes/finishing/");
+
+string $cam_name_origin[] = `getFileList -folder $cam_loc -filespec "*_original_cam_*.mb"`;
+string $cam_name_stereo[] = `getFileList -folder $cam_loc -filespec "*_stereo_cam_*.mb"`;
+string $cam_name_idmt[] = `getFileList -folder $cam_loc -filespec "*CAM*.mb"`;
+
+file -import -type "mayaBinary" -ra true -rpr $cam_name_origin[0] -options "v=0"  -pr -loadReferenceDepth "all" ($cam_loc + $cam_name_origin[0]);
+file -import -type "mayaBinary" -ra true -rpr $cam_name_stereo[0] -options "v=0"  -pr -loadReferenceDepth "all" ($cam_loc + $cam_name_stereo[0]);
+file -import -type "mayaBinary" -ra true -options "v=0"  -pr -loadReferenceDepth "all" ($cam_loc + $cam_name_idmt[0]);
+
+select -r ("wx2_" + $cam_sq + "_" + $cam_sc + "_original_cam_all_" + "*" + "original" + "*");
+string $camNodeOrigin[] = `ls -sl -type transform`;
+select -r ("wx2_" + $cam_sq + "_" + $cam_sc + "_stereo_cam_all_" + "*" + "stereo" + "*");
+string $camNodeStereo[] = `ls -sl -type transform`;
+select -r ("finishing_" + $cam_sq + "_" + $cam_sc + "*_CAM_RendercamBake");
+string $camNodeIdmt[] = `ls -sl -type transform`;
+
+select -cl;
+
+string $rangeTemp = `match "1001_+[0-9]+" $camNodeOrigin[0]`;
+int $frameRangeLast = `substitute "1001_" $rangeTemp ""`;
+
+playbackOptions -min 1001 -max $frameRangeLast;
+currentTime 1001;
+//clear wrong stereo channels
+
+
+setAttr -k on -l off ($camNodeStereo[0] + ".rotateX");
+setAttr -k on -l off ($camNodeStereo[0] + ".rotateY");
+setAttr -k on -l off ($camNodeStereo[0] + ".rotateZ");
+setAttr -k on -l off ($camNodeStereo[0] + ".scaleX");
+setAttr -k on -l off ($camNodeStereo[0] + ".scaleY");
+setAttr -k on -l off ($camNodeStereo[0] + ".scaleZ");
+setAttr -k on -l off ($camNodeStereo[0] + ".translateX");
+setAttr -k on -l off ($camNodeStereo[0] + ".translateY");
+setAttr -k on -l off ($camNodeStereo[0] + ".translateZ");
+
+string $allAnimCurve[] = `listConnections -type animCurve $camNodeStereo`;
+for($animCurve in $allAnimCurve){
+	delete $animCurve;
+};
+
+
+
+//clear wrong original channels
+
+setAttr -k on -l off ($camNodeOrigin[0] + ".rotateX");
+setAttr -k on -l off ($camNodeOrigin[0] + ".rotateY");
+setAttr -k on -l off ($camNodeOrigin[0] + ".rotateZ");
+setAttr -k on -l off ($camNodeOrigin[0] + ".scaleX");
+setAttr -k on -l off ($camNodeOrigin[0] + ".scaleY");
+setAttr -k on -l off ($camNodeOrigin[0] + ".scaleZ");
+setAttr -k on -l off ($camNodeOrigin[0] + ".translateX");
+setAttr -k on -l off ($camNodeOrigin[0] + ".translateY");
+setAttr -k on -l off ($camNodeOrigin[0] + ".translateZ");
+
+
+string $allAnimCurve[] = `listConnections -type animCurve $camNodeOrigin`;
+for($animCurve in $allAnimCurve){
+	delete $animCurve;
+};
+
+
+// parent stereo to original
+
+parent $camNodeStereo[0] $camNodeOrigin[0] ;
+
+// parent original to IDMT left eye
+
+//(old method)parent $camNodeOrigin[0] $camNodeIdmt[0] ;
+
+select -r $camNodeIdmt[0] ;
+select -add $camNodeOrigin[0] ;
+parentConstraint -weight 1;
+
+// bake new stereo cam
+
+select -r $camNodeStereo[0];
+source zwCameraImportExport.mel; zwBakeCamera;
+
+// save out the new stereo cam
+select -cl;
+select -r $camNodeIdmt[0];
+select -add $camNodeOrigin[0];
+doDelete;
+select -r ("*" + $camNodeStereo[0] + "_baked") ;
+rename camera_stereoRx;
+
+// end of the proc
+};

@@ -1,0 +1,133 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwAddAmbient()
+{
+	string $amb_list[] = `ls -type ambientLight`;
+	int $size = `size $amb_list`;
+	if($size>0)
+	{
+		string $pma;
+		string $clamp;
+		if(`objExists AMBIENT_PMA`==0)
+		{
+			$pma = `createNode plusMinusAverage`;
+			$pma = `rename $pma "AMBIENT_PMA"`;
+			setAttr ($pma+".operation") 3;
+		}
+		if(`objExists AMBIENT_CLAMP`==0)
+		{
+			$clamp = `createNode clamp`;
+			$clamp = `rename $clamp "AMBIENT_CLAMP"`;
+			setAttr ($clamp+".maxR") 1;
+			setAttr ($clamp+".maxG") 1;
+			setAttr ($clamp+".maxB") 1;
+		}
+		if(`isConnected ("AMBIENT_PMA.output3D") ("AMBIENT_CLAMP.input")`==0)
+		{
+			connectAttr -f ("AMBIENT_PMA.output3D") ("AMBIENT_CLAMP.input");
+		}
+		for($a=0;$a<$size;$a++)
+		{
+			if(`isConnected ($amb_list[$a]+".color") ("AMBIENT_PMA.input3D["+$a+"]")`==0)
+			{
+				connectAttr -f ($amb_list[$a]+".color") ("AMBIENT_PMA.input3D["+$a+"]");
+			}
+		}
+
+		//GET COLOR FILES
+		string $shader_list[], $color_cons[];
+
+		//FIND ALL SHADERS OTHER THAN DEFAULT INITIAL SHADERS
+		string $se_list[] = `ls -type shadingEngine`;
+		string $mat_list[] = `ls -mat`;
+		int $j = 0;
+		for($i=0;$i<`size $se_list`;$i++)
+		{
+			if(`gmatch $se_list[$i] "initial*"`==0)
+			{
+				//MAKE SURE SHADER IS ASSIGNED TO SURFACES
+				string $mesh_check[] = `listConnections -type mesh $se_list[$i]`;
+				string $nurbs_check[] = `listConnections -type nurbsSurface $se_list[$i]`;
+				if(`size $mesh_check`>0||`size $nurbs_check`>0)
+				{
+					string $cons[] = `listConnections -s 1 -d 0 $se_list[$i]`;
+					for($con in $cons)
+					{
+						for($mat in $mat_list)
+						{
+							//FIND SHADER
+							if(`strcmp $con $mat`==0)
+							{
+								if(`connectionInfo -id ($con+".outColor")`)
+								{
+									$shader_list[$j] = $con;
+									$j++;
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		string $colorFile;
+		for($i=0;$i<`size $shader_list`;$i++)
+		{
+			//FIND CONNECTION TO SURFACE SHADER
+			if(`objExists ($shader_list[$i]+".outColor")`)
+			{
+				//print ("CHECKING SHADER: "+$shader_list[$i]+"\n");
+				$colorFile = `substitute "surfaceShader" $shader_list[$i] "colorFile"`;
+				if(`objExists ($colorFile+".colorGain")`)
+				{
+					if(`isConnected ("AMBIENT_CLAMP.output") ($colorFile+".colorGain")`==0)
+					{
+						//print ("CHECKING COLOR FILE: "+$colorFile+"\n");
+						if(`connectionInfo -id ($colorFile+".colorGain")`==0)
+						{
+							connectAttr -f ("AMBIENT_CLAMP.output") ($colorFile+".colorGain");
+							//print ("CONNECTING COLOR FILE: "+$colorFile+"\n");
+						}
+						else
+						{
+							string $scons[] = `listConnections -s 1 -d 0 ($colorFile+".colorGain")`;
+							if(`objExists ($scons[0]+".colorGain")`)
+							{
+								if(`isConnected ("AMBIENT_CLAMP.output") ($scons[0]+".colorGain")`==0)
+								{
+									connectAttr -f ("AMBIENT_CLAMP.output") ($scons[0]+".colorGain");
+									//print ("CONNECTING SOURCE CON: "+$scons[0]+"\n");
+								}
+								else
+								{
+									//print ("\nAMBIENT CLAMP ALREADY CONNECTED TO SOURCE CON: "+$scons[0]+"\n\n");
+								}
+							}
+							else
+							{
+								print ("\n***COLOR GAIN ALREADY HAS A CONNECTION: "+$scons[0]+"***\n\n");
+							}
+						}
+					}
+					else
+					{
+						//print ("\nAMBIENT CLAMP ALREADY CONNECTED TO COLOR FILE: "+$colorFile+"\n\n");
+					}
+				}
+				else
+				{
+					print ("\n***THIS IS NOT THE DEFAULT COLOR CONNECTION: "+$colorFile+"***\n\n");
+				}
+			}
+		}
+	}
+}

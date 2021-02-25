@@ -1,0 +1,250 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 0 hide, 1 display, 2 toggle, 3 query
+global proc int zwCustomCamera(int $display)
+{
+	global string $zwHeadsUpDisplayApproved;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	string $resolutionGate = "resolutionGate.iff";
+	float $level = 8;
+	if (zwIsRainbowProject($project) && `match "_algida_" $sceneName` == "" && `match "_exposh_" $sceneName` == "")
+	{
+		if ($zwHeadsUpDisplayApproved == "")
+		{
+			$resolutionGate = "WinxClubII/" + $resolutionGate;
+		}
+		else
+		{
+			$resolutionGate = "WinxClubII/" + $zwHeadsUpDisplayApproved + "/" + $resolutionGate;
+		}
+		$level = 2;
+	}
+	else if ($project == "OKI")
+	{
+		$resolutionGate = "OKI/" + $resolutionGate;
+		$level = 2.666667;
+	}
+
+	source "slAnimMaterialTrans.mel";
+	
+	string $camera = "";
+	string $modelPanel = `getPanel -withFocus`;
+	if (`getPanel -typeOf $modelPanel` == "modelPanel")
+	{
+		$camera = `modelEditor -query -camera $modelPanel`;
+	}
+	else
+	{
+		string $version = zwAboutVersion();
+		if ((float)$version >= 2009)
+		{
+			string $view = `getCustomViewEditorFromPanel $modelPanel`;
+			if (`stereoCameraView -exists $view`)
+			{
+				$camera = `stereoCameraView -query -camera $view`;
+				$modelPanel = $view;
+			}
+		}
+	}
+	if ($camera == "")
+	{
+		if ($display == 2)
+		{
+			confirmDialog -message "Please select the view you want to toggle" -button "OK" -defaultButton "OK";
+		}
+		return false;
+	}
+	string $camtr = getTransform($camera);
+	if (`objExists $camtr`)
+		$camera = $camtr;
+	
+	
+
+////	float $maxDepth = -1;
+//	string $buf[] = `listAttr -multi ($camera + ".imagePlane")`;
+//	for ($attr in $buf)
+//	{
+//		string $buf1[] = `listConnections ($camera + "." + $attr)`;
+//		for ($imagePlane in $buf1)
+//		{
+//			string $imageName = `getAttr ($imagePlane + ".imageName")`;
+//			$imageName = `match "[^/\\]+$" $imageName`;
+//			if ($imageName == "resolutionGate.iff" || $imageName == "Guidance_frame.iff")
+//			{
+//				if ($display == 3)
+//				{
+//					return true;
+//				}
+//
+//				delete $imagePlane;
+//
+//				if ($display == 2)
+//				{
+//					$display = false;
+//				}
+//			}
+//		}
+//	}
+//	if ($display == 3)
+//	{
+//		return false;
+//	}
+//	else if ($display == 2)
+//	{
+//		$display = true;
+//	}
+
+	zwImportModule("idmt.maya.camera", true);
+	zwImportModule("idmt.pipeline.project", true);
+	int $displayGateMaskQuery = `python "idmt.maya.camera.DisplayGateMaskQuery1()"`;
+	if ($display == 3)
+	{
+		return $displayGateMaskQuery;
+	}
+	python "idmt.maya.camera.DisplayGateMaskRemove1()";
+	if ($display == 2)
+	{
+		$display = !$displayGateMaskQuery;
+	}
+
+	if ($display)
+	{
+		if (`getAttr ($camera + ".farClipPlane")` > pow(2, 47))
+			error ($camera + ".farClipPlane > 140737488355328");
+		$buf = `listConnections ($camera + ".drawOverride")`;
+		//if (`size $buf`)
+		//{
+		//	if (!`getAttr ($buf[0] + ".visibility")`)
+		//		error ($camera + " is under an invisible layer: " + $buf[0]);
+		//}
+		
+		$buf = `ls -sl`;
+
+		string $model[] = {"nurbsCurves","nurbsSurfaces","polymeshes","subdivSurfaces","planes","lights","cameras","joints","ikHandles","deformers","dynamics","fluids",
+						   "hairSystems","follicles","nCloths","nRigids","dynamicConstraints","locators","dimensions","pivots","handles","textures","strokes"};
+		string $hide[];
+		clear $hide;
+		for ($dis in $model)
+		{
+			int $vis = `eval("modelEditor -q -"+$dis+" "+$modelPanel)`;
+			if (!$vis)
+				$hide[size($hide)] = $dis;
+		}
+		modelEditor -e -allObjects 1 $modelPanel;
+		for ($hi in $hide)
+		{
+			eval("modelEditor -e -"+$hi+" 0 "+$modelPanel);
+		}
+
+		//modelEditor -edit -cameras true $modelPanel;
+	//	modelEditor -edit -cameras false $modelPanel;
+
+		if (!`camera -query -displayResolution $camera` && !`camera -query -displaySafeAction $camera`)
+		{
+		//	camera -edit -displayFilmGate off -displayResolution on -overscan 2.0 $camera;
+			camera -edit -displayFilmGate off -displayResolution on $camera;
+		}
+
+	//	if ($maxDepth = -1)
+	//		$maxDepth = 100;
+	//	$maxDepth ++;
+//		string $imagePlane = `createNode imagePlane`;
+//		connectAttr -nextAvailable ($imagePlane + ".message") ($camera + ".imagePlane");
+//
+//		// 如果有imagePlane，imagePlane必须最后连，否则显示不出来
+//		string $old[] = `listConnections -plugs true ($camera + ".imagePlane[0]")`;
+//		if (size($old) == 1)
+//		{
+//			disconnectAttr $old[0] ($camera + ".imagePlane[0]");
+//			connectAttr $old[0] ($camera + ".imagePlane[0]");
+//		}
+//
+//		setAttr ($imagePlane + ".displayOnlyIfCurrent") on;
+
+		string $bg = `getenv "DEV_PATH"` + "/Maya/Icons/playblast/" + $resolutionGate;
+		if (!`filetest -f $bg`)
+		{
+			$bg = `internalVar -userAppDir` + "icons/" + $resolutionGate;
+		}
+//		setAttr -type "string" ($imagePlane + ".imageName") $bg;
+//
+//		setAttr ($imagePlane + ".fit") 4;
+//	//	setAttr ($imagePlane + ".depth") (`getAttr ($camera + ".nearClipPlane")` * 2.1);
+//
+//		float $level = 8;
+//	//	if (!`camera -query -displayResolution $camera` && `camera -query -displaySafeAction $camera`)	// panshel时加的？
+//	//		$level = 7.2;
+//		
+//		string $script = "// Created by Toggle Custom Resolution Gate Tool, HuangZhongwei R&D IDMT\n\n";
+//		$script += $imagePlane + ".depth = " + $camera + ".nearClipPlane * 2.1;\n\n";
+//		$script += "float $rezAspect = defaultResolution.width / defaultResolution.height;\n";
+//	//	$script += "if (defaultResolution.lockDeviceAspectRatio)\n";
+//		$script += "\t$rezAspect = defaultResolution.deviceAspectRatio;\n";
+//		$script += "float $camX = " + $camera + ".horizontalFilmAperture;\n";
+//		$script += "float $camY = " + $camera + ".verticalFilmAperture;\n";
+//		$script += "float $camAspect = $camX / $camY;\n";
+//		$script += "float $scaleX = " + $camera + ".scaleX / " + $camera + ".scaleZ;\n";
+//		$script += "float $scaleY = " + $camera + ".scaleY / " + $camera + ".scaleZ;\n";
+//		$script += "float $level = " + $level + ";\n";
+//	//	$script += "if (!`camera -query -displayResolution " + $camera + "` && `camera -query -displaySafeAction " + $camera + "`)\n";
+//	//	$script += "\t$level = 7.2;\n";
+//		$script += "int $fitType = " + $camera + ".filmFit;\n\n";
+//		$script += "if ($fitType == 0) {\t\t\t\t// FILL\n";
+//		$script += "\tif ($rezAspect < $camAspect) {\n";
+//		$script += "\t\t" + $imagePlane + ".sizeX = $camY * $rezAspect * $scaleX * $level;\n";
+//		$script += "\t\t" + $imagePlane + ".sizeY = $camY * $scaleY * $level;\n";
+//		$script += "\t} else {\n";
+//		$script += "\t\t" + $imagePlane + ".sizeX = $camX * $scaleX * $level;\n";
+//		$script += "\t\t" + $imagePlane + ".sizeY = $camX / $rezAspect * $scaleY * $level;\n";
+//		$script += "\t}\n";
+//		$script += "} else if ($fitType == 1) {\t\t\t// HORIZONTAL\n";
+//		$script += "\t" + $imagePlane + ".sizeX = $camX * $scaleX * $level;\n";
+//		$script += "\t" + $imagePlane + ".sizeY = $camX / $rezAspect * $scaleY * $level;\n";
+//		$script += "} else if ($fitType == 2) {\t\t\t// VERTICAL\n";
+//		$script += "\t" + $imagePlane + ".sizeX = $camY * $rezAspect * $scaleX * $level;\n";
+//		$script += "\t" + $imagePlane + ".sizeY = $camY * $scaleY * $level;\n";
+//		$script += "} else if ($fitType == 3) {\t\t\t// OVERSCAN\n";
+//		$script += "\tif ($rezAspect < $camAspect) {\n";
+//		$script += "\t\t" + $imagePlane + ".sizeX = $camX * $scaleX * $level;\n";
+//		$script += "\t\t" + $imagePlane + ".sizeY = $camX / $rezAspect * $scaleY * $level;\n";
+//		$script += "\t} else {\n";
+//		$script += "\t\t" + $imagePlane + ".sizeX = $camY * $rezAspect * $scaleX * $level;\n";
+//		$script += "\t\t" + $imagePlane + ".sizeY = $camY * $scaleY * $level;\n";
+//		$script += "\t}\n";
+//		$script += "}\n";
+//		$script += $imagePlane + ".offsetX = " + $camera + ".horizontalFilmOffset * $scaleX;\n";
+//		$script += $imagePlane + ".offsetY = " + $camera + ".verticalFilmOffset * $scaleY;\n";
+//
+//		expression -string $script;
+//
+//		if (zwIsRainbowProject($project))
+//		{
+//			setAttr ($imagePlane + ".useDepthMap") true;
+//			setAttr ($imagePlane + ".depthBias") (`getAttr ($camera + ".nearClipPlane")` * 2.1);
+//		}
+
+		python ("idmt.maya.camera.DisplayGateMaskSet2('" + $bg + "')");
+
+		select $buf;
+
+		//slAnimMaterialTrans "ON";
+		print "Custom Resolution Gate On.\n";
+	}
+	else
+	{
+		//slAnimMaterialTrans "OFF";
+		print "Custom Resolution Gate Off.\n";
+	}
+
+	return $display;
+}

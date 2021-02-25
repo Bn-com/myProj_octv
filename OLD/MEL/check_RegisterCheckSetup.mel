@@ -1,0 +1,620 @@
+//-----------------------------------------------------------------------
+//  Alias Script File
+//
+//  Creation Date:  January 16, 2003
+//
+//  Procedure Name:
+//      check_RegisterUsercheck
+//
+//  Description:
+//
+//		Initialization function that is called when the Check Scene
+//		operation is invoked.  The purpose of this function is to
+//		allow users to register their own custom check operations.
+//
+//  Input Arguments: none
+//
+//	Return Value: None.
+//
+//-----------------------------------------------------------------------
+
+//
+// Modified by Cz - May 18th, 2006
+//
+
+global proc check_RegisterCheckSetup()
+{
+	global string $gUserScenechecks[];
+	clear $gUserScenechecks;
+	//	use the check_AddUsercheck() proc to register all your
+	//	custom check steps here.
+	//
+	string $file = `file -q -sn -shn`;
+	int $vis = 0;
+	string $buffer[];
+	tokenize $file "_" $buffer;
+	if ($buffer[0] == "ez")	$vis = 1;
+
+
+	source "ezRiggingCheck.mel";
+
+
+	check_AddUsercheck( "check_filename", "File Name", 1, "checkSetupFilename()" );
+	check_AddUsercheck( "check_masterGrp", "Master Group", 1, "checkSetupMasterGrp()" );
+	check_AddUsercheck( "check_objSet", "Object Set", 1, "checkSetupObjectSet()" );
+	check_AddUsercheck( "check_objSetAttr", "Objset Attribute", 1, "checkSetupobjectSetAttr()" );
+	check_AddUsercheck( "check_objectName", "Objects' Name", 1, "checkSetupCharName()" );
+	check_AddUsercheck( "check_charGEO", "GEO/geo", 1, "checkSetupGeo()" );
+	check_AddUsercheck( "check_charLayer", "Layer Name", 1, "checkSetupLayerNames()" );
+	check_AddUsercheck( "check_smooth", "Smooth/Cluster/Joints", $vis, "riggingCheckSmooth();riggingCheckCluster();riggingCheckJoint()" );
+	check_AddUsercheck( "check_anmodel", "AnModel", 0, "riggingCheckAnModel()" );
+	check_AddUsercheck( "check_meshvtx", "MeshVtx", 0, "riggingCheckMeshVtx()" );
+	check_AddUsercheck( "check_history", "History", $vis, "RiggingCheckObjectsHistory()" );
+	check_AddUsercheck( "check_position", "Position", $vis, "RiggingCheckOrigin()" );
+	check_AddUsercheck( "check_weight", "Weight", $vis, "RiggingCheckWeight()" );
+
+
+}
+
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//
+//+++++++++++++++++++++++++++++++++++ Check Functions Start ++++++++++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+global proc string[] getCharNames()
+{
+	int $i = 0;
+	string $charNames[];
+	string $buffer;
+
+	string $allChar[] = `ls -tr "*_MASTER" "*:*_MASTER"`;
+	for ($each in $allChar)
+	{
+		$buffer = `substring $each 1 (size($each)-7)`;
+		if (`objExists ($buffer+"_Facial_Curve")`)
+		{
+			$charNames[$i++] = $buffer;
+		}
+	}
+	return $charNames;	
+}
+
+global proc checkSetupFilename()
+{
+	print "\nChecking File Name\n";
+	print "--------------------";
+
+		int $numDel = 0;
+
+		// get the scene name
+		string $fname = `file -q -sn`;
+
+		if ($fname != "")
+		{
+			string $buffer[] = {};
+
+			// check if the scene name includes any illegal letter.
+			tokenize $fname "/." $buffer;
+			string $sname = $buffer[size($buffer)-2];
+			if (`match "^[a-z0-9_]+$" $sname` == "") 
+			{
+				print "file name includes illegal letters";
+				$numDel++;
+			}
+			else
+			{
+				// check if the scene name meets the requirement 
+				// of setup file naming rule.
+				tokenize $sname "_" $buffer;
+
+				// if the scene name includes only 5(6) parts
+				// then the 4th(5th) part should be "ik", which
+				// is separated by underscore;
+				// else the scene name break the setup file naming rule.
+				if (size($buffer)==5)
+				{
+					if ($buffer[3]!="ik")
+					{
+						print ("\n" + "  -> " + "Scene name should be in this format: "+"\"project_asset_aescription_lod_pp_version\""+",like \"br_bernicem005_001_l_ik_005\""+"\n");
+						$numDel++;
+					}
+					else if (`strcmp "l" $buffer[2]`&&`strcmp "m" $buffer[2]`&&`strcmp "h" $buffer[2]`)
+					{
+						print ("\n" + "  -> " + "Scene name should be in this format: "+"\"project_asset_aescription_lod_pp_version\""+",like \"br_bernicem005_001_l_mo_005\""+"\n");
+						$numDel++;
+					}
+				}
+				else if (size($buffer)==6)
+				{
+					if ($buffer[4]!="ik")
+					{
+						print ("\n" + "  -> " + "Scene name should be in this format: "+"\"project_asset_aescription_lod_pp_version\""+",like \"br_bernicem005_001_l_ik_005\""+"\n");
+						$numDel++;
+					}
+				}
+				else
+				{
+					print ("\n" + "  -> Wrong scene name format! It should be " +"\"project_asset_aescription_lod_pp_version\"!" + "\n");
+					$numDel++;
+				}
+
+			}
+		}
+
+		check_Summary( "Checked file name", ("Found " + $numDel + " illegal file name") );
+		print "\n";
+}
+
+
+global proc checkSetupMasterGrp()
+{
+	print "Checking Character's Master Group\n";
+	print "------------------------------------\n";
+
+		//add by wanshoulong
+		//增加ez项目新的设置规范
+		//--------------------------------------------------------------
+		string $file = `file -q -sn`;
+		string $buffer[];
+		int $num1 = `tokenize $file "\/" $buffer`;
+		int $num2 = `tokenize $buffer[$num1-1] "_" $buffer`;
+		string $proj = $buffer[0];
+		//--------------------------------------------------------------
+		
+		int $numDel = 0;
+		//int $charGrp = 0;
+
+		string $topGrp[],$masterCtr[],$defltAssemblies[],$topGrp[];
+	
+			
+		// make sure character control group locates at the top level
+		$topGrp = `ls -assemblies`;
+		$defltAssemblies = {"persp", "top", "front", "side"}; 
+
+		// remove those default assemblies
+		$topGrp = stringArrayRemove($defltAssemblies, `ls -assemblies`);
+		
+		if (size($topGrp))
+		{
+
+			int $i = 0;
+
+			// loop to find the top char-control group's name,
+			// which ends with "_MASTER"
+			for($each in $topGrp)
+			{
+				if (endsWith($each, "_MASTER"))
+				{
+					//$charGrp++;
+					$masterCtr[$i]=$each;
+				}
+			}
+
+			// concludes the result for checking character's master
+			if (size($masterCtr)!=1)
+			{
+				if (size($masterCtr)<1)
+				{
+					print ("\n" + "  -> " + "Character's master group does not exist!\n");
+					$numDel++;
+				}
+				else
+				{
+					print ("\n" + "  -> " + "Found more than one characters' master groups!\n");
+					$numDel++;	
+				}
+			}
+			else
+			{
+				// NOTE: 
+				// channelbox - cell will display 0 if the number 
+				// that maya user inputs is less than 0.001. 
+
+				float $tx = `getAttr ($masterCtr[0]+".tx")`;
+				float $ty = `getAttr ($masterCtr[0]+".ty")`;
+				float $tz = `getAttr ($masterCtr[0]+".tz")`;
+				float $rx = `getAttr ($masterCtr[0]+".rx")`;
+				float $ry = `getAttr ($masterCtr[0]+".ry")`;
+				float $rz = `getAttr ($masterCtr[0]+".rz")`;
+
+				if ($tx||$ty||$tz)
+				{
+					print ("\n" + "  -> " + "Characters' master groups' translate attributes are NOT freezed! Or the number you input is less than 0.001!\n");
+					$numDel++;
+				}
+				if ($rx||$ry||$rz)
+				{
+					print ("\n" + "  -> " + "Characters' master groups' rotate attributes are NOT freezed! Or the number you input is less than 0.001\n");
+					$numDel++;
+				}				
+				
+				// check if the "Upper_Body.Smooth" exists or not, if
+				// it is a character.
+				string $char = `substring $masterCtr[0] 1 (size($masterCtr[0])-7)`;
+//				if (`objExists ($char+"_Facial_Curve")`)
+//				{	
+					//add by wanshoulong
+					//增加ez项目新的设置规范
+					//------------------------------------------------------------------------------------------------------
+					if ($proj == "ez")
+					{
+						string $temp[] = `ls ($char+"_MASTER.smooth")`;
+						if (!size($temp))
+						{
+							print ("\n" + "  -> " + "Cant find character's MASTER.Smooth attribute!\n");
+							$numDel++;
+						}
+						if (!`objExists ($char + "_MASTER.skinning_vis")`)
+						{
+							print ("\n" + "  -> " + "Cant find character's MASTER.skinning_vis attribute!\n");
+							$numDel++;
+						}
+						if (!`objExists ($char + "_MASTER.skinProxy_vis")`)
+						{
+							print ("\n" + "  -> " + "Cant find character's MASTER.skinning_vis attribute!\n");
+							$numDel++;
+						}
+						if (!`objExists ($char + "_MASTER.skeleton_vis")`)
+						{
+							print ("\n" + "  -> " + "Cant find character's MASTER.skinning_vis attribute!\n");
+							$numDel++;
+						}
+					}
+					//-----------------------------------------------------------------------------------------------------------
+					else 
+					{
+						string $temp[] = `ls ($char+"_Upper_Body.Smooth")`;
+						if (!size($temp))
+						{
+							print ("\n" + "  -> " + "Cant find character's Upper_Body.Smooth attribute!\n");
+							$numDel++;
+						}
+					}
+//				}
+
+			}
+		}
+
+      check_Summary("Checked character's master group", ("Found " + $numDel + " master group mistakes!"));
+      print "\n";
+}
+
+
+global proc checkSetupObjectSet()
+{
+	// NOTE:
+	// This proc will assume that the master group
+	// were already there.
+
+
+	print "\nChecking Character's ObjectSet\n";
+	print "-----------------------------------";
+	
+		int $numDel = 0;	
+		int $i = 0;
+
+		string $charName,$masterGrp,$charSet;
+		string $topGrp[],$buffer[];
+
+		$topGrp = `ls -assemblies`;
+
+		// loop to find character master group's name,
+		// which ends with "_MASTER"
+		for($each in $topGrp)
+		{
+			if (endsWith($each, "_MASTER"))
+			{
+				$masterGrp = $each;
+				break;
+			}
+		}
+
+		tokenize $masterGrp "_" $buffer;
+		string $temp[] = {"MASTER"};
+		$buffer = stringArrayRemove($temp, $buffer);
+
+		if (size($buffer)>1)
+		{
+			
+			for ($this in $buffer)
+			{
+				$charSet += ($this + "_");
+			}
+			$charSet += "set";
+		}
+		else
+		{
+			$charSet = $buffer[0] + "_set";
+		}
+
+		// loop to check if character's objSet exists or not
+		$buffer = `ls $charSet`;
+		if (!size($buffer))
+		{
+			print ("\n" + "  -> " + "Character objectSet \""+ $charSet+ "\" does NOT exist!\n"); 
+			$numDel++;
+		}
+
+	check_Summary( "Checked character's objectSet", ("Found " + $numDel + " character's objectSet mistakes") );
+	print "\n";	
+
+}
+
+
+global proc checkSetupobjectSetAttr()
+{
+	// NOTE:
+	// This proc will assume that the master group
+	// and objSet were already there.
+
+
+	print "\nChecking ObjectSet's UserDefined Attributes\n";
+	print "---------------------------------------------";
+
+	int $numDel = 0;
+	string $temp;
+	string $buffer[];
+
+	// get all the "_set"
+	$buffer = `ls "*_set"`;
+	
+	// loop to check if the "TR" or "RO" is set or not
+	if (size($buffer))
+	{
+		for ($each in $buffer)
+		{
+			// get all the members of each objSet
+			string $mem[] = `sets -q $each`;
+			for ($this in $mem)
+			{
+				if (!`objExists ($this + ".TR")`)
+				{
+					print ("\n" + "  -> " + $this +"'s \"TR or RO\" attribute is NOT set!\n");
+					$numDel++;
+				}
+			}
+		}
+	}
+	else
+	{
+		print ("\n" + "  -> " + "please make sure you got objectSet, whose name ends with \"_set\", before checking this item!\n"); 
+		$numDel++;
+	}
+
+
+
+	check_Summary( "Checked objSet's userDefined attributes", ("Found " + $numDel + " character's objSet's userDefined attribute mistakes") );
+	print "\n";	
+}
+
+global proc checkSetupKeyframe()
+{
+	// NOTE:
+	// This proc will assume that the master group
+	// and objSet were already there.
+
+
+	print "\nChecking Character's Pre-set Keyframe\n";
+	print "---------------------------------------";
+
+	int $numDel = 0;
+	int $keyFlag_negative31,$keyFlag_zero;
+	string $masterGrp,$charSet;
+	string $topGrp[],$buffer[];
+
+	$topGrp = `ls -assemblies`;
+
+	// loop to find character master group's name,
+	// which ends with "_MASTER"
+	for($each in $topGrp)
+	{
+		if (endsWith($each, "_MASTER"))
+		{
+			$masterGrp = $each;
+			break;
+		}
+	}
+
+	tokenize $masterGrp "_" $buffer;
+	string $temp[] = {"MASTER"};
+	$buffer = stringArrayRemove($temp, $buffer);
+
+	if (size($buffer)>1)
+	{
+		
+		for ($this in $buffer)
+		{
+			$charSet += ($this + "_");
+		}
+		$charSet += "set";
+	}
+	else
+	{
+		$charSet = $buffer[0] + "_set";
+	}
+
+	// catenate the character objSet
+	$buffer = `ls $charSet`;
+
+	if (size($buffer))
+	{
+		$keyFlag_negative31 = `findKeyframe -time -30 -which previous $charSet`;
+		$keyFlag_zero = `findKeyframe -time 1 -which previous $charSet`;
+
+		if (($keyFlag_negative31)!=-31)
+		{
+			print ("\n" + "  -> " + "Character set: \"" + $charSet +"\" has NO keyframe at frame -31 !\n"); 
+			$numDel++;
+		}
+
+		if (($keyFlag_zero)!=0)
+		{
+			print ("\n" + "  -> " + "Character set: \"" + $charSet +"\" has NO keyframe at frame 0 !\n"); 
+			$numDel++;
+		}
+	}
+	else
+	{
+		print ("\n" + "  -> " + "please make sure you got \""+ $charSet+ "\" before checking this item!\n"); 
+		$numDel++;
+	}
+
+	check_Summary( "Checked character's pre-set keyframe", ("Found " + $numDel + " character's pre-set keyframe mistakes") );
+	print "\n";	
+}
+
+
+global proc checkSetupCharName()
+{
+	// NOTE: 
+	// This proc will check if all the transforms nodes' names
+	// in the current scene starts with the character's name
+
+	print "\nChecking Character's Name\n";
+	print "---------------------------";
+
+	int $numDel = 0;
+	string $charName;
+	
+	// get the character's name
+	string $charGroup[] = stringArrayCatenate(`ls -as "*_geo"`, `ls -as "*_GEO"`);
+
+	string $defaultCams[] = {"persp", "top", "front", "side"};
+	if ($charGroup[0]!="")
+	{
+		string $buffer[];
+		tokenize $charGroup[0] "_" $buffer;
+		$charName =  $buffer[0];
+	}
+
+	// get geo list
+	string $allGeo[] = `ls -tr -ni`;
+
+	$allGeo = stringArrayRemove($defaultCams,$allGeo);
+
+	// check if geo starts with the charName
+	for ($each in $allGeo)
+	{
+		
+		string $buffer[];
+		tokenize $each "|" $buffer;
+		{
+			string $temp[];
+			tokenize $each "_" $temp;
+			if ($temp[0]!=$charName)
+			{
+				print ("\n" + "  -> " + $each + " 角色组件命名错误!\n");
+				$numDel++;
+			}
+		}
+	}
+
+	// message
+	if ($numDel)
+	{
+		confirmDialog -title "Need your attention!" -message "出错了，角色前缀命名错误!"
+				-button "OK";
+	}
+
+	check_Summary( "Checked character's name", ("Found " + $numDel + " naming mistakes in character elements!") );
+	print "\n";
+}
+
+
+global proc checkSetupGeo()
+{
+	// NOTE:
+	// This proc will check if the characterName_GEO
+	// or characterName_geo group exists or not
+
+	print "\nChecking Character's GEO/geo group\n";
+	print "-------------------------------------";
+
+	int $numDel = 0;
+
+	string $geoGroup[] = stringArrayCatenate(`ls -as "*_geo"`, `ls -as "*_GEO"`);
+
+	if (!size($geoGroup))
+	{
+		print ("\n" + "  -> characterName_Geo/characterName_geo group does not exist!\n");
+		$numDel++;
+	}
+
+	check_Summary( "Checked character's GEO/geo group", ("Found " + $numDel + " naming mistakes in character's GEO/geo groups!") );
+	print "\n";
+}
+
+global proc checkSetupLayerNames()
+{
+	// NOTE:
+	// Each character should include three layers
+	// charName_Skin+charName_Skeleton+charName_Skinproxy
+
+	print "\nChecking Character's Layers\n";
+	print "-----------------------------";
+
+	//add by wanshoulong
+	//增加ez项目新的设置规范
+	//----------------------------------------------------------------
+	string $file = `file -q -sn`;
+	string $buffer[];
+	int $num1 = `tokenize $file "\/" $buffer`;
+	int $num2 = `tokenize $buffer[$num1-1] "_" $buffer`;
+	string $proj = $buffer[0];
+	//-----------------------------------------------------------------
+	
+	int $numDel = 0;
+
+	// first, it should be a character which includes a facial_Curve
+	string $chars[] = `getCharNames`;
+
+	if (size($chars))
+	{
+		// list all the displayLayer names associated with a character
+		for ($char in $chars)
+		{
+			//add by wanshoulong
+			//增加ez项目新的设置规范
+			//-----------------------------------------------------------------------------------------------------
+			if ($proj == "ez")
+			{
+				if (!`objExists ($char+"_layer")`)
+				{
+					print ("\n" + "  -> " + $char + "'s " + $char + "_layer layer does not exist!\n");
+					$numDel++;
+				}
+			}
+			//-----------------------------------------------------------------------------------------------------
+			else 
+			{
+				if (!`objExists ($char+"_skinning")`)
+				{
+					print ("\n" + "  -> " + $char + "'s " + $char + "_skinning layer does not exist!\n");
+					$numDel++;
+				}
+				if (!`objExists ($char+"_skeleton")`)
+				{
+					print ("\n" + "  -> " + $char + "'s " + $char + "_skinProxy layer does not exist!\n");
+					$numDel++;
+				}
+				if (!`objExists ($char+"_skinProxy")`)
+				{
+					print ("\n" + "  -> " + $char + "'s " + $char + "_skinProxy layer does not exist!\n");
+					$numDel++;
+				}
+			}
+		}
+	}
+	
+
+	check_Summary( "Checked character's layers", ("Found " + $numDel + " bad character layer names!") );
+	print "\n";
+}
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++ Check Functions End +++++++++++++++++++++++++++++++++++++
+//
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

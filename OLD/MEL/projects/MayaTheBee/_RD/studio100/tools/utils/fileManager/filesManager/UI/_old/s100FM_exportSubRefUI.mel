@@ -1,0 +1,1531 @@
+// Export SubRef procs : to export "subRefs" from 'master' file :
+// - LAYOUT (simplified rig and shaders)
+
+//prefix s100FM_exportSubRef
+
+global proc s100FM_exportSubRefUI()
+{
+	if(`window -q -ex  s100FM_exportSubRefUI`)
+		deleteUI s100FM_exportSubRefUI ;
+
+	string $toDo[] = `s100FM_exportSubRef_returnEveryPossibleSubRef`;
+
+	window s100FM_exportSubRefUI ;
+	$form = `formLayout s100FM_exportSubRefUIFormLayout `;
+
+	string $last ;
+
+	$text = `text -l "Choose Sub-Ref(s) to create :" `;
+	$setAll = `button -h 20 -l "-Check All"
+		-c ("s100FM_exportSubRefUI_updateAllCBoxes(1);") s100FMexportSubRefUI_setAll `;
+	$unsetAll = `button -h 20 -l "UnCheck-"
+		-c ("s100FM_exportSubRefUI_updateAllCBoxes(0);") s100FMexportSubRefUI_unsetAll `;
+	$sep = `separator `;
+	$first = $sep ;
+	for($tmp in $toDo)
+	{
+		$ch = `checkBox -h 20 -l $tmp -v 1 ("s100FMexportSubRefUICk_" + $tmp) `;
+		formLayout -e
+			-attachForm $ch "left" 5
+			-attachForm $ch "right" 5
+			-attachControl $ch "top" 5 $first
+			$form ;
+		$first = $ch ;
+		$last = $ch ;
+	}
+
+	$sep1 = `separator `;
+
+	$but = `button -l "create Sub Ref(s)" -c "s100FM_exportSubRefFromUI"`;
+	$but2 = `button -bgc 0.5 0.5 0.5 -l "create Sub Ref(s) by Deadline"
+		-ann "If installed on your machine, will use dispatcher 'Deadline' to generated chosen subRefs"
+		-c "s100FM_exportSubRefFromUIToDeadline"`;
+
+		formLayout -e
+			-attachForm $text "left" 5
+			//-attachForm $text "right" 5
+			-attachForm $text "top" 5
+
+			-attachForm $setAll "right" 5
+			-attachForm $setAll "top" 5
+
+			-attachControl $unsetAll "right" 2 $setAll
+			-attachForm $unsetAll "top" 5
+
+			-attachForm $sep "left" 5
+			-attachForm $sep "right" 5
+			-attachControl $sep "top" 5 $setAll
+
+
+			-attachForm $sep1 "left" 5
+			-attachForm $sep1 "right" 5
+			-attachControl $sep1 "top" 5 $last
+
+
+			-attachForm $but "left" 5
+			-attachForm $but "right" 5
+			-attachControl $but "top" 5 $sep1
+
+			-attachForm $but2 "left" 5
+			-attachForm $but2 "right" 5
+			-attachControl $but2 "top" 5 $but
+
+			$form ;
+
+	window -e -h 270 -w 300  s100FM_exportSubRefUI;
+	showWindow ;
+
+}
+
+
+global proc s100FM_exportSubRefUI_updateAllCBoxes(int $value)
+{
+	string $child[] = `formLayout -q -childArray  s100FM_exportSubRefUIFormLayout`;
+	//int $value = `checkBox -q -v s100FMexportSubRefUI_setAll`;
+	for($tmp in $child)
+		if(`gmatch $tmp "s100FMexportSubRefUICk*"`)
+		{
+			//print ("// setting '"+$tmp+"' generation to "+$value+"\n");
+			checkBox -e -v $value $tmp;
+        }
+}
+
+
+//s100FM_exportSubRefUI ;
+
+global proc s100FM_exportAllSubRef()
+{
+	string $toDo[] = `s100FM_exportSubRef_returnEveryPossibleSubRef`;
+	s100FM_exportSubRef($toDo) ;
+}
+
+
+
+global proc s100FM_exportSubRefFromUI()
+{
+	string $child[] = `formLayout -q -childArray  s100FM_exportSubRefUIFormLayout`;
+	string $toDo[] ={} ;
+	$i = 0 ;
+	for($tmp in $child)
+	{
+		if(`gmatch $tmp "s100FMexportSubRefUICk*"`)
+		{
+			if(`checkBox -q -v $tmp`)
+			{
+				$sub = substituteAllString($tmp ,"s100FMexportSubRefUICk_","");
+				$toDo[$i] =  $sub ;
+				$i++;
+            }
+        }
+    }
+	//print $toDo ;
+	if(size($toDo) > 0)
+		s100FM_exportSubRef($toDo) ;
+
+	if(`window -q -ex  s100FM_exportSubRefUI`)
+		deleteUI s100FM_exportSubRefUI ;
+
+	//refreshing UI
+	s100FMASswitchOptionList("state");
+	s100FMASswitchOptionList("lod");
+
+	headsUpMessage "SubRef Export Completed";
+}
+
+
+
+global proc s100FM_exportSubRefFromUIToDeadline()
+{
+	string $child[] = `formLayout -q -childArray  s100FM_exportSubRefUIFormLayout`;
+	string $toDo[] ;
+	clear $toDo;
+	$i = 0 ;
+	$file = `file -q -sn` ;
+	for($tmp in $child)
+	{
+		if(`gmatch $tmp "s100FMexportSubRefUICk*"`)
+		{
+			if(`checkBox -q -v $tmp`)
+			{
+				$sub = substituteAllString($tmp ,"s100FMexportSubRefUICk_","");
+				$toDo[$i] =  $sub ;
+				$i++;
+            }
+        }
+    }
+	//print $toDo ;
+	if(size($toDo) > 0)
+	{
+		string $tab = "" ;
+		for($i = 0 ; $i < size($toDo) ; $i++)
+		{
+			$tab += "\\\"" +$toDo[$i] +"\\\"" ;
+			if($i< size($toDo) -1)
+				$tab+=",";
+        }
+		print $tab ;
+		$command = "file -f -o \"" + $file +"\";file -f -s;s100FM_exportSubRef({" + $tab +"});quit -a "   ;
+		$arr = stringToStringArray(`file -q -sn -shortName`,".");
+		$name = "SubRef__" + $arr[0];
+		s100PCSubmitPythonToDeadlineNeedUI({""},$name,(`file -q -sn -shortName` +":"+ $tab) ,"build", $command ) ;
+		//s100FM_exportSubRef($toDo) ;
+	}
+
+	if(`window -q -ex  s100FM_exportSubRefUI`)
+		deleteUI s100FM_exportSubRefUI ;
+
+	headsUpMessage "Submited to deadline...";
+}
+
+global proc s100FM_exportSubRef(string $toDo[])
+{
+	string $file = `file -q -sn`;
+	global string $s100FM_exportSubRef_callBack = "\n\n//------------------------\n// Sub Refs EXPORT :\n";
+	//test si le fichier est un fichier maitre
+ 	if(` s100FM_exportSubRefCheckFileForExport($file) `)
+	{
+		// first proposing to save current scene if changes are detected
+		// -> cancel : returns 0
+		// -> don't save : returns 1
+		// if no changes are detected : return 1 as well :)
+		//
+ 		if(`saveChanges("")`)
+		{
+			s100FM_exportSubRefAutoIncrementScene($toDo) ;
+			s100FM_exportSubRef_toDoFor($toDo);
+			$s100FM_exportSubRef_callBack+= "// SubRef Export(s) Completed.\n";
+        }
+		else
+			$s100FM_exportSubRef_callBack += "// Export Canceled by user\n//------------------------\n";
+
+    }else{
+
+    }
+	print $s100FM_exportSubRef_callBack ;
+}
+
+// Double-Checks if file is a 'root' one and warn if some expected objectSets are missing (but no error if they are)
+//
+global proc int s100FM_exportSubRefCheckFileForExport(string $file)
+{
+	int $ch = 1 ;
+	global string $s100FM_exportSubRef_callBack ;
+	if(`s100testIfFileIsARootFile($file)`)
+	{
+		string $objToCheckExists[] = {"del4LayoutSet","del4AnimSet","del4RenderSet","full_grp"} ;
+		for($i = 0 ; $i < size($objToCheckExists) ; $i++)
+		{
+			if(!`objExists  $objToCheckExists[$i]`)
+			{
+				//$ch = 0 ; // Finally accepting some objectSet could not exist if they are not necessary...
+				$s100FM_exportSubRef_callBack += ("\n//--- WARNING : objectSet '"+$objToCheckExists[$i]+"' doesn't exist!");
+            }
+        }
+    }else{
+		$ch = 0 ;
+		$s100FM_exportSubRef_callBack+= ("\n//---- file is not a root file") ;
+    }
+	return $ch;
+}
+
+// Returns base path of exoprtation :
+// ex:  // Result: Y:/000_3D_BANK/01_Characters/Ant/MA_C_AntOriginal_01/ //
+
+global proc string s100FM_exportSubRefGetRootPathToExp(string $file)
+{
+	string $root = `s100returnAssetRootFolder($file)` ;
+	string $path = $root + "00_subRefs/" ;
+	if(!`filetest -d $path`)
+		sysFile -md $path ;
+	return $path ;
+}
+
+
+//////////////////////MAIN
+// proc qui fait les operations pour chaque type d'export
+
+// $toDo[0] = "INSTANCE"
+//
+global proc s100FM_exportSubRef_toDoFor(string $toDo[])
+{
+	global string $s100FM_exportSubRef_callBack ;
+	string $file = `file -q -sn`;
+
+	// ask to load found UNLOADED references if any first (references will then be imported and treated) :
+	int $unloaded = `s100FM_exportSubRef_importRefChUnload`;
+
+	if($unloaded != -1)
+	{
+		for($i = 0 ; $i < size($toDo) ; $i++)
+		{
+		// Import references, get rid of Namespaces and deal with multinames that this process generates:
+			//print ("\n" + $toDo[$i] ) ;
+			$s100FM_exportSubRef_callBack += "\n//---------------\n// Exporting " + $toDo[$i] +"\n//--------------- ...";
+			s100FM_exportSubRef_importRefAndClean( $unloaded ) ;
+
+		// op avant la suppression
+			s100FM_exportSubRef_toDoByKindPreDelete($toDo[$i]) ;
+
+		//suppression des objs listed in specific sets (del4...Set) :
+			s100FM_exportSubRef_deleteBySetFor($toDo[$i]);
+
+		//suppression des shaders useless
+			s100FM_exportSubRef_deleteShadingByKind($toDo[$i]);
+
+		//deletion of last objects and creation of cache file nodes for cache subRefs :
+			s100FM_exportSubRef_toDoByKind($toDo[$i]) ;
+
+		//export
+			string $path = `s100FM_exportSubRef_ExportFor($toDo[$i]) `;
+
+			$s100FM_exportSubRef_callBack += "\n//---------------\n// OK for step '"+$toDo[$i]+"'. Now reopening 'master' file.\n//---------------\n" ;
+			file -open -force $file;
+		}
+		print $s100FM_exportSubRef_callBack ;
+
+    }else{
+		warning "Operation Aborted";
+    }
+}
+
+
+//exporting file
+global proc s100FM_exportSubRef_ExportFor(string $kind)
+{
+	global string $s100FM_exportSubRef_callBack ;
+	select -cl ;
+	string $path = `s100FM_exportSubRef_buildNameForExport($kind) `;
+	string $toExp[] =`s100FM_exportSubRef_GetObjToExport( $kind)` ;
+	if(size($toExp) > 0)
+	{
+		select -r $toExp;
+
+		//add guillaume a cause de la creation de noeud locker qui foute grave la miser pour les rigs
+
+		/*
+		if($kind =="RENDER" || $kind =="ANIMCACHE") {
+			file -op "v=0;p=17" -typ "mayaAscii" -pr -exportSelected $path;
+        }else{
+		*/
+		s100FM_exportSubRef_unlockAll ;
+		file -rename $path;
+		file  -s ;
+        //}
+		$s100FM_exportSubRef_callBack += ("\nfile " + $path + " created" );
+
+    }else{
+		$s100FM_exportSubRef_callBack+= ("\n//-----WARNING: nothing to export for " + $kind );
+		$s100FM_exportSubRef_callBack += ("\nfile " + $path + " not created" );
+    }
+}
+
+global proc s100FM_exportSubRef_unlockAll()
+{
+	string $ls[] = `ls`;
+	for($tmp in $ls)
+	{
+	int $test2[] = `lockNode -q -l $tmp` ;
+		if($test2[0] == 1)
+		{
+			print ("\n//----unlocking node : " + $tmp);
+			lockNode -l 0 $tmp ;
+        }
+    }
+}
+
+
+//delete Shading By kind
+// string $kind = "RENDER"
+//
+global proc s100FM_exportSubRef_deleteShadingByKind(string $kind)
+{
+	//$kind = "RENDER"
+	string $list2[] =`ls  -type shadingEngine `;
+	string $list4[] = `listConnections -s 1 -d 0  $list2` ;
+	string $list3[] =`ls  -materials `;
+	string $list[] ;
+
+	//garde les shader connecter au shadingEngine
+	$i = 0 ;
+	for($tmp in $list4)
+	{
+		for($tmp2 in $list3)
+		{
+   			if($tmp2 == $tmp)
+			{
+				$list[$i] = $tmp ;
+				$i++;
+				break ;
+            }
+        }
+    }
+
+	string $toMatch[] = {"mentalray"};
+
+	$i = 0 ;
+	$j= 0 ;
+	string $viewPortSh[] ={} ;
+	string $renderPortSh[] = {} ;
+	string $classifications[] = {};
+
+	for($tmp in $list)
+	{
+		$ch = 0 ;
+		if($tmp != "initialParticleSE" && $tmp != "initialShadingGroup")
+		{
+			$na =  `nodeType $tmp`;
+			clear $classifications  ;
+			$classifications = `getClassification $na`;
+			for($tmp2 in $toMatch)
+			{
+				for($tmp3 in $classifications)
+				{
+					if(`gmatch $tmp3 ("*"+ $tmp2 +"*")`)
+					{
+						$ch = 1 ;
+					}
+				}
+			}
+
+			//check si le materiaux sert au rendu (mental ray type)
+			if($ch == 1)
+			{
+				$renderPortSh[$i]=$tmp ;
+				$i++;
+			}
+			else
+			{
+				// also checking if node is NOT member of a 'keep4RenderSet' objectSet :
+				int $keepIt = false;
+				if (`objExists "keep4RenderSet"`)
+				{
+					if (`sets -isMember "keep4RenderSet" $tmp`)
+					{
+						print ("// node \""+$tmp+"\" is in 'keep4RenderSet' => skipping its deletion\n");
+						$keepIt = true;
+                    }
+                }
+				if ($keepIt==false && $tmp != "lambert1" && $tmp != "particleCloud1" )
+				{
+					$viewPortSh[$j]=$tmp ;
+					$j++ ;
+				}
+			}
+		}
+	}
+	// select -r $viewPortSh ;
+	// select -r $renderPortSh ;
+
+
+	if($kind == "ANIM" || $kind == "LAYOUT" || $kind == "ANIMCACHE" || $kind == "INSTANCE")
+	{
+		if(size($renderPortSh) > 0)
+			delete $renderPortSh ;
+		for($tmp in  $viewPortSh)
+		{
+			string $listC[] = `listConnections -type shadingEngine -s 0 -d 1 $tmp` ;
+			for($tmp2 in $listC)
+			{
+				if(`isConnected ($tmp+".outColor") ($tmp2 +".surfaceShader") `)
+				{
+					disconnectAttr ($tmp+".outColor") ($tmp2 +".surfaceShader");
+					connectAttr -f ($tmp+".outColor") ($tmp2 +".surfaceShader");
+				}
+			}
+		}
+
+    } else
+	{
+		if(size($viewPortSh) > 0)
+		{
+			delete $viewPortSh ;
+			/*
+			for($tmp in  $renderPortSh)
+			{
+			string $listC[] = `listConnections -type shadingEngine -s 0 -d 1 $tmp` ;
+
+			string $listCP[] = `listConnections  -connections 1 -type shadingEngine -s 0 -d 1 $tmp` ;
+
+
+				for($i = 0 ;$i <size($listCP) ; $i+=2)
+				{
+					if(`objExists $tmp` && `objExists $listC[$i] `&& `attributeExists "surfaceShader" $listC[$i]`  )
+						if(!`isConnected $listCP[$i] ($listC[$i] +".surfaceShader") `)
+							connectAttr -f $listCP[$i] ($listC[$i] +".surfaceShader");
+                }
+            }
+			*/
+        }
+    }
+
+
+	//debug a l'arrache mais ca fait planter des fois et j'veux pas toucher au script de maya
+	if(`objExists "defaultObjectSet" `)
+		lockNode -l 1 "defaultObjectSet";
+
+	MLdeleteUnused ;
+}
+
+
+
+global proc string[] s100RecShad_listShadingNodeReturnToMatch()
+{
+	return {"mentalray","render","shader",  "texture", "utility","color","shadingEngine"} ;
+}
+
+//proc pour renommer les Shading Engine en fonction du nom du fichier
+global proc s100FM_exportSubRef_renameShadingEngine()
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100FM_exportSubRef_renameShadingEngine():";
+
+	string $list[] = `ls -type "shadingEngine"`;
+	string $file = `file -q -sn -shortName`;
+	string $arr[] = stringToStringArray($file, ".") ;
+	string $arr2[] = stringToStringArray($arr[0], "_") ;
+	$end = 4 ;
+	if(`gmatch $file "??_*_??_*"`)
+	{
+		$end = 5 ;
+    }
+
+	string $suf = "" ;
+	for($i = 1; $i < $end ; $i++)
+	{
+		$suf += $arr2[$i] ;
+    }
+	string $toSub[] ;
+
+	string $tmp = "" ;
+	for($i =2; $i < $end ; $i++)
+	{
+		$tmp += $arr2[$i] ;
+    }
+
+	$toSubSm[0] = $tmp ;
+	string $tmp = "" ;
+	for($i =2; $i < 4 ; $i++)
+	{
+		$tmp += $arr2[$i] ;
+		if($i < 3)
+			$tmp += "_";
+    }
+
+	$toSubSm[1] = $tmp ;
+	$toSubSm[2] = $arr2[2] ;
+
+	$toSubP[0] = $arr2[1] +"_" + $toSubSm[0] ;
+	$toSubP[1] = $arr2[1] +"_" + $toSubSm[1] ;
+	$toSubP[2] = $arr2[1] +"_" + $toSubSm[2] ;
+
+	$toSubPM[0] =$arr2[0]  +"_"+ $arr2[1] +"_" + $toSubSm[0] ;
+	$toSubPM[1] =$arr2[0]  +"_"+ $arr2[1] +"_" + $toSubSm[1] ;
+	$toSubPM[2] = $arr2[0]  +"_"+ $arr2[1] +"_" + $toSubSm[2] ;
+
+	$toSub =stringArrayCatenate($toSubPM , $toSubP ) ;
+	$toSub =stringArrayCatenate($toSub , $toSubSm ) ;
+
+	string $sub  ;
+	for($tmp in $list)
+	{
+		if(!`gmatch $tmp ($suf+"*") `)
+		{
+			$sub = $tmp;
+			if($tmp != "initialParticleSE" && $tmp != "initialShadingGroup")
+			{
+				for($tmp2 in $toSub)
+				{
+					if(`gmatch $tmp ($tmp2+"*") `)
+					{
+						$sub = substituteAllString($tmp , $tmp2 , "" );
+						break ;
+					}
+				}
+				$start = startString($sub ,1) ;
+				$add = "_";
+				if($start == "_")
+					$add = "";
+				$nName = ($suf +$add+ $sub) ;
+				if($tmp != $nName)
+				{
+					rename $tmp $nName ;
+					global string $s100FM_exportSubRef_callBack ;
+					$s100FM_exportSubRef_callBack += "\n//\t. renaming '"+$tmp+"' into '"+$nName+"'";
+                }
+			}
+        }
+    }
+	$s100FM_exportSubRef_callBack += "\n//\t . s100FM_exportSubRef_renameShadingEngine() Done";
+}
+
+
+//proc qui delete les obj
+global proc s100FM_exportSubRef_deleteBySetFor(string $kind) // string $kind = $toDo[0]
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100FM_exportSubRef_deleteBySetFor("+$kind+"):";
+
+	string $toDel[] = `s100FM_exportSubRef_toDeleteBySetFor($kind) `;
+	if(size($toDel) > 0)
+	{
+		//select $toDel ;
+		for ($tmp in $toDel)
+			if(`objExists $tmp  `)
+			{
+				$s100FM_exportSubRef_callBack += "\n//\t . deleting \""+$tmp+"\"";
+				catch(`delete $tmp `);
+            }
+    }
+	$s100FM_exportSubRef_callBack += "\n// - s100FM_exportSubRef_deleteBySetFor("+$kind+") Done.";
+}
+
+
+// Pre-deletion action for RENDER and ANIMCACHE subRef generation (shading engines, polycolorvertex..)
+// ex : string $kind = "INSTANCE";
+// 		s100FM_exportSubRef_toDoByKindPreDelete($kind);
+//
+global proc s100FM_exportSubRef_toDoByKindPreDelete(string $kind)
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100FM_exportSubRef_toDoByKindPreDelete("+$kind+"):";
+
+	if($kind == "ANIMCACHE" || $kind == "RENDER" || $kind == "INSTANCE")
+	{
+		if($kind=="RENDER")
+		{
+			// deleting polycolorvertex nodes, not necessary for RENDER subRefs:
+			$s100FM_exportSubRef_callBack += "\n//\t. deleting polyColorVertex nodes if any...";
+			string $sel[] = `ls -type  "polyColorPerVertex" `;
+			if(size($sel) > 0)
+				delete $sel ;
+		}
+
+		// unlocking meshes:
+		$s100FM_exportSubRef_callBack += "\n//\t. unlocking Main.meshDisplay if any...";
+		if(`objExists "Main.meshDisplay"`)
+			setAttr "Main.meshDisplay" 0;
+		else if(`objExists "root_ctrl.meshDisplay"`)
+			setAttr "root_ctrl.meshDisplay" 0;
+
+
+		// delete history of specific objects listed in 'geoCacheSet':
+		string $list[] = `s100Set_retrieveSetMembers("geoCacheSet")`;
+		for($tmp in $list)
+		{
+			$s100FM_exportSubRef_callBack += "\n//\t. deleting history of '"+$tmp+"'";
+			delete -ch $tmp;
+		}
+
+		// in this case (INSTANCE) combining every meshes into one.
+		//
+		if ($kind == "INSTANCE")
+		{
+			string $file = `file -q -sn`;
+			string $usableFilePart = s100FM_returnAssetBaseNameFromFile($file) ;
+
+			$s100FM_exportSubRef_callBack +=  ("\n// - combining every visible meshes from geoCacheSet");
+			string $combMesh = "";
+			// first filter some out if they are hidden by default :
+			string $toCombin[] = {};
+			for ($geo in $list)
+			{
+				if (`getAttr ($geo+".v")`==1)
+					$toCombin[size($toCombin)]=$geo;
+            }
+			if (size($toCombin))
+			{
+				// combine them all :
+				string $INSTbaseName = s100FM_exportSubRef_returnINSTANCEbaseName();
+				string $combMeshes[] = `polyUnite -ch 0 -n ($usableFilePart+$INSTbaseName+"001") $toCombin `;
+
+				// now tags the "combined_msh" with current scene to be associated with :
+				// (in .s100_associatedRefFile string attribute)
+				s100FMassociateObjsWithRef($combMeshes,$file);
+				$s100FM_exportSubRef_callBack += "\n//\t. adding an association on resulted mesh '"+$combMeshes[0]+"' toward current scene \""+$file+"\".";
+
+				// locking/hiding visibility of resulting mesh :
+				catch(`setAttr -l 0 -k 0 ($combMeshes[0]+".v")`);
+            }
+			else
+				warning ("// couldn't combine any meshes found in the scene ! ('geoCacheSet' absent or empty of visible meshes ?)");
+        }
+		s100Shp_DeleteUnusedShapesVerboseInScene(0);
+
+
+		// renaming shadingEngines for rendering purposes:
+		s100FM_exportSubRef_renameShadingEngine ;
+    }
+	$s100FM_exportSubRef_callBack += "\n// - s100FM_exportSubRef_toDoByKindPreDelete("+$kind+") Done.";
+}
+
+// proc pour les actions suplementaires par type d'export
+//
+global proc s100FM_exportSubRef_toDoByKind(string $kind) //$kind="RENDER"
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100FM_exportSubRef_toDoByKind("+$kind+"):";
+
+	if($kind == "ANIMCACHE" || $kind == "RENDER"  )
+	{
+		string $list[] = `s100Set_retrieveSetMembers("geoCacheSet")`;
+		if(size($list) > 0)
+		{
+			// delete history of specific objects listed in 'geoCacheSet' was normally done before (predelete part)
+			// redeleting unused ghost shapes anyway :
+			s100Shp_DeleteUnusedShapesVerboseInScene(0);
+
+			// lock translate/rotate/scale of all meshes :
+			s100_exportSubRef_lockTransforms($list, 1,1,1, 0, 1);
+			// unlocking visibility of all meshes :
+			s100_exportSubRef_lockTransforms($list, 0,0,0, 1, 0);
+
+			//createCache for Render
+			select -r $list ;
+			string $exampleFileName = ( `internalVar -userTmpDir` );
+			string $cacheXmls[] = `doCreateGeometryCache 5 { "0", "0", "1", "OneFilePerFrame",0 ,$exampleFileName ,1,"tmp","0", "add", "1", "1", "1","0","1","mcc" } `;
+
+			// trying to rename all caches by Transform short name of mesh, cache file if impossible:
+			string $ls[] = `ls -type cacheFile`;
+			for($tmp in $ls) // string $tmp = $ls[0] ; select -r $tmp
+			{
+				setAttr($tmp +".enable") 0 ;
+				string $get = "";
+				string $cons[] = `listConnections -s 0 -d 1 ($tmp+".inRange")`;
+				if (size($cons) && objectType($cons[0])=="historySwitch")
+				{
+					$cons = `listConnections -s 0 -d 1 ($cons[0]+".outputGeometry[0]")`;
+					if (size($cons))
+						$get = shortNameOf($cons[0]);
+                }
+				else
+					$get = `getAttr -asString  ($tmp +".cacheName")`;
+
+				rename $tmp ($get +"_cacheFile") ;
+			}
+			$ls = `ls -type cacheFile`;
+			$s100FM_exportSubRef_callBack += "\n//\t "+size($ls)+" geoCache nodes created on "+size($list)+" objects:";
+			for ($ch in $ls)
+				$s100FM_exportSubRef_callBack += "\n//\t - '"+$ch+"'";
+
+
+			// creation of mini-rig for further manipulation of cached geoms (offset caches, global moves...)
+			string $topNode = "|full_grp";
+			s100FMSRcreateCacheModelControl($topNode);
+        }
+    }
+
+	// deletin superfluous sets:
+	if($kind == "ANIMCACHE" || $kind == "RENDER" || $kind == "INSTANCE" )
+	{
+		if(`objExists "AllSet"`)
+		{
+			$s100FM_exportSubRef_callBack += "\n//\t. deleting set 'AllSet'";
+			select -ne "AllSet";
+			delete;
+		}
+		if(`objExists "DeformSet"`)
+		{
+			$s100FM_exportSubRef_callBack += "\n//\t. deleting set 'DeformSet'";
+			select -ne "DeformSet";
+			delete;
+		}
+    }
+
+	// Various optimizations:
+	//
+	switch ($kind)
+	{
+		case "LAYOUT":
+			// facial cam deletion
+			if(`objExists "facialCam_grp" `)
+			{
+				$s100FM_exportSubRef_callBack += "\n//\t - deletion of Facial Camera.";
+				delete  "facialCam_grp"  ;
+            }
+			// force 'best' attributes:
+			s100FMattrs_setBestPrevizAttrs(100, 0) ;
+		break;
+
+		 case "ANIM":
+ 			s100FMattrs_setBestPrevizAttrs(100, 0) ;
+
+			$s100FM_exportSubRef_callBack += "\n//\t - Forcing display of Facial Animation UI ('facial_oGrp')";
+			if(`objExists "facial_oGrp" `)
+				setAttr ("facial_oGrp.v") 1 ;
+
+		    //string $file = `file -q -sn -shortName`;
+			//if(`gmatch $file "*_C_*"`)
+			//	s100AsModCreateFacialCam ; // no auto creation of facial cam anymore!
+		 break;
+
+		 case "ANIMCACHE":
+		 break;
+
+		 case "RENDER":
+			 //generation de .map pour mental ray
+			 $s100FM_exportSubRef_callBack += "\n//\t - .map generation for Mental Ray...";
+			 string $listText[] = `ls -type file` ;
+			if(size($listText)> 0)
+			{
+				string $cmd = "";
+				$cmd += "from s100API.core import switchTexturesToMap\n";
+				$cmd += "switchTexturesToMap()\n";
+				python($cmd);
+			}
+		 break;
+
+		 case "INSTANCE":
+		 	catch(`delete "|full_grp"`);
+			if(`objExists "geoCacheSet"`)
+			{
+				$s100FM_exportSubRef_callBack += "\n//\t. deleting set 'geoCacheSet'";
+				select -ne "geoCacheSet";
+				delete;
+			}
+		 break;
+	}
+
+
+		//tag of top node according to "kind"
+		s100FMAStagSubRefSceneTopNode($kind);
+
+
+	$s100FM_exportSubRef_callBack += "\n// - s100FM_exportSubRef_toDoByKind("+$kind+") Done.";
+}
+
+
+//get des obj a exporter
+global proc string[] s100FM_exportSubRef_GetObjToExport(string $kind)
+{
+	global string $gS100_associatedRefFileTag ; // for INSTANCE kind
+	string $toExp[] ={} ;
+	switch ($kind)
+	{
+		 case "LAYOUT":
+			$toExp = {"|full_grp"};
+		 break;
+
+		 case "ANIM":
+			$toExp = {"|full_grp"};
+		 break;
+
+		 case "ANIMCACHE":
+			$toExp = `s100Set_retrieveSetMembers( "geoCacheSet") `;
+		 break;
+
+		 case "RENDER":
+			$toExp = `s100Set_retrieveSetMembers( "geoCacheSet") `;
+		 break;
+
+		 case "INSTANCE": // should only be one mesh
+		 	string $INSTbaseName = s100FM_exportSubRef_returnINSTANCEbaseName();
+			string $toExpTmp[] = `ls -o ("*"+$INSTbaseName+"*."+$gS100_associatedRefFileTag)`;
+			if (size($toExpTmp)>1)
+			{
+				warning ("more than ONE tagged/associated '"+$INSTbaseName+"' object found ! keeping only the first one ('"+$toExpTmp[0]+"'");
+            }
+			$toExp = {$toExpTmp[0]};
+		 break;
+	}
+	return $toExp ;
+}
+
+// official list of every subRef types :
+//
+global proc string[] s100FM_exportSubRef_returnEveryPossibleSubRef()
+{
+	return {"LAYOUT", "ANIM", "ANIMCACHE", "RENDER", "INSTANCE" } ;
+}
+
+// official baseName of INSTANCE main mesh
+// (is completed by asset name from master scene before, and possibly number afterwards when duplicated)
+//
+global proc string s100FM_exportSubRef_returnINSTANCEbaseName()
+{
+	return "_INSTANCE_" ;
+}
+
+
+//build du nom du nouveau fichier
+global proc string s100FM_exportSubRef_buildNameForExport(string $kind)
+{
+	global string $s100FM_exportSubRef_callBack ;
+	string $file = `file -q -sn` ;
+	string $path = `s100FM_exportSubRefGetRootPathToExp( $file)`;
+	$file = `file -q -sn -shortName` ;
+	string $arr[] = stringToStringArray($file ,".") ;
+	$path = $path + $arr[0] + "_" + $kind + ".mb" ;
+	return $path  ;
+}
+
+global proc string[] s100FM_exportSubRef_toDeleteBySetFor(string $kind)
+{
+	global string $s100FM_exportSubRef_callBack ;
+
+	string $getObjList[] ;
+	string $set = "";
+	switch ($kind)
+	{
+		 case "LAYOUT":
+		 	$set = "del4LayoutSet";
+		 	if (size(`ls -type "objectSet" $set`))
+				$getObjList = `s100Set_retrieveSetMembers($set) `;
+		 break;
+
+		 case "ANIM":
+			$set = "del4AnimSet";
+			if (size(`ls -type "objectSet" $set`))
+				$getObjList = `s100Set_retrieveSetMembers($set) `;
+		 break;
+
+		 case "ANIMCACHE":
+			$set = "del4RenderSet";
+			if (size(`ls -type "objectSet" $set`))
+				$getObjList = `s100Set_retrieveSetMembers($set) `;
+		 break;
+
+		 case "RENDER":
+			$set = "del4RenderSet";
+			if (size(`ls -type "objectSet" $set`))
+				$getObjList = `s100Set_retrieveSetMembers($set) `;
+		 break;
+	}
+	if (size($getObjList))
+		$s100FM_exportSubRef_callBack += "\n//\t s100FM_exportSubRef_toDeleteBySetFor : retrieving objects from set '"+$set+"'";
+	else
+		$s100FM_exportSubRef_callBack += "\n//\t s100FM_exportSubRef_toDeleteBySetFor : No set to work from...";
+	return $getObjList ;
+}
+
+///////////////////////////////////////////////
+//proc pour incrementer les sub ref //in case
+
+
+global proc s100FM_exportSubRefAutoIncrementScene(string $toDo[])
+{
+	global string $s100FM_exportSubRef_callBack ;
+
+	string $files[] = `s100FM_exportSubRefGetRefSceneToIncrement `;
+	if(size($files) > 0)
+	{
+		$file = `file -q -sn`;
+		$refFolder = `s100FM_exportSubRefGetRootPathToExp($file)`;
+		if(!`filetest -d ($refFolder +"_old/") `)
+		{
+			sysFile -makeDir ($refFolder +"_old/") ;
+			$s100FM_exportSubRef_callBack += ("\n//-----folder created : " + $refFolder +"_old/") ;
+        }
+		$inc = s100FM_exportSubRefGetNumbOfIncrement($refFolder +"_old/") ;
+		$goFolder = ($refFolder +"_old/" + $inc +"/") ;
+		sysFile -makeDir $goFolder ;
+		$s100FM_exportSubRef_callBack += ("\n//-----folder created : " + $goFolder) ;
+
+		string $files[] = `s100FM_exportSubRefGetRefSceneToIncrement `;
+		string $filToKeep[] ;
+		$i = 0 ;
+		for($tmp in $files)
+		{
+			for($tmp2 in $toDo)
+			{
+				if(`gmatch $tmp ("*" + $tmp2 + "*")`)
+				{
+					$filToKeep[$i] = $tmp ;
+					$i++ ;
+                }
+            }
+        }
+		//print $filToKeep ;
+		s100FM_exportSubRefRecopyOldSceneToANewOne($filToKeep, $refFolder, $goFolder);
+
+		for($tmp in $filToKeep)
+		{
+			$filTmp = $refFolder + $tmp ;
+			//if(`filetest -e $filTmp`)
+				//sysFile -delete $filTmp ;
+        }
+
+	}else{
+		$s100FM_exportSubRef_callBack += "\nnothing to backup";
+    }
+}
+
+global proc string[] s100FM_exportSubRefGetRefSceneToIncrement()
+{
+	$file = `file -q -sn`;
+	$refFolder = `s100FM_exportSubRefGetRootPathToExp($file)`;
+	string $filesList[] = `getFileList -folder $refFolder -filespec "*.ma"` ;
+	return 	$filesList ;
+}
+
+global proc int s100FM_ExportsubRefGetIfSubExists()
+{
+	$ch = 0 ;
+	string $path = `textField -q -tx s100FileManagerUITFPathAsset `;
+	string $root = `s100returnAssetRootFolder($path) `;
+	string $sub =$root+  "00_subRefs/";
+	if(`filetest -d $sub`)
+	{
+  		string $file[] =`getFileList -folder $sub -filespec "*.ma"`;
+		$ch = size($file) ;
+    }
+	return $ch ;
+}
+
+global proc string s100FM_exportSubRefGetNumbOfIncrement(string $path)
+{
+	//$path = ($refFolder +"_old/") ;
+	string $filesList[] = sort(`getFileList -folder $path `) ;
+	string $return ;
+	if(size($filesList) == 0)
+	{
+		$return = "001";
+    }
+
+	if(size($filesList) > 0)
+	{
+		$last = size($filesList) -1    ;
+		$lastN =  $filesList[$last] ;
+		int $lastI =  $lastN ;
+		$lastI++;
+		$return = padNumber($lastI,3);
+    }
+	return $return ;
+}
+
+global proc s100FM_exportSubRefRecopyOldSceneToANewOne(string $files[],string $oldFolder, string $newFolder)
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\nfiles backuped :" ;
+	for($i = 0 ; $i < size($files) ; $i++)
+	{
+		sysFile -copy (	$newFolder + $files[$i]) ($oldFolder + $files[$i]) ;
+		$s100FM_exportSubRef_callBack += ("\n" +  (	$newFolder + $files[$i]))  ;
+    }
+	$s100FM_exportSubRef_callBack += "\n\n//-----files backuped :" ;
+	$s100FM_exportSubRef_callBack += "\n" ;
+}
+
+// import reference nodes and clean multinames :
+//
+global proc s100FM_exportSubRef_importRefAndClean(int $loadUnloadedRef)
+{
+	//trouve les grp en local dans la scene --- ca sert rien
+	//string $grp[] = `s100FM_exportSubRef_findNoneRefGrp`;
+	//trouve les parents de ces grps
+	//string $grpP[] = `s100FM_exportSubRef_findNoneRefGrpParent($grp)`;
+
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100FM_exportSubRef_importRefAndClean :" ;
+
+	//import et check des references
+	int $ch = ` s100_importRef_withChoice($loadUnloadedRef) `;
+	waitCursor -state on;
+	if($ch )
+	{
+		//delete ref
+			print ("\n//------------Deleting reference node") ;
+			s100deleteAllReferences ;
+			print ("\n//------------Deleting namespace") ;
+		//cleaning name
+			s100FM_exportSubRef_deleteNameSpace ;
+		/*
+		// rerrange les grp en fonction de ce qui il a apres le namespace
+			print ("\n//------------rearranging grp") ;
+			s100FM_exportSubRef_rearreangeGrp ;
+		// reaarange les grps en local
+			print ("\n//------------rearranging grp, second pass") ;
+			s100FM_exportSubRef_rearreangeGrpSecondPass ;
+		//fixe
+			print ("\n//------------fixing grp") ;
+			s100FM_exportSubRef_fixe ;
+		*/
+
+		print "\n//---- clean ref done" ;
+    }
+	$s100FM_exportSubRef_callBack += "\n// - s100FM_exportSubRef_importRefAndClean Done." ;
+	waitCursor -state off;
+}
+
+global proc string[] s100FM_exportSubRef_findNoneRefGrpParent(string $grp[])
+{
+	string $returnA[] ;
+	//print $grp ;
+	for($i = 0 ; $i < size($grp) ; $i++ )
+	{
+		if(`objExists $grp[$i]`)
+		{
+			$listP = `listRelatives -p $grp[$i]`;
+			$returnA[$i] = $listP[0];
+        }
+    }
+	string $ru[] = stringArrayRemoveDuplicates($returnA ) ;
+	return $ru ;
+}
+
+global proc string[] s100FM_exportSubRef_findNoneRefGrp()
+{
+	string $all[] = `ls -exactType "transform"`;
+	$i = 0 ;
+	string $return[] ;
+	for($tmp in $all)
+	{
+		if(! `referenceQuery -isNodeReferenced $tmp  `)
+		{
+			$shape = `listRelatives -s $tmp `;
+				if(size($shape) == 0)
+					$return[$i] = $tmp ; $i++;
+		}
+    }
+	string $ru[] = stringArrayRemoveDuplicates($return ) ;
+	return $ru ;
+}
+
+global proc s100FM_exportSubRef_deleteEmptyGrp()
+{
+	string $all[] = `ls -exactType "transform"`;
+	//select $all ;
+	string $emptyGrp[];
+	string $listCh[] ;
+	$j = 0 ;
+	for($i = 0 ; $i < size($all) ; $i++ )
+	{
+		if(`objExists $all[$i]`)
+		{
+			$ch = 1 ;
+			$listCh = `listRelatives -allDescendents $all[$i]` ;
+			if(size($listCh) == 0 && $ch)
+			{
+				 $emptyGrp[$j] = $all[$i] ;
+				 $j++;
+			}
+        }
+    }
+	if(size($emptyGrp) >0)
+		delete $emptyGrp ;
+}
+
+/*
+global proc s100FM_exportSubRef_rearreangeGrpSecondPass()
+{
+	string $toMatch[] = {"*?","*:*?" ,"*:*:*?"};
+	string $toDo[] = {"full_grp","Msh_grp","Rig_grp","msh_grp","rig_grp"};
+	string $toPar[] = {"full_grp","msh_grp","rig_grp","msh_grp","rig_grp"};
+	string $list[] ;
+	string $buildExplist ;
+	string $p[] ;
+	for($i = 0 ; $i < size($toDo) ; $i++ )
+	{
+		$buildExplist =" ls ";
+		for($j = 0 ;$j < size($toMatch); $j++)
+		{
+			$buildExplist += (" \"" + $toMatch[$j] + $toDo[$i] + "\" ");
+        }
+		$buildExplist += ";" ;
+		$list = eval ($buildExplist ) ;
+		for($tmp2 in $list)
+		{
+			if(!`gmatch $tmp2 "v???_*"`)
+			{
+				$p = `listRelatives -p $tmp2`;
+				if($p[0] !=  $toPar[$i] )
+					parent $list $toPar[$i] ;
+			}
+		}
+    }
+	string $toDoSubKind[] = {"mesh_grp","msh_grp" ,"rig_grp","deform_grp"};
+	for($i = 0 ; $i < size($toDoSubKind) ; $i++ )
+	{
+		if(`objExists $toDoSubKind[$i] `)
+		{
+			$litsP = `listRelatives -p $toDoSubKind[$i] `;
+			if($litsP[0] != "full_grp")
+				parent $toDoSubKind[$i] "full_grp" ;
+        }
+	}
+	string $toDoType[] = {"Characters_grp","Props_grp","Vegetations_grp"};
+	for($tmp in $toDoType)
+	{
+		if(`objExists $tmp `)
+		{
+			clear $list ;
+			$list = `listRelatives -c $tmp`	;
+				if(size($list) > 0)
+				{
+					parent $list "msh_grp";
+                }
+        }
+    }
+	string $toDoSubKind[] = {"full_grp"};
+
+	for($i = 0 ; $i < size($toDoSubKind) ; $i++ )
+	{
+		string $dup[] = `ls -exactType "transform" ("v???_" +$toDoSubKind[$i]) `;
+		for($tmp2 in $dup)
+		{
+			$listSh = `listRelatives -shapes $tmp2`;
+				if(size($listSh) ==0)
+				{
+					$listC = `listRelatives -children $tmp2`;
+						if(size($listC) > 0)
+						{
+						$start = startString($tmp2 ,5) ;
+						$sub = substituteAllString($tmp2 , $start ,"");
+							if(`objExists $sub`)
+							{
+								for($tmp4 in $listC)
+								{
+									if(`objExists $tmp4`)
+									{
+									print ("\n//---parenting " + $tmp4 +" to " + $sub );
+									//$listPt =`listRelatives -p `
+									parent $tmp4 $sub ;
+									delete $tmp2 ;
+									}
+                                }
+							}
+                        }
+				}
+		}
+	}
+	s100FM_exportSubRef_deleteEmptyGrp() ;
+}
+
+
+
+global proc s100FM_exportSubRef_rearreangeGrp()
+{
+	string $toMatch[] = {"*:" ,"*:*:"};
+	string $toDoType[] = {"Characters_grp","Props_grp","Vegetations_grp"};
+	string $toDoSubKind[] = {"mesh_grp","msh_grp" ,"rig_grp","deform_grp","full_grp","bdd","blend_shapes","blendShapes"};
+	//ici
+	string $toDo[] = stringArrayCatenate($toDoType,$toDoSubKind ) ;
+	string $buildExplist ;
+	string $list[] ;
+	for($i = 0 ; $i < size($toDo) ; $i++ )
+	{
+		$buildExplist =" ls ";
+		for($j = 0 ;$j < size($toMatch); $j++)
+		{
+			$buildExplist += (" \"" + $toMatch[$j] + $toDo[$i] + "\" ");
+		}
+		$buildExplist += ";" ;
+		$list = eval ($buildExplist ) ;
+		//	print $list ;
+		for($j = 0 ;$j < size($list); $j++)
+		{
+			if(! `objExists $toDo[$i]`)
+			{
+				group -n $toDo[$i]  -em -p "full_grp";
+            }
+			string $list2[] = `listRelatives -c $list[$j]`;
+			for($k = 0 ; $k < size($list2) ; $k++)
+			{
+				$p = `listRelatives -p $list2[$k] `;
+				if($p[0] != 	$toDo[$i] )
+				{
+					parent $list2[$k] $toDo[$i];
+					print ("\n//---- parenting " + $list2[$k] + " under full_grp");
+                }
+			}
+			print ("\n//---- deleting " + $list[$j] );
+			if(`objExists $list[$j] `)
+				delete $list[$j] ;
+        }
+    }
+}
+*/
+
+global proc int s100FM_exportSubRef_importRefChUnload()
+{
+	//check si il y a des ref non loade dans la scene, demande a l'user si il veut les importer, ou annule
+	//l operation.
+
+	//$r = 0 : import pas les ref non load
+	//$r = 1 : import
+	//$r = -1 : cancel operation
+
+	$r = 0 ;
+	string $s[] = `s100findAllUnLoadReferenceNode`;
+	if(size($s) > 0)
+	{
+  		$conf = `confirmDialog -title "unloaded ref in scene" -message ("do you want to import unload ref?" )
+			-button "Yes" -button "No" -button "Cancel" -defaultButton "Yes"
+			-cancelButton "Cancel" -dismissString "No"`;
+
+		if($conf == "Yes")
+		{
+			$r = 1 ;
+        }
+		else
+		{
+			if($conf == "No")
+			{
+				$r = 0;
+            }
+			else
+			{
+				$r = -1 ;
+				warning "operation aborted" ;
+            }
+        }
+    }
+	else
+	{
+		$r = 0 ;
+    }
+	return $r ;
+}
+
+
+
+////////////////////
+//cleaning des noms
+////////////////////
+
+global proc s100FM_exportSubRef_deleteNameSpace()
+{
+	string $nST[] = `namespaceInfo -listOnlyNamespaces `;
+	string $ns[] = stringArrayRemove({"UI","shared"} , $nST ) ;
+	namespace -set ":" ;
+
+	string $list[] ;
+	string $name ;
+	for($i = 0 ; $i < size($ns) ; $i++)
+	{
+		print ("\n//---processing namespace" + $ns[$i] ) ;
+
+		clear $list ;
+		$list = `ls -type "transform" ($ns[$i] +":*") ("*:" +$ns[$i] +":*") `;
+		for($j = 0 ; $j < size($list) ; $j++)
+		{
+
+			$arr = stringToStringArray($list[$j] , ":") ;
+			$objTC = $arr[size($arr) -1 ] ;
+			$toPut = "";//substituteAllString($list[$j],$objTC  ,"");
+			$name = $toPut +$objTC ;
+
+			if(size($objTC) > 0)
+			{
+				if( `objExists $objTC`)
+				{
+					$k = 1 ;
+					$pad = padNumber($k ,3) ;
+					$name = ($toPut+ "v" + $pad +"_" + $objTC ) ;
+					while(`objExists $name`)
+					{
+						$k++;
+						$pad = padNumber($k ,3) ;
+						$name = ($toPut+ "v" + $pad +"_" + $objTC ) ;
+					}
+					//print $name ;
+
+				}
+				if(`objExists $list[$j]  `)
+				{
+					//print ("\nrename "+ $list[$j] + " to " + $name) ;
+					rename $list[$j] $name ;
+				}
+			}
+		}
+		print ("\n//---deleting namespace" + $ns[$i] ) ;
+		namespace -f -moveNamespace $ns[$i] ":";
+		namespace -f -removeNamespace $ns[$i] ;
+    }
+
+	$nST = `namespaceInfo -listOnlyNamespaces `;
+	$ns = stringArrayRemove({"UI","shared"} , $nST ) ;
+	while(size($ns)> 0)
+	{
+		s100DeleteNameSpace($ns) ;
+		$nST = `namespaceInfo -listOnlyNamespaces `;
+		$ns = stringArrayRemove({"UI","shared"} , $nST ) ;
+    }
+}
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////
+//
+//	Tools to re-rig ANIMCACHE and RENDER subRef :
+// = top node hierarchy :
+//		"place_ctrlGrp"
+// 			- "place_ctrl" (=NURBS controller with attributes driving every cacheFile node of the scene)
+//				- "full_grp" ... (meshes parent)
+
+// string $topNode = "|full_grp";
+// createCacheModelControl($topNode);
+
+global proc string[] s100FMSRcreateCacheModelControl(string $topNode)
+{
+	string $placeGrp = "";
+	string $placeCtrl = "";
+
+	if (objExists($topNode))
+	{
+		$placeGrp = `createNode -n "place_ctrlGrp" transform`;
+		string $placeCtrls[] = `circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 4 -d 3 -ut 0 -tol 0.01 -s 8 -ch 0 -n "place_ctrl"`;
+		$placeCtrl = $placeCtrls[0];
+
+		parent $placeCtrl $placeGrp;
+		string $newName[] = `parent $topNode $placeCtrl`;
+		s100FMSRsetSpecialTag($placeGrp, "topNode");
+		s100FMSRsetSpecialTag($placeCtrl, "placeNode");
+
+		//configuration des attributs
+		s100FMSRmanageControlCacheAttr($placeCtrl, `ls -type "cacheFile"`);
+
+		// renaming so that topNode is still named this way :)
+		rename $newName[0] ("old"+capitalizeString($newName[0]));
+		$placeGrp = `rename $placeGrp $topNode`;
+    }
+	else
+		print ("// No object \""+$topNode+"\" in the scene. Stopped.\n");
+
+	return {$placeGrp, $placeCtrl};
+}
+
+global proc s100FMSRrenameCacheNodes(string $cacheNodes[])
+{
+	for ($chn in $cacheNodes)
+	{
+		// wip
+    }
+}
+
+global proc string s100FMSRsetSpecialTag(string $node, string $tag)
+{
+	// Ajoute un tag "special" a l'objet designe
+	if (objExists($node+".topNode") == 0)
+	{
+		addAttr -ln $tag -dt "string" $node;
+		setAttr -type "string" ($node+"."+$tag) "i m the top dude";
+		setAttr -lock true ($node+"."+$tag);
+	}
+	return ($node+"."+$tag);
+}
+
+global proc s100FMSRmanageControlCacheAttr(string $ctrl, string $caches[])
+{
+	/*
+	Create cache attributes of the controllers.
+	ctrl: cache controller
+	caches: cache file to connect to the controller
+	Chaque parties pour un type different d'attributs (enum, time, float, bool...)
+	*/
+	if (objExists($ctrl+".cacheAttrs") == 0)
+	{
+		addAttr -ln "cacheAttrs" -attributeType "enum" -en "####:" $ctrl;
+		setAttr -keyable on -lock true ($ctrl+".cacheAttrs");
+	}
+
+	for ($att in {"sourceStart", "sourceEnd", "startFrame"})
+	{
+		if (objExists($ctrl+"."+$att) == 0)
+		{
+			addAttr -ln $att -attributeType "time" $ctrl;
+			setAttr -keyable on ($ctrl+"."+$att);
+			setAttr ($ctrl+"."+$att) `getAttr($caches[0]+"."+$att)`;
+	    }
+		for ($cache in $caches)
+		{
+			connectAttr ($ctrl+"."+$att) ($cache+"."+$att);
+		}
+	}
+
+	if (objExists($ctrl+".scaleCache") == 0)
+	{
+		addAttr -ln "scaleCache" -attributeType "float" -minValue 0 $ctrl;
+		setAttr -keyable on ($ctrl+".scaleCache");
+		setAttr ($ctrl+".scaleCache") `getAttr($caches[0]+".scale")`;
+    	}
+	for ($cache in $caches)
+	{
+		connectAttr ($ctrl+".scaleCache") ($cache+".scale");
+    }
+
+	for ($att in {"hold", "preCycle", "postCycle"})
+	{
+		if (objExists($ctrl+"."+$att) == 0)
+		{
+			addAttr -ln $att -attributeType "float" -minValue 0 $ctrl;
+			setAttr -keyable on ($ctrl+"."+$att);
+			setAttr ($ctrl+"."+$att) `getAttr($caches[0]+"."+$att)`;
+	    }
+		for ($cache in $caches)
+		{
+			connectAttr($ctrl+"."+$att, $cache+"."+$att);
+		}
+	}
+
+	for ($att in {"enable", "reverse", "oscillate"})
+	{
+		if (objExists($ctrl+"."+$att) == 0)
+		{
+			addAttr -ln $att -attributeType "bool" $ctrl;
+			setAttr -keyable on ($ctrl+"."+$att);
+			setAttr ($ctrl+"."+$att) `getAttr($caches[0]+"."+$att)`;
+	    }
+		for ($cache in $caches)
+		{
+			connectAttr ($ctrl+"."+$att) ($cache+"."+$att);
+		}
+	}
+}
+
+
+// lock/unlock attributes on passed transforms:
+//
+global proc int s100_exportSubRef_lockTransforms(string $list[], int $translate, int $rotate, int $scale, int $vis, int $lock )
+{
+	global string $s100FM_exportSubRef_callBack ;
+	$s100FM_exportSubRef_callBack += "\n// s100_exportSubRef_lockTransforms :" ;
+
+	// listing attrs to treat:
+	string $tAttrs[] = {"tx","ty","tz","t"};
+	string $rAttrs[] = {"rx","ry","rz","r"};
+	string $sAttrs[] = {"sx","sy","sz","s"};
+	string $vAttrs[] = {"v"};
+	string $attrsToTreat[] = {};
+	string $stringAttrA[] = {};
+	if ($translate)
+	{
+		$attrsToTreat = $tAttrs;
+		$stringAttrA = stringArrayCatenate($stringAttrA,{"translate"});
+	}
+	if ($rotate)
+	{
+		$attrsToTreat = stringArrayCatenate($attrsToTreat,$rAttrs);
+		$stringAttrA = stringArrayCatenate($stringAttrA,{"rotate"});
+	}
+	if ($scale)
+	{
+		$attrsToTreat = stringArrayCatenate($attrsToTreat,$sAttrs);
+		$stringAttrA = stringArrayCatenate($stringAttrA,{"scale"});
+	}
+	if ($vis)
+	{
+		$attrsToTreat = stringArrayCatenate($attrsToTreat,$vAttrs);
+		$stringAttrA = stringArrayCatenate($stringAttrA,{"visibility"});
+	}
+
+	// treating them:
+	int $ok = 0;
+	for ($obj in $list)
+	{
+		int $localOk = 0;
+
+		for ($att in $attrsToTreat)
+		{
+			string $attr = ($obj+"."+$att);
+			if (objExists($attr))
+				$localOk += !catch(`setAttr -l $lock $attr`);
+        }
+		if ($localOk==size($attrsToTreat))
+			$ok += 1;
+    }
+	string $prompt = ("\n//\t. "+$ok+"/"+size($list)+" objects '"+stringArrayToString($stringAttrA,",")+"' Lock Status set to "+$lock+".");
+	print $prompt;
+	$s100FM_exportSubRef_callBack += $prompt;
+	return $ok;
+}

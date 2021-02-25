@@ -1,0 +1,464 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÚ Ÿ¡˙
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 
+// CROWD CREATION BASED ON LOCATORS AND CURVES
+// 
+
+
+
+global proc slParticleCreator()
+{
+
+	string	$locators[]; // store names of all the locators & nurbsCurve
+	string	$crowdParticle; // name of the particle created for this crowd.
+	vector	$crowdPos[]; // store positions of the locators 
+	int	$statePP[]; // store states of these locators (0=static or 1=curve)
+	float	$speed ; 
+	int	$indexPP;
+	int	$noOfSpans=20;
+	float	$smoothness=0.1;
+	int	$minStaticIndexPP=0;
+	int	$maxStaticIndexPP=1;
+	int	$minWalkingIndexPP=0;
+	int	$maxWalkingIndexPP=1;
+	string	$conGroup[];
+	string	$type;
+	vector	$scalePP=<<1,1,1>>;
+	
+	
+	playbackOptions -e -min 43 -max 300;currentTime 43;
+
+	string	$conGroup[]  = `ls -sl "*Group"`;
+	if (!`objExists $conGroup[0]`)
+	{
+		error "Standard Group is necessary.";
+	}
+	string	$crowdLocs[] = `listRelatives  -path -children`;
+	if (size($crowdLocs) == 0)
+	{
+		error "YOU MUST CREATE CROWDLOCATORS FIRST! RETURN";
+	}
+	if (`objExists $conGroup[0]`)
+	{
+		if (!`objExists ($conGroup[0]+".speed")`)
+		{
+			setAttr -lock true -keyable false ($conGroup[0]+".tx");
+			setAttr -lock true -keyable false ($conGroup[0]+".ty");
+			setAttr -lock true -keyable false ($conGroup[0]+".tz");
+			setAttr -lock true -keyable false ($conGroup[0]+".rx");
+			setAttr -lock true -keyable false ($conGroup[0]+".ry");
+			setAttr -lock true -keyable false ($conGroup[0]+".rz");
+			setAttr -lock true -keyable false ($conGroup[0]+".sx");
+			setAttr -lock true -keyable false ($conGroup[0]+".sy");
+			setAttr -lock true -keyable false ($conGroup[0]+".sz");
+			setAttr -lock true -keyable false ($conGroup[0]+".v");
+			
+			addAttr -ln speed -at double  -min 0 -dv 1 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".speed");
+			addAttr -ln seed -at double  -min 1  -dv 1 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".seed");
+
+			addAttr -ln scaleXmin -at double  -min 0.5 -max 1.5 -dv 0.8 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleXmin");
+			addAttr -ln scaleXmax -at double  -min 0.5 -max 1.5 -dv 1.2 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleXmax");
+			addAttr -ln scaleYmin -at double  -min 0.5 -max 1.5 -dv 0.8 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleYmin");
+			addAttr -ln scaleYmax -at double  -min 0.5 -max 1.5 -dv 1.2 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleYmax");
+			addAttr -ln scaleZmin -at double  -dv 0.8 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleZmin");
+			addAttr -ln scaleZmax -at double  -dv 1.2 $conGroup[0];
+			setAttr -e -keyable true ($conGroup[0]+".scaleZmax");
+		}
+	}
+	$type=`substitute "Group" $conGroup[0] ""`;
+	if ($type=="walk")
+		setAttr ($conGroup[0]+".speed") 20;
+	else if($type=="run")
+		setAttr ($conGroup[0]+".speed") 30;
+	$cmd="getAttr " + $conGroup[0] + ".speed";
+	$speed=eval($cmd);
+	
+	// GET THE DEFAULT SPANS AND SPEED FROM CROWD GUI
+	// These values will be used in the creation of the particles
+	// After the particles are created, user may use the GUI to 
+	// change these values and apply the changes to one or group
+	// of particles associated with these crowd locators.
+
+	print ("Static Range = [" + $minStaticIndexPP + ", " + $maxStaticIndexPP + "]\n");
+	print ("Walking Range = [" + $minWalkingIndexPP + ", " + $maxWalkingIndexPP + "]\n");
+	
+	// GET THE CROWD LOCATORS AND INITIALIZE OTHER VARIABLES
+		
+	int $cnt = 0;  // define particleID also
+	for($item in $crowdLocs)
+	{
+		float $pos[];
+		if(kcIsType($item, "locator"))
+		{
+			
+			$pos = `xform -q -worldSpace -translation $item`;	
+			$statePP[$cnt] = 0; // static
+			$locators[$cnt] = $item;
+			
+		}
+		else if (kcIsType($item, "nurbsCurve"))
+		{
+					
+			// rebuild the curve first then get the postion of the first CV
+			// I use a default "spans" value of 20 for all curves
+			// still keep the original curve
+			string $rebuilt[] = `rebuildCurve -replaceOriginal 1 
+							  -rebuildType 0 
+							  -keepRange 0 
+							  -keepControlPoints 0 
+							  -keepEndPoints 1 
+							  -keepTangents 0 
+							  -spans $noOfSpans 
+							  -degree 1 
+							  -tolerance 0.05 $item`;
+
+			string $cmd = "xform -q -worldSpace -translation " + $item + ".cv[0]";
+			$pos = eval($cmd);
+			$statePP[$cnt] = 1;
+			$locators[$cnt] = $item;	
+		}
+				
+		$crowdPos[$cnt] = <<$pos[0], $pos[1], $pos[2]>>;			
+		$cnt +=1;
+	}
+
+	// CREATE PARTICLE SYSTEM
+	string $cmd = "particle";
+	for($i=0; $i<size($crowdPos); $i++)
+	{
+		vector $pos = $crowdPos[$i];
+		$cmd +=" -position " + $pos.x + " " + $pos.y + " " + $pos.z; 
+	}
+	$cmd += " -name " + $type + "CrowdParticle";
+	
+	string $particle[] = eval($cmd);
+	$crowdParticle = $particle[0];	// update the global variable
+
+	// ADD DYNAMIC ATTRIBUTES TO THE PARTICLE
+	slCrowdAddStatePP($crowdParticle);
+
+	setAttr ($particle[1] + ".particleRenderType") 4;	// set render type
+	setAttr ($particle[1] + ".startFrame") 43;		// set startFrame to 43
+	addAttr -is true -ln "spriteScaleX" -dv 1.0 $particle[1];
+	addAttr -is true -ln "spriteScaleY" -dv 1.0 $particle[1];
+	setAttr ($particle[1] + ".spriteScaleX") 1.2;
+	setAttr ($particle[1] + ".spriteScaleY") 7;
+
+	// UPDATE PP ATTRIBUTES
+	for($i=0; $i<size($crowdPos); $i++)
+	{
+		// update statePP
+		$cmd = "particle -e -attribute statePP -order " + $i + " -floatValue " + $statePP[$i] + " " + $crowdParticle;
+		eval($cmd);
+		
+		// update indexPP
+		if($statePP[$i] == 0)
+			$indexPP =  (int)rand($minStaticIndexPP, $maxStaticIndexPP);
+		else
+			$indexPP = (int)rand($minWalkingIndexPP, $maxWalkingIndexPP);
+		$cmd = "particle -e -attribute indexPP -order " + $i + " -floatValue " + $indexPP + " " + $crowdParticle;
+		eval($cmd);
+		
+		// update noOfSpansPP
+		$cmd = "particle -e -attribute noOfSpansPP -order " + $i + " -floatValue " + $noOfSpans + " " + $crowdParticle;
+		eval($cmd);
+
+		// udpate speedPP
+		$cmd = "particle -e -attribute speedPP -order " + $i + " -floatValue " + $speed + " " + $crowdParticle;
+		eval($cmd);
+
+		// udpate smoothPP
+		$cmd = "particle -e -attribute smoothPP -order " + $i + " -floatValue " + $smoothness + " " + $crowdParticle;
+		eval($cmd);
+
+		// update rotationPP
+		if($statePP[$i]==0)
+		{
+			$cmd = "xform -q -worldSpace -rotation " + $locators[$i];
+			float $rot[] = eval($cmd);
+			float $rad = $rot[1] * 3.14159/180;
+			vector $rotPP = <<cos($rad), 0, -sin($rad)>>;
+			particle -e -attribute rotationPP -order $i -vectorValue ($rotPP.x) ($rotPP.y) ($rotPP.z) $crowdParticle;
+		}
+
+		// udpate crowdIndex
+		$crowdIndex=rand (`size $locators`);
+		$cmd = "particle -e -attribute crowdIndex -order " + $i + " -floatValue " + $crowdIndex + " " + $crowdParticle;
+		eval($cmd);
+
+		// udpate scalePP
+		particle -e -attribute scalePP -order  $i  -vectorValue  ($scalePP.x) ($scalePP.y) ($scalePP.z) $crowdParticle;
+	}
+
+	// UPDATE PARTICLE ATTRIBUTES
+	// update crowdLocators
+	string $temp = arrayToString($locators);	
+	$cmd = "setAttr " + $crowdParticle + ".crowdLocators -type \"string\" \"" + $temp + "\"";
+	eval($cmd);
+
+	// update crowdSpeedMultipliers
+	// ASSUMPTIONS:
+	//		+ the static and walking indices are continuous
+	//		+ the "crowdSpeedMultiply*" nodes associated with them 
+	//		  start from index 0 to the maxWalkingIndex!
+	// -> Always give static geos lower indices as compare to walking ones
+	//    and they must be continuous in the instancer.
+
+	string $sl[] = `ls "crowdSpeedMultiply*"`;
+	string $temp = "";
+	for($i=0; $i<$maxWalkingIndexPP; $i++) $temp+= $sl[$i] + ";";
+	setAttr ($crowdParticle + ".crowdSpeedMultipliers") -type "string" $temp;
+	
+	// CREATE DYNAMIC EXPRESSIONS
+	string $instancerType =`radioButtonGrp -q -sl instancerType`;
+	
+	if ($instancerType ==1)
+	{
+		if ($type=="walk")
+		{
+			dynExpression -c -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr walkCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr walkCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr walkCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nfloat $sxmin=`getAttr walkGroup.scaleXmin`;\r\nfloat $sxmax=`getAttr walkGroup.scaleXmax`;\r\nfloat $symin=`getAttr walkGroup.scaleYmin`;\r\nfloat $symax=`getAttr walkGroup.scaleYmax`;\r\nfloat $szmin=`getAttr walkGroup.scaleZmin`;\r\nfloat $szmax=`getAttr walkGroup.scaleZmax`;\r\n\r\nif (particleId==0)\r\n\tseed(walkGroup.seed);\r\nfloat $sx= rand ($sxmin,$sxmax);\r\nfloat $sy= rand ($symin,$symax);\r\nfloat $sz= rand ($szmin,$szmax);\r\nscalePP = <<$sx,$sy,$sz>>;\r\n\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif (statePP == 1)\r\n\t\t{\r\n\t\t\tstring $myCurve = $crowdLocators[(int)$pid];\r\n\t\t\tstring $cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[0]\";\r\n\t\t\tfloat $p[] = eval($cmd);\r\n\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[1]\";\r\n\t\t\tfloat $p1[] = eval($cmd);\r\n\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[2]\";\r\n\t\t\tfloat $p2[] = eval($cmd);\r\n\t\t\tvector $vp = << $p[0], $p[1], $p[2] >>;\r\n\t\t\tvector $vp1 = << $p1[0], $p1[1], $p1[2] >>;\r\n\t\t\tvector $vp2 = << $p2[0], $p2[1], $p2[2] >>;\r\n\t\t\tspanIndexPP = 0 ;\r\n\t\t\t\r\n\t\t\tposition =<< $vp.x, $vp.y, $vp.z >>;\r\n\t\t\tcurvePointPP = $vp;\r\n\t\t\tcurveSegPP = $vp1 - $vp;\r\n\t\t\ttargDirPP = unit($vp1 - $vp);\r\n\t\t\tnextDirPP = unit($vp2 - $vp1); \r\n\t\t\tspeedPP = walkGroup.speed;\r\n\t\t\tvelocity = speedPP * targDirPP;\r\n\t\t\tvector $vt = velocity;\r\n\t\t\trotationPP = <<$vt.x, 0, $vt.z>>;\r\n\t\t\tuniquePointPP = sphrand(1); \r\n\t\t}\r\n\t}\r\n}" walkCrowdParticleShape;
+			dynExpression -rad -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr walkCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr walkCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr walkCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nint $pid;\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif(statePP == 1)\r\n\t\t{\r\n\t\t\tstring $myCurve = $crowdLocators[(int)$pid];\r\n\t\t\tfloat $distBlend;\r\n\t\t\tvector $dir;\r\n\t\t\tfloat $t;\r\n\t\t\tvector $vt1,$vt2;\r\n\t\t\tint $i = (int)spanIndexPP;\r\n\t\t\t$vt1 = curvePointPP - position;\r\n\t\t\t$vt2 = $vt1 * (unit($vt1) * unit(curveSegPP));\r\n\t\t\tfloat $dist = mag ($vt2);\r\n\t\t\tfloat $cLen = mag(curveSegPP);\r\n\t\t\t$dir = unit(velocity);\r\n\t\t\t$distBlend = linstep( $cLen-smoothPP, $cLen, $dist);\r\n\t\t\t$t = lastDistBlendPP;\r\n\t\t\tif( $distBlend < $t ) \r\n\t\t\t{\r\n\t\t\t\t$t += .05;\r\n\t\t\t\t$t = $t > 1.0 ? 1.0 : $t;\r\n\t\t\t\t$distBlend = $t;\r\n\t\t\t}\r\n\t\t\telse\t$t = $distBlend;\r\n\t\t\tlastDistBlendPP = $t;\r\n\t\t\tif($i < noOfSpansPP + 1)\r\n\t\t\t{\r\n\t\t\t\tif ($distBlend >=1.0 ) \r\n\t\t\t\t{\r\n\t\t\t\t\tspanIndexPP ++;\r\n\t\t\t\t\t$i ++;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + $i + \"]\";\r\n\t\t\t\t\tfloat  $pi1[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi1 = << $pi1[0], $pi1[1], $pi1[2]>>;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + ($i+1) + \"]\";\r\n\t\t\t\t\tfloat  $pi2[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi2 = << $pi2[0], $pi2[1], $pi2[2]>>;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + ($i+2) + \"]\";\r\n\t\t\t\t\tfloat  $pi3[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi3 = << $pi3[0], $pi3[1], $pi3[2]>>;\r\n\t\t\t\t\tcurvePointPP = $vpi1;\r\n\t\t\t\t\tcurveSegPP = $vpi2 - $vpi1;\r\n\t\t\t\t\ttargDirPP = unit($vpi2 - position);\r\n\t\t\t\t\tnextDirPP = unit($vpi3-$vpi2);\r\n\t\t\t\t\tvelocity = speedPP * targDirPP;\r\n\t\t\t\t\tlastDistBlendPP = 0;\r\n\t\t\t\t}\r\n\t\t\t\telse if ($distBlend > 0.0)\r\n\t\t\t\t{\r\n\t\t\t\t\tvelocity = speedPP * ($distBlend*(nextDirPP-targDirPP) + targDirPP);\r\n\t\t\t\t}\r\n\t\t\t}\r\n\t\t\telse\tvelocity = <<0,0,0>>; \r\n\t\t\tvector $vt = velocity;\r\n\t\t\trotationPP = <<$vt.x, 0, $vt.z>>;\r\n\r\n\t\t}\r\n\t}\r\n}"  walkCrowdParticleShape;
+		}
+		else if ($type=="run")
+		{
+			dynExpression -c -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr runCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr runCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr runCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nfloat $sxmin=`getAttr runGroup.scaleXmin`;\r\nfloat $sxmax=`getAttr runGroup.scaleXmax`;\r\nfloat $symin=`getAttr runGroup.scaleYmin`;\r\nfloat $symax=`getAttr runGroup.scaleYmax`;\r\nfloat $szmin=`getAttr runGroup.scaleZmin`;\r\nfloat $szmax=`getAttr runGroup.scaleZmax`;\r\n\r\nif (particleId==0)\r\n\tseed(runGroup.seed);\r\nfloat $sx= rand ($sxmin,$sxmax);\r\nfloat $sy= rand ($symin,$symax);\r\nfloat $sz= rand ($szmin,$szmax);\r\nscalePP = <<$sx,$sy,$sz>>;\r\n\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif (statePP == 1)\r\n\t\t{\r\n\t\t\tstring $myCurve = $crowdLocators[(int)$pid];\r\n\t\t\tstring $cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[0]\";\r\n\t\t\tfloat $p[] = eval($cmd);\r\n\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[1]\";\r\n\t\t\tfloat $p1[] = eval($cmd);\r\n\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[2]\";\r\n\t\t\tfloat $p2[] = eval($cmd);\r\n\t\t\tvector $vp = << $p[0], $p[1], $p[2] >>;\r\n\t\t\tvector $vp1 = << $p1[0], $p1[1], $p1[2] >>;\r\n\t\t\tvector $vp2 = << $p2[0], $p2[1], $p2[2] >>;\r\n\t\t\tspanIndexPP = 0 ;\r\n\t\t\t\r\n\t\t\tposition =<< $vp.x, $vp.y, $vp.z >>;\r\n\t\t\tcurvePointPP = $vp;\r\n\t\t\tcurveSegPP = $vp1 - $vp;\r\n\t\t\ttargDirPP = unit($vp1 - $vp);\r\n\t\t\tnextDirPP = unit($vp2 - $vp1); \r\n\t\t\tspeedPP = runGroup.speed;\r\n\t\t\tvelocity = speedPP * targDirPP;\r\n\t\t\tvector $vt = velocity;\r\n\t\t\trotationPP = <<$vt.x, 0, $vt.z>>;\r\n\t\t\tuniquePointPP = sphrand(1); \r\n\t\t}\r\n\t}\r\n}" runCrowdParticleShape;
+			dynExpression -rad -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr runCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr runCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr runCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nint $pid;\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif(statePP == 1)\r\n\t\t{\r\n\t\t\tstring $myCurve = $crowdLocators[(int)$pid];\r\n\t\t\tfloat $distBlend;\r\n\t\t\tvector $dir;\r\n\t\t\tfloat $t;\r\n\t\t\tvector $vt1,$vt2;\r\n\t\t\tint $i = (int)spanIndexPP;\r\n\t\t\t$vt1 = curvePointPP - position;\r\n\t\t\t$vt2 = $vt1 * (unit($vt1) * unit(curveSegPP));\r\n\t\t\tfloat $dist = mag ($vt2);\r\n\t\t\tfloat $cLen = mag(curveSegPP);\r\n\t\t\t$dir = unit(velocity);\r\n\t\t\t$distBlend = linstep( $cLen-smoothPP, $cLen, $dist);\r\n\t\t\t$t = lastDistBlendPP;\r\n\t\t\tif( $distBlend < $t ) \r\n\t\t\t{\r\n\t\t\t\t$t += .05;\r\n\t\t\t\t$t = $t > 1.0 ? 1.0 : $t;\r\n\t\t\t\t$distBlend = $t;\r\n\t\t\t}\r\n\t\t\telse\t$t = $distBlend;\r\n\t\t\tlastDistBlendPP = $t;\r\n\t\t\tif($i < noOfSpansPP + 1)\r\n\t\t\t{\r\n\t\t\t\tif ($distBlend >=1.0 ) \r\n\t\t\t\t{\r\n\t\t\t\t\tspanIndexPP ++;\r\n\t\t\t\t\t$i ++;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + $i + \"]\";\r\n\t\t\t\t\tfloat  $pi1[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi1 = << $pi1[0], $pi1[1], $pi1[2]>>;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + ($i+1) + \"]\";\r\n\t\t\t\t\tfloat  $pi2[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi2 = << $pi2[0], $pi2[1], $pi2[2]>>;\r\n\t\t\t\t\t$cmd = \"xform -q -translation -worldSpace \"+$myCurve +\".cv[\" + ($i+2) + \"]\";\r\n\t\t\t\t\tfloat  $pi3[] = eval($cmd);\r\n\t\t\t\t\tvector $vpi3 = << $pi3[0], $pi3[1], $pi3[2]>>;\r\n\t\t\t\t\tcurvePointPP = $vpi1;\r\n\t\t\t\t\tcurveSegPP = $vpi2 - $vpi1;\r\n\t\t\t\t\ttargDirPP = unit($vpi2 - position);\r\n\t\t\t\t\tnextDirPP = unit($vpi3-$vpi2);\r\n\t\t\t\t\tvelocity = speedPP * targDirPP;\r\n\t\t\t\t\tlastDistBlendPP = 0;\r\n\t\t\t\t}\r\n\t\t\t\telse if ($distBlend > 0.0)\r\n\t\t\t\t{\r\n\t\t\t\t\tvelocity = speedPP * ($distBlend*(nextDirPP-targDirPP) + targDirPP);\r\n\t\t\t\t}\r\n\t\t\t}\r\n\t\t\telse\tvelocity = <<0,0,0>>; \r\n\t\t\tvector $vt = velocity;\r\n\t\t\trotationPP = <<$vt.x, 0, $vt.z>>;\r\n\r\n\t\t}\r\n\t}\r\n}"  runCrowdParticleShape;
+		}
+	}
+	else 
+	{
+		
+		if ($type=="walk")
+		{
+			dynExpression -c -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr walkCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr walkCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr walkCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nfloat $sxmin=`getAttr walkGroup.scaleXmin`;\r\nfloat $sxmax=`getAttr walkGroup.scaleXmax`;\r\nfloat $symin=`getAttr walkGroup.scaleYmin`;\r\nfloat $symax=`getAttr walkGroup.scaleYmax`;\r\nfloat $szmin=`getAttr walkGroup.scaleZmin`;\r\nfloat $szmax=`getAttr walkGroup.scaleZmax`;\r\n\r\nif (particleId==0)\r\n\tseed(walkGroup.seed);\r\nfloat $sx= rand ($sxmin,$sxmax);\r\nfloat $sy= rand ($symin,$symax);\r\nfloat $sz= rand ($szmin,$szmax);\r\nscalePP = <<$sx,$sy,$sz>>;\r\n\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif (statePP == 0)\r\n\t\t{\r\n\t\t\tstring $myLoc = $crowdLocators[(int)$pid];\r\n\t\t\tstring $cmd = \"xform -q -translation -worldSpace \"+ $myLoc;\r\n\t\t\tfloat $p[] = eval($cmd);\r\n\t\t\tposition =<< $p[0], $p[1], $p[2] >>;\r\n\t\t\tvelocity =<< 0 ,0, 0 >>;\r\n\t\t\t$cmd = \"xform -q -worldSpace -rotation \" + $myLoc;\r\n\t\t\tfloat $rot[] = eval($cmd);\r\n\t\t\tfloat $rad = $rot[1] * 3.14159/180;\r\n\t\t\trotationPP =<< cos($rad), 0 ,-sin($rad) >>;\r\n\t\t}\r\n\t}\r\n}" walkCrowdParticleShape;
+		}
+		else if ($type=="run")
+		{
+			dynExpression -c -s "string $crowdLocators[];\r\nstring $crowdSpeedMultipliers[];\r\nfloat $parPP[]=`getAttr runCrowdParticle.particleId`;\r\nstring $temp = eval(\"getAttr runCrowdParticle.crowdLocators\");\r\ntokenize($temp,\";\",$crowdLocators);\r\n$temp = eval(\"getAttr runCrowdParticle.crowdSpeedMultipliers\");\r\nif(size($crowdSpeedMultipliers) <= 1) tokenize($temp,\";\",$crowdSpeedMultipliers);\r\n\r\nfloat $sxmin=`getAttr runGroup.scaleXmin`;\r\nfloat $sxmax=`getAttr runGroup.scaleXmax`;\r\nfloat $symin=`getAttr runGroup.scaleYmin`;\r\nfloat $symax=`getAttr runGroup.scaleYmax`;\r\nfloat $szmin=`getAttr runGroup.scaleZmin`;\r\nfloat $szmax=`getAttr runGroup.scaleZmax`;\r\n\r\nif (particleId==0)\r\n\tseed(runGroup.seed);\r\nfloat $sx= rand ($sxmin,$sxmax);\r\nfloat $sy= rand ($symin,$symax);\r\nfloat $sz= rand ($szmin,$szmax);\r\nscalePP = <<$sx,$sy,$sz>>;\r\n\r\nfor ($pid=0;$pid<`size $parPP` ;$pid++ )\r\n{\r\n\tif (particleId == $pid)\r\n\t{\r\n\t\tif (statePP == 0)\r\n\t\t{\r\n\t\t\tstring $myLoc = $crowdLocators[(int)$pid];\r\n\t\t\tstring $cmd = \"xform -q -translation -worldSpace \"+ $myLoc;\r\n\t\t\tfloat $p[] = eval($cmd);\r\n\t\t\tposition =<< $p[0], $p[1], $p[2] >>;\r\n\t\t\tvelocity =<< 0 ,0, 0 >>;\r\n\t\t\t$cmd = \"xform -q -worldSpace -rotation \" + $myLoc;\r\n\t\t\tfloat $rot[] = eval($cmd);\r\n\t\t\tfloat $rad = $rot[1] * 3.14159/180;\r\n\t\t\trotationPP =<< cos($rad), 0 ,-sin($rad) >>;\r\n\t\t}\r\n\t}\r\n}" runCrowdParticleShape;
+		}
+	}
+	
+}
+
+// ADD DYNAMIC ATTRIBUTES
+//
+// per particle attributes (PP)
+// add statePP: 0 - static, 1 - moving;
+// add indexPP: index to geometry lists (used for instancer)
+// add rotationPP	
+// add noOfSpansPP	 attribute // number of spans on the curve
+// add spanIndexPP	 attribute 
+// add targDirPP	// target direction 
+// add nextDirPP	// next target direction (advanced 1 index)
+// add lastDistBlendPP // store last distance blend value
+// add speedPP // speed 
+// add smoothPP // smoothness for linearstep func
+// add uniquePointPP; the unique random point on a sphere PP
+// add curvePointPP; // the curvePoint at pos i 
+// add curveSegPP;	 // the current curve segment
+// add crowdLocators; // store the crowd curves/locators here
+// add crowdSpeedMultipliers; // store the multiplier nodes for speed variation
+//
+global proc slCrowdAddStatePP(string $particle)
+{
+	if (kcIsType($particle, "particle"))
+	{
+		string $particleShape[] = `listRelatives -shapes $particle`;
+
+		string $attr = "statePP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "indexPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "rotationPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "noOfSpansPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "spanIndexPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "targDirPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "nextDirPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "lastDistBlendPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "speedPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "smoothPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+		
+		string $attr = "uniquePointPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+		
+		string $attr = "curvePointPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "curveSegPP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+	
+		string $attr = "crowdLocators";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType "string" $particleShape[0];
+			addAttr -longName $attr -dataType "string" -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+		
+		string $attr = "crowdSpeedMultipliers";
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType "string" $particleShape[0];
+			addAttr -longName $attr -dataType "string" -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "crowdIndex";
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType doubleArray $particleShape[0];
+			addAttr -longName $attr -dataType doubleArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+
+		string $attr = "scalePP";
+
+		if (!`attributeExists $attr $particleShape[0]`)
+		{
+			addAttr -longName ($attr + "0") -dataType vectorArray $particleShape[0];
+			addAttr -longName $attr -dataType vectorArray -keyable true $particleShape[0];
+
+			print("Add attribute \"" + $attr + "\" to " + $particle + "\n");
+		}
+	}
+}
+
+
+global proc string arrayToString(string $array[])
+{
+	string $temp;
+	for($i=0; $i<size($array); $i++)
+		if ($i != size($array) - 1) 
+			$temp += $array[$i] + ";";
+		else
+			$temp += $array[$i];
+
+	return $temp;
+}

@@ -1,0 +1,284 @@
+global proc zwCheckLighting()
+{
+	if (`zwLoadPlugin "idmtCmd"` < 108)
+	{
+		error "需要重启Maya";
+	}
+	if(`window -exists zwCheckLighting`)
+	{
+		deleteUI zwCheckLighting;
+	}
+	window -title "未Checkin的lighting文件" -resizeToFitChildren true zwCheckLighting;
+		columnLayout -adjustableColumn true;
+			textFieldGrp -label "SQ" -annotation "场次，留空则为所有场次" textFieldGrpSq;
+			textFieldGrp -label "SC" -annotation "镜头，留空则为所有镜头" textFieldGrpSc;
+			button -label "搜索" -command "zwCheckLightingProc";
+	showWindow zwCheckLighting;
+}
+
+global proc zwCheckLightingProc()
+{
+	global string $zwCheckLighting;
+	$zwCheckLighting = "";
+
+	string $sq = `textFieldGrp -query -text textFieldGrpSq`;
+	string $sc = `textFieldGrp -query -text textFieldGrpSc`;
+
+	progressWindow -title "正在搜索" -isInterruptable true;
+
+	if ($sq == "")
+	{
+		zwCheckLightingAll;
+	}
+	else if ($sc == "")
+	{
+		zwCheckLightingSq $sq;
+	}
+	else
+	{
+		zwCheckLightingSqSc $sq $sc;
+	}
+
+	progressWindow -endProgress;
+
+	if ($zwCheckLighting != "")
+	{
+		$zwCheckLighting = "<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\" width=\"768\" style=\"border-collapse:collapse\">\n" + $zwCheckLighting + "</table>";
+		string $temp = `internalVar -userTmpDir` + "lighting.htm";
+		int $fileId = `fopen $temp "w"`;
+		if ($fileId != 0)
+		{
+			fprint $fileId $zwCheckLighting;
+			fclose $fileId;
+		}
+		system ("shell " + $temp);
+	}
+}
+
+global proc zwCheckLightingAll()
+{
+	string $folder = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII";
+	string $sqs[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($sq in $sqs)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+
+		if (`match "^SQ_[^_]+$" $sq` != "")
+		{
+			$sq = `match "[^_]+$" $sq`;
+			zwCheckLightingSq $sq;
+		}
+	}
+}
+
+global proc zwCheckLightingSq(string $sq)
+{
+	string $folder = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $sq;
+	string $scs[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($sc in $scs)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+
+		if (`match "^winxII_sq_[^_]+_sc_[^_]+$" $sc` != "")
+		{
+			$sc = `match "[^_]+$" $sc`;
+			zwCheckLightingSqSc $sq $sc;
+		}
+	}
+}
+
+global proc zwCheckLightingSqSc(string $sq, string $sc)
+{
+	global string $zwCheckLighting;
+	$zwCheckLighting += "<tr><td colspan=\"4\"><b>winxII_sq_" + $sq + "_sc_" + $sc + "</b></td></tr>\n";
+
+	string $parity = `zwGetParity $sq`;
+	string $folder = "//file-cluster/GDC/Projects/WinxClubII/Production/Render/Lighting_Passes/" + $parity + "/sq_" + $sq + "/sc_" + $sc;
+	string $characters[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($character in $characters)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+
+		string $path = $folder + "/" + $character;
+		if (`filetest -d $path`)
+		{
+			if (`match "^env[0-9]*$" $character` != "" || `match "^vfx$" $character` != "")
+			{
+				continue;
+			}
+
+			string $layers[] = `getFileList -filespec ($path + "/*.*")`;
+			for ($layer in $layers)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					break;
+				}
+
+				if (`match "^env[0-9]*$" $layer` != "" || `match "^vfx$" $layer` != "")
+				{
+					continue;
+				}
+				$path = $folder + "/" + $character + "/" + $layer;
+				if (`filetest -d $path`)
+				{
+					if ($layer == "hairs")
+					{
+						string $layers_hr[] = `getFileList -filespec ($path + "/*.*")`;
+						for ($layer_hr in $layers_hr)
+						{
+							if (`progressWindow -query -isCancelled`)
+							{
+								break;
+							}
+
+							$path = $folder + "/" + $character + "/" + $layer + "/" + $layer_hr;
+							if (`filetest -d $path`)
+							{
+								zwCheckLightingFolder $sq $sc $character $layer $path;
+							}
+						}
+					}
+					else
+					{
+						zwCheckLightingFolder $sq $sc $character $layer $path;
+					}
+				}
+			}
+		}
+	}
+
+	$folder = "//file-cluster/GDC/Projects/WinxClubII/Production/Render/EXR/" + $parity + "/sq_" + $sq + "/sc_" + $sc + "/footage";
+	string $characters[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($character in $characters)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+
+		string $path = $folder + "/" + $character;
+		if (`filetest -d $path`)
+		{
+			if (`match "^env[0-9]*$" $character` != "" || $character == "normalpass" || $character == "occlusion" || $character == "zdepth")
+			{
+				string $layers[] = `getFileList -filespec ($path + "/*.*")`;
+				for ($layer in $layers)
+				{
+					if (`progressWindow -query -isCancelled`)
+					{
+						break;
+					}
+
+					$path = $folder + "/" + $character + "/" + $layer;
+					if (`filetest -d $path`)
+					{
+						if (`match "^env[0-9]*$" $character` != "" && `match "^vegetation[0-9]*$" $layer` != "")
+						{
+							string $layers_hr[] = `getFileList -filespec ($path + "/*.*")`;
+							for ($layer_hr in $layers_hr)
+							{
+								if (`progressWindow -query -isCancelled`)
+								{
+									break;
+								}
+
+								$path = $folder + "/" + $character + "/" + $layer + "/" + $layer_hr;
+								if (`filetest -d $path`)
+								{
+									zwCheckLightingFolder $sq $sc $character $layer $path;
+								}
+							}
+						}
+						else
+						{
+							zwCheckLightingFolder $sq $sc $character $layer $path;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc zwCheckLightingFolder(string $sq, string $sc, string $character, string $layer, string $folder)
+{
+	global string $zwCheckLighting;
+
+	string $buf[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($file in $buf)
+	{
+		if (`progressWindow -query -isCancelled`)
+		{
+			break;
+		}
+
+		string $path = $folder + "/" + $file;
+		if (`filetest -f $path`)
+		{
+			progressWindow -edit -status $file;
+			print ($file + "\n");
+
+			string $filespec;
+			if ($character == "normalpass")
+			{
+				$filespec = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $sq + "/winxII_sq_" + $sq + "_sc_" + $sc + "/scenes/lighting/" + $layer + "/*_*normal*.mb";
+			}
+			else if ($character == "occlusion")
+			{
+				$filespec = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $sq + "/winxII_sq_" + $sq + "_sc_" + $sc + "/scenes/lighting/" + $layer + "/*_*" + $character + "*.mb";
+			}
+			else if ($character == "zdepth")
+			{
+				$filespec = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $sq + "/winxII_sq_" + $sq + "_sc_" + $sc + "/scenes/lighting/" + $layer + "/*_*" + $character + "*.mb";
+			}
+			else
+			{
+				$filespec = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/SHOT_winxII/SQ_" + $sq + "/winxII_sq_" + $sq + "_sc_" + $sc + "/scenes/lighting/" + $character + "/*_" + $layer + "_*.mb";
+			}
+			string $scenes[] = `getFileList -filespec $filespec`;
+			if (size($scenes) == 0)
+			{
+				string $hist = `idmtImage -hist $path`;
+				string $mb = `match "[^./\\]+[.]mb" $hist`;
+				$mb = `substitute "[_]{2,}[0-9]+[.]" $mb "."`;
+				if ($mb == "")
+				{
+					break;
+				}
+				string $mbdir = `zwGetPath "scene" $mb`;
+				$filespec = $mbdir + "/" + `substitute "lighting_[^_.]+_[^_.]+_[^_.]+_[^_.]+_" $mb "*_"`;
+				$scenes = `getFileList -filespec $filespec`;
+				if (size($scenes) == 0)
+			//	if (!`filetest -f ($mbdir + "/" + $mb)`)
+				{
+					string $imagename = `match "[^/\\]+$" $path`;
+					string $imagedir = `substitute "[/\\][^/\\]+$" $path "" `;
+					$imagedir = `substituteAllString $imagedir "/" "\\"`;
+
+					if ($mbdir == "")
+					{
+						$mbdir = `substitute "[/\\][^/\\]+$" $filespec ""`;
+					}
+					if (!`filetest -d $mbdir`)
+					{
+						$mbdir = `substitute "[/\\][^/\\]+$" $mbdir ""`;
+					}
+					$mbdir = `substituteAllString $mbdir "/" "\\"`;
+
+					$zwCheckLighting += "<tr><td width=\"16\"><a href=\"" + $imagedir + "\" target=\"_blank\"><img src=\"http://app-server/ws/Support/Working/images/iff.gif\" width=\"16\" height=\"16\" border=\"0\" alt=\"图片目录\"></a></td><td width=\"16\"><a href=\"" + $mbdir + "\" target=\"_blank\"><img src=\"http://app-server/ws/Support/Working/images/maya8.gif\" width=\"16\" height=\"16\" border=\"0\" alt=\"lighting目录\"></a></td><td width=\"400\">" + $imagename + "</td><td width=\"400\">" + $mb + "</td></tr>\n";
+				}
+			}
+			break;
+		}
+	}
+}

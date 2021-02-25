@@ -1,0 +1,536 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// create joints starting from $stickPercent th of CVs
+//
+proc string[] hairCreateJointOnCurve(string $curve, string $jointParent)
+{
+	int $spans = `getAttr ($curve + ".spans")`;
+	int $numCVs = $spans + 1;
+
+	string $joints[];
+
+	select $jointParent;
+
+	string $name[];
+	tokenize $curve "_" $name;
+	string $jname = $name[0];
+	for ($i = 0; $i < $numCVs; $i++)
+	{
+		float $pos[] = `pointPosition -world ($curve + ".ep[" + $i + "]")`;
+
+		
+		string $jointname = $jname+"_joint_"+$i;
+		$joints[size($joints)] = `joint -position $pos[0] $pos[1] $pos[2] -name $jointname`;
+
+	}
+
+	return $joints;
+}
+
+proc string[] hairCreateIK(string $startJoint, string $endJoint, string $curve)
+{
+	string $result[];
+
+	if ($curve != "")
+		$result = `ikHandle -solver ikSplineSolver -createCurve false -curve $curve -simplifyCurve false -startJoint $startJoint -endEffector $endJoint`;
+
+	// Result: ikHandle44 effector45 curve1 //
+
+	return $result;
+}
+
+proc hairCreateSoftBody(int $hide, int $history, int $goal, float $goalWeight, int $makeCopySoft)
+{
+	// create softbody
+
+	dynCreateSoft $hide $history $goal $goalWeight $makeCopySoft;
+}
+
+proc hairCreateSpring(string $particle, string $spring)
+{
+	if (`objExists $spring`)
+		// add to current spring
+		spring -add -noDuplicate true -wireframe true -walkLength 2 $particle $spring;
+	else
+		// create spring
+		spring -noDuplicate false -wireframe true -walkLength 2 -useRestLengthPS true -stiffness 100 -damping 0.2 -startForceWeight 1 -endForceWeight 1 -name $spring $particle;
+}
+
+proc kcHairMain(string $character, float $stickPercent, float $minWeight)
+{
+	string $jointParent = $character + "_headTip";
+	string $master = $character + "_MASTER";
+
+	if (!`objExists $master`)
+		error("Make sure " + $master + " exists.");
+
+	if (!`objExists $jointParent`)
+		error("Make sure " + $jointParent + " exists.");
+
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) == 0)
+		error("Select curves to make softbody.");
+
+
+	// check at least a NURBS curve is selected
+
+	int $valid = false;
+
+	for ($item in $selected)
+		if (kcIsType($item, "nurbsCurve"))
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select curves to make softbody.");
+
+
+	//Tazz add
+	//create a locator 
+	string $locator = $character + "_hairLocator";
+	string $hairLoc[] = `ls $locator`;
+	if (!`objExists $hairLoc[0]`)
+	{
+		string $locshape = `createNode locator`;
+		string $loc = getTransform($locshape);
+		rename $loc $locator;
+		//contrain the locator to the headTip
+		select -r $jointParent;
+		select -add $locator;
+		orientConstraint -weight 1;
+		pointConstraint -weight 1;
+		parent $locator $jointParent;
+	}
+
+	
+	string $hairJoint_group = `group -empty -name ($character + "_hairJoint_group") -parent $locator`;
+	string $hairIK_group = `group -empty -name ($character + "_hairIK_group") -parent $master`;
+	string $hairSoft_group = `group -empty -name ($character + "_hairSoft_group") -parent $master`;
+
+	for ($item in $selected)
+	{
+		if (kcIsType($item, "nurbsCurve"))
+		{	
+
+			// create joints
+
+			string $joints[];
+
+			$joints = hairCreateJointOnCurve($item, $hairJoint_group);
+
+			// create IKs
+
+			string $result[];
+			string $curve;
+
+			$result = hairCreateIK($joints[0], $joints[size($joints) - 1], $item);
+
+			parent $result[0] $hairIK_group;
+
+			// rename IK spline curve 
+
+			$curve = `rename $item ($result[0] + "_curve")`;
+
+			// create softbody
+
+			select $curve;
+			hairCreateSoftBody(true, false, true, 1.0, false);
+
+			// after softbody creation, the curve is unparented, re-parent it
+			parent $curve $hairSoft_group;
+
+			// assign per particle weight
+
+			string $particle = $curve + "Particle";
+			kcHairAssignParticleWeightUniformDist($particle, $stickPercent, $minWeight);
+		
+			// create spring
+			hairCreateSpring($particle, ($character + "_hairSpring"));
+		}
+
+		// make collision with head
+
+//			select $particle;
+//			collision -resilience 1.0 -friction 1.0 simon_c_lo_head $particle;
+//			print($particle + "\n");
+	}
+	
+	select -r $master;
+	select -add $hairSoft_group;
+	orientConstraint -weight 1;
+	pointConstraint -weight 1;
+
+	// restore original selection
+//	select $selected;
+}
+
+global proc kcHairMainCB(string $textField, string $stickPercentSlider, string $minWeightSlider)
+{
+	string $character = `textFieldGrp -q -text $textField`;
+	float $stickPercent = `floatSliderGrp -q -value $stickPercentSlider`;
+	float $minWeight = `floatSliderGrp -q -value $minWeightSlider`;
+
+	kcHairMain($character, $stickPercent, $minWeight);
+}
+
+global proc kcHairMainGUI()
+{
+	if (`window -q -exists kcHairMainGUIWnd`)
+		return;
+
+	window -title "Hair Main GUI" -resizeToFitChildren true kcHairMainGUIWnd;
+		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Hair Main GUI..." -command "zjHelpCallback kcHairMainGUI";
+				setParent ..;
+		
+		frameLayout -label ""  -collapsable false -borderStyle "etchedIn";
+			string $formLayout = `formLayout`;
+
+				string $direction = ` radioButtonGrp  -numberOfRadioButtons 2 -select 2  -labelArray2 "U" "V" 
+					-columnWidth 1 100 -columnWidth 2 100 radbutton_hair_direc`;
+				string $button = `button -label "Build" -command ("zjBuildLinefun")`;
+			setParent ..;
+
+			formLayout -edit
+				-attachForm		$direction		"top"	5
+				-attachForm		$direction		"left"	50
+
+				-attachControl		$button	"top"		5	$direction
+				-attachForm		$button	"left"		15
+				-attachForm		$button	"right"		15
+
+			$formLayout;
+			setParent ..;
+		setParent ..;
+		frameLayout -label ""  -collapsable false -borderStyle "etchedIn";
+			string $formLayout = `formLayout`;
+
+				string $textField = `textFieldGrp -label "Character" -text "simon" text_hair_char`;
+				string $stickPercentSlider = `floatSliderGrp -label "Stick Percentage" -field true -minValue 0.0 -maxValue 1.0 -fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.4`;
+				string $minWeightSlider = `floatSliderGrp -label "Min Particle Weight" -field true -minValue 0.0 -maxValue 1.0 -fieldMinValue 0.0 -fieldMaxValue 1.0 -value 0.5`;
+				string $button = `button -label "Create" -command ("kcHairMainCB " + $textField + " " + $stickPercentSlider + " " + $minWeightSlider)`;
+
+			setParent ..;
+
+			formLayout -edit
+				-attachForm		$textField	"top"	5
+				-attachForm		$textField	"left"	5
+				-attachForm		$textField	"right"	5
+
+				-attachControl	$stickPercentSlider		"top"		5	$textField
+				-attachForm		$stickPercentSlider		"left"		5
+				-attachForm		$stickPercentSlider		"right"		5
+
+				-attachControl	$minWeightSlider		"top"		5	$stickPercentSlider
+				-attachForm		$minWeightSlider		"left"		5
+				-attachForm		$minWeightSlider		"right"		5
+
+				-attachControl	$button		"top"		5	$minWeightSlider
+				-attachForm		$button		"left"		15
+				-attachForm		$button		"right"		15
+
+			$formLayout;
+			setParent ..;
+		setParent ..;
+		
+		frameLayout -label ""  -collapsable false -borderStyle "etchedIn";
+			string $formLayout = `formLayout`;
+
+			string $button1 = `button -label "Bind Model" -command "zjBindHair"`;
+			string $brushTextField = `textFieldGrp -label "Brush" -text "wetHair.mel"`;
+			string $radnum = ` radioButtonGrp  -numberOfRadioButtons 2 -select 2  -labelArray2 "1 control line" "2 control lines" 
+					-columnWidth 1 100 -columnWidth 2 100`;
+			string $button2 = `button -label "PaintEffects Hair" -command ("zjPaintEfxHair " + $brushTextField + " " + $radnum)`;
+
+			setParent ..;
+
+			formLayout -edit
+				-attachForm		$button1		"top"	5
+				-attachForm		$button1		"left"	15
+				-attachForm		$button1		"right"	15
+			
+				-attachControl		$brushTextField		"top"		10	$button1
+				-attachForm		$brushTextField		"left"		5
+				-attachForm		$brushTextField		"right"		5
+			
+				-attachControl		$radnum		"top"		10	$brushTextField
+				-attachForm		$radnum		"left"		50
+
+				-attachControl		$button2	"top"		5	$radnum
+				-attachForm		$button2	"left"		15
+				-attachForm		$button2	"right"		15
+
+			$formLayout;
+			setParent ..;
+		setParent ..;
+
+
+	showWindow kcHairMainGUIWnd;
+}
+
+proc string buildmidCurve( string $sel, string $spandirect, string $direct )
+{
+	string $newname;
+	int $spans = `getAttr ($sel + ".maxValue" + $spandirect)` - `getAttr ($sel + ".minValue" + $spandirect)`;
+	float $midspan = $spans/2.0;
+	string $mid = $sel + "." + $direct + "[" + $midspan + "]";
+	string $oldname = $sel;
+	string $dupvs[] = `duplicateCurve -ch 1 -rn 0 -local 0 $mid`;
+	$newname = $oldname + "_mid_curve";
+	rename $dupvs[0] $newname;
+	return $newname;
+}
+
+proc string[] zjbuildctlCurves( string $sel, string $spandirect, string $direct, int $ctrnum )
+{
+	string $ctrcurve[];
+	int $max = `getAttr ($sel + ".maxValue" + $spandirect)`;
+	int $min = `getAttr ($sel + ".minValue" + $spandirect)`;
+	if ($ctrnum == 2)
+	{
+		string $one = $sel + "." + $direct + "[" + $max + "]";
+		string $two = $sel + "." + $direct + "[" + $min + "]";
+		string $dupone[] = `duplicateCurve -ch 1 -rn 0 -local 0 $one`;
+		string $duptwo[] = `duplicateCurve -ch 1 -rn 0 -local 0 $two`;
+		$ctr1 = $sel + "_ctrcurve1";
+		$ctr2 = $sel + "_ctrcurve2";
+		rename $dupone[0] $ctr1;
+		rename $duptwo[0] $ctr2;
+		$ctrcurve = {$ctr1,$ctr2};
+	}
+	else 
+	{
+		float $mid = ($max - $min)/2.0;
+		string $midiso = $sel + "." + $direct + "[" + $mid + "]";
+		string $dup[] = `duplicateCurve -ch 1 -rn 0 -local 0 $midiso`;
+		$ctr1 = $sel + "_ctrcurve";
+		rename $dup[0] $ctr1;
+		$ctrcurve = {$ctr1};
+	}
+	return $ctrcurve;
+}
+
+//build curve 
+global proc zjBuildLinefun()
+{
+	string $sel[] = `ls -selection`;
+
+	// check at least a NURBS surface is selected
+
+	int $valid = false;
+
+	for ($item in $sel)
+		if ( kcIsType($item, "nurbsSurface") )
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select nurbsSurface to build curves.");
+
+	int $option = `radioButtonGrp -q -select radbutton_hair_direc`;
+	string $direct,$spandirect;
+	if ($option == 1)
+	{
+		$spandirect = "U";
+		$direct = "u";
+	}
+	else
+	{
+		$spandirect = "V";
+		$direct = "v";
+	}
+	for ( $i=0; $i<size($sel); $i++ )
+		buildmidCurve( $sel[$i], $spandirect, $direct);
+}
+
+
+proc string zjbuildstrokeCurve( string $sel, string $spandirect, string $direct )
+{
+	string $newname;
+	int $spans = `getAttr ($sel + ".minValue" + $spandirect)`;
+	string $mid = $sel + "." + $direct + "[" + $spans + "]";
+	string $oldname = $sel;
+	string $dupvs[] = `duplicateCurve -ch 1 -rn 0 -local 0 $mid`;
+	$newname = $oldname + "_ctr_curve";
+	rename $dupvs[0] $newname;
+	return $newname;
+}
+
+proc kcHairCreateBrush(string $strokecurve, string $ctrcurve[], string $brushMEL, string $stroke_group)
+{
+	global string $gMLPath;
+	eval("source \"" + $gMLPath + "/brushes/hair/" + $brushMEL + "\"");
+
+	select -r $strokecurve;
+
+	// create stroke
+
+	AttachBrushToCurves;
+	string $selected[] = `ls -selection`;
+
+	parent $selected $stroke_group;
+
+	// create control curve
+
+	select -add $ctrcurve;
+	SetStrokeControlCurves;
+	bindCurvesToStrokes;
+}
+
+proc kcHairSetBrushPara(string $character, string $group)
+{
+	string $strokes[] = `listRelatives -allDescendents -type stroke $group`;
+	if (`objExists $strokes[0]`)
+	{
+		for ($item in $strokes)
+			setAttr ($item+".displayPercent") 1;
+	
+		select -r $strokes;
+
+		ShareOneBrush;
+
+		/*
+		// get the brush
+		string $brush[] = `listConnections -s 1 -d 0 -type brush $strokes[0]`;
+		string $hairbrush = $brush[0];
+		setAttr ($hairbrush+".globalScale") 0.01;
+		setAttr ($hairbrush+".brushWidth") 0;
+		setAttr ($hairbrush+".mapColor") 1;
+		setAttr ($hairbrush+".texColorScale") 0;
+		setAttr ($hairbrush+".texColorOffset") 0;
+		setAttr ($hairbrush+".textureType") 1;
+		setAttr ($hairbrush+".mapMethod") 2;
+		setAttr ($hairbrush+".texColor1") -type double3 0.596 0.396 0.153;
+		setAttr ($hairbrush+".texColor2") -type double3 0.29 0.106 0.012;
+		setAttr ($hairbrush+".translucence") 0.388;
+		setAttr ($hairbrush+".depthShadowType") 1;
+		setAttr ($hairbrush+".specular") 0.200;
+		setAttr ($hairbrush+".specularColor") -type double3 0.711 0.419 0.048;
+		setAttr ($hairbrush+".tubesPerStep") 20;
+		setAttr ($hairbrush+".lengthMin") 0.7;
+		setAttr ($hairbrush+".lengthMax") 0.7;
+		setAttr ($hairbrush+".segments") 100;
+		setAttr ($hairbrush+".curveFollow") 0.98;
+		setAttr ($hairbrush+".curveAttract") 0;
+		setAttr ($hairbrush+".curveMaxDist") 0;
+		setAttr ($hairbrush+".momentum") 0.98;
+		setAttr ($hairbrush+".lengthFlex") 0.90;
+		rename $hairbrush ($character + "_hairBrush");
+		*/
+	}
+}
+
+// create paintEfx hair
+global proc zjBindHair()
+{
+	string $character = `textFieldGrp -q -text text_hair_char`;
+
+	string $selected[] = `ls -selection`;
+	if (size($selected) == 0)
+		error("Select nurbsSurface to make Hair.");
+
+	// check at least a NURBS surface is selected
+
+	int $valid = false;
+
+	for ($item in $selected)
+		if (kcIsType($item, "nurbsSurface"))
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select nurbsSurface to make Hair.");
+
+	//smooth bind hair model and skeleton
+	cycleCheck -e off;
+	for ($item in $selected)
+	{
+		if (kcIsType($item, "nurbsSurface"))
+		{	
+			string $skeleton = $item + "_joint_0";
+			skinCluster -maximumInfluences 5 -dropoffRate 4 $skeleton $item;
+		}
+	}
+	cycleCheck -e on;
+}
+
+// create paintEfx hair
+global proc zjPaintEfxHair(string $brushTextField, string $radctr)
+{
+	string $character = `textFieldGrp -q -text text_hair_char`;
+
+	string $selected[] = `ls -selection`;
+	if (size($selected) == 0)
+		error("Select nurbsSurface to make Hair.");
+
+	// check at least a NURBS surface is selected
+
+	int $valid = false;
+
+	for ($item in $selected)
+		if (kcIsType($item, "nurbsSurface"))
+		{
+			$valid = true;
+			break;
+		}
+
+	if (!$valid)
+		error("Select nurbsSurface to make Hair.");
+
+	//smooth bind hair model and skeleton
+	//then rebuild stroke curve and control curve
+	int $option = `radioButtonGrp -q -select radbutton_hair_direc`;
+	string $direct,$spandirect,$revdirect,$revspandirect;
+	if ($option == 1)
+	{
+		$spandirect = "U";
+		$direct = "u";
+		$revspandirect = "V";
+		$revdirect = "v";
+	}
+	else
+	{
+		$spandirect = "V";
+		$direct = "v";
+		$revspandirect = "U";
+		$revdirect = "u";
+	}
+
+	string $brushMEL = `textFieldGrp -q -text $brushTextField`;
+	string $stroke_group = `group -empty -name ($character+"_Hairstroke_group")`;
+	int $ctlnum = `radioButtonGrp -q -select $radctr`;
+
+	for ($item in $selected)
+	{
+		if (kcIsType($item, "nurbsSurface"))
+		{	
+			string $strokeCurve = zjbuildstrokeCurve( $item, $revspandirect, $revdirect );
+			string $ctrCurve[] = zjbuildctlCurves( $item, $spandirect, $direct, $ctlnum );
+			kcHairCreateBrush($strokeCurve, $ctrCurve, $brushMEL, $stroke_group);
+			parent $strokeCurve $stroke_group;
+			parent $ctrCurve $stroke_group;
+		}
+	}
+	//parent $stroke_group ($character + "_MASTER");
+	kcHairSetBrushPara($character,$stroke_group);
+	TranslateToolMarkingMenu;
+	TranslateToolMarkingMenuPopDown;
+}

@@ -1,0 +1,576 @@
+//  Alias|Wavefront Script File
+//
+//  Creation Date:  Dec 2001
+//
+//
+// Usage:
+// 1) Place this script into your scripts directory (usually the
+//    maya/scripts directory in your home directory
+// 2) Select the Script Paint Tool (Modify->Script Paint Tool)
+//    and bring up the Tool Settings window
+// 3) Go to the Setup tab and enter "mushroomPaint" into the
+//    "Tool Setup Cmd" field and hit enter
+// 4) Paint mushroom
+//
+// Tips:
+// Once you have the mushroom Paint Tool setup you may want to drag
+// it from the minibar to the shelf so that it is always accessible
+//
+
+// These are global variables used to keep track of multiple
+// surfaces and the name prefixes used for the mushrooms on each
+// surface
+//
+global string $mushroomNamePrefix[];
+global string $mushroomParentName[];
+global string $mushroomGroupName[];
+global string $mushroomGeom[];
+global string $mushroomValidGeom[];
+global int $mushroomPaintFreeSlot = 0;
+global int $mushroomPaintSlots = 0;
+
+// determines which operation we are in:
+// 1 - create/modify, 2 - modify, 3 - remove
+//
+global int $mushroomOperation = 1;
+
+// These are global variables used to control what will happen
+// during painting. These globals are modified using a separate
+// UI window created when this tool becomes active.
+//
+global int $mushroomGridSizeU = 60;
+global string $mushroomGridSizeUSlider;
+global int $mushroomGridSizeV = 60;
+global string $mushroomGridSizeVSlider;
+global float $mushroomJitterValueAmtSmin = 0.5;
+global float $mushroomJitterValueAmtSmax = 1;
+global float $mushroomJitterValueAmtRmin = 0;
+global float $mushroomJitterValueAmtRmax = 360;
+global int $mushroomAlignToSrf = 0;
+global int $mushroomInstance = 1;
+global string $mushroomAttrName[] = { ".sx", ".sy", ".sz", ".ry" };
+global int $mushroomModifyAttr[] = { 1, 1, 1, 1 };
+global float $mushroomModifyAttrNorm[] = { 1, 1, 1, 360 };
+global int $mushroomModifyAttrWrap[] = { 0, 0, 0, 1 };
+global string $mushroomIdentifier = "Mrm1";
+global string $mushroomAlignChkBoxGrp;
+
+proc chkRotateHelperPlugin()
+{
+	global int $mushroomAlignToSrf;
+	global string $mushroomAlignChkBoxGrp;
+
+	if ( $mushroomAlignToSrf && !`pluginInfo -q -loaded rotateHelper.so` ) {
+		if ( catch( `loadPlugin rotateHelper.so` ) ) {
+			warning( "couldn't load plugin (rotateHelper) required for Align option");
+			$mushroomAlignToSrf = 0;
+
+			// disable Align option
+			//
+			checkBoxGrp -e -en3 0 -v3 0 $mushroomAlignChkBoxGrp;
+		}
+	}
+}
+
+global proc mushroomPaintAlignToSrfCB( int $align )
+{
+	global int $mushroomAlignToSrf;
+	
+	$mushroomAlignToSrf = $align;
+	chkRotateHelperPlugin;
+}
+
+// This procedure creates the dialog box used to control various
+// parameters that control what happens when painting.
+// NOTE: This is in no way meant to be an example of good UI
+// design!
+//
+global proc replaceproxy ()
+{
+         string $dagnodes[];
+         $dagnodes = `selectedNodes -dagObjects`;
+         int $finalobjs = size($dagnodes);
+         string $Groupchildren[]=`listRelatives -c   $dagnodes[0]`;
+         int $groupid = size($Groupchildren);
+         for ($i=0;$i<$groupid ;$i++ )
+             {
+              int $id = trunc(rand(1,$finalobjs));
+              string $proxyobj=$Groupchildren[$i];
+              string $real = $dagnodes[$id];
+              float $transfm[]=`xform -q -m $proxyobj`;
+              string $realname = $proxyobj;
+              delete $proxyobj;
+              instance -n $realname $real ;
+              xform -p true -m $transfm[0] $transfm[1] $transfm[2] $transfm[3] $transfm[4] $transfm[5] $transfm[6] $transfm[7]
+	            $transfm[8] $transfm[9] $transfm[10] $transfm[11] $transfm[12] $transfm[13] $transfm[14] $transfm[15] $realname;
+              parent $realname $dagnodes[0];
+             }
+}
+
+proc mushroomPaintUI( string $context ) 
+{
+	global int $mushroomOperation;
+	global int $mushroomGridSizeU;
+	global int $mushroomGridSizeV;
+	global string $mushroomGridSizeUSlider;
+	global string $mushroomGridSizeVSlider;
+	global string $mushroomAlignChkBoxGrp;
+	global int $mushroomAlignToSrf;
+	global int $mushroomInstance;
+	global string $mushroomGeom[];
+	global int $mushroomModifyAttr[];
+	global float $mushroomJitterValueAmtSmin;
+	global float $mushroomJitterValueAmtSmax;
+	global float $mushroomJitterValueAmtRmin;
+	global float $mushroomJitterValueAmtRmax;
+	global string $mushroomIdentifier;
+
+	setUITemplate -pushTemplate DefaultTemplate;
+	window -title "Mushroom Paint Settings" mushroomPaintWindow;
+	columnLayout -adj false -cal "center";
+
+			string $geom;
+			int $numGeoms = size($mushroomGeom);
+			int $g;
+			for ( $g = 0; $g < $numGeoms; $g++ ) {
+				$geom = ($geom + " " + $mushroomGeom[$g]);
+			}
+			textFieldGrp -label "Mushroom:"
+						 -text $geom
+						 -cc "tokenize( \"#1\", $mushroomGeom )"
+						 mushroomName; 
+			textFieldGrp -label "Group:"
+						 -text $mushroomIdentifier
+						 -cc "$mushroomIdentifier = \"#1\""
+						 mushroomIdentifier; 
+			radioButtonGrp -l "Operation:" -nrb 3
+				-l1 "Create/Modify"
+				-on1 "$mushroomOperation = 1"
+				-l2 "Modify"
+				-on2 "$mushroomOperation = 2"
+				-l3 "Remove"
+				-on3 "$mushroomOperation = 3"
+				-sl $mushroomOperation 
+				operation;
+			$mushroomGridSizeUSlider=`
+				intSliderGrp -field true -l "U Grid Size:" -min 2 -max 100
+						 -v $mushroomGridSizeU
+						 -cc "$mushroomGridSizeU = #1"
+						 uGrid`; 
+			$mushroomGridSizeVSlider=`
+				intSliderGrp -field true -l "V Grid Size:" -min 2 -max 100
+						 -v $mushroomGridSizeV
+						 -cc "$mushroomGridSizeV = #1"
+						 vGrid`;
+			checkBoxGrp -ncb 3 -l "Scale:"
+						-l1 "X" -v1 $mushroomModifyAttr[0] 
+						-cc1 "$mushroomModifyAttr[0] = #1"
+						-l2 "Y" -v2 $mushroomModifyAttr[1]
+						-cc2 "$mushroomModifyAttr[1] = #1"
+						-l3 "Z" -v3 $mushroomModifyAttr[2]
+						-cc3 "$mushroomModifyAttr[2] = #1"
+						control0;
+                        floatSliderGrp -field true -l "Random Min:" -min 0.01 -max 1 -pre 2
+						 -v $mushroomJitterValueAmtSmin
+						 -cc "$mushroomJitterValueAmtSmin = #1"
+						 jitterRangeSmin;
+			floatSliderGrp -field true -l "Max:" -min 0.01 -max 1 -pre 2
+						 -v $mushroomJitterValueAmtSmax
+						 -cc "$mushroomJitterValueAmtSmax = #1"
+						 jitterRangeSmax;
+			checkBoxGrp -ncb 1 -l "Rotation:"
+						-l1 "Y" -v1 $mushroomModifyAttr[3]
+						-cc1 "$mushroomModifyAttr[3] = #1"
+						control1;
+
+			floatSliderGrp -field true -l "Random Min:" -min 0 -max 360 -pre 2
+						 -v $mushroomJitterValueAmtRmin
+						 -cc "$mushroomJitterValueAmtRmin = #1"
+						 jitterRangeRmin;
+			floatSliderGrp -field true -l "Max:" -min 0 -max 360 -pre 2
+						 -v $mushroomJitterValueAmtRmax
+						 -cc "$mushroomJitterValueAmtRmax = #1"
+						 jitterRangeRmax;
+			$mushroomAlignChkBoxGrp = `
+				checkBoxGrp -ncb 1 -l "Options:"
+						-l1 "Align the Normal"
+						-v1 $mushroomAlignToSrf
+						-cc1 "mushroomPaintAlignToSrfCB( #1 )"
+						options1`;
+                        string $form = `formLayout`;
+                        string $b1 = `button -label "Replace"   -w 300 -command  "replaceproxy"`;
+                        formLayout -edit
+			        -attachForm            $b1     "top"    20
+			        -attachForm            $b1     "left"    90
+                        $form;
+		setParent ..;
+	setParent ..;
+	showWindow;
+
+	setUITemplate -popTemplate;
+}
+
+// This procedure should be set as the "Tool Setup Cmd" in the 
+// Setup tab of the Maya Artisan Script Paint tool's tool
+// settings window. The tool context is supplied as an argument.
+//
+global proc mushroomPaint( string $context )
+{
+	// initialize all the other commands in this scriptable 
+	// paint tool context.
+	// 
+	artUserPaintCtx -e
+		-ic "initmushroomPaint"
+		-fc "finishmushroomPaint"
+		-svc "setmushroomPaintValue"
+		-gvc "getmushroomPaintValue"
+		-gsc ""
+		-cc ""
+		-tcc "cleanupmushroomPaint"
+		-gac ""
+		$context;
+		
+	// create the dialog box to control various parameters
+	//
+	mushroomPaintUI( $context );
+}
+
+// This is the "Tool Cleanup Cmd". It is called when the tool is
+// exited. In this case, the special dialog window that was created
+// is deleted
+//
+global proc cleanupmushroomPaint( string $context )
+{
+	if ( `window -ex mushroomPaintWindow` ) {
+		deleteUI mushroomPaintWindow;
+	}
+}
+
+global proc int checkForValidmushroom()
+{
+	global string $mushroomGeom[];
+	global string $mushroomValidGeom[];
+
+	int $numGeom = size($mushroomGeom);
+	int $g, $fg;
+
+	clear($mushroomValidGeom);
+	for( $g = 0, $fg = 0; $g < $numGeom; $g++ ) {
+		// check if mushroom exists
+		//
+		if ( `objExists $mushroomGeom[$g]` && `nodeType $mushroomGeom[$g]` == "transform" ) {
+			$mushroomValidGeom[$fg] = $mushroomGeom[$g];
+			$fg++;
+		}
+	}
+	return $fg;
+}
+
+// This is the "Initialize Cmd". This procedure is called once
+// for every selected surface when an intial click is received
+// on any surface. The argument is the name of the surface. This
+// procedure returns a string which indicates to the scriptable
+// tool how to behave for the duration of the stroke. 
+//
+global proc string initmushroomPaint( string $name )
+{
+	global string $mushroomNamePrefix[];
+	global string $mushroomParentName[];
+	global string $mushroomGroupName[];
+	global int $mushroomPaintFreeSlot;
+	global int $mushroomPaintSlots;
+	global int $mushroomGridSizeU;
+	global int $mushroomGridSizeV;
+	global int $mushroomAlignToSrf;
+	global int $mushroomOperation;
+	global string $mushroomIdentifier;
+
+	if ( checkForValidmushroom() == 0 ) {
+		// return enough to make sure the set method gets
+		// called correctly
+		//
+		warning( "There is no valid mushroom to paint" );
+		return "-uv surface -position local";
+	}
+
+	// find a free slot for this surface in the global arrays
+	//
+	int $slot;
+
+	for ( $slot = $mushroomPaintFreeSlot; $slot < $mushroomPaintSlots; $slot++ ) {
+		if ( $mushroomNamePrefix[$slot] == "" ) {
+			break;
+		}
+	}  
+
+	if ( $slot == $mushroomPaintSlots ) {
+		$mushroomPaintSlots++;
+		$mushroomPaintFreeSlot = $mushroomPaintSlots;
+	}
+
+	if ( `nodeType $name` == "nurbsSurface" ) {
+		// save the name of the parent of this shape as well
+		// as a prefix to use when creating the mushrooms and
+		// and a group name if $mushroomGroup is true
+		//
+		string $parent[] = `listRelatives -p $name`;
+		$mushroomParentName[$slot] = $parent[0];
+		$mushroomNamePrefix[$slot] = $parent[0] + $mushroomIdentifier;
+		$mushroomGroupName[$slot] = $parent[0] + $mushroomIdentifier + "Grp";
+
+		if ( $mushroomOperation == 1 &&  ! `objExists $mushroomGroupName[$slot]` ) {
+			// Make a group for the painted geometries. Place it at the
+			// same level as the surface
+			//
+			string $parentParent[] = `listRelatives -p $mushroomParentName[$slot]`;
+
+			if ( size($parentParent) > 0 ) {
+				group -em -p $parentParent[0] -n $mushroomGroupName[$slot];
+			} else {
+				group -em -w -n $mushroomGroupName[$slot];
+			}
+
+			// Connect this new transform to the surface's transform
+			//
+			string $from = $mushroomParentName[$slot];
+			string $to = $mushroomGroupName[$slot];
+			string $attr[] = { "t", "r", "ro", "s", "sh",
+							   "rp", "rpt", "sp", "spt" };
+
+			for ( $a = 0; $a < size($attr); $a++ ) {
+				connectAttr ($from + "." + $attr[$a]) ($to + "." + $attr[$a]);
+			}
+		}
+
+		if ( $mushroomAlignToSrf ) {
+			// check if we have rotateHelper plugin
+			// - this may change $mushroomAlignToSrf flag
+			//
+			chkRotateHelperPlugin;
+
+			// if mushroom alignment is desired but mushroom attachment isn't, create
+			// some dependency nodes to help out with this and create the constant
+			// connections
+			//
+				int $created = 0;
+	
+				if ( ! `objExists mushroomPaintPOSNode` ) {
+					createNode pointOnSurfaceInfo -name mushroomPaintPOSNode;
+					$created = 1;
+				}
+				if ( ! `objExists mushroomPaintBRNode` ) {
+					createNode rotateHelper -name mushroomPaintBRNode;
+					$created = 1;
+				}
+				if ( $created ) {
+					connectAttr mushroomPaintPOSNode.normal mushroomPaintBRNode.up;
+					connectAttr mushroomPaintPOSNode.tangentU mushroomPaintBRNode.forward;
+				}
+		}
+	}
+
+	// Return an argument string which:
+	// - tells the tool what surface ID to use for this surface
+	// - indicates that values should be distributed on a 20x20
+	//   grid on the surface
+	// - indicate that the associated surface parameter location
+	//   should also be passed to the "Set Value Cmd".
+	//
+	string $jitter;
+	string $position;
+	string $grid;
+
+	$position = "local";
+	$grid = (" -grid " + $mushroomGridSizeU  + " " + $mushroomGridSizeV);
+	return ( "-id " + $slot
+		   + $grid
+		   + " -jitter " + "false"
+		   + " -uv surface"
+		   + " -position " + $position );
+}
+
+// This is the "Finalize Cmd". This procedure is called at the
+// end of the stroke. It is passed the surface ID, that was
+// generated by the "Initialize Cmd".
+//
+global proc finishmushroomPaint( int $slot )
+{
+	global string $mushroomNamePrefix[];
+	global int $mushroomPaintFreeSlot;
+
+	// clear out the slot that was used for this surface
+	//
+	if ( $slot >= 0 ) {
+		$mushroomNamePrefix[$slot] = "";
+		if ( $slot < $mushroomPaintFreeSlot ) {
+			$mushroomPaintFreeSlot = $slot;
+		}
+	}
+}
+
+proc string getRandommushroom()
+{
+	global string $mushroomValidGeom[];
+
+	int $index = trunc( rand( size($mushroomValidGeom) - 0.5 ) );
+	return $mushroomValidGeom[$index];
+}
+
+proc setmushroomAttributes( string $objname )
+{
+	global int $mushroomModifyAttr[];
+	global float $mushroomModifyAttrNorm[];
+	global string $mushroomAttrName[];
+	global int $mushroomModifyAttrWrap[];
+	global float $mushroomJitterValueAmtSmin;
+	global float $mushroomJitterValueAmtSmax;
+	global float $mushroomJitterValueAmtRmin;
+	global float $mushroomJitterValueAmtRmax;
+	
+  	string $geomushroom = getRandommushroom();
+	int $attr;
+	int $numAttr = size($mushroomModifyAttr);
+	float $normVal,$mrs;
+        
+
+		// replace all modifiable attributes with normalized value
+		//
+		for ( $attr = 0; $attr < $numAttr; $attr++ ) {
+			if ( $mushroomModifyAttr[$attr] ) {
+				if ( $mushroomModifyAttrNorm[$attr] != 1 ) {
+					$normVal = rand( $mushroomJitterValueAmtRmin, $mushroomJitterValueAmtRmax ); 
+				} else {
+                                        $mrs = `getAttr ($geomushroom + $mushroomAttrName[$attr])`;
+                                        $normVal = rand( $mrs *$mushroomJitterValueAmtSmin, $mrs*$mushroomJitterValueAmtSmax );			
+				}
+
+				setAttr ($objname + $mushroomAttrName[$attr]) $normVal;
+			}
+		}
+}
+
+// This is the "Set Value Cmd". It is called everytime a value
+// on the surface is changed. A surface ID, a grid index
+// on the surface and the value associated with that grid index
+// is passed. There can be additional arguments depending on the
+// options generated by the return value of the "Initialize Cmd".
+// In this case the (u,v) surface parameter position for this
+// grid point as well as its local position is passed.
+// 
+global proc setmushroomPaintValue(
+	int $slot,
+	int $index,
+	float $val,
+	float $u,
+	float $v,
+	float $x,
+	float $y,
+	float $z
+)
+{
+	global string $mushroomNamePrefix[];
+	global string $mushroomParentName[];
+	global string $mushroomGroupName[];
+	global int $mushroomAlignToSrf;
+	global int $mushroomInstance;
+	global int $mushroomOperation;
+
+	if ( $slot < 0 ) {
+		return;
+	}
+
+	if ( $mushroomNamePrefix[$slot] != "" ) {
+		// determine the name of the mushroom associated with this
+		// grid location as well as the name of the
+		// pointOnSurfaceInfo node that attaches the mushroom to
+		// the surface
+		//
+		string $objname = $mushroomNamePrefix[$slot] + $index;
+
+		if ( `objExists $objname` ) {
+			// the mushroom already exists
+			//
+			if ( $mushroomOperation == 3 ) {
+				// we are removing mushroom; only remove if val > 0
+				//
+				if ( $val > 0 ) {
+					delete $objname;
+					// if there is a group and it's empty delete it
+					//
+					if ( `objExists $mushroomGroupName[$slot]` ) {
+						string $children[] = `listRelatives -c $mushroomGroupName[$slot]`;
+
+						if ( size($children) == 0 ) {
+							delete $mushroomGroupName[$slot];
+						}
+					}
+				}
+			} else {
+				// modify mushroom attributes
+				//
+			setmushroomAttributes( $objname );
+			}
+		} else if ( $val > 0 && $mushroomOperation == 1 ) {
+			// the mushroom doesn't exist
+			//
+			string $sname[];
+			string $geom = getRandommushroom();
+
+			// create a mushroom with the proper name, scale it by
+			// the passed value
+			//
+			$sname=`instance -n $objname $geom`;
+
+			if ( $sname[0] != $objname ) {
+				print ("mushroom NAME FAILED: wanted " + $objname + " got " + $sname[0] + "\n");
+				return;
+			}  
+			showHidden $objname;
+
+			string $objparent[] = `listRelatives -p $objname`;
+			
+			if ( $objparent[0] !=$mushroomGroupName[$slot] ){
+			     parent -r $objname $mushroomGroupName[$slot];
+			};
+
+			setmushroomAttributes( $objname );
+
+			string $outSrfAttr;
+
+			$outSrfAttr = ".local";
+
+			move -ls $x $y $z $objname;
+
+			if ( $mushroomAlignToSrf ) {
+				// use global nodes to calculate required rotation
+				//
+				string $outSrf = ($mushroomParentName[$slot] + $outSrfAttr);
+				connectAttr $outSrf mushroomPaintPOSNode.is;
+				setAttr mushroomPaintPOSNode.u $u;
+				setAttr mushroomPaintPOSNode.v $v;
+				// set rotation of object 
+				// - rotateHelper plugin has a bug where it doesn't recompute
+				//   unless asked for rotate attribute
+				//
+				getAttr mushroomPaintBRNode.rotate;
+				rotate `getAttr mushroomPaintBRNode.rx`
+					   `getAttr mushroomPaintBRNode.ry`
+					   `getAttr mushroomPaintBRNode.rz` $objname;
+
+				// disconnect the surface
+				//
+				disconnectAttr $outSrf mushroomPaintPOSNode.is;
+			}
+		}
+	}
+}
+
+// This is the "Get Value Cmd". It is called everytime a value
+// on the surface is needed by the scriptable paint tool. A
+// surface ID and a grid index is passed in. This procedure should
+// return the value for this grid location on the specified surface.
+// 
+global proc float getmushroomPaintValue( int $slot, int $index )
+{
+		return 0.0;
+}

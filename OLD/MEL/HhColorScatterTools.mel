@@ -1,0 +1,170 @@
+
+global proc HhColorScatterTools()
+{
+	HhColorRecord();
+	HhColorScatterConnect();
+}
+
+global proc HhColorRecord()
+{
+	global float $colorR;
+	global float $colorG;
+	global float $colorB;
+	global float $Percent;
+	$colorR=`floatSliderGrp -q -v ColorR`;
+	$colorG=`floatSliderGrp -q -v ColorG`;
+	$colorB=`floatSliderGrp -q -v ColorB`;
+	$Percent=`floatSliderGrp -q -v Colorpercent`;
+}
+global proc HhColorScatterConnect()
+{
+	global float $colorR;
+	global float $colorG;
+	global float $colorB;
+	global float $Percent;
+	string $done[];
+	clear $done;
+	string $Selectobj[] = `ls-sl`;
+	string $remapColor=`createNode "remapColor" -n   "HHRamapColor"`;
+	setAttr ($remapColor+".red[1].red_Position") 1;
+	setAttr ($remapColor+".red[1].red_FloatValue") $colorR;
+	setAttr ($remapColor+".green[1].green_Position") 1;
+	setAttr ($remapColor+".green[1].green_FloatValue") $colorG;
+	setAttr ($remapColor+".blue[1].blue_Position") 1;
+	setAttr ($remapColor+".blue[1].blue_FloatValue") $colorB;
+	select -cl;
+	float $sizeSelect=size($Selectobj)*$Percent*0.01;
+	int $perentsize=(int)$sizeSelect;
+	int $n=`rand $perentsize`*0.1;
+	int $s=$perentsize-$n-1;
+	print $perentsize;
+	for ($i=0; $i<$s; $i=$i+$n+1)
+	{
+		string $objtype=`nodeType  $Selectobj[$i]`;
+		if(`match "transform" $objtype`=="" )
+		{
+			continue;
+		}
+		string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+		if (size($NodeShape) == 0)
+		{
+			continue;
+		}
+		string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+		if (size($ShadingEngine) == 0)
+		{
+			continue;
+		}
+		string $Shader[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+		string $nodeType=`nodeType $Shader[0]`;
+		string $ShaderNew="adjuster_"+$Shader[0];
+		if(!`objExists $ShaderNew`)
+		{
+			string $shaderlist[]=`ls -type $nodeType`;
+			select $Shader[0];
+			hyperShadePanelMenuCommand("hyperShadePanel1", "duplicateShadingNetwork");
+			string $shaderlistN[]=`ls -type $nodeType`;
+			string $newshader[]=stringArrayRemove($shaderlist, $shaderlistN);
+			rename $newshader[0] $ShaderNew;
+		}
+		string $newSG=$ShaderNew+"SG";
+		if(!`objExists $newSG`)
+		{
+			sets -renderable true -noSurfaceShader true -empty -name $newSG;
+		}
+		string $conShder[]=`listConnections -plugs true -connections true ($ShaderNew+".outColor")`;
+		if(size($conShder)!=0)
+		{
+			for ($j=0; $j<size($conShder); $j+=2)
+			{
+				evalEcho ("disconnectAttr \"" +  $conShder [$j] + "\" \"" +  $conShder [$j+1] + "\"");
+			}
+		}
+		connectAttr -f ($ShaderNew+".outColor") ($newSG+".surfaceShader");
+		string $SColor =$ShaderNew+".color";
+		if (!`objExists $SColor`)
+		{
+			continue;
+		}
+		string $FileTexture[] = `listConnections $SColor`;
+		if (size($FileTexture)!=0)
+		{
+			string $conColor[] = `listConnections -plugs true -connections true ($ShaderNew+".color")`; 
+			if(`match "HHRamapColor" $conColor[1]`=="")
+			{
+				for ($k=0; $k<size($conColor); $k+=2)
+				{
+					evalEcho ("disconnectAttr \"" +  $conColor [$k+1] + "\" \"" +  $conColor [$k] + "\"");
+				}
+				connectAttr -force  $conColor[1] ($remapColor+".color");
+				connectAttr -force  ($remapColor+".outColor") $conColor[0];
+			}
+			
+			else
+			{
+				string $rempCon[] = `listConnections  -connections true ($ShaderNew+".color")`;
+				setAttr ($rempCon[1]+".red[1].red_Position") 1;
+				setAttr ($rempCon[1]+".red[1].red_FloatValue") $colorR;
+				setAttr ($rempCon[1]+".green[1].green_Position") 1;
+				setAttr ($rempCon[1]+".green[1].green_FloatValue") $colorG;
+				setAttr ($rempCon[1]+".blue[1].blue_Position") 1;
+				setAttr ($rempCon[1]+".blue[1].blue_FloatValue") $colorB;
+			}
+			
+
+
+		}
+		else
+		{
+			connectAttr -force  ($remapColor+".outColor") ($ShaderNew+".color");
+		}
+		select -cl;
+		select $Selectobj[$i];
+		hyperShade -assign $ShaderNew;
+		select -cl;
+	}
+}
+
+global proc HhColorScatterWin()
+{
+	// See if there is fSet in current scene
+    if (`window -q -exists HhColorScatterWin`) {
+		// window -q -wh HhPaintWindow;
+		// windowPref -remove HhPaintWindow;	
+		showWindow HhColorScatterWin;
+	} else {
+	
+	window -mb true -title "P5ColorScatterTools" 
+			-topLeftCorner 60 200 -widthHeight 200  250  -sizeable 1 HhColorScatterWin;
+	
+	menu -l "Help";
+	menuItem -l "User Manual" -c "HhPaintHelp()"  helpItem;
+	//string $hsets[] = `ls -type objectSet "*_fSet" "*:*_fSet"`;
+	 frameLayout -l "ColorAdijust" -collapsable true -width 120 ColorScatterFL;
+	     columnLayout  -adjustableColumn true -rs  10  -cw  10 ColorScatterCL;
+			   
+				
+			
+					floatSliderGrp -label "adjustR" -adjustableColumn 3 -field true -minValue 0 -maxValue 1  -fieldMinValue 0 -fieldMaxValue 1 -value 1 -precision 3 ColorR; 
+					floatSliderGrp -label "adjustG" -adjustableColumn 3 -field true -minValue 0 -maxValue 1  -fieldMinValue 0 -fieldMaxValue 1 -value 1 -precision 3 ColorG;
+					floatSliderGrp -label "adjustB" -adjustableColumn 3 -field true -minValue 0 -maxValue 1  -fieldMinValue 0 -fieldMaxValue 1 -value 1 -precision 3 ColorB;
+					floatSliderGrp -label "Percent" -adjustableColumn 3 -field true -minValue 0 -maxValue 100  -fieldMinValue 0 -fieldMaxValue 100 -value 0 -precision 3 Colorpercent;
+					//setParent ..;
+				//separator -style "single";
+				//rowColumnLayout	 -numberOfColumns 2 -h 35 -cw 1 100 -columnAttach 1 "right" 1;	
+					string $objName="ScatterLambert";
+					if(`objExists $objName`) 
+					{
+						delete $objName;
+					}
+					setParent ..;
+				separator -style "single";
+		columnLayout  -adjustableColumn true -rs  10  -cw  10;
+				button -label "Scatter" -align "center" -height 35  -w 260 -bgc .4 .6 0 -c "HhColorScatterTools()" ;
+		setParent ;
+		setParent ..;
+		
+		showWindow;
+		}
+			
+}

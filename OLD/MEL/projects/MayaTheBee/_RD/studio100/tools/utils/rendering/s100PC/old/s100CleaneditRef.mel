@@ -1,0 +1,418 @@
+global proc s100KRECUI()
+{
+	if(`window -ex 	s100KRECUI`)
+			deleteUI s100KRECUI;
+
+	window -title "Clean Reference Edit With Option"  -h 400  s100KRECUI;
+	columnLayout -adjustableColumn true s100KRECUICLMain;
+	menuBarLayout s100KRECUIMLMain;
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100KRECUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+		setParent ..;
+	$width = 350; //460
+
+	window -e -h 575 -w $width -sizeable 0  s100KRECUI;
+	showWindow;
+
+
+	// formlayout edit :
+	$height = 490;
+	$width2 = $width -20;
+
+	string $toMatch[] =`s100KREgetToKeep` ;
+
+	formLayout -h $height s100KRECUIFL ;
+
+	$textL = `text -label "loaded referenceNodes" `;
+	$textScroll = `textScrollList -allowMultiSelection 1 -h ($height/2) -w $width2 s100KRECUIFLTL`;
+
+	$w = 200;
+	//button
+	$textB = `text -l "string To Keep in ref Edit" `;
+	$sep = `separator -w $width2 `;
+	string $last = $sep ;
+	for($tmp in $toMatch )
+	{
+		$chk = `checkBox -w $w -v 1 -label $tmp ("chkB_" +$tmp)` ;
+		formLayout -e
+
+		-attachControl $chk "top" 5 $last
+		-attachForm $chk "left" 10
+		s100KRECUIFL ;
+		$last = $chk ;
+	}
+
+	$buttonSel = `button -w $w  -c s100KRECcleanOnSel -l "clean Ref on Selected" `;
+	$buttonAll = `button -w $w -c s100KRECcleanOnAll -l "clean Ref on All" `;
+
+	$chTryMoveLayaer = `checkBox -w $w -v 1 -label "try move to defaultLayer" s100KRECUIFLTML` ;
+
+	formLayout -e
+		-attachForm $textL "top" 5
+		-attachForm $textL "left" 5
+
+		-attachControl $textScroll "top" 1 $textL
+		-attachForm $textScroll "left" 1
+
+		//button
+		-attachControl $textB "top" 1 $textScroll
+		-attachForm $textB "left" 10
+
+		-attachControl $sep "top" 1 $textB
+		-attachForm $sep "left" 10
+
+		-attachControl $buttonSel "top" 1 $last
+		-attachForm $buttonSel "left" 10
+
+		-attachControl $buttonAll "top" 1 $buttonSel
+		-attachForm $buttonAll "left" 10
+
+		-attachControl $chTryMoveLayaer "top" 1 $buttonAll
+		-attachForm $chTryMoveLayaer "left" 10
+	s100KRECUIFL ;
+
+
+	showWindow s100KRECUI;
+	s100KRECUIRefreshTL($width2) ;
+}
+
+
+global proc  s100KRECcleanOnSel()
+{
+	s100KRECclean("sel");
+}
+
+global proc  s100KRECcleanOnAll()
+{
+	s100KRECclean("all") ;
+}
+
+global proc  s100KRECclean(string $stat)
+{
+	print  ("\n//\n// s100KRECclean (\""+$stat+"\") :\n");
+	print        ("// ---------------------- \n\n");
+
+
+	string $ls[];
+	if($stat == "all")
+	{
+		$ls = `s100findAllReferenceNode `;
+    }
+	else
+	{
+		$ls =  `textScrollList -q -selectItem s100KRECUIFLTL ` ;
+    }
+	print ("// Reference Nodes to work from:\n");
+		print $ls ;
+	print "// .\n";
+
+	if(size($ls) > 0)
+	{
+		string $child[] = {} ;
+		$child = `	formLayout -q -childArray   s100KRECUIFL `;
+		$j = 0 ;
+		string $toMatch[] = {};
+		for($tmp in $child)
+		{
+			if(`gmatch $tmp "chkB_*"`)
+			{
+				if( `checkBox -q -v $tmp `)
+				{
+					$toMatch[$j] = substituteAllString( $tmp ,"chkB_" ,"")  ;
+					$j++;
+				}
+			}
+		}
+		print ("// Reference Edits to keep/match : \n");
+			print $toMatch ;
+		print "// .\n";
+
+		s100keepReferenceEditAndClean($ls, $toMatch) ;
+	}
+	else
+	{
+		warning "nothing selected or no reference in scene";
+    }
+}
+
+
+global proc s100KRECUIRefreshTL(int $w )
+{
+	string $ls[] = `s100findAllReferenceNode `;
+	textScrollList -e -removeAll s100KRECUIFLTL ;
+	for($tmp in $ls)
+	{
+		if(!`referenceQuery -isNodeReferenced $tmp `)
+			textScrollList -e -append $tmp s100KRECUIFLTL ;
+    }
+	textScrollList -e -w $w s100KRECUIFLTL;
+}
+
+
+global proc string[] s100KREgetToKeep()
+{
+	return {"translate", "rotate", "scale" , "parent","output" ,"parentConstraint","proxy" };
+}
+//s100KRECUI ;
+
+// $ls = reference nodes, $toMatch = edits (strings to match) to keep
+//
+global proc s100keepReferenceEditAndClean(string $ls[], string $toMatch[])
+{
+	if( `checkBox -q -v s100KRECUIFLTML` )
+		if(`objExists "defaultRenderLayer"`)
+			editRenderLayerGlobals -currentRenderLayer "defaultRenderLayer" ;
+	s100ParentConstraintToGether;
+	s100keyAllLocalConstraintValue;
+	s100keepReferenceEditAndCleanWithArg($toMatch , $ls) ;
+	if( `checkBox -q -v    s100KRECUIFLTML` )
+		if(`objExists "defaultRenderLayer"`)
+			editRenderLayerGlobals -currentRenderLayer "defaultRenderLayer" ;
+	s100RMVreconnectAllMicroVeg;
+}
+
+// $refNodes = reference nodes, $toMatch = edits (strings to match) to keep
+//
+global proc s100keepReferenceEditAndCleanWithArg(string $toMatch[],string $refNodes[] )
+{
+	string $ls[] = $refNodes;
+
+    progressWindow
+         -title "reference cleaning "
+         -progress 0
+         -status "current clean : "
+         ;
+	string $edits[] ={}; ;
+
+	for( $m=0 ; $m<size($ls) ; $m++)
+	{
+		clear $edits ;
+		int $okmove=false;
+		string $nmsp = "";
+
+		string $refNode = $ls[$m];
+
+		$file = `referenceQuery -filename $refNode`;
+		string $baseNamespace = `file -q -namespace $file`;
+
+		// $edits = `referenceQuery -editStrings -failedEdits 0  "P_Bark_01_01RN" `;
+		// print $edits ;
+		// string $refNode = "LM_PoppyField_01_01:V_Clover_02_05RN1";
+
+	 	$edits = `referenceQuery -showDagPath 0 -editStrings -failedEdits 0  $refNode `;
+		if( size($edits ) > 0)
+		{
+			print  ("\n// > Current clean on ref node \""+ $refNode+"\" :\n\n");
+			progressWindow -edit -status ("current clean : " + $refNode );
+
+			// Addendum QA to deal with namespaces in case of Locations (imported)
+			//
+			string $potentialNMSPs[] = FMgetCleanNameSpace($refNode);
+			string $buf[]={};
+			int $numbf = `tokenize $potentialNMSPs[0] ":" $buf`;
+			if ($numbf>1)
+			{
+				string $bufMinusEnd[]={};
+            	for ($i=0;$i<$numbf-1;$i++)
+					$bufMinusEnd[$i] = $buf[$i];
+				$nmsp = stringArrayToString($bufMinusEnd,":");
+
+				// => more than one namespace would mean
+				warning ("Namespace \""+$nmsp+"\" could have been added at ref. 'importation' !");
+				//print ("// Trying to temporarly delete it..\n");
+				//namespace -setNamespace  ":" ;
+
+				//$okmove = !catch(`namespace -f -moveNamespace $nmsp ":" `);
+				//if ($okmove) $okmove = !catch(`namespace -f -removeNamespace $nmsp `);
+				//if ($okmove==0) {
+				//	warning ("Was not able to - temporarly - get rid of namespace \""+$nmsp+"\"... Skipping this ref node '"+$ls[$m]+"'");
+				//	continue;
+				//}
+				// done : so we must update the name of the refNode ! (no more $nmsp in it)
+				//$refNode = substitute($nmsp+":",$refNode,"");
+            }
+
+
+			// Keeping only the $toMatch ref.edits from current ones:
+			$j = 0 ;
+			string $ret[] = {};
+			for($i =0 ; $i < size($edits) ; $i++)
+			{
+				for($k = 0 ; $k < size($toMatch) ; $k++)
+				{
+					$matchTmp = "*" + $toMatch[$k] + "*" ;
+					if(	`gmatch $edits[$i] $matchTmp`)
+					{
+						$ret[$j] =  $edits[$i] ;
+						$j++;
+						break;
+					}
+				}
+			}
+
+			print ("// Reference Edits to keep : \n");
+			print $ret;
+			print ("// End Reference Edits. \n");
+
+			$def = `file -referenceNode $refNode -q -deferReference `;
+			if(!$def)
+			{
+				// Cleaning reference but reactivating the Edits we kept :
+				//
+				print ("// - Unloading reference '"+$refNode+"'\n");
+				file -unloadReference $refNode ;
+				print ("// - Cleaning reference '"+$refNode+"'\n");
+				file -cleanReference  $refNode ;
+				print ("// - Reloading reference '"+$refNode+"'\n");
+				file -loadReference $refNode ;
+				print ("// - Reference '"+$refNode+"' reloaded\n");
+
+
+				$edits2 = `referenceQuery -showDagPath 0 -editStrings -failedEdits 0  $refNode `;
+				int $ch ;
+				for($i = 0 ; $i < size( $ret ) ; $i++)
+				{
+					$ch = 1 ;
+					for($j = 0 ; $j < size($edits2)  ;$j++)
+					{
+						if($ret[$i] == $edits2[$j] )
+						{
+							//print "viviv";
+							$ch = 0 ;
+							break ;
+						}
+					}
+					if($ch)
+					{
+						string $correctedCmd = $ret[$i] ;
+
+						// QA : enriching ref edit by adding namespace if any
+						if (size($nmsp))
+						{
+							// replacing every ' "xxxx"' by ' "namespace:xxxx"' :
+							$correctedCmd = `substituteAllString $ret[$i] (" \"") (" \""+$nmsp+":") `;
+								// BUT unreplacing '-type "namespace:XXXX"' by '-type "XXX"':
+								$correctedCmd = `substituteAllString $correctedCmd ("-type \""+$nmsp+":") ("-type \"")`;
+								// AND string attributes.. (like .fileTextureName attr) :
+								$correctedCmd = `substituteAllString $correctedCmd ("-type \"string\" \""+$nmsp+":") ("-type \"string\" \"")`;
+
+							// + Also replacing "setAttr xxxx" by "setAttr namespace:xxxx"
+							$correctedCmd = `substituteAllString $correctedCmd ("setAttr ") ("setAttr "+$nmsp+":") `;
+
+							print ("// - original ref.Edit : \n");
+							print ("// \t << "+$ret[$i]+" ; >> \n");
+                        }
+						print ("// => New ref.Edit : \n");
+						print ("// \t << "+$correctedCmd+" ; >> \n");
+						print ("// - executing it ... \n");
+
+						int $ok = !catch(eval($correctedCmd)) ;
+						if ($ok)
+							print ("// - Done. \n");
+						else
+							print ("// - Encountered problem. See ScriptEditor for details. \n");
+                    }
+				}
+
+				print ("\n// Reference Edits cleaned up for ref : '" +  $refNode + "'\n");
+
+				progressWindow -edit  -progress $m ;
+			}
+        }
+	}
+	progressWindow -endProgress;
+}
+
+
+global proc s100ParentConstraintToGether()
+{
+	if(!`objExists "full_grp"`)
+	{
+		createNode -n "full_grp" transform;
+    }
+	if(!`objExists "constraints_grp"`)
+	{
+		createNode -n "constraints_grp" -p "full_grp" transform;
+    }
+
+	string $lsConst[] = `s100FindLocalConstraintForRef`;
+
+	for($tmp in $lsConst)
+	{
+		string $p[] = `listRelatives -p $tmp `;
+		if($p[0] != "constraints_grp")
+		{
+			parent $tmp "constraints_grp" ;
+        }
+    }
+}
+
+global proc string[] s100FindLocalConstraintForRef()
+{
+	///string $ls[] = `s100findAllReferenceNode `;
+	string $lsConst[] = `ls -type constraint `;
+	string $ret[] ;
+
+	$j= 0 ;
+	for($tmp in $lsConst)
+	{
+		if(! `referenceQuery -isNodeReferenced 	$tmp `)
+		{
+			$ret[$j] = $tmp ;
+			$j++;
+        }
+    }
+	return $ret;
+}
+
+global proc  s100keyAllLocalConstraintValue()
+{
+	string $lsConst[] = `s100FindLocalConstraintForRef`;
+	if(size($lsConst) > 0)
+	{
+		select 	$lsConst ;
+		setKeyframe ;
+    }
+}
+
+
+global proc string[] s100StoreAllLocalConstraintValue()
+{
+	string $lsConst[] = `s100FindLocalConstraintForRef`;
+	string $toApply[] ;
+	int $m = 0 ;
+	string $stringt ;
+	string $attr[] ;
+	for($i = 0 ; $i < size($lsConst) ; $i++)
+	{
+		clear $attr ;
+		$attr = `listAttr -output   -hasData    -v -keyable -unlocked   -settable  $lsConst[$i] `;
+		for($j = 0 ; $j < size($attr ) ; $j++)
+		{
+			$stringt = $lsConst[$i] + "." + $attr[$j] ;
+			if(`attributeExists $attr[$j] $lsConst[$i] `)
+			{
+				$v = `getAttr $stringt  `;
+				$toApply[$m] = ("setAttr \"" + $stringt + "\" " + $v +";"  );
+				$m++;
+
+            }else{
+				print ("\n" + $attr[$j] ) ;
+            }
+		//print $toApply ;
+		//print "\n" ;
+		//$j++;
+        }
+    }
+	return $toApply ;
+}
+
+
+global proc s100evalAArray(string $array[])
+{
+	for($tmp in $array)
+		eval($tmp);
+}
+

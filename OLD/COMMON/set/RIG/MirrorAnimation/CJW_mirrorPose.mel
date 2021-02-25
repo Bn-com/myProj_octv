@@ -1,0 +1,237 @@
+//
+//	Script Name: myControlWin
+//	Author: Justin.Chan
+//	Created: 2015/12/29 
+//
+//	Update/Change: 
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+//////////////////////////////////////////////////控制窗口
+
+global proc asMirrorOptions (string $uiName)
+{
+string $uiName = "biped";    
+if (`window -q -ex asMirrorOptions`)
+	deleteUI asMirrorOptions;
+window -t "pose镜像窗口" asMirrorOptions;
+columnLayout -adj 1;
+	separator -h 25 -st "none";
+	
+	rowLayout -nc 4 -cw 5 40;
+		text -l "镜像中心:";
+		radioCollection asMOSpaceRadioCollection;
+		radioButton -label "以世界坐标" asMOSpaceWorld;
+		radioButton -label "以Master控制器" asMOSpaceMain;
+		radioButton -label "以waist_Ctrl控制器" asMOSpaceCenter;
+		radioCollection -e -sl "asMOSpaceWorld" asMOSpaceRadioCollection;
+		setParent..;		
+	rowLayout -nc 4 -cw 5 40;
+		text -l "镜像模式:";
+		radioCollection asMOSideRadioCollection;
+		radioButton -label "两边镜像" asMOSideFlip;
+		radioButton -label "从右到左镜像" asMOSideR2L;
+		radioButton -label "从左到右镜像" asMOSideL2R;
+		setParent..;
+	rowLayout -nc 10 -cw 5 40;
+		text -l "镜像轴向:";
+		radioCollection asMOAxisRadioCollection;
+		radioButton -label "X轴" asMOAxisX;
+		radioButton -label "Y轴" asMOAxisY;
+		radioButton -label "Z轴" asMOAxisZ;
+		radioCollection -e -sl "asMOAxisX" asMOAxisRadioCollection;
+		setParent..;
+	rowLayout -nc 10 -cw 5 40;
+		text -l "相关控制器:";
+		radioCollection asMOSelOnlyRadioCollection;
+		radioButton -label "所有控制器" asMOSelOnlyAll;
+		radioButton -label "选择的控制器" asMOSelOnlySel;
+		radioCollection -e -sl "asMOSelOnlyAll" asMOSelOnlyRadioCollection;
+		setParent..;
+separator -st "none" -h 25;
+button -w 100 -l "镜像" -c ("asMirror "+$uiName);
+showWindow;
+
+string $optionVars[]={"asMOSide","asMOSpace","asMOAxis","asMOSelOnly"};
+string $cia[];
+string $radioCollection,$selected,$optionVarString;
+for ($i=0;$i<size($optionVars);$i++)
+	{
+	$radioCollection=$optionVars[$i]+"RadioCollection";
+	$cia=`radioCollection -q -cia $radioCollection`;
+	$selected=$cia[0];
+	if (`optionVar -ex $optionVars[$i]`)
+		{
+		$optionVarString=`optionVar -q $optionVars[$i]`;
+		for ($y=0;$y<size($cia);$y++)
+			if (`gmatch $cia[$y] ("*"+$optionVarString)`)
+				$selected=`optionVar -q $optionVars[$i]`;
+		}
+	radioCollection -e -sl $selected $radioCollection;
+	}
+}
+
+global proc asMirror (string $uiName)
+{
+if (!`window -q -ex $uiName`)
+	error ("Window : "+$uiName+" not found !");
+string $side="asMOSideR2L";
+string $space="asMOSpaceMain";
+string $axis="asMOAxisX";
+string $selOnly="asMOSelOnlyAll";
+if (`window -q -ex asMirrorOptions`)
+	{
+	$side=`radioCollection -q -sl asMOSideRadioCollection`;
+	$space=`radioCollection -q -sl asMOSpaceRadioCollection`;
+	$axis=`radioCollection -q -sl asMOAxisRadioCollection`;
+	$selOnly=`radioCollection -q -sl asMOSelOnlyRadioCollection`;
+	optionVar -sv asMOSide $side;
+	optionVar -sv asMOSpace $space;
+	optionVar -sv asMOAxis $axis;
+	optionVar -sv asMOSelOnly $selOnly;
+	}
+if (`optionVar -ex asMOSide`)
+	$side=`optionVar -q asMOSide`;
+if (`optionVar -ex asMOSpace`)
+	$space=`optionVar -q asMOSpace`;
+if (`optionVar -ex asMOAxis`)
+	$axis=`optionVar -q asMOAxis`;
+if (`optionVar -ex asMOSelOnly`)
+	$selOnly=`optionVar -q asMOSelOnly`;
+string $sel[]=`ls -sl`;
+string $nameSpace=`optionMenu -q -v ($uiName+"OptionMenu")`;
+if ($nameSpace==":")
+	$nameSpace="";
+string $controlSets[]=`asGetControlSetsFromUI $uiName`;
+string $controls[]=`sets -q $controlSets`;
+string $sortedControls[];
+if (`stringArrayCount "Main" $controlSets`)
+	$sortedControls={"Main","RootX_M","CenterExtra_M"};
+
+for ($i=0;$i<size($controls);$i++)
+	if (`gmatch $controls[$i] ($nameSpace+"IK*Spine*")`)
+		$sortedControls[size($sortedControls)]=$controls[$i];
+for ($i=0;$i<size($controls);$i++)
+	if (`gmatch $controls[$i] ($nameSpace+"IK*Leg_*")` || `gmatch $controls[$i] ($nameSpace+"IK*Arm_*")` || `gmatch $controls[$i] ($nameSpace+"Pole*")`)
+		$sortedControls[size($sortedControls)]=$controls[$i];
+for ($i=0;$i<size($controls);$i++)
+	if (!`stringArrayCount $controls[$i] $sortedControls`)
+		$sortedControls[size($sortedControls)]=$controls[$i];
+$controls=$sortedControls;
+if ($selOnly=="asMOSelOnlySel")
+	$controls=$sel;
+string $allKeyableAttrs[],$tempString[];
+string $source,$dest,$cmd,$loc1,$loc2;
+float $pos[3],$rot[3];
+int $wsXform[];
+int $flip;
+int $isFaceControl;
+string $flipAxis,$t0;
+if ($axis=="asMOAxisX")
+	{$flipAxis="X";$t0="tx";}
+if ($axis=="asMOAxisY")
+	{$flipAxis="Y";$t0="ty";}
+if ($axis=="asMOAxisZ")
+	{$flipAxis="Z";$t0="tz";}
+
+createNode -n flipGroup transform;
+if ($space=="asMOSpaceCenter")
+	parent flipGroup ($nameSpace+"RootX_M");
+if ($space=="asMOSpaceMain")
+	parent flipGroup ($nameSpace+"Main");
+xform -os -t 0 0 0 -ro 0 0 0 flipGroup;
+if ($space=="asMOSpaceCenter" || $space=="asMOSpaceMain")
+	parent -w flipGroup;
+for ($i=0;$i<size($controls);$i++)
+	{
+	if ($side!="asMOSideFlip")
+		if (`gmatch $controls[$i] "*_M"` || `gmatch $controls[$i] "*Main"`)
+			continue;
+	if ($side=="asMOSideR2L")
+		{
+		if (`gmatch $controls[$i] "*_L"`)
+			continue;
+		$dest=`substitute "_R" $controls[$i] "_L"`;
+		}
+	else if ($side=="asMOSideL2R")
+		{
+		if (`gmatch $controls[$i] "*_R"`)
+			continue;
+		$dest=`substitute "_L" $controls[$i] "_R"`;
+		}
+	else if ($side=="asMOSideFlip")
+		{
+		if (!`gmatch $controls[$i] "*_L"` && !`gmatch $controls[$i] "*_R"` && !`gmatch $controls[$i] "*_M"`)
+			continue;
+		if (`gmatch $controls[$i] "*FKExtraSpine1_M"`)
+			continue;
+		if (`gmatch $controls[$i] "*_L"`)
+			$dest=`substitute "_L" $controls[$i] "_R"`;
+		if (`gmatch $controls[$i] "*_R"`)
+			$dest=`substitute "_R" $controls[$i] "_L"`;
+		if (`gmatch $controls[$i] "*_M"`)
+			$dest=$controls[$i];
+		}
+	if (!`objExists $dest`)
+		continue;
+	$isFaceControl=0;
+	if (`objExists ($nameSpace+"FaceControlSet")`)
+		if (`sets -im ($nameSpace+"FaceControlSet") $controls[$i]`)
+			$isFaceControl=1;
+	$source=$controls[$i];
+	$allKeyableAttrs=`listAttr -k -m -sn $controls[$i]`;
+	for ($y=0;$y<size($allKeyableAttrs);$y++)
+		{
+		$flip=1;
+		if (`gmatch $controls[$i] ($nameSpace+"FK*_L")` || `gmatch $controls[$i] ($nameSpace+"FK*_R")`
+		 || `gmatch $controls[$i] ($nameSpace+"Bend*_L")` || `gmatch $controls[$i] ($nameSpace+"Bend*_R")`)
+		 	{
+		 	if ($allKeyableAttrs[$y]=="tx" || $allKeyableAttrs[$y]=="ty" || $allKeyableAttrs[$y]=="tz")
+		 		$flip=-1;
+		 	}
+		else
+			if ($allKeyableAttrs[$y]=="tz" || $allKeyableAttrs[$y]=="rx" || $allKeyableAttrs[$y]=="ry")
+				$flip=-1;
+		if ($isFaceControl && !`gmatch $controls[$i] ($nameSpace+"ctrl*")`)
+			{
+			if ($allKeyableAttrs[$y]=="tx" || $allKeyableAttrs[$y]=="ry" || $allKeyableAttrs[$y]=="rz")
+				$flip=-1;
+			else
+				$flip=1;
+			}
+		if (`gmatch $controls[$i] ($nameSpace+"Aim*")` || `gmatch $controls[$i] ($nameSpace+"IK*")` || `gmatch $controls[$i] ($nameSpace+"Pole*")` || `gmatch $controls[$i] ($nameSpace+"RootX_M*")`)
+			$wsXform[$i]=1;
+		if (!$wsXform[$i])
+			if (`getAttr -se ($dest+"."+$allKeyableAttrs[$y])`)
+				$cmd+="setAttr "+$dest+"."+$allKeyableAttrs[$y]+" "+(`getAttr ($source+"."+$allKeyableAttrs[$y])`*$flip)+";";
+		}
+
+	if ($wsXform[$i])
+		{
+		$tempString=`spaceLocator`;
+		$loc1=$tempString[0];
+		$tempString=`spaceLocator`;
+		$loc2=$tempString[0];
+		parent $loc2 $loc1;
+		parent $loc1 $source;
+		xform -os -t 0 0 0 -ro 0 0 0 $loc1;
+		setAttr ($loc1+".rotateOrder") `getAttr ($source+".rotateOrder")`;
+		setAttr ($loc2+".rotateOrder") `getAttr ($source+".rotateOrder")`;
+		setAttr ("flipGroup.scale"+$flipAxis) 1;
+		parent $loc1 flipGroup;
+		setAttr ("flipGroup.scale"+$flipAxis) -1;
+		setAttr ($loc1+".scaleX") -1;
+		$pos=`xform -q -ws -t $loc2`;
+		$rot=`xform -q -ws -ro $loc2`;
+		$cmd+="xform -ws -t "+$pos[0]+" "+$pos[1]+" "+$pos[2]+" -ro "+$rot[0]+" "+$rot[1]+" "+$rot[2]+" "+$dest+";";
+		}
+
+	if (`attributeExists "mirror" $controls[$i]`)
+		setAttr ($controls[$i]+".mirror") 0;
+	}
+delete flipGroup;
+eval ($cmd);
+select $sel;
+}
+

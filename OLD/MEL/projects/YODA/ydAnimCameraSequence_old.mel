@@ -1,0 +1,113 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc ydAnimCameraSequenceSplit()
+{
+	string $file = `file -q -sn`;
+	string $tempBuff[] = stringToStringArray($file,".");
+	string $filetype = $tempBuff[size($tempBuff)-1];
+
+	string $shots[] = `ls -type shot`;
+	for ($shot in $shots)
+	{
+		string $cmd = "\""+`getenv "MAYA_LOCATION"` + "/bin/mayabatch\" -file \""+$file+"\" -command \"source ydAnimCameraSequence.mel;ydAnimCameraSequence \\\""+$shot+"\\\"\"";
+		//print "\n";
+		//print $cmd;
+		system("\""+$cmd+"\"");
+
+		
+		string $fn = `file -q -sn -shn`;
+		string $buff[];
+		int $num = `tokenize $fn "_" $buff`;
+		string $es = $buff[0]+"_"+$buff[1]+"_"+$buff[2]+"_";
+		string $path = "D:/YODA/Episode_"+$buff[1]+"/Sequence_"+$buff[2]+"/";
+		sysFile -md $path;
+
+		clear $buff;
+		$num = `tokenize $shot "_" $buff`;
+		string $ss = $buff[1];
+		string $filename = $es+$ss+"_an_001."+$filetype;
+
+		string $cmd = "\""+`getenv "MAYA_LOCATION"` +"/bin/mayabatch\" -file \""+$path+$filename+"\" -command \"source ydAnimReplaceAnimation.mel;ydAnimReplaceAnimation();\"";
+		//print "\n";
+		//print $cmd;
+		system("\""+$cmd+"\"");
+	}
+}
+
+global proc ydAnimCameraSequence(string $shot)
+{
+	string $fn = `file -q -sn -shn`;
+	string $tempBuff[] = stringToStringArray($fn,".");
+	string $filetype = $tempBuff[size($tempBuff)-1];
+
+	string $buff[];
+	int $num = `tokenize $fn "_" $buff`;
+	string $es = $buff[0]+"_"+$buff[1]+"_"+$buff[2]+"_";
+	string $path = "D:/YODA/Episode_"+$buff[1]+"/Sequence_"+$buff[2]+"/";
+	sysFile -md $path;
+
+	clear $buff;
+	$num = `tokenize $shot "_" $buff`;
+	string $ss = $buff[1];
+	string $filename = $es+$ss+"_an_001."+$filetype;
+
+	//frame range
+	float $sf = `getAttr ($shot+".startFrame")`;
+	float $ef = `getAttr ($shot+".endFrame")`;
+	playbackOptions -min $sf -max $ef;
+	currentTime $sf;
+
+	//delete other camera
+	string $sc[] = `listConnections -s 1 -d 0 ($shot+".currentCamera")`;
+	string $cameras[] ={};//= `listRelatives "Camera_Group"`;
+	string $shots[] = `ls -type shot`;
+	for ($item in $shots)
+	{
+		string $itemsc[] = `listConnections -s 1 -d 0 ($item+".currentCamera")`;
+		$cameras[size($cameras)] = $itemsc[0];
+	}
+	$cameras = stringArrayRemove($sc,$cameras);
+	delete $cameras;
+
+	//remove other reference
+	string $rootgroup[] = `ls "*:*_Root*" "*_Root*"`;
+	for ($group in $rootgroup)
+	{
+		if (`objExists $group` && `referenceQuery -inr $group` && `attributeExists "visibility" $group` &&`getAttr ($group+".visibility")` == 0)
+		{
+			string $reffile = `referenceQuery -f $group`;
+			string $refnode = `referenceQuery -rfn $group`;
+			file -ur $refnode $reffile;
+			file -cr $refnode;
+			file -rr $reffile;
+		}
+	}
+	/*
+	string $references[] = `listAttr -ud $shot`;
+	for ($ref in $references)
+	{
+		if (`getAttr ($shot+"."+$ref)` == 0)
+		{
+			string $reffile = `referenceQuery -f $ref`;
+			file -rr $reffile;
+		}
+	}*/
+	
+	//delete other sequence shot
+	string $shots[] = `ls -type shot`;
+	$shots = stringArrayRemove({$shot},$shots);
+	delete $shots;
+
+	file -rename ($path+$filename);
+	file -save;
+}

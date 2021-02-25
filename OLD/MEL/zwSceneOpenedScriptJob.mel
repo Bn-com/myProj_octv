@@ -1,0 +1,1260 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description:
+///
+
+
+global proc zwSceneOpenedScriptJob()
+{
+	string $username = `getenv "username"`;
+	if (tolower($username) == "chris")
+	{
+		return;
+	}
+	
+	//添加VICKY项目路径变量
+	//string $version = `about -version`;
+	string $version = `about -apiVersion` / 100;
+	
+	$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+	if ($version == "2012"){
+		putenv "ROOT_VICKY"  "\\\\file-cluster\\GDC\\Projects\\VickytheViking\\Reference\\Animation_production\\ST100_Asset";
+		putenv "ROOT_PROD"  "\\\\file-cluster\\GDC\\Projects\\VickytheViking\\Reference\\Animation_production\\ST100_Asset";
+	}
+
+	scriptJob -event "SceneOpened" "source zwSceneOpenedScriptJob.mel; catch(`zwSceneOpened`);catch(`slAnimSmooth`)";
+	if ($version == "2015")
+	{
+		setAttr -type "string" defaultRenderGlobals.preMel "pgYetiPreRender;";
+	}
+	catch(`zwSceneOpened`);
+}
+
+global proc zwSceneOpened()
+{
+	if (!`about -batch`)
+	{
+		catch(python("execfile(r'\\\\file-cluster\\GDC\\Resource\\Support\\bin\\iopentest\\iopen.py')"));
+	}
+
+	string $username = `getenv "username"`;
+	if (tolower($username) == "chris")
+	{
+		return;
+	}
+
+// 检查C:盘空间
+	if (!`about -batch`)
+	{
+		string $temp = `internalVar -userTmpDir`;
+		int $diskFreeSpace = `idmtFile -diskFreeSpace $temp`;
+		if ($diskFreeSpace >=0 && $diskFreeSpace < 300)
+		{
+			confirmDialog -message "C:盘空间过小将影响性能，建议马上清理磁盘空间" -button "OK";
+		}
+	}
+
+//	eval "source \"zwHeadsUpDisplay.mel\"";
+
+	string $scene = `file -query -sceneName`;
+	string $project = zwGetProject("");
+
+// get version
+	//string $version = `about -version`;
+	string $version = `about -apiVersion` / 100;
+	$version = `match "[0-9]+(\.[0-9]){0,1}" $version`;
+
+//	if (($version == "2009" || $version == "2011") && !`about -batch`)
+//	{
+//		putenv "idmtOpenFileDebug" "x";
+//		python "import idmt.maya.OpenFileLog\nidmt.maya.OpenFileLog.removeCallback()";
+//		python "reload(idmt.maya.OpenFileLog)\nidmt.maya.OpenFileLog.addCallback()";
+//	}
+
+// to avoid the collision between hsvAdjust.mll and MayaToAlias.mll,load hsvAdjust first!
+//	if ((float)$version >= 7.0 && (float)$version <= 8.5)
+//	{
+//		if ((!`pluginInfo -q -autoload "HSVadjust2.mll"`) || (!`pluginInfo -q -loaded "HSVadjust2.mll"`))
+//		{
+//			catch(`loadPlugin -quiet "HSVadjust2.mll"`);
+//			catch(`pluginInfo -edit -autoload true "HSVadjust2.mll"`);
+//			catch(`loadPlugin -quiet "HSVadjust2.mll"`);
+//		}
+//	}
+	if (`pluginInfo -query -autoload "HSVadjust2.mll"`)
+	{
+		pluginInfo -edit -autoload false "HSVadjust2.mll";
+	}
+
+//// 校正出错的hsvadjust文件
+//	if ((float)$version == 7.0)
+//	{
+//		catch(`zjCorrectHsvnode`);
+//	}
+
+//winx
+	catch(`zwWinxSetRenderable`);
+
+//	if (zwIsRainbowProject($project))	// mentalRay: 16bit
+//	{
+//		zwSetAttrInt "miDefaultFramebuffer.datatype" 3;
+//	}
+
+	string $shortname = `file -q -sceneName -shortName`;
+	if (zwIsRainbowProject($project) && `gmatch $shortname "*hair*"`)
+	{
+	/*
+		source iRenderScriptsHub.mel;
+		string $buffer[];
+		string $buff[];
+		int $numTokens = `tokenize $shortname "_" $buff`;
+
+		$buffer = `iRenderLayersArray`;
+		if (`size $buff`>0){
+			for ($each in $buffer){
+				$shortname = "seq" + $buff[1] + "_" + "sce" + $buff[2] + "_" + $each;
+				string $outputImageName = `getAttr defaultRenderGlobals.imageFilePrefix`;
+				if($outputImageName!=$shortname){
+					setAttr -type "string" defaultRenderGlobals.imageFilePrefix $shortname;
+				}
+			}
+		}
+		*/
+		// load the MayaMan plugin & do a preset
+		if (!`pluginInfo -q -loaded "MayaMan.mll"`){
+		catch(`loadPlugin "MayaMan.mll"`);
+		}
+		//Hot key for MayaMan Assistant
+		nameCommand
+			-annotation "MayaMan Assistant"
+			-command "czMayaManAssistant"
+			czMayaManAssistantNamedCommand;
+		hotkey -k "C" -alt -name "czMayaManAssistantNamedCommand";
+		//Hot key for MayaMan Globals
+		nameCommand
+			-annotation "MayaMan Globals"
+			-command "MayaManOptions"
+			mayaManOptionsNamedCommand;
+		hotkey -k "G" -alt -name "mayaManOptionsNamedCommand";
+	}
+
+	catch(`zwSceneOpenedScriptJobResetLayerShader`);		// 用于zwLayerShader 程序
+
+	if ($scene == "")
+		return;
+
+	string $buf[];
+	tokenize $scene "/" $buf;
+	string $filename = $buf[size($buf)-1];
+
+// Enyog根据镜头好设置护身符
+	catch(`zwEnyoAmulet`);
+//Hunga根据镜头跟换眼睛材质
+	//catch(`slEnyoHungaEyes`);
+
+//// Bratz 关掉主要角色头顶上小球球的castsShadows
+//	catch(`zwSceneOpenedSetCastsShadows`);
+
+//	if (`gmatch $filename "ta_*"`)				// TaoWa项目playblast不显示额外信息
+//		optionVar -intValue playblastShowOrnaments 0;
+
+// 设置Render Globals
+//	if ($project != "MayaTheBee")
+//	{
+//		catch(`zwSetRenderGlobals`);
+//	}
+	if ($project == "JourneyofLong")
+	{
+		currentUnit -linear "centimeter" -angle "degree" -time "ntsc";
+		zwSetAttrInt "defaultResolution.width" 1280;
+		zwSetAttrInt "defaultResolution.height" 720;
+		zwSetAttrFloat "defaultResolution.deviceAspectRatio" 1.778;
+		zwSetAttrInt "defaultResolution.lockDeviceAspectRatio" true;
+		int $startFrame = 1001;
+		zwSetAttrInt defaultRenderGlobals.startFrame $startFrame;
+		float $min = `playbackOptions -query -min`;
+		if ($min != $startFrame)
+		{
+			float $animationStartTime = $startFrame - ($min - `playbackOptions -query -animationStartTime`);
+			playbackOptions -min $startFrame -animationStartTime $animationStartTime;
+		}
+	}
+	if (`gmatch $filename "ez_*"`)
+	{
+		catch(`slEZRenderSetting`);
+	}
+
+	if (`gmatch $filename "bu_*_lr_*"`)
+	{
+		catch(`zwSceneOpenedSetView`);
+		slDeleteCamera;
+
+	// 根据渲染意见　打开文件时候自动设置文件全局渲染设置
+
+	}
+	
+	if (`gmatch $filename "VV_*"` || `gmatch $filename "vv_*"`)
+	{
+		catch(`vvSceneOpenScripts`);
+
+	}
+	
+	if ($project == "Ninjago")
+	{
+		python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/projects/Ninjago2016/nj_2016_CamerasLensSqueezeRatio.py\")");
+	// Ninjago2016应导演要求，会随时改变镜头LensSqueezeRatio属性为1.1。
+
+	}	
+	
+	
+	if (`gmatch $filename "bu_*_ch_*"`)
+	{
+		if  (`pluginInfo -query -loaded "Mayatomr"`==0)
+		{
+		loadPlugin Mayatomr;
+		}
+
+		setAttr -type "string" "defaultRenderGlobals.currentRenderer" "mentalRay" ;
+		setAttr "miDefaultOptions.minSamples" 0;
+		setAttr "miDefaultOptions.maxSamples" 2;
+		setAttr "miDefaultOptions.contrastR" 0.02;
+		setAttr "miDefaultOptions.contrastG" 0.02;
+		setAttr "miDefaultOptions.contrastB" 0.02;
+		setAttr "miDefaultOptions.maxReflectionRays" 1;
+		setAttr "miDefaultOptions.maxRefractionRays" 1;
+		setAttr "miDefaultOptions.maxRayDepth" 2;
+		setAttr "miDefaultOptions.maxShadowRayDepth" 3;
+		setAttr "miDefaultOptions.filter" 2;
+		setAttr "miDefaultOptions.finalGather" 0;
+
+		string $fgpaht=`getAttr miDefaultOptions.finalGatherFilename`;
+		if (`size $fgpaht`==0)
+		{
+		string $fn = `file -query -sceneName -shortName`;
+		string $buff[];
+		tokenize $fn "." $buff;
+		string $buff1[];
+		tokenize $buff[0] "/" $buff1;
+		string $cmname=zwGetMusterCheckinProject()+`getenv "COMPUTERNAME"`+"\\renderData\\mentalRay\\finalgMap\\"+$buff1[size($buff1) -1]+"FGlightmap";
+		setAttr -type "string" miDefaultOptions.finalGatherFilename $cmname;
+		}
+
+	}
+
+
+//	catch(`zwCheckCameraUI`);				// 检查是否最新版本摄像机
+	catch(`zwSceneOpenedDelCam`);				// ch 环节删an 环节的原始摄像机
+	catch(`zwFixBug`);	// 修正checkin 不是100%时摄像机导出成.mb 的错误
+	catch(`zjCheckBackfaces`);				// 双面显示
+
+	string $mode = zwGetMode($filename);
+	if ((!($mode == "layout" || $mode == "anim" || $mode == "")) || $project == "DiveOllyDive2" || $project == "ChinaImage" || $project == "ToothFairies")
+	{
+		catch(`zwSceneOpenedScriptJobStartEnd`);		// 根据数据库设置起始结束帧
+	}
+	else
+	{
+		int $find = false;
+		string $buf[] = `ls -type "script"`;
+		for ($i=size($buf); $i>=0; $i--)
+		{
+			if (`match "sceneConfigurationScriptNode" $buf[$i]` != "")
+			{
+				if ($buf[$i] == "sceneConfigurationScriptNode")
+				{
+					if ($find)
+					{
+						string $cmd = `getAttr "sceneConfigurationScriptNode.before"`;
+						if ($cmd != "")
+						{
+							catch (`eval $cmd`);
+						}
+					}
+					break;
+				}
+				$find = true;
+			}
+		}
+	}
+
+	// 检查摄像机位置是否离原点过远
+	if (!`about -batch`)
+	{
+		catch(zwImportModule("idmt.maya.camera", true));
+		catch(`python "idmt.maya.camera.CheckPosition()"`);
+	}
+
+//BubbleGuppies 项目使用(wanshoulong)
+	///摄像机设置
+	catch(`buAnimCameraLock`);
+	///眼睛面片的显示切换
+	if ( startsWith($filename,"bu_") && (`gmatch $filename "*_ly_*"` || `gmatch $filename "*_an_*"`))
+	{
+		catchQuiet(`slSceneOpenRigView`);	// 加catch是因为有时候会报错 // Error: No object matches name: *.rig_ctrl
+		///电视框
+		global int $zwshowCustomCamera=0;buCustomCameraForTV;
+	}
+
+
+// 检查是否参考，是否最新版本
+//	if ((float)$version == 7.0)
+//	{
+	//	catch(`zwSceneOpenedScriptJobCheck $filename`);		// commented by huangzhongwei@idmt.irg.cn, 20080724
+	//	catch(`zwSceneOpenedScriptJobCheckBackground`);		// 检查是否参考了错误的场景
+	//	catch(`zwSceneOpenedScriptJobCheckReference`);		// 检查是否使用了错误的参考文件		// commented by huangzhongwei@idmt.irg.cn, 20080724
+//	}
+
+	if (zwIsRainbowProject($project) && `gmatch $filename "*_ch_*"`)
+	{
+		string $bl[] = `ls -type blendShape "*:Head_BlendShape"`;
+		for ($item in $bl)
+		{
+			zwSetAttrInt(($item + ".envelope"), 1);
+		}
+	}
+
+//	if (zwIsRainbowProject($project))
+//	{
+//		catch(`zwWinxRecoverTempMaps true`);
+//	}
+
+	eval "source zwAssetFile.mel";
+	catch(`zwSceneOpenedCheckAsset`);
+
+	if (!startsWith($filename,"act"))        //add by wanshoulong@idmt.com.cn  6/25/2013     替换的时候不检查ms_anim版本上传情况
+	{
+		catch(`zwSceneOpenedAlertMsAnim`);
+	}
+
+//设置动画面板启动
+	source "slOpenScene.mel";slCloseScene;
+
+	if ($project == "Enyo" || $project == "")
+	{
+		catch(`zwSceneOpenedTexture2Map false`);
+	}
+
+// commented by huangzhongwei@idmt, 20090122, 何子力说不需要检查sets的二次参考
+//	if (zwIsRainbowProject($project))
+//	{
+//		zwCheckTopReference();
+//	}
+
+	//add by WansHoulOng 2008-10-24
+	//修正replace reference后，前缀名没有变化的问题
+	/*if (`getenv "username"` == "wanshoulong")
+	{
+		//source "slRepairNamespace.mel";slRepairNamespace 1;
+	}*/
+//ToothFairies项目
+	if (`gmatch $filename "tf_act*_*_*_an_*"`|| `gmatch $filename "tf_act*_*_*_l*_lr_*"`)
+	{
+		// 动画镜头文件，修改nameSpace为 tf_c001001XXX 格式
+		python("from idmt.maya.TF import TF_sceneTools");
+		python("reload(TF_sceneTools)");
+		python("TF_sceneTools.TF_sceneTools().sk_sceneAssetNamespaceConfig()");
+		// 刷新动画文件里的cache节点的cacheName
+		python("from idmt.maya.TF import TF_checkinClean");
+		python("reload(TF_checkinClean)");
+		python("TF_checkinClean.CJW_renovateNCache()");
+	}
+
+//Zoomies项目
+	if ($project == "Zoomies")
+	{
+		zmSceneOpenJob;
+	}
+//RainbowRider项目	
+	if ($project == "RainbowRiders")
+	{
+		rrSceneOpenJob;
+	}
+	if ($project == "OKI")
+	{
+		oiSceneOpenJob;
+	}
+	if ($project == "Woodlies")
+	{
+		eval "source woAnimCheckModel.mel";
+		woSceneOpenScripts;
+	}
+	if ($project == "Ninjago")
+	{
+		njSceneOpenScripts;
+	}
+	if ($project == "YODA")
+	{
+		catch(`python "import idmt.maya.checkin"`);
+		catch(`python "reload(idmt.maya.checkin)"`);
+		catch(`python "idmt.maya.checkin.YODA_addVersion()"`);
+
+		ydSceneOpenScripts;
+		if ((float)$version >= 2016)
+		{
+			zwSceneOpenedScriptJobbase_OpenGL_Renderer;
+		}
+	}
+	if ($project == "TTMS")
+	{
+		zwSetAttrFloat "defaultRenderGlobals.byFrameStep" 0.5;
+	}
+	if ($project == "Tofuboy")
+	{
+		tbSceneOpen;
+	}
+	if ($project == "MayaTheBee")
+	{
+		eval "source \"//file-cluster/GDC/Resource/Support/Maya/scripts/zwXcopy2.mel\"";
+		eval "source \"//file-cluster/GDC/Resource/Support/Maya/2010/scripts/doCreateGeometryCache.mel\"";
+
+		maSceneOpenScript;
+	}
+	if ($project == "ChinaImage" && ($mode == "anim" || $mode == "layout"))
+	{
+		catch (`eval "source \"//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhCamCorrectCh.mel\""`);
+		catch (`HhCamCorrectCh`);
+	}
+	if ($project == "HeroFactory")
+	{
+		source hfCGRenderTools.mel; 
+		string $renderLayers[] = `ls -type renderLayer`;
+		for ($rl in $renderLayers)
+		{
+			if (match(":defaultRenderLayer",$rl)=="" && !`referenceQuery -inr $rl`)
+			{
+				editRenderLayerGlobals  -crl $rl;
+				hfCGRenderToolsRLSetFilenamePrefix();
+			}
+		}
+		editRenderLayerGlobals  -crl "defaultRenderLayer";
+	}
+	
+//	//设置renderglobal的 mel 多个项目使用了后台自动cache工具，需要修正Renderglobal的设置
+//	// wanshoulong@idmt.com.cn  2011-2-18
+//	if (!($project == "Ninjago" || $project == "Calimero" || $project == "Strawberry"))
+//	{
+//		setAttr -type "string" defaultRenderGlobals.preMel "";
+//	}
+
+	if ($project == "TheAdventuresOfYak")
+	{
+		evalDeferred -lowestPriority "setAttr -type \"string\" defaultRenderGlobals.preMel \"\"";
+		evalDeferred -lowestPriority "setAttr -type \"string\" defaultRenderGlobals.postMel  \"\"";
+	}
+
+	if (zwIsRainbowProject($project))
+	{
+		if (!`pluginInfo -query -loaded "MayaMan"`)
+		{
+			loadPlugin "MayaMan";
+		}
+		if (!`objExists "MayaManNugget"`)
+		{
+			MayaManVerifyNugget;
+		}
+		if (`getAttr "MayaManNugget.CustomDisplay"` != "it")
+		{
+			evalEcho "setAttr -type \"string\" MayaManNugget.CustomDisplay \"it\"";
+		}
+		zwSetAttrInt "MayaManNugget.ExternalTextureCache" 2;
+		zwSetAttrInt "MayaManNugget.EODuringPreview" 1;
+
+		string $sceneName = `file -query -sceneName -shortName`;
+		if (!(`match "_zdepth[_.]" (tolower($sceneName))` != "" || `match "_zdp[_.]" (tolower($sceneName))` != ""))
+		{
+			zwSetAttrStr "MayaManNugget.RenderDisplayDriver" "mayaiff";
+			zwSetAttrStr "MayaManNugget.DisplayExtension" "iff";
+		}
+		zwSetAttrInt "MayaManNugget.QuanOne" 65535;
+		zwSetAttrInt "MayaManNugget.QuanMax" 65535;
+
+		if (`match "^lighting_" $sceneName` != "")
+		{
+			string $RibBase = zwGetPath("RibBase", "");
+			zwSetAttrStr "MayaManNugget.RibBase" $RibBase;
+		}
+
+		python "import maya.cmds as cmd";	// 因为 |RBW| -> Lighting -> Shave Utilities -> Write Shave and Haircut RIB
+	}
+
+	zwImportModule("idmt.maya.cache", true);
+	python "idmt.maya.cache.ImportDiskCache()";
+}
+
+global proc slSceneOpenRigView()
+{
+	string $rigctrls[] = `ls "*rig_ctrl" "*:rig_ctrl" "*:*:rig_ctrl"`;
+	for ($ctrl in $rigctrls)
+	{
+		if (`objExists ($ctrl+".View")`)
+			setAttr ($ctrl+".View") 0;
+	}
+}
+
+global proc zwSceneOpenedLockFilmFit ()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $cameraName = `match "^[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+	$cameraName = `substitute "^[^_]+" $cameraName "cam"`;
+
+	string $cameras[] = `ls -cameras`;
+	for ($shape in $cameras)
+	{
+		string $parent[] = `listRelatives -parent $shape`;
+		string $camera = `match "[^|]+$" $parent[0]`;
+		if (tolower($cameraName) == tolower($camera))
+		{
+			if (!`getAttr -lock ($shape + ".filmFit")`)
+			{
+				evalEcho ("setAttr \"" + $shape + ".filmFit\" 1");
+				evalEcho ("setAttr -lock true \"" + $shape + ".filmFit\"");
+			}
+		}
+	}
+}
+
+global proc zwSceneOpenedSetCastsShadows()
+{
+	string $buf[] = `ls -long "*_dummy.castsShadows" "*:*_dummy.castsShadows"`;
+	for ($obj in $buf)
+	{
+		setAttr $obj false;
+	}
+}
+
+global proc zwSceneOpenedScriptJobResetLayerShader()
+{
+	global int $zwLayerShader;
+
+	$zwLayerShader = 0;
+	if (`symbolCheckBox -exists symbolCheckBoxZwLayeredShader`)
+		symbolCheckBox -edit -value $zwLayerShader symbolCheckBoxZwLayeredShader;
+}
+
+global proc zwSceneOpenedScriptJobStartEnd()
+{
+	int $margin = 12;
+	string $project = zwGetProject("");
+	if ($project == "Woodlies")
+	{
+		$margin = 0;
+	}
+//	else if (`match "^DiveollyDive" $project` != "")
+//	{
+//		$margin = 50;
+//	}
+
+	int $buf[3];
+	catch($buf = `idmtProject -timeLine -echo off`);
+	if ($buf[0] != $buf[1])
+	{
+	//	if (!zwIsRainbowProject($project))
+		{
+			setAttr defaultRenderGlobals.startFrame $buf[0];
+			setAttr defaultRenderGlobals.endFrame $buf[1];
+		}
+
+		playbackOptions -min $buf[0] -animationStartTime ($buf[0] - $margin);
+		playbackOptions -max $buf[1] -animationEndTime ($buf[1] + $margin);
+	}
+
+//	string $sceneName = `file -query -shortName -sceneName`;
+//	if (`gmatch (tolower($sceneName)) "*fire*"`)
+//	{
+//		int $startFrame = -10;
+//		setAttr defaultRenderGlobals.startFrame $startFrame;
+//	//	playbackOptions -min $startFrame -animationStartTime $startFrame;
+//	}
+}
+
+global proc string[] zwSelectByVersion(string $version)
+{
+	string $objs[];
+	string $buf[] = `ls -long "*.version" "*:*.version"`;
+	for ($obj in $buf)
+	{
+		string $file = `getAttr $obj`;
+		if (tolower($file) == tolower($version))
+		{
+			$obj = `substring $obj 1 (size($obj)-8)`;
+			string $buf1[] = `ls -shortNames $obj`;
+			$objs[size($objs)] = $buf1[0];
+		}
+	}
+	return $objs;
+}
+
+global proc zjCheckBackfaces()
+{
+	string $all[] = `ls -dag -ni -shapes`;
+	for ($item in $all)
+	{
+		global int $gSelectMeshesBit ;
+		global int $gSelectNurbsSurfacesBit;
+		// Toggle backface culling for all nurbs surfaces
+		//
+		string $nurbsSurfaces[] = `filterExpand -ex true -sm $gSelectNurbsSurfacesBit $item`;
+		for ( $surface in $nurbsSurfaces ) {
+			if (`displayCull -q -bfc $surface`)
+				displayCull -bfc 0 $surface;
+		}
+
+		//  Toggle backface culling for all mesh surfaces
+		//
+		string $meshSurfaces[] = `filterExpand -ex true -sm $gSelectMeshesBit $item`;
+		int    $isNotCulled[]  = `polyOptions -q -bc $meshSurfaces`;
+		int    $index = 0;
+		for ( $surface in $meshSurfaces ) {
+			if ( !$isNotCulled[$index] ) {
+				polyOptions -bc $surface;
+			}
+			$index++;
+		}
+	}
+}
+
+global proc zwSceneOpenedScriptJobCheckBackground()
+{
+	if (`about -batch`)
+	{
+		return;
+	}
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (!`gmatch $sceneName "br_*_an_*"`)
+	{
+		return;
+	}
+
+	$sceneName = `match "^br_[^_]+_[^_]+_" $sceneName`;
+	if ($sceneName == "")
+	{
+		return;
+	}
+	$sceneName = `substring $sceneName 4 (size($sceneName)-1)`;
+
+	string $background = `eval ("idmtProject -background \"" + $sceneName + "\"")`;
+	if ($background == "")
+	{
+		return;
+	}
+
+	string $reference[] = `file -query -reference`;
+	for ($file in $reference)
+	{
+		$file = `match "[^/\\]+$" $file`;
+		$file = `match "^[^{}]+" $file`;
+		if (tolower($file) == tolower($background))
+		{
+			return;
+		}
+	}
+
+	string $message = "参考了错误的场景或者没有参考场景，正确的场景应该是\n\n" + $background;
+	confirmDialog -message $message -button "OK";
+}
+
+global proc slAnimSmooth()
+{
+	int $slAS = `optionVar -q AnimSmooth`;
+
+	if ($slAS)
+	{
+		string $smoothNodes[] = `ls -type polySmoothFace`;
+		for ($node in $smoothNodes)
+		{
+			string $master[] = `listConnections -plugs true ($node + ".divisions")`;
+			if (`objExists $master[0]`)
+				setAttr $master[0] 0;
+			else
+				setAttr ($node + ".divisions") 0 ;
+		}
+	}
+}
+
+global proc zwSceneOpenedAlertMsAnim()
+{
+	string $buf[];
+	clear $buf;
+
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+
+		string $asset_mode = `zwGetMode $filename`;
+		if ($asset_mode != "rigging")
+		{
+			continue;
+		}
+		$asset_mode = "master";
+
+		string $project = `zwGetProject $filename`;
+		if ($project == "")
+		{
+			continue;
+		}
+
+		string $asset_id = `match "_[^_]+_" $filename`;
+		$asset_id = `match "[^_]+" $asset_id`;
+		if ($asset_id == "")
+		{
+			continue;
+		}
+
+		$filename = `substitute "_rg[.]" $filename "_ms_anim."`;
+
+		string $asset_types[] = `getFileList -folder ("//file-cluster/GDC/Projects/" + $project + "/Project/scenes/")`;
+		for ($asset_type in $asset_types)
+		{
+			string $ms = "//file-cluster/GDC/Projects/" + $project + "/Project/scenes/" + $asset_type + "/" + $asset_id + "/" + $asset_mode + "/" + $filename;
+			if (`filetest -f $ms`)
+			{
+				string $referenceNode = `file -query -referenceNode $reference`;
+			//	file -loadReference $referenceNode $ms;
+				$buf[size($buf)] = $referenceNode;
+				break;
+			}
+		}
+	}
+
+	if (size($buf) && `zwGetProject ""` != "Ninjago")// add by WansHoulOng@idmt.com.cn  2010-12-22  Ninjago项目使用rig文件，无ms文件
+	{
+		ReferenceEditor;
+
+		global string $gReferenceEditorPanel;
+		string $filter = `itemFilter -byName $buf[0]`;
+		for ($i = 1; $i <size($buf); $i++)
+		{
+			string $nextReference = `itemFilter -byName $buf[$i]`;
+			$filter = `itemFilter -union $filter $nextReference`;
+			delete $nextReference;
+		}
+		sceneEditor -edit -filter $filter $gReferenceEditorPanel;
+
+		confirmDialog -message "场景中参考的 rg 文件已经有 ms_anim 文件上传\n\n请在 Reference Editor 里面用 rg->ms 按钮替换选择的文件\n\n提示：当前 Reference Editor 只显示需要替换文件的参考。显示所有参考请用View -> View All References" -button "OK";
+	}
+}
+
+global proc zwSceneOpenedCheckAsset()
+{
+//	global int $zwAssetFile;
+//	eval ("idmtDHtmlDlg -destroyWindow " + $zwAssetFile);
+
+	string $fileName = `file -query -shortName -sceneName`;
+	if (`gmatch $fileName "bu_*_an_*"`)
+	{
+		string $unReferenced[] = `zwAssetFileUnReferenced`;
+		if (size($unReferenced) > 0)
+		{
+			zwAssetFile;
+		}
+	}
+}
+
+global proc zwSceneOpenedSetView()
+{
+	// setAttr "rig_ctrl.View" 1;	// Render
+	string $buf[] = `ls "*.View" "*:*.View"`;
+	for ($attr in $buf)
+	{
+		zwSetAttrInt($attr, 1);
+	}
+}
+
+global proc zwFixBug()
+{
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $filename = `referenceQuery -withoutCopyNumber -shortName -filename $reference`;
+		if (`match "_cam[.]mb$" $filename` != "")
+		{
+			string $ma = `referenceQuery -withoutCopyNumber -filename $reference`;
+			$ma = `substitute "[.]mb$" $ma ".ma"`;
+			if (`filetest -f $ma`)
+			{
+				string $str = `match "^[0-9a-zA-Z]+_[0-9a-zA-Z]+_[0-9a-zA-Z]+_" $filename`;
+				if ($str == "")
+				{
+					return;
+				}
+				string $buf[];
+				tokenize $str "_" $buf;
+				$project = $buf[0];
+				$episode = $buf[1];
+				$scene = $buf[2];
+
+				file -removeReference $reference;
+
+				eval "source zwCameraImportExport.mel";
+				zwGetCameraUIGetCamera $project $episode $scene;
+
+				break;
+			}
+		}
+	}
+}
+
+global proc zwWinxSetRenderable()
+{
+	string $sceneName = `file -query -sceneName`;
+	$sceneName = `match "[^/\\]+$" $sceneName`;
+	if (`match "_DYN[._]" $sceneName` == "")
+	{
+		return;
+	}
+
+	string $cameraShapes[] = `ls -long -cameras`;
+	for ($cameraShape in $cameraShapes)
+	{
+		if (`match "|cam_[^|]+|[^|]+$" $cameraShape` != "")
+		{
+			zwSetAttrInt ($cameraShape + ".renderable") true;
+		}
+		else
+		{
+			zwSetAttrInt ($cameraShape + ".renderable") false;
+		}
+	}
+}
+
+global proc zwEnyoAmulet()
+{
+	string $sceneName = `file -query -sceneName -shortName`;
+	if (`match "^ey(_[^_]+){3}[_.]" $sceneName` == "")
+	{
+		return;
+	}
+
+	string $attrs[] = `ls "MSH_all.display" "*:MSH_all.display"`;
+	int $size = size($attrs);
+	if ($size == 0)
+	{
+		return;
+	}
+
+	string $buf[];
+	tokenize $sceneName "_" $buf;
+	string $episode = $buf[1];
+	string $shot = $buf[3];
+	int $display = -1;
+	if ($episode == "101")
+	{
+		//$display = 1;
+		if (`strcmp $shot "456"` < 0)
+			$display = 0;
+		else
+			$display = 1;
+	}
+	else if ($episode == "102")
+	{
+		if (`strcmp $shot "430"` < 0)
+		{
+			$display = 1;
+		}
+		else if (`strcmp $shot "430"` > 0)
+		{
+			$display = 2;
+		}
+	}
+	else if ($episode == "103" || $episode == "104" || $episode == "105")
+	{
+		$display = 2;
+	}
+	else if ($episode == "106")
+	{
+		if (`strcmp $shot "381"` < 0)
+		{
+			$display = 2;
+		}
+		else if (`strcmp $shot "381"` > 0)
+		{
+			$display = 3;
+		}
+	}
+	else if (`strcmp $episode "106"` > 0 && `strcmp $episode "114"` <0)
+	{
+		$display = 3;
+	}
+	else if ($episode == "114")
+	{
+		if (`strcmp $shot "340"` < 0)
+			$display = 3;
+		else
+			$display = 4;
+	}
+	else if (`strcmp $episode "114"` > 0 && `strcmp $episode "120"` <0)
+	{
+		$display = 4;
+	}
+	else if ($episode == "120")
+	{
+		if (`strcmp $shot "405"` < 0)
+			$display = 4;
+		else
+			$display = 5;
+	}
+	else if (`strcmp $episode "120"` > 0 && `strcmp $episode "124"` <=0)
+	{
+		$display = 5;
+	}
+	else if (`strcmp $episode "124"` > 0 && `strcmp $episode "126"` <=0)
+	{
+		$display = 6;
+	}
+	if ($display == -1)
+	{
+		return;
+	}
+
+	for ($attr in $attrs)
+	{
+		if (`getAttr $attr` == $display)
+		{
+			continue;
+		}
+		if (`keyframe -query -keyframeCount $attr` > 0)
+		{
+			cutKey -clear -attribute `match "[^.]+$" $attr` `substitute "[.][^.]+$" $attr ""`;
+		}
+		select `substitute "[.][^.]+$" $attr ""`;
+		zwSetAttrInt($attr, $display);
+	}
+}
+
+global proc slEnyoHungaEyes()
+{
+	string $sceneName = `file -query -sceneName -shortName`;
+	if (`match "^ey(_[^_]+){3}[_.]" $sceneName` == "")
+	{
+		return;
+	}
+
+	string $buf[];
+	tokenize $sceneName "_" $buf;
+	string $episode = $buf[1];
+	string $shot = $buf[3];
+
+	string $oldEP[] = {"106","105","103","107","109","101","111","110","113","108"};
+	if ( !stringArrayCount($episode,$oldEP))
+	{
+		source "eyRenderHungaEyes.mel";
+		eyRenderHungaEyesReplaceTexture "new";
+	}
+}
+
+global proc int zwSceneOpenedTexture2Map(int $force)
+{
+	int $dirty = false;
+
+	string $IDMT_PROJECTS = `getenv "IDMT_PROJECTS"`;
+
+	string $files[] = `ls -type "file"`;
+
+	int $max = size($files);
+	if ($max == 0)
+	{
+		return $dirty;
+	}
+	int $progress = 0;
+	if ($force && !`about -batch`)
+	{
+		progressWindow -progress $progress -max $max -title "Tga2Map" -status ($progress + "/" + $max) -isInterruptable true;
+	}
+
+	for ($file in $files)
+	{
+		if ($force && !`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			$progress ++;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $file);
+		}
+
+		string $str = `getAttr ($file + ".fileTextureName")`;
+		string $fileTextureName = `substitute ".*/Enyo/" $str ($IDMT_PROJECTS + "/Enyo/")`;
+
+		if (`match "[.]map$" $fileTextureName` == "")
+		{
+			string $map = $fileTextureName + ".map";
+			if (`filetest -f $fileTextureName` && !`filetest -f $map` && $force)
+			{
+				string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $map`;
+				zwImgcvt $fileTextureName $temp;
+				zwSysFile "move" $temp $map true;
+			}
+			$fileTextureName = $map;
+		}
+
+		if ($fileTextureName != $str && `filetest -f $fileTextureName`)
+		{
+			evalEcho ("setAttr \"" + $file + ".fileTextureName\" -type \"string\" \"" + $fileTextureName + "\"");
+			$dirty = true;
+		}
+	}
+
+	if ($force && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+global proc int zwWinxRecoverTempMaps(int $force)
+{
+	int $dirty = false;
+
+	string $files[] = `ls -type "file"`;
+
+	int $max = size($files);
+	if ($max == 0)
+	{
+		return $dirty;
+	}
+	int $progress = 0;
+	if ($force && !`about -batch`)
+	{
+		progressWindow -progress $progress -max $max -title "Recover Temp Maps" -status ($progress + "/" + $max) -isInterruptable true;
+	}
+
+	for ($file in $files)
+	{
+		if ($force && !`about -batch`)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				break;
+			}
+			$progress ++;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $file);
+		}
+
+		string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+		string $sourcePath = `workspace -expandName $fileTextureName`;
+		if (`filetest -f $sourcePath`)
+		{
+			continue;
+		}
+
+		string $filename = `match "[^/\\]+$" $sourcePath`;
+		string $tempPath = `substitute "[^/\\]+$" $sourcePath ("tmp/" + $filename)`;
+		if (!`filetest -f $tempPath`)
+		{
+			continue;
+		}
+
+		string $rs = `zwSysFile "move" $tempPath $sourcePath true`;
+		if ($rs != "")
+		{
+			warning ("move \"" + `substituteAllString $tempPath "/" "\\"` + "\" \"" + `substituteAllString $sourcePath "/" "\\"` + "\"\n" + $rs);
+			continue;
+		}
+
+		$dirty = true;
+	}
+
+	if ($force && !`about -batch`)
+	{
+		progressWindow -endProgress;
+	}
+
+	return $dirty;
+}
+
+global proc zwSceneOpenedScriptJobbase_OpenGL_Renderer()
+{
+	string $modelPanels[] = `getPanel -type modelPanel`;
+	for ($modelPanel in $modelPanels)
+	{
+		string $modelEditor = `modelPanel -q -me $modelPanel`;
+		if ($modelEditor != "")
+		{
+			string $currentRenderer = `modelEditor -q -rnm $modelPanel`;
+			if ($currentRenderer != "base_OpenGL_Renderer")
+			{
+				setRendererInModelPanel "base_OpenGL_Renderer" $modelPanel;
+			}
+		}
+	}
+}
+
+/*
+global proc int zwSceneOpenedScriptJobCheck(string $filename)
+{
+	int $rs = false;
+
+	string $project = zwGetProject($filename);
+	string $mode = zwGetMode($filename);
+	if ($mode == "anim" || ($mode == "cloth" || $mode == "dynamic") || $mode == "lr_layer" || $mode == "lighting")
+	{
+		string $reference[] = `file -query -reference`;
+
+		string $cmd = "idmtCheckVersion";
+		if ($mode == "anim")
+		{
+		// 不能参考tx、ik文件
+			int $checkMsReference = zwCheckReference($filename);
+			$cmd += " -checkMsReference " + $checkMsReference;
+	//	// 没有使用参考
+	//		int $checkReference = true;
+	//		for ($file in $reference)
+	//		{
+	//			$file = tolower($file);
+	//			if (`gmatch $file "*_ms_c000.*"`)
+	//			{
+	//				$checkReference = false;
+	//				break;
+	//			}
+	//		}
+	//		$cmd += " -checkReference " + $checkReference;
+		}
+	// 检查文件版本
+		string $files[];
+		string $buf[] = `ls -long "*.version" "*:*.version"`;
+		for ($obj in $buf)
+		{
+			if (!`reference -isNodeReferenced $obj`)
+			{
+				string $version = `getAttr $obj`;
+				int $find = false;
+				int $i;
+				for ($i=0; $i<size($files); $i++)
+				{
+					if (tolower($files[$i]) == tolower($version))
+					{
+						$find = true;
+						break;
+					}
+
+					// to fix a bug, huangzhongwei, 20070521
+					if (tolower(`substring $files[$i] 1 (size($files[$i]) - 6)`) == tolower(`substring $version 1 (size($version) - 6)`))
+					{
+						if (int(`substring $version (size($version) - 5) (size($version) - 3)`) > int(`substring $files[$i] (size($files[$i]) - 5) (size($files[$i]) - 3)`))
+						{
+							$files[$i] = $version;
+						}
+						$find = true;
+						break;
+					}
+				}
+				if (!$find)
+				{
+					$files[size($files)] = $version;
+				}
+			}
+		}
+		for ($file in $files)
+		{
+			$cmd += " \"" + $file + "\"";
+		}
+
+		$rs = `eval $cmd`;
+	}
+	return $rs;
+}
+
+global proc zwSceneOpenedScriptJobCheckReference()
+{
+	if (`about -batch`)
+	{
+		return;
+	}
+
+	if(`window -exists "zwSceneOpenedScriptJobCheckReference"`)
+		deleteUI "zwSceneOpenedScriptJobCheckReference";
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (!`gmatch $sceneName "br_*_an_*"`)
+	{
+		return;
+	}
+
+	string $rs[];
+	clear $rs;
+
+	string $str1 = eval ("idmtService \"GetAssetInAnim\" \"" + $sceneName + "|background|master\"");
+	$rs = `zwSceneOpenedScriptJobCheckReferenceProc $str1 $rs`;
+	string $str2 = eval ("idmtService \"GetAssetInAnim\" \"" + $sceneName + "|character|master\"");
+	$rs = `zwSceneOpenedScriptJobCheckReferenceProc $str2 $rs`;
+
+	if (size($rs))
+	{
+		window -title "使用了错误的参考文件" -width 568 -height 160 "zwSceneOpenedScriptJobCheckReference";
+			rowColumnLayout -numberOfColumns 2 -columnWidth 1 280 -columnWidth 2 280;
+				textField -editable false -text "错误";
+				textField -editable false -text "正确";
+			for ($str in $rs)
+			{
+				textField -editable false -text $str;
+			}
+		showWindow "zwSceneOpenedScriptJobCheckReference";
+	}
+}
+
+global proc string[] zwSceneOpenedScriptJobCheckReferenceProc(string $str, string $rs[])
+{
+	string $done[];
+
+	string $buf[];
+	tokenize $str "|" $buf;
+
+	string $reference[] = `file -query -reference`;
+	for ($file in $reference)
+	{
+		$file = `match "[^/\\]+$" $file`;
+		$file = `match "^[^{}]+" $file`;
+
+		int $find = false;
+		for ($i=0; $i<size($done); $i++)
+		{
+			if (tolower($file) == tolower($done[$i]))
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+		$done[size($done)] = $file;
+
+		string $asset_file = "";
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			if (`gmatch (tolower($file)) ("*_" + tolower($buf[$i]) + "_*")`)
+			{
+				if (`substitute "_sp_" (tolower($file)) "_"` == `substitute "_sp_" (tolower($buf[$i+1])) "_"`)
+				{
+					$asset_file = "";
+					break;
+				}
+				else
+				{
+					if ($asset_file != "")
+					{
+						$asset_file += ", ";
+					}
+					$asset_file += $buf[$i+1];
+				}
+			}
+		}
+		if ($asset_file != "")
+		{
+			$rs[size($rs)] = $file;
+			$rs[size($rs)] = $asset_file;
+		}
+	}
+
+	return $rs;
+}
+*/

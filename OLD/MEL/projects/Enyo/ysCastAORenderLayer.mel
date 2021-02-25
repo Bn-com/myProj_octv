@@ -1,0 +1,68 @@
+global proc ysCastAORenderLayer()
+{
+	string $allShape[] = `ls -geometry`;
+	//string $allTransform[] = `listRelatives -parent $allShape`;
+	string $Top[] = `ls -sl`;
+	string $shapes[] = `ls -dag $Top`;
+	// check selected objects
+	if(size($Top) == 0)
+	{
+		confirmDialog -message "没有选择任何物体" -button "请选择需要投影AO的物体";
+		return;		
+	}	
+	
+	//Make cast render layer and overrides use AO material 
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}		
+	
+	if(!(`objExists "castAO"`))
+	{
+		//Adjust camera's background color to white
+		createRenderLayer -name "castAO";
+		editRenderLayerMembers -noRecurse "castAO" $allShape;
+		editRenderLayerGlobals -currentRenderLayer "castAO";
+		
+		editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+		editRenderLayerAdjustment "defaultResolution.width";
+		setAttr "defaultResolution.width" 960;
+		editRenderLayerAdjustment "defaultResolution.height";
+		setAttr "defaultResolution.height" 540;
+		
+		string $cams[] = `listCameras -p`;
+		for($cam in $cams)
+		{
+			if(`getAttr ($cam+".renderable")`==1)
+			{
+				editRenderLayerAdjustment ($cam+".backgroundColor");
+				setAttr ($cam+".backgroundColor") -type double3 1 1 1;
+			}
+		}
+		
+		string $aoTex = `shadingNode -asTexture mib_amb_occlusion -name "aoTexture"`;
+		setAttr ($aoTex + ".samples" ) 128;
+		setAttr ($aoTex + ".max_distance" ) 10;
+		string $aoShader = `shadingNode -asShader surfaceShader -name "aoShader"`;
+		string $aoShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($aoShader+"SG")`;
+		connectAttr -force ($aoTex + ".outValue") ($aoShader + ".outColor");
+		connectAttr -force ($aoShader + ".outColor") ($aoShaderSG + ".surfaceShader");
+		layerEditorHandleNodeDrop "castAO" $aoShader;
+		//添加属性控制max_distance
+		addAttr -ln "max_distance"  -at double  $aoShader;
+		setAttr -e-keyable true ($aoShader+".max_distance");
+		setAttr ($aoShader+".max_distance") 10;
+		connectAttr -f ($aoShader+".max_distance") ($aoTex + ".max_distance");	
+	}			
+	
+	//Set up  visible attribute	
+	for($item in $shapes)
+	{
+		if(`objExists ($item + ".primaryVisibility")`)
+		{
+			setAttr ($item + ".primaryVisibility") 0;
+		}
+	} 
+}

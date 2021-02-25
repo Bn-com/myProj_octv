@@ -1,0 +1,988 @@
+//proc for switching Sub Ref
+//pref s100_sSR_
+
+global proc string[] s100_sSR_getAllrefnodesWithSubRef()
+{
+	global string $gS100_MTB_topNodeShName  ;
+	global string $gS100_subRefAttr ;
+	string $fulGrpToGet[] = `ls ("*:" +$gS100_MTB_topNodeShName +"." + $gS100_subRefAttr) ("*:*:" +$gS100_MTB_topNodeShName +"." + $gS100_subRefAttr)` ;
+	string $nodeAsRef[] = {};
+	for($j = 0 ; $j < size($fulGrpToGet) ; $j++)
+	{
+		string $no_component = `match "^[^\.]*" $fulGrpToGet[$j]`;
+		if(`referenceQuery -isNodeReferenced $no_component` ) // referenceQuery -rfn $fulGrpToGet[$j]
+			$nodeAsRef[size($nodeAsRef)] = `referenceQuery -rfn $no_component`; // size ($nodeAsRef)
+		else
+			$nodeAsRef[size($nodeAsRef)] = "unknownRefNode";
+    }
+	return $nodeAsRef ;
+}
+
+// Master proc : switching to subRef :
+//
+// ex :
+//		string $refNodeToSwitch[]=s100FM_exportSubRef_getRealRefSelectionFromUI();
+// 		string $toSwitch = `optionMenu -q -v s100FM_exportSubRef_importRefUIOP` ;
+//
+global proc s100_sSR_switch(string $refNodeToSwitch[],string $toSwitch)
+{
+	// string $toSwitch = "RENDER"
+	// string $toSwitch = "ANIMCACHE"
+	// string $refNodeToSwitch[] = `s100_sSR_getAllrefnodesWithSubRef` ;
+	// $refNodeToSwitch = `s100findAllReferenceNode`
+	// $refNodeToSwitch[$j] = "C_PaulOriginal_01_01RN"
+	// string $toSwitch = "LAYOUT" ; string $refNodeToSwitch[]={"C_MayaOriginal_01_01RN"};
+
+	print ("//\n// >> s100_sSR_switch :\n"
+			 + "// To Switch to \""+$toSwitch+"\"; \n"
+			 + "// Reference nodes to treat = {\""+stringArrayToString($refNodeToSwitch,"\", \"")+"\"};\n"
+			 + "// \n" );
+
+	string $addMessage = "";
+	string $curSt ;
+	int $compatibility ;
+	int $ch =0 ;
+	//int $keepGoing = false;
+
+	global string $s100_sSR_getInfoForExistingsCache;
+	global string $s100_sSR_getInfoForExistingsCachePath;
+
+	// first checking compatibiliy of source state to subRef to switch to (ex: master to everything is ok, RENDER to Layout is not..)
+	// Some switching (>3) needs to cache meshes out -> might already exist : will be prompted...
+	// other only need to update reference address/path (something with some animation baking and reference cleaning)
+	//
+	string $toPrint ="" ;
+	for( $j = 0 ; $j < size($refNodeToSwitch) ; $j++) // int $j=0
+	{
+		$curSt = `s100_sSR_getCurrentStateForRef($refNodeToSwitch[$j] ) `;
+		$compatibility 	= s100Fm_sSR_getIfCompatibleToSwitchInTheryAndReal($refNodeToSwitch[$j], $curSt, $toSwitch) ;
+			// s100Fm_sSR_getIfCompatibleToSwitch($cur,$toSwitch) ;
+
+		// if we need to cache meshes out :
+		if($compatibility > 3 )
+		{
+			if(`s100_sSR_checkIfThereIsSomeCacheAlready( $refNodeToSwitch[$j] )` )
+			{
+				$toPrint += "\n\n// Cache for ref : '"+$refNodeToSwitch[$j]+"'\n// here : \""+$s100_sSR_getInfoForExistingsCachePath +"\"\n\""+$s100_sSR_getInfoForExistingsCache+"\"\n";
+				$ch = 1 ;
+			}
+		}
+	}
+
+	//if ($keepGoing==false) return ;
+
+	// what to do with caches :  "Creating new one"=1 ; "Use existing one"=2 ; "Cancel"=0 ; "override"=3 ;
+	int $chToGo = 1 ;
+
+	// if there's already a cache:
+	if($ch)
+	{
+		$conf = `confirmDialog -title "Cache already Exists" -message ("Cache Already Exists for some of the Refs"+ $toPrint +", what do you want to do?")
+		-button "Override" -button "Creating new one" -button "Use existing one" -button "Cancel"  -defaultButton "Creating new one"
+		-cancelButton "Cancel" -dismissString "Cancel"`;
+			if($conf == "Cancel" )
+			{
+				$chToGo = 0 ;
+				print "// Asked to Cancel Switch!\n";
+            }
+			if($conf == "Creating new one" )
+			{
+				$chToGo = 1 ;
+				print "// Asked to Create New Cache.\n";
+            }
+			if($conf == "Use existing one" )
+			{
+				$chToGo = 2 ;
+				print "// Asked to Use Existing Cache.\n";
+            }
+			if($conf == "Override" )
+			{
+				$chToGo = 3 ;
+				print "// Asked to Override Existing Cache.\n";
+            }
+    }
+	else
+		print ("// No pre-existing 'subRef switching' cache to deal with\n");
+
+	$toApplyCache = 0 ;
+	$step = "caching : " ;
+	$max = `size($refNodeToSwitch)` ;
+
+		progressWindow
+			 -title "Switching Sub REF"
+			 -progress 0
+			 -status ($step )
+			 -minValue 0
+			 -maxValue $max
+			 -isInterruptable false
+			 ;
+
+	string $refNodeToSwitchToApply[] ;
+	int $k = 0 ;
+	int $switchOK = false;
+	if($chToGo > 0)
+	{
+		print "// Starting switching...\n";
+		for( $j=0 ; $j < size($refNodeToSwitch) ; $j++)
+		{
+			print ("\n//---- processing : \""+$refNodeToSwitch[$j]+"\"\n") ;
+			$curSt = `s100_sSR_getCurrentStateForRef($refNodeToSwitch[$j] ) `;
+			if($curSt != $toSwitch)
+			{
+				$compatibility 	= s100Fm_sSR_getIfCompatibleToSwitchInTheryAndReal($refNodeToSwitch[$j], $curSt, $toSwitch) ;
+				// $compatibility 	= s100Fm_sSR_getIfCompatibleToSwitch($cur,$toSwitch) ;
+				if($compatibility != 0)
+				{
+					string $path = s100_sSR_GetPathForSwitching($refNodeToSwitch[$j] , $toSwitch ) ;
+					if(`filetest -e $path`)
+					{
+						if($compatibility > 0 && $compatibility < 4 )
+						{
+							$step = ("switching : " + $refNodeToSwitch[$j] )  ;
+							progressWindow -edit
+										 -progress ($j+1)
+										 -status ($step);
+
+							// SAME KIND OF SUBREF ! Switching ref :
+							$switchOK = s100_sSR_switchRef($refNodeToSwitch[$j] , $path ) ;
+
+							if($compatibility == 1)
+							{//metre le replace moins ici
+
+							}
+
+							// "replace plus" : updates of caches paths (if "local" caches will be put into "Y:/005_EPISODES_Caches/.."
+							// unless they already were tagged "known in Paris" (a key 'inParis':True into their info.txt file if any)
+							//
+							if($compatibility == 3)
+							{
+								// Updating cache files path if needed :
+								//
+								if ( $curSt=="ANIMCACHE" || $curSt=="RENDER" )
+								{
+									string $okFixCaches = s100CM_updateCachesIfNeeded($refNodeToSwitch[$j]);
+									// result could be "already OK" or "wrong path" or "paths update OK" or "paths update failed"
+									// any "OK" one are good for us
+									int $updateOK = ` gmatch $okFixCaches "*OK*" `;
+									if (!$updateOK)
+										$addMessage = ($addMessage+" - update of Cache Path failed");
+                                }
+							}
+						}
+						if($compatibility > 3 )
+						{
+							if($compatibility == 4)
+							{//cache
+
+							}
+
+							if($compatibility == 5)
+							{//cache plus - unused
+
+							}
+
+							$refNodeToSwitchToApply[$k] =   $refNodeToSwitch[$j] ;
+							$k++;
+							$step = ("caching : " + $refNodeToSwitch[$j] )  ;
+							progressWindow -edit
+									 -progress ($j+1)
+									 -status ($step);
+							$switchOK = s100_sSR_OnlyCache($refNodeToSwitch[$j],$path,$chToGo );
+							$toApplyCache = 1 ;
+						}
+						if ($switchOK)
+							print ("\n// --- Switching asset \""+$refNodeToSwitch[$j] +"\" ("+$curSt+") to \""+ $toSwitch+"\", done.\n") ;
+						else
+						{
+							warning ("Switching asset \""+$refNodeToSwitch[$j] +"\" ("+$curSt+") to \""+ $toSwitch+"\", encountered problems!") ;
+							$addMessage = ($addMessage+" - Switch failed");
+                        }
+					}
+					else
+					{
+						print ("\n---file "+ $path + " doesn't exists\n");
+						$step = ("skipping : " + $refNodeToSwitch[$j] )  ;
+						progressWindow -edit
+								 -progress ($j+1)
+								 -status ($step);
+					}
+				}
+				else
+				{
+					print ("\n// --- Skipping switching asset \""+$refNodeToSwitch[$j] +"\" ("+$curSt+") to \""+ $toSwitch+"\", not compatible\n") ;
+					$step = ("skipping : " + $refNodeToSwitch[$j] )  ;
+					progressWindow -edit
+						 -progress ($j+1)
+						 -status ($step);
+				}
+
+			}else{
+				print ("\n//--- Asset \""+$refNodeToSwitch[$j]+"\" already is in state '"+$toSwitch+"'\n" ) ;
+			}
+		}
+
+		if($toApplyCache)
+		{
+			 progressWindow -edit
+				 -progress 0
+				 -max `size($refNodeToSwitchToApply)`;
+
+			for($j = 0 ; $j < size($refNodeToSwitchToApply) ; $j++)
+			{
+				$path = s100_sSR_GetPathForSwitching($refNodeToSwitchToApply[$j] , $toSwitch ) ;
+				$step = ("switching : " + $refNodeToSwitchToApply[$j] )  ;
+
+						 progressWindow -edit
+							 -progress ($j+1)
+							 -status ($step);
+				s100_sSR_OnlySwitch($refNodeToSwitchToApply[$j],$path,$chToGo );
+			}
+        }
+		progressWindow -endProgress;
+
+		if (size($addMessage)) //string $addMessage = "";
+			$addMessage = ($addMessage+" -> ScriptEditor");
+
+		headsUpMessage("Switch Procedure Complete"+$addMessage);
+	}
+	progressWindow -endProgress;
+}
+
+global proc int s100_sSR_switchRef(string $refN , string $path)
+{
+	//retourne 1 si c bon et 0 sinon
+	int $t = !catch(`file -loadReference $refN  -type "mayaAscii" -options "v=0;p=17" ($path )`);
+	return $t ;
+}
+
+global proc string s100_sSR_GetPathForSwitching(string $refN , string $statToSwitch)
+{
+	string $file = `referenceQuery  -filename $refN ` ;
+	string $rootP = `s100returnAssetRootFolder($file ) `;
+	string $arr[] = stringToStringArray($rootP,"/") ;
+	string $add ="";
+	string $add2 = "" ;
+	if($statToSwitch !="MASTER")
+	{
+		$add= "00_subRefs/";
+		$add2 = "_" + $statToSwitch ;
+    }
+	string $path = $rootP +$add + $arr[size($arr) -1 ] + $add2 + ".ma";
+	return $path ;
+}
+
+global proc string s100_sSR_getCurrentStateForRef(string $refN)
+{
+	//$refN = $refNodeToSwitch[$j]
+	global string $gS100_MTB_topNodeShName  ;
+	global string $gS100_subRefAttr ;
+
+	string $nams = s100findNamespaceForOnlyOneRef($refN) ;
+
+	string $retu ;
+	string $fullGrp = $nams +":"+$gS100_MTB_topNodeShName ;
+
+	if(`objExists $fullGrp`)
+	{
+		$toDo =   `ls  $fullGrp` ;
+		if(size($toDo) ==1)
+		{
+			if(`attributeExists "s100_subRefType"  $toDo[0]`)
+			{
+			$retu = `getAttr -asString ($toDo[0] +"." +$gS100_subRefAttr) `;
+			}else{
+			$retu = "MASTER";
+			}
+		}
+
+    }else{
+		$retu ="";
+    }
+	return $retu;
+}
+
+global proc string[] s100FM_sSR_GetKindToExport()
+{
+	return s100FM_exportSubRef_returnEveryPossibleSubRef(); // `s100FM_exportSubRef_GetKindToExport`;
+}
+
+
+// checks if reference node type is compatible in theory (acc.to type) and in "reality" (presence of actual file type):
+// string $rn = $tmp;
+// s100Fm_sSR_getIfCompatibleToSwitchInTheryAndReal($rn, $from, $to);
+//
+global proc int s100Fm_sSR_getIfCompatibleToSwitchInTheryAndReal(string $rn, string $from, string $to)
+{
+	int $ok = false;
+	int $okInTheory = s100Fm_sSR_getIfCompatibleToSwitch($from, $to);
+	if ($okInTheory)
+	{
+		int $okInReal = s100Fm_sSR_getIfCompatibleToSwitchInReal($rn, $from, $to);
+		if ($okInReal)
+			$ok = $okInTheory;
+	}
+	return $ok;
+}
+
+// returns if ref node is switchable acc. to presence of destination file
+//
+// Example: string $rfn = "C_WorkerMaOriginal_02_cache_00RN7"; ; $rfn ="t:/_RD/studio100/reference_files/camera/camera_1pnt.ma"
+//	s100Fm_sSR_getIfCompatibleToSwitchInReal($rfn, $from, $to);
+//
+global proc int s100Fm_sSR_getIfCompatibleToSwitchInReal(string $rfn, string $from, string $to)
+{
+	int $ok = false;
+
+
+	// Getting path file is from :
+	//
+
+
+	// useless ?
+	/*
+		// Ex: $dir = "Y:/000_3D_BANK/01_Characters/Workers/MA_C_WorkerMaOriginal_02/00_subRefs/" ; $dir = "Y:/000_3D_BANK/01_Characters/Workers/MA_C_WorkerMaOriginal_02"
+		string $subRefPath = "";
+		string $file = `referenceQuery -filename $rfn`;
+		//!!!! string $dir = `match "^.*  /" $file`;
+		if ( !endsWith($dir,"/00_subRefs/") )
+		{
+			warning ("Reference node \""+$rfn+"\" doesn't point to a '00_subRef' directory!");
+			if (!`filetest -d ($dir+"/00_subRefs/")`)
+				warning ("Reference node \""+$rfn+"\" doesn't point to a directory containing a '00_subRef' directory!");
+			else
+				$subRefPath = ($dir+"/00_subRefs/");
+		}
+		else
+			$subRefPath = $dir;
+		if (size($subRefPath)==0)
+		{
+			print ("// ! Reference node \""+$rfn+"\" doesn't have a related '00_subRef' directory. Not compatible for any subRef switching.\n");
+			return 0;
+		}
+		// If '00_subRefs' directory is found, now checking if related "..._$to.ma" file exists:
+		//
+		string $filepart = `match "[^/\\]*$" $file`;
+		string $rootFilePart = `match "^[^\.]*" $filepart ` ;
+			// getting rid of last 'subRef' extension part :
+		string $subRefNames[] = s100FM_exportSubRef_returnEveryPossibleSubRef();
+		for ($srf in $subRefNames)
+		{
+			if ( endsWith($rootFilePart,("_"+$srf)) )
+				$rootFilePart = substring($rootFilePart,1,(size($rootFilePart)-size($srf)-1)) ;
+		}
+	*/
+
+	string $possiblePath = s100_sSR_GetPathForSwitching( $rfn , $to);
+	//if (` filetest -s ($subRefPath+$rootFilePart+"_"+$to+".ma") `)
+	if (` filetest -s $possiblePath `)
+	{
+		//print ("// Related destination subref file '"+$rootFilePart+"_"+$to+".ma' for Reference Node \""+$rfn+"\" exists.\n");
+		print ("// Related destination subref file '..._"+$to+".ma' for Reference Node \""+$rfn+"\" exists.\n");
+		return 1;
+    }
+	else
+	{
+		//print ("// ! Can not find a '"+$rootFilePart+"_"+$to+".ma' for Reference Node \""+$rfn+"\". Not compatible for any subRef switching.\n");
+		print ("// ! Can not find a '..._"+$to+".ma' for Reference Node \""+$rfn+"\". Not compatible for any subRef switching.\n");
+		return 0;
+    }
+}
+
+global proc int s100Fm_sSR_getIfCompatibleToSwitch(string $from,string $to)
+{
+	int $r = 0 ;
+	/*
+		REF au google doc "TODO list R&D MayaTheBee march 2012"
+		NO = 0
+		(replace-)= 1
+		(replace) = 2
+		(replace+) = 3
+
+		ioCache = 4
+		ioCache+ = 5
+	*/
+	switch ($from)
+	{
+		case "LAYOUT":
+			if($to == "MASTER")
+				$r = 3 ;
+			if($to == "ANIM")
+				$r = 3 ;
+			if($to == "RENDER")
+				$r = 5 ;
+		break;
+		case "ANIM":
+			if($to == "MASTER")
+				$r = 2 ;
+			if($to == "LAYOUT")
+				$r = 1 ;
+			if($to == "ANIMCACHE")
+				$r = 4 ;
+			if($to == "RENDER")
+				$r = 5 ;
+		break;
+		case "ANIMCACHE":
+			if($to == "RENDER")
+				$r = 3 ;
+		break;
+		case "RENDER":
+			if($to == "ANIMCACHE")
+				$r = 3 ;
+		break;
+		case "MASTER":
+			if($to == "LAYOUT")
+				$r = 1 ;
+			if($to == "ANIM")
+				$r = 2 ;
+			if($to == "ANIMCACHE")
+				$r = 4 ;
+			if($to == "RENDER")
+				$r = 5 ;
+		break;
+	}
+	return $r ;
+}
+
+global proc s100_sSR_switchAllSub(string $toSwitch)
+{
+	string $ref[] = `s100_sSR_getAllrefnodesWithSubRef` ;
+	s100_sSR_switch($ref, $toSwitch);
+}
+
+global proc s100_sSR_switchAll(string $toSwitch)
+{
+	string $ref[] = `s100findAllReferenceNode` ;
+	s100_sSR_switch($ref, $toSwitch);
+}
+
+
+// $version == 1:
+//	$args[0] = time range mode:
+//		time range mode = 0 : use $args[1] and $args[2] as start-end
+//		time range mode = 1 : use render globals
+//		time range mode = 2 : use timeline
+//  $args[1] = start frame (if time range mode == 0)
+//  $args[2] = end frame (if time range mode == 0)
+//
+// $version == 2:
+//  $args[3] = cache file distribution, either "OneFile" or "OneFilePerFrame"
+//	$args[4] = 0/1, whether to refresh during caching
+//  $args[5] = directory for cache files, if "", then use project data dir
+//	$args[6] = 0/1, whether to create a cache per geometry
+//	$args[7] = name of cache file. An empty string can be used to specify that an auto-generated name is acceptable.
+//	$args[8] = 0/1, whether the specified cache name is to be used as a prefix
+// $version == 3:
+//  $args[9] = action to perform: "add", "replace", "merge", "mergeDelete" or "export"
+//  $args[10] = force save even if it overwrites existing files
+//	$args[11] = simulation rate, the rate at which the cloth simulation is forced to run
+//	$args[12] = sample mulitplier, the rate at which samples are written, as a multiple of simulation rate.
+//
+//  $version == 4:
+//	$args[13] = 0/1, whether modifications should be inherited from the cache about to be replaced. Valid
+//				only when $action == "replace".
+//	$args[14] = 0/1, whether to store doubles as floats
+//  $version == 5:
+//	$args[15] = name of cache form
+
+
+// 	string $file = "T:/Animation/Cycles/scenes/4Aphids_SpotCycle_Walk_HoldingLeaf_01_ANIM.ma";
+// 	string $nameSpace = "C_AphidOriginal_01_04";
+// 	int $method = 0 ;
+//
+// Returns {$cacheDir,$name,$returnCh,$getDate } with $returnCh=1 if .xml exists, under the form :
+//		T:/Animation/Cycles/scenes/_Data/Cache/Characters/C_AphidOriginal_01_04/001
+//		C_AphidOriginal_01_04_001
+//		1
+//		*	Last modified:      08/10/2012 04:07:41
+//
+global proc string[] s100_sSR_buildNameForCaching(string $file, string $nameSpace, int $method)
+{
+	//$method = 0 -> ask For path
+	//$method = 1 -> auto increment
+	//$method = 2 -> get latest Exists
+
+	string $shot = `s100returnShotFolder ($file) `;
+	string $sub = substituteAllString($shot,"005_EPISODES","005_EPISODES_Caches") ;
+	string $arr[] =stringToStringArray($sub,"/") ;
+	string $tmpPath ="" ;
+	for($i = 0 ; $i < size($arr) ; $i++)
+	{
+		$tmpPath +=$arr[$i] +"/";
+		if(!`filetest -d $tmpPath `)
+			sysFile -md $tmpPath ;
+    }
+	$shot =$sub;
+	if(!`filetest -d ($shot +"_Data/") `)
+		sysFile -md ($shot +"_Data/") ;
+
+	string $cacheDir = 	($shot +"_Data/Cache/");
+	if(!`filetest -d $cacheDir `)
+		sysFile -md $cacheDir ;
+
+	if(`gmatch $nameSpace "C_*"`)
+	 $cacheDir += "Characters";
+
+	if(`gmatch $nameSpace "P_*"`)
+	 $cacheDir += "Props";
+
+	if(`gmatch $nameSpace "V_*"`)
+	 $cacheDir += "Vegetations";
+
+	if($method > 0)
+	{
+		if(!`filetest -d $cacheDir `)
+			sysFile -md $cacheDir ;
+	}
+
+	$cacheDir +="/"+ $nameSpace;
+	if($method > 0)
+		if(!`filetest -d $cacheDir `)
+			sysFile -md $cacheDir ;
+
+	string $padS = "001" ;
+	$i = 1 ;
+	string $name = $nameSpace + "_001";
+	string $returnCh = "0" ;
+	if($method == 1)
+	{
+		while(`filetest -e ($cacheDir+"/" + $padS+"/" +$name +".xml")`)
+		{
+			$i++ ;
+			$pad =padNumber($i , 3 ) ;
+			$name = $nameSpace + "_" + $pad;
+			$padS = $pad;
+			$returnCh = "1" ;
+		}
+	}else{
+		while(`filetest -e ($cacheDir+"/" + $padS+"/" +$name +".xml")` )
+		{
+			$pad =padNumber($i , 3 ) ;
+			$name = $nameSpace + "_" + $pad;
+			$padS = $pad;
+			$returnCh = "1" ;
+			$i++ ;
+			$tmp = padNumber($i , 3 ) ;
+			$namet = $nameSpace + "_" + $tmp;
+			if(!`filetest -e ($cacheDir+"/" + $tmp +"/" +$namet +".xml")`)
+			{
+				break ; // QA : ????
+            }
+		}
+    }
+
+	 $cacheDir +="/"+ $padS;
+	if($method > 0)
+		if(!`filetest -d $cacheDir `)
+			sysFile -md $cacheDir ;
+	string $getDate ;
+	string $path = ($cacheDir +"/" +$name +".xml") ;
+
+	if(`filetest -e $path `)
+	{
+		//print ("\n ici\n");
+		python("from s100API.util.feedback import FormatFileInfo");
+		$te = python("FormatFileInfo('"+$path+"').text");
+		$arr = stringToStringArray($te ,"\n" ) ;
+		$getDate =  $arr[3] ;
+	}
+	return {$cacheDir,$name,$returnCh,$getDate };
+}
+
+
+global proc s100_sSR_importCache(string $nameSpace, string $fileToLoad ,string $pathToLoad ,string $start, string $end)
+{
+	if(`objExists ($nameSpace +":geoCacheSet")`)
+	{
+		string $sel[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+
+		for ($i = 0 ; $i < size($sel) ; $i++)
+		{
+			$listShape = `listRelatives -noIntermediate -s $sel[$i]` ;
+			$listShapeAll = `listRelatives  -s $sel[$i]` ;
+			$listInt = stringArrayRemove($listShape, $listShapeAll ) ;
+			$listGrpPart = `listConnections -type "groupParts" -skipConversionNodes 1 $listInt   ` ;
+			$listHistory = `listConnections -type "historySwitch" -skipConversionNodes 1 $listGrpPart   ` ;
+			$listCache = `listConnections -type "cacheFile" -skipConversionNodes 1 $listHistory   ` ;
+			for($tmp in $listCache)
+			{
+				s100_sSR_setConnectedAttr( ($tmp+".enable"), 1, "", "float");
+				s100_sSR_setConnectedAttr( ($tmp+".startFrame"), $start, "", "float");
+				s100_sSR_setConnectedAttr( ($tmp+".sourceStart"), $start, "", "float");
+				s100_sSR_setConnectedAttr( ($tmp+".sourceEnd"), $end, "", "float");
+
+				s100_sSR_setConnectedAttr( ($tmp+".cachePath"), 0.0, $pathToLoad, "string");
+				s100_sSR_setConnectedAttr( ($tmp+".cacheName"), 0.0, $fileToLoad, "string");
+				s100_sSR_setConnectedAttr( ($tmp+".channel[0]"), 0.0, $listShape[0], "string");
+
+				// making sure models don't jump to origin before first and after last frame for motion blur reason:
+				int $changedPre =false;
+				int $changedPost =false;
+				int $changedOscillate =false;
+				if ( equivalent(`getAttr ($tmp+".preCycle") `, 0.0) )
+				{
+					print ("// Forcing \""+$tmp+".preCycle\" to 1.0 \n");
+					$changedPre = s100_sSR_setConnectedAttr( ($tmp+".preCycle"), 1.0, "", "float");
+                }
+				if ( equivalent(`getAttr ($tmp+".postCycle") `, 0.0) )
+				{
+					print ("// Forcing \""+$tmp+".postCycle\" to 1.0 \n");
+					$changedPost = s100_sSR_setConnectedAttr( ($tmp+".postCycle"), 1.0, "", "float");
+                }
+				if ( ($changedPre+$changedPost)==2 )
+				{
+					print ("// => Forcing also \""+$tmp+".oscillate\" to ON \n");
+					$changedOscillate = s100_sSR_setConnectedAttr( ($tmp+".oscillate"), 1.0, "", "float");
+                }
+				else if ( ($changedPre+$changedPost)==1 )
+				{
+					print ("// !! only one \""+$tmp+".pre/postCycle\" attribute was set to 1.0 \n");
+					print ("// => Forcing also \""+$tmp+".oscillate\" to ON anyway!\n");
+					$changedOscillate = s100_sSR_setConnectedAttr( ($tmp+".oscillate"), 1.0, "", "float");
+                }
+
+				/*
+				catch(`setAttr ($tmp + ".enable") 1 `);
+				catch(`setAttr ($tmp + ".startFrame") $start  `);
+				catch(`setAttr ($tmp + ".sourceStart") $start  `);
+				catch(`setAttr ($tmp + ".sourceEnd") $end  `);
+				catch(`setAttr -type "string" ($tmp + ".cachePath") $pathToLoad `);
+				catch(`setAttr -type "string" ($tmp + ".cacheName") $fileToLoad `);
+				catch(`setAttr -type "string" ($tmp + ".channel[0]") $listShape[0]  `);
+				*/
+            }
+			//select $listS
+        }
+    }
+	else
+	{
+		warning "no geo cache set";
+    }
+	//attachGeometryCache;
+}
+
+// setting attributes or input connection of it!
+// Ex:
+// string $attr = "Body_msh_cacheFile.sourceStart";
+// string $attr = "Body_msh_cacheFile.cacheName";
+// float $fvalue = 100;
+// string $svalue = "toto";
+// string $type = "float";
+// string $type = "string";
+// s100_sSR_setConnectedAttr( $attr, $fvalue, $svalue, $type);
+//
+global proc int s100_sSR_setConnectedAttr( string $attr, float $fvalue, string $svalue, string $type)
+{
+	int $ok=false;
+	string $cons[] = `listConnections -s 1 -d 0 -p 1 $attr`;
+	if (size($cons))
+		$attr = $cons[0];
+	string $cmd = "setAttr";
+	if ($type=="string")
+		$cmd = ($cmd+" -type \"string\" ");
+	else if ($type=="float")
+		$cmd = ($cmd+" ");
+	else
+		$cmd = ($cmd+" ");
+
+	$cmd = ($cmd+" "+$attr);
+	if ($type=="string")
+		$cmd = ($cmd+" \""+$svalue+"\"");
+	else if ($type=="float")
+		$cmd = ($cmd+" "+$fvalue);
+	//print ("// s100_sSR_setConnectedAttr >> trying to execute command : "+$cmd+" ;\n");
+    $ok = !catch(eval($cmd));
+	return $ok;
+}
+
+// Checks if any animCurves associated to passed namespace still exist after "delete static channels" is launched on them.
+// if some still exist and are NOT referenced => controllers were animated => returns 0
+// if not : it means no movement was really made, it's only a static pose. => returns 1
+//
+// 	ex : s100_sSR_cleanAnimCurveAndGetIfNoneDeformed($nameSpace )
+//
+global proc int s100_sSR_cleanAnimCurveAndGetIfNoneDeformed(string $nameSpace )
+{
+	int $ch = 0;
+	string $ls[] = `ls -type "objectSet" ($nameSpace+":ControlSet")`;
+	if( size($ls) > 0)
+	{
+		$elements = `sets -q -no $ls[0] `;
+		//$list = `listConnections -s 1 -d 0 -scn 1 -type animCurve $elements `; select -r $list;
+		//select -r $elements ;
+		delete -staticChannels -unitlessAnimationCurves false -hierarchy none -controlPoints 0 -shape 1 $elements;
+		$list = `listConnections -s 1 -d 0 -scn 1 -type animCurve $elements `;
+		if (size($list))
+		{
+			// if at least one remaining curve is NOT a reference => there's an animation : breaking the loop, returning 0
+			for($tmp in $list)
+				if(!`referenceQuery -isNodeReferenced $tmp`)
+					return 0 ;
+			$ch = 1;
+        }
+		else
+			$ch = 1;
+    }
+	return $ch;
+}
+
+// Checks if cache already exists for passed ref node ACCORDING to scene name (containing Ep/Sq/Shot/Take infos...)
+// ex:
+// 		string $ref = $refNodeToSwitch[$j]
+//
+global proc int s100_sSR_checkIfThereIsSomeCacheAlready(string $ref)
+{
+	int $ch ;
+	global string $s100_sSR_getInfoForExistingsCache;
+	global string $s100_sSR_getInfoForExistingsCachePath;
+
+	string $nameSpace = `s100findNamespaceForOnlyOneRef($ref) `;
+	string $file = `file -q -sn `;
+	string $gets[] = s100_sSR_buildNameForCaching($file, $nameSpace,0) ;
+	/* Returns {$cacheDir,$name,$returnCh,$getDate } with $returnCh=1 if .xml exists, under the form :
+		T:/Animation/Cycles/scenes/_Data/Cache/Characters/C_AphidOriginal_01_04/001
+		C_AphidOriginal_01_04_001
+		1
+		*	Last modified:      08/10/2012 04:07:41
+	*/
+	$s100_sSR_getInfoForExistingsCache =  $gets[3]  ;
+	$s100_sSR_getInfoForExistingsCachePath = ($gets[0] + $gets[1] +".xml") ;
+	return $gets[2]  ; // 1 if xml exists
+}
+
+
+global proc string s100_sSR_CacheThis(string $nameSpace, string $path, string $cacheName,string $sFrame ,string $eFrame)
+{
+	if(`objExists ($nameSpace +":geoCacheSet")`)
+	{
+		string $list[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+		select $list ;
+		catch(`deleteCacheFile 3 { "keep", "", "geometry" } `);
+
+		string $args[] = { "0", $sFrame, $eFrame, "OneFilePerFrame",0 ,$path ,0,$cacheName,"0", "add", "1", "1", "1","0","1","mcc" };
+		// With these meanings :
+		//
+		// $version == 1:
+		//	$args[0] = time range mode:
+		//		time range mode = 0 : use $args[1] and $args[2] as start-end
+		//		time range mode = 1 : use render globals
+		//		time range mode = 2 : use timeline
+		//  $args[1] = start frame (if time range mode == 0)
+		//  $args[2] = end frame (if time range mode == 0)
+		//
+		// $version == 2:
+		//  $args[3] = cache file distribution, either "OneFile" or "OneFilePerFrame"
+		//	$args[4] = 0/1, whether to refresh during caching
+		//  $args[5] = directory for cache files, if "", then use project data dir
+		//	$args[6] = 0/1, whether to create a cache per geometry
+		//	$args[7] = name of cache file. An empty string can be used to specify that an auto-generated name is acceptable.
+		//	$args[8] = 0/1, whether the specified cache name is to be used as a prefix
+		// $version == 3:
+		//  $args[9] = action to perform: "add", "replace", "merge", "mergeDelete" or "export"
+		//  $args[10] = force save even if it overwrites existing files
+		//	$args[11] = simulation rate, the rate at which the cloth simulation is forced to run
+		//	$args[12] = sample mulitplier, the rate at which samples are written, as a multiple of simulation rate.
+		//
+		//  $version == 4:
+		//	$args[13] = 0/1, whether modifications should be inherited from the cache about to be replaced. Valid
+		//				only when $action == "replace".
+		//	$args[14] = 0/1, whether to store doubles as floats
+		//  $version == 5:
+		//	$args[15] = name of cache form
+
+		doCreateGeometryCache 5 $args ;
+
+	}
+	return ($path +$cacheName + ".mc") ;
+}
+
+
+// geoCaching all meshes found under "*:geoCacheSet" of passed referenced node assets :
+//
+global proc int s100_sSR_OnlyCache(string $refN, string $path, int $toDoForExistingCache)
+{
+	global string $gS100_MTB_topNodeShName = "full_grp";
+	int $ok = false;
+	int $cur = `currentTime -q `;
+	string $file = `file -q -sn `;
+	string $nameSpace = `s100findNamespaceForOnlyOneRef($refN) `;
+	string $parent ;
+	string $list[] ;
+
+	if(`objExists ($nameSpace +":geoCacheSet")`)
+	{
+		if(`objExists ($nameSpace +":full_grp")`)
+		{
+			$list = `listRelatives -p ($nameSpace +":full_grp")`;
+			$parent = $list[0] ;
+		}
+
+		string $sel[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+
+		//pour passer sur la recup du cache
+		string $g[] = s100_sSR_buildNameForCaching($file, $nameSpace, $toDoForExistingCache) ;
+		print ("\n\n//------------NAMESPACE =" + $nameSpace +"\n") ;
+
+		string $sFrame  =`playbackOptions -q -minTime `;
+		string $eFrame  =`playbackOptions -q -maxTime `;
+		int $chFrame ;
+		if(`s100_sSR_cleanAnimCurveAndGetIfNoneDeformed($nameSpace)`)
+		 {
+			$eFrame = `playbackOptions -q -minTime ` + 1 ;
+		 	warning ("Every animation curves of asset \""+$nameSpace+":...\" seem to be static ! => only caching meshes on one frame ("+$sFrame+"-"+$eFrame+")");
+		 	$chFrame = 1 ;
+         }
+
+		if($toDoForExistingCache == 1 ||$toDoForExistingCache == 3)
+		{
+			string $cacheN = "";
+			$ok = !catch( $cacheN = s100_sSR_CacheThis($nameSpace,$g[0] , $g[1] ,$sFrame,$eFrame) );
+        }
+
+    }else{
+		warning "no geo cache set";
+    }
+	currentTime $cur;
+	return $ok;
+}
+
+
+// Switching ref to $path one.
+// 	int $toDoForExistingCache = 2 // => use existing cache
+// Baking current meshes visibilities (and keeping curves only for non-static curves)
+// also cleaning reference before switching it
+//
+// string $refRN = "MA_C_AntOriginal_01_00RN";
+//
+//
+global proc s100_sSR_OnlySwitch(string $refN,string $path,int $toDoForExistingCache)
+{
+	//$refN = $refNodeToSwitch[$j]
+	//$refN = "C_AntOriginal_01_01RN"
+	global string $gS100_MTB_topNodeShName ;
+	int $cur = `currentTime -q `;
+	string $file = `file -q -sn `;
+	string $nameSpace = `s100findNamespaceForOnlyOneRef($refN) `;
+	string $parent ;
+	string $list[] ;
+	if(`objExists ($nameSpace +":geoCacheSet")`)
+	{
+
+		// BAKING MESHES VIS :
+
+			if(`objExists ($nameSpace +":full_grp")`)
+			{
+				$list = `listRelatives -p ($nameSpace +":full_grp")`;
+				$parent = $list[0] ;
+			}
+
+			string $sel[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+			string $vis[] ;
+			for($i = 0 ; $i < size($sel);$i++)
+			{
+				$vis[$i] = `getAttr ($sel[$i] +".v" )` ;
+			}
+
+			string $cacheNames[] = s100_sSR_buildNameForCaching($file, $nameSpace, 2) ; // string $nameSpace = "C_FlipOriginal_01_01"
+			string $cachePath = $cacheNames[0];
+			string $cacheXmlName = $cacheNames[1];
+
+			print ("\n\n------------NAMESPACE =" + $nameSpace +"\n") ;
+
+			int $additiveFrame = 0;
+			string $sFrame  = (`playbackOptions -q -minTime` - $additiveFrame);
+			string $eFrame  = (`playbackOptions -q -maxTime` + $additiveFrame);
+			float $frameRange = (`playbackOptions -q -maxTime` - `playbackOptions -q -minTime` + 2*$additiveFrame) ;
+			float $hold = 0 ;
+
+			print ("Getting rid of static animation curves of asset \""+$nameSpace+":...\"\n");
+			currentTime $sFrame;
+			int $chFrame ;
+			if(`s100_sSR_cleanAnimCurveAndGetIfNoneDeformed($nameSpace)`)
+			 {
+				$eFrame = `playbackOptions -q -minTime ` + 1 ;
+				warning ("All are gone ! Asset \""+$nameSpace+":...\" seems to be static ! => "+$sFrame+"-"+$eFrame+" is the frame range we'll work on.");
+				$chFrame = 1 ;
+				$hold = $frameRange ;
+			 }
+
+			print ("// Baking meshes.visiblity of asset \""+$nameSpace+":...\" on frame(s) "+$sFrame+"-"+$eFrame+"\n");
+				bakeResults   -attribute visibility -simulation true -t ( $sFrame + ":" + $eFrame) -sampleBy 1 -disableImplicitControl true
+			-preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -bakeOnOverrideLayer false
+			-controlPoints false -shape true  $sel ;
+
+			//$ch = `s100_sSR_cleanAnimCurveAndGetIfNoneDeformed($nameSpace ) `;
+
+
+		// CLEANING REFERENCES before swapping them :
+			print ("// Cleaning current reference of \""+$nameSpace+"\" before switching subRef.\n");
+			file -unloadReference $refN ;
+			file -cleanReference  $refN ;
+			string $ls[] = `ls "*RNfosterParent*"`;
+				if(size($ls) > 0 )
+					delete $ls;
+
+
+		// Switching Ref :
+			print ("// Switching subRef of \""+$nameSpace+":...\"\n");
+			s100_sSR_switchRef($refN ,  $path);
+
+
+		// Importing geoCache if needed:
+			if(`filetest -e  ($cachePath+"/"+$cacheXmlName+".xml")`)
+			{
+				//string $infoFile = python("laCommandePython('"+$refN+"', '"+$nameSpace+"', '"+$cachePath+"', '"+$cacheXmlName+"')");
+				// ---- traitement de mon infoFile : recup de son dico "{}"
+				// -- si il contient 'inParis' : True => on conserve ces paths
+				// -- si il contient 'copied2Sync': True => on recupere 'newPath' value comme path..., meme nom de xml a priori
+
+				// WIP :
+				//python("import s100API");
+				//python("skeleton = s100API.Skeleton()");
+				//string $infoFile = python("skeleton.api.checkGeoCacheInParis('"+$refN+"','"+$cachePath+"')");
+
+
+				s100_sSR_importCache($nameSpace, $cacheXmlName, $cachePath, $sFrame, $eFrame  );
+			}
+			else
+			{
+				print ("\n---------------FAILED \n") ;
+			}
+
+
+		// set attr on Caches.hold (important in case of static animation)
+			string $lsCache[] = `ls ($nameSpace+":place_ctrl")`;
+			for($tmp in $lsCache)
+			{
+				if(`attributeExists "hold" $tmp`)
+					setAttr ($tmp +".hold") $hold;
+			}
+
+
+
+		if(`objExists ($nameSpace +":full_grp")`)
+			if(`objExists $parent`)
+			{
+				string $listP[] = `listRelatives -p ($nameSpace +":full_grp")`;
+				if($listP[0] != $parent)
+					parent ($nameSpace +":full_grp") $parent;
+            }
+
+		int $vT ;
+		//reconnect anim
+		for($i = 0 ; $i < size($sel) ; $i++)
+		{
+			$vT = $vis[$i] ;
+			$curv = $sel[$i] + "_visibility";
+			catch(`setAttr ($sel[$i] +".v" ) $vT`);
+			if(`objExists $curv `)
+				connectAttr ($curv +".output") ($sel[$i] +".visibility") ;
+        }
+
+    }else{
+		warning "no geo cache set";
+    }
+	currentTime $cur;
+}
+
+
+

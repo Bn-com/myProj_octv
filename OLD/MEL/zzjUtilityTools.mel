@@ -1,0 +1,221 @@
+//-----------------------------------------------------------------------
+// Author: zhaozhongjie
+// Creation Date: 2009/06/29
+// Script Name:	zzjUtilitytools.mel
+// Description:
+//
+// Usage:
+//
+// Note:
+//----------------------------------------------------------------------
+global proc zzjUtilityTools(string $switch)
+{
+	switch ($switch)
+	{
+		case "bakeAnim":                				// 需要解算，出结果
+			zzjUtilityTools_bakeAnim(1);
+		break;
+		case "bakeAnim_NoSimulation":   // 不需要解算，直接出结果
+			zzjUtilityTools_bakeAnim(0);
+		break;
+		case "createLocators":   					// 在物体上创建locator
+			zzjUtilityTools_createLocators();
+		break;
+	}
+
+}
+
+global proc zzjUtilityTools_bakeAnim(int $ifSimulation)
+{
+	string $selection[] = `ls -selection`;
+	string $cons[]={};
+	string $loc[]={};
+	int $i=0;int $j=0;
+	for ($a in $selection)
+	{
+		string $locator[] = `spaceLocator`;
+		string $locBake=`rename $locator[0] "IDMT_BakeAnim"`;
+		$loc[$i++]=$locBake;
+
+		string $constraint[] = `parentConstraint $selection[$j++] $locBake`;
+		$cons[$j-1]=$constraint[0];
+
+	}
+	float $startTime = `playbackOptions -query -min`;
+	float $endTime = `playbackOptions -query -max`;
+	bakeResults -simulation $ifSimulation 
+	            -t ($startTime + ":" + $endTime) 
+	            -sampleBy 1 -disableImplicitControl true 
+	            -preserveOutsideKeys true 
+	            -sparseAnimCurveBake false 
+	            -controlPoints false 
+	            -shape true $loc;
+
+	delete $cons;
+}
+
+
+
+global proc zzjUtilityTools_aimToLocators()
+{
+	string $sls[]= `ls -sl -l`;
+	for ($a in $sls)
+	{
+		if ($a == $sls[0])	continue;
+		string $constraint[] =`aimConstraint -offset 0 0 0 -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0 -skip x -skip z $sls[0] $a`;
+		delete $constraint;
+
+	}
+}
+global proc zzjUtilityTools_createLocators()
+{
+	string $selection[] = `ls -selection`;
+	string $cons[]={};
+	string $loc[]={};
+	int $i=0;int $j=0;
+	for ($a in $selection)
+	{
+		float $pos[]=`xform -ws -q -rp $a`;
+		string $locator[] = `spaceLocator`;
+		setAttr 	($locator[0]+".tx") $pos[0];
+		setAttr 	($locator[0]+".ty") $pos[1];
+		setAttr 	($locator[0]+".tz") $pos[2];
+		string $locBake=`rename $locator[0] "IDMT_BakeAnim"`;
+		
+
+	}
+}
+
+
+global proc lighting_DeleteUnusedNode()
+{
+/*
+	string $refs[]=`file -q -r`;
+	while (`size $refs`!=0)
+	{
+		for ( $ref in $refs )
+		{
+			if ( `file -q -dr $ref` )
+			{
+				string $xxx=`file -q -rfn $ref`;
+				file -lr $xxx;
+			}
+			file -ir $ref;
+		}
+		$refs=`file -q -r`;
+	}
+	
+*/
+	string $SG[]=`ls -type shadingEngine`;
+	catchQuiet(`delete $SG`);
+	delete `ls -type ramp`;
+	delete `ls -type file`;
+	select `ls -type "nurbsSurface" -type "mesh"`;
+//	source "zzjIdPassInfo.mel";
+    source "ezRenderMainLayoutMaterial.mel";
+	ezRenderMainLayoutMaterial_Assign("lambert");
+//	source "D:/Alias/MAYA8.5/scripts/others/hyperShadePanel.mel";
+	source "hyperShadePanel.mel";
+	hyperShadePanelMenuCommand("hyperShadePanel1", "deleteUnusedNodes");
+}
+
+global proc pre_BakeFileNode_ImageNumber()
+{
+	int $start_Frame = `playbackOptions -q -min`;
+	int $end_Frame = `playbackOptions -q -max`;
+	string $time_Range=string($start_Frame + ":"+$end_Frame);
+
+	string $files[]=`ls -type file`;
+	for ($f in $files)
+	{
+		string $cons[]=`listConnections ($f+".frameExtension")`;
+		if (`size $cons`)
+		{
+			bakeResults -t  $time_Range  -sb 1 ($f+".frameExtension");
+		}
+	}	
+	
+}
+
+global proc Convert_Maya_MBFile_to_MAFile()
+{
+	string $Dir[]=`fileDialog2 -fm 3 -okCaption "指定"`;
+	if (`size $Dir[0]`)
+	{
+	    string $confirm=`confirmDialog -title "Confirm" -message "转换整个目录的mb文件吗？"
+	    -button "Yes" -button "No" -defaultButton "Yes"
+	    -cancelButton "No" -dismissString "No"`;
+	    
+	    if ($confirm =="Yes")
+	    {
+	    	string $path = $Dir[0]+"/";
+	        string $files[]=`getFileList -folder $path -filespec "*.mb"`;
+	        for ($f in $files)
+	        {
+	        	file -f -new;
+		        file -o ($path+$f);		      
+		
+				string $fileName =`file -q -sn`;
+				string $fileName_Split[]=stringToStringArray($fileName,".");
+				
+				$fileName = $fileName_Split[0]+".ma";
+				
+				file -rename $fileName; 
+				file -save -type "mayaAscii";
+	        }
+	
+	   
+	    }
+	}
+}
+
+
+global proc int nodeIsVisible( string $node )
+{
+  // If user is asking about a bogus node, return FALSE.
+  if ( !`objExists $node` ) return false;
+
+  // Object must be a DAG node, or it's not visible.
+  // There's no MEL query to identify a DAG node, but the kDagNode class adds
+  // the '.visibility' attribute, so we'll use its existence as a cue.
+  if ( !`attributeQuery -node $node -exists "visibility"` ) return false;
+
+  // The obvious: Start with the '.visibility' attribute on the node.
+  int $visible = `getAttr ( $node + ".visibility" )`;
+
+  // If this is an intermediate mesh, it's not visible.
+  if ( `attributeQuery -node $node -exists "intermediateObject"` )
+  {
+    $visible = $visible && !`getAttr ( $node + ".intermediateObject" )`;
+  }
+
+  // If the object is in a displayLayer, and the displayLayer is hidden,
+  // then the object is hidden.
+  if ( `attributeQuery -node $node -exists "overrideEnabled"` &&
+       `getAttr ( $node + ".overrideEnabled" )` )
+  {
+    $visible = $visible && `getAttr ( $node + ".overrideVisibility" )`;
+  }
+
+  // Ascend the hierarchy and check all of the parent nodes.
+  if ( $visible )
+  {
+    string $parents[] = `listRelatives -parent -f $node`;
+    if ( `size $parents` > 0 )
+    {
+      $visible = $visible && nodeIsVisible( $parents[0] );
+    }
+  }
+ 
+  return $visible;
+}
+
+
+global proc zzjIsolateSelect()
+{
+	string $sls[]=`ls -sl`;
+	string $activePanel = `getPanel -withFocus`;
+	isoSelectAutoAddNewObjs $activePanel 1;
+	if (`size $sls`)	enableIsolateSelect $activePanel (!`isolateSelect -query -state $activePanel`);
+	else	isolateSelect -state 0 modelPanel4;
+}

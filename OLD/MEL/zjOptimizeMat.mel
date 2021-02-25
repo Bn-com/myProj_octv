@@ -1,0 +1,262 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ’‘÷æΩ‹
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc int findit(string $obj,string $array[])
+{
+	for ($i=0;$i<size($array);$i++)
+	{
+		if ($array[$i]==$obj)
+			return 1;
+	}
+	return 0;
+}
+
+proc gp_remAttr(string $obj) 
+{
+	string $lS[] = `listAttr -ud -st subdiv $obj`;
+	if (size($lS) == 1)
+		deleteAttr -at "subdiv" $obj;
+}
+
+proc opt()
+{
+	//delete unused mentalraySubdivApprox nodes
+	string $files[] = `ls -type mentalraySubdivApprox`;
+	for ($item in $files)
+	{
+		string $cons[] = `listConnections -s 0 -d 1 -type mesh $item`;
+		if (size($cons) == 0)
+			deleteIfNotReferenced $item;
+	}
+
+	string $objs[] = `ls -dag -ni -type transform`;
+	for ($item in $objs)
+	{
+		string $cons[] = `listConnections -s 0 -d 1 -type mentalraySubdivApprox $item`;
+		if (size($cons) == 0)
+			gp_remAttr($item);
+	}
+
+}
+
+global proc zjOptimizeMat()
+{
+	global string $exparray[];
+	global int $count;
+	global int $flagxxx;
+	
+	int $itemCount = 0;
+	
+	MLdeleteUnused;
+	
+	if (`pluginInfo -query -loaded "Mayatomr"`)
+	{
+		//delete unused subdiv nodes and mentalraySubdivApprox nodes
+		opt();
+	
+		//delete unused file nodes
+		string $files[] = `ls -type file -type mib_amb_occlusion`;
+		for ($item in $files)
+		{
+			string $cons[] = `listConnections -s 0 -d 1 $item`;
+			string $selfarray[] = { $item, "defaultTextureList1"};
+			string $tocons[] = stringArrayRemove($selfarray, $cons);
+			if (size($tocons) == 0)
+				deleteIfNotReferenced $item;
+		}
+	}
+
+	string $mats[] = `ls -mat`;
+	for ($matitem in $mats)
+	{
+		if (`objExists $matitem`)
+		{
+			if (`nodeType $matitem` == "reference")	// by huangzhongwei
+			{
+				continue;
+			}
+
+			//MLdeleteUnused;
+			//delete material nodes
+			string $shadings[] = `listConnections -s true -d true -type "shadingEngine" $matitem`;
+			if (size($shadings)==0)  
+			{
+				//initialize 
+				clear($exparray);
+				$count = 0;
+				$flagxxx = 0;
+				zjConnectSg($matitem);
+
+				if ($flagxxx==0)	//no shadingEngine linked with the material
+				{
+					$itemCount++;
+					deleteIfNotReferenced $matitem;
+//					MLdeleteUnused;
+				}
+
+			}
+		} 
+	}
+	cleanUp_Summary( "Removed unused material nodes", ("Removed " + $itemCount + " unused material nodes") );
+
+	//delete "+-*/" nodes
+	$itemCount = 0;
+	string $pma[] = `ls -type plusMinusAverage -type multiplyDivide`;
+	for ($item in $pma)
+	{
+		if (`objExists $item`)
+		{
+			string $shds[] = `listConnections -s true -d true -type "shadingEngine" $item`;
+			string $ambs[] = `listConnections -s true -d true -type "ambientLight" $item`;
+			string $dirs[] = `listConnections -s true -d true -type "directionalLight" $item`;
+			string $points[] = `listConnections -s true -d true -type "pointLight" $item`;
+			string $spots[] = `listConnections -s true -d true -type "spotLight" $item`;
+			string $areas[] = `listConnections -s true -d true -type "areaLight" $item`;
+			string $vols[] = `listConnections -s true -d true -type "volumeLight" $item`;
+			string $joints[] = `listConnections -s true -d true -type "joint" $item`;
+			string $nurbCurves[] = `listConnections -s true -d true -type "nurbsCurve" $item`;
+			string $meshes[] = `listConnections -s true -d true -type "mesh" $item`;
+			string $nurbsSurfaces[] = `listConnections -s true -d true -type "nurbsSurface" $item`;
+			string $subdivs[] = `listConnections -s true -d true -type "subdiv" $item`;
+			string $trans[] = `listConnections -s true -d true -type "transform" $item`;
+
+			string $others[] = stringArrayCatenate($ambs,$dirs);
+			$others = stringArrayCatenate($others,$points);
+			$others = stringArrayCatenate($others,$spots);
+			$others = stringArrayCatenate($others,$areas);
+			$others = stringArrayCatenate($others,$vols);
+			$others = stringArrayCatenate($others,$joints);
+			$others = stringArrayCatenate($others,$nurbCurves);
+			$others = stringArrayCatenate($others,$meshes);
+			$others = stringArrayCatenate($others,$nurbsSurfaces);
+			$others = stringArrayCatenate($others,$subdivs);
+			$others = stringArrayCatenate($others,$trans);
+
+			if (size($shds)==0 && size($others)==0)  
+			{
+				//initialize 
+				clear($exparray);
+				$count = 0;
+				$flagxxx = 0;
+				zjConnectDAG($item);
+
+				if ($flagxxx==0)	//no dag nodes linked with the item
+				{
+					$itemCount++;
+					deleteIfNotReferenced $item;
+				}
+
+			}
+		}
+	}
+	MLdeleteUnused;
+	cleanUp_Summary( "Removed unused plusMinusAverage/multiplyDivide nodes", ("Removed " + $itemCount + " unused plusMinusAverage/multiplyDivide nodes") );
+
+
+	source zxHardwareTexturing.mel;
+	zxAlldisplay(32);
+
+	//zwShareNode("file", "fileTextureName");
+	zwShareNode("samplerInfo", "facingRatio");
+	source zzjOptimizeLayeredTexture;zzjOptimizeLayeredTexture();
+}
+
+//detect whether there is a shadingEngine linked with a material,use recursion
+global proc zjConnectSg(string $mat)
+{
+	global string $exparray[];
+	global int $count;
+	global int $flagxxx;
+
+	string $list[]=`listConnections -s false -d true $mat`;
+	string $right[] = stringArrayRemoveDuplicates($list);
+
+	$exparray[$count++]=$mat;
+	$exparray = stringArrayRemoveDuplicates($exparray);
+
+  
+	for($r in $right)
+		if (findit($r,$exparray)==0)
+		{
+			if (`nodeType $r`=="shadingEngine")
+				$flagxxx = 1;
+			else zjConnectSg($r);
+		}
+}
+
+//detect whether there'r sth we need to be linked with, use recursion
+global proc zjConnectDAG(string $item)
+{
+	global string $exparray[];
+	global int $count;
+	global int $flagxxx;
+
+	string $list[]=`listConnections -s false -d true $item`;
+	string $list1[]=`listConnections -s false -d true -shapes true $item`;
+	$list = stringArrayCatenate($list,$list1);
+	string $right[] = stringArrayRemoveDuplicates($list);
+
+	$exparray[$count++] = $item;
+	$exparray = stringArrayRemoveDuplicates($exparray);
+
+  
+	for($r in $right)
+		if (findit($r,$exparray)==0)
+		{
+			if (`nodeType $r`=="shadingEngine"
+			||`nodeType $r`=="transform"
+			||`nodeType $r`=="joint"||`nodeType $r`=="nurbsCurve"
+			||`nodeType $r`=="mesh"||`nodeType $r`=="nurbsSurface"||`nodeType $r`=="subdiv"
+			||`nodeType $r`=="ambientLight"||`nodeType $r`=="directionalLight"
+			||`nodeType $r`=="pointLight"||`nodeType $r`=="spotLight"
+			||`nodeType $r`=="areaLight"||`nodeType $r`=="volumeLight")
+				$flagxxx = 1;
+			else zjConnectDAG($r);
+		}
+}
+
+
+
+global proc zwShareNode(string $nodeType, string $attr)
+{
+	int $i, $j, $k;
+	string $buf1[], $buf2[];
+
+	string $buf[] = `ls -type $nodeType`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		if (`objExists $buf[$i]`)
+		{
+			for ($j=$i+1; $j<size($buf); $j++)
+			{
+				if (`objExists $buf[$j]`)
+				{
+					if (`getAttr ($buf[$i] + "." + $attr)` == `getAttr ($buf[$j] + "." + $attr)`)
+					{
+						$buf1 = `listConnections -source false -plugs true -connections true $buf[$j]`;
+						for ($k=0; $k<size($buf1); $k+=2)
+						{
+							if (`isConnected $buf1[$k] $buf1[$k+1]`)
+							{
+								disconnectAttr $buf1[$k] $buf1[$k+1];
+							}
+							tokenize $buf1[$k] "." $buf2;
+							if (!`isConnected ($buf[$i] + "." + $buf2[1]) $buf1[$k+1]`)
+							{
+								connectAttr ($buf[$i] + "." + $buf2[1]) $buf1[$k+1];
+							}
+						}
+						evalEcho ("delete \"" + $buf[$j] + "\"");
+					}
+				}
+			}
+		}
+	}
+}

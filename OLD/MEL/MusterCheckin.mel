@@ -1,0 +1,4003 @@
+global proc MusterCheckin()
+{
+	eval "source \"zwGetMode.mel\"";
+	eval "source \"zwGetPath.mel\"";
+	zwImportModule("idmt.maya.Muster", true);
+	zwImportModule("idmt.pipeline.project", true);
+
+	string $sceneName = `file -query -sceneName`;
+	$sceneName = `match "[^/\\]+$" $sceneName`;
+
+	int $isTd = false;
+	if (tolower(`getenv "USERNAME"`) == "huangzhongwei")
+	{
+		$isTd = true;
+	}
+//	else
+//	{
+//		$isTd = `idmtUser -groupIsMember "R&D"`;
+//	}
+
+	int $musterVersion = 5;
+//	if (`getenv OFFICE_LOCATION` == "chongqing")
+//	{
+//		$musterVersion = 4;
+//	}
+	optionVar -intValue musterVersion $musterVersion;
+
+	zwMusterSetOptionVars(true);
+
+
+
+
+	string $project = zwMusterGetProject($sceneName);
+	if (`match "^diveollydive[0-9]+$" (tolower($project))` != "" && `match "_sc" (tolower($sceneName))` != "")
+	{
+		if (!`zwMusterIsBatch`)
+		{
+			//confirmDialog -message "DOD4场景请提交超算，点 “OK” 后将会打开\n\n\\\\file-cluster\\GDC\\Scratch\\IT\\超算中心\\深圳超算云渲染平台" -button "OK";
+			string $rs = `confirmDialog -icon "critical" -message "DOD4场景请提交超算，点 “OK” 后将会打开\n\n\\\\file-cluster\\GDC\\Scratch\\IT\\超算中心\\深圳超算云渲染平台" -button "OK" -button "不提超算，还是准备提到 185" -defaultButton "OK" -dismissString "OK"`;
+			if ($rs == "OK")
+			{
+				system "load \"\\\\file-cluster\\GDC\\Scratch\\IT\\超算中心\\深圳超算云渲染平台\"";
+				return;
+			}
+		}
+		else
+		{
+			return;
+		}
+	}
+	//else if ($project == "Ninjago")
+	//{
+	//	if (!`zwMusterIsBatch`)
+	//	{
+	//		string $rs = `confirmDialog -icon "warning" -message "你好，NJ 项目请按约定全部提交超算中心。如必须提交公司内部网渲，产生费用可能会结算到项目成本中" -button "OK" -button "Cancel" -defaultButton "Cancel" -dismissString "Cancel"`;
+	//		if ($rs == "Cancel")
+	//		{
+	//			return;
+	//		}
+	//	}
+	//}
+
+
+
+	if (`zwMusterIsBatch`)
+	{
+		Monsubmit();
+		return;
+	}
+
+// Create UI
+	if (`window -exists connectorGUI`)
+	{
+		deleteUI connectorGUI;
+	}
+	int $width = 400;
+	int $height = 300;
+	if (`windowPref -exists connectorGUI`)
+	{
+		windowPref -edit -widthHeight $width $height connectorGUI;
+	}
+	window -menuBar true -resizeToFitChildren true -title "RenderFarm Connect" -widthHeight $width $height connectorGUI;
+		menu -label "帮助";
+			menuItem -label "Help on Netrender Tool..." -command "zjHelpCallback MusterInkworks";
+		menu -label "其他选项";
+			menuItem -label "自动更改贴图路径" -checkBox `optionVar -query musterCheckinChangeMap` ChangeMapPathMU;
+		columnLayout -adjustableColumn true -columnAlign "left";
+			frameLayout -label "贴图" -borderStyle "etchedIn" -collapsable true;
+				columnLayout -adjustableColumn true -columnAttach "both" 4 -columnAlign "left" -rowSpacing 4;
+					textScrollList -numberOfRows 8 -doubleClickCommand "zwMusterMapListDBClick" maplistCTL;
+						popupMenu -button 3 -postMenuCommand "zwMusterMapListMenu \"popupMenuMapListR\" \"maplistCTL\"" popupMenuMapListR;
+					setParent ..;
+				setParent ..;
+			frameLayout -label "上传文件" -borderStyle "etchedIn" -collapsable true;
+				columnLayout -adjustableColumn true -columnAlign "left" -rowSpacing 2;
+					textFieldGrp -label "Project:" -text `optionVar -query musterCheckinProject` -editable false -adjustableColumn 2 projpathCTL;
+					int $delHair = zwMusterCheckinGetDelHair();
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "删除所有头发系统" -value1 `optionVar -query musterCheckinDelHair` -onCommand1 "optionVar -intValue musterCheckinDelHair 1" -offCommand1 "optionVar -intValue musterCheckinDelHair 0" -enable $delHair -adjustableColumn 2 checkBoxGrpDelHair;
+				//	checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "优化场景" -value1 `optionVar -query "musterCheckinOptimize"` -onCommand1 "optionVar -intValue \"musterCheckinOptimize\" 1" -offCommand1 "optionVar -intValue \"musterCheckinOptimize\" 0" -enable (`match "^lighting_" $sceneName` == "" || $isTd) optimizeCTL;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "优化场景" -value1 `optionVar -query "musterCheckinOptimize"` -onCommand1 "optionVar -intValue \"musterCheckinOptimize\" 1" -offCommand1 "optionVar -intValue \"musterCheckinOptimize\" 0" -enable 1 optimizeCTL;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "拷贝本机贴图" -value1 `optionVar -query musterCheckinCopyLocal` -onCommand1 "optionVar -intValue musterCheckinCopyLocal 1" -offCommand1 "optionVar -intValue musterCheckinCopyLocal 0" copyLocalCTL;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "拷贝hair cache" -value1 `optionVar -query musterCheckinCopyCache` -onCommand1 "optionVar -intValue musterCheckinCopyCache 1" -offCommand1 "optionVar -intValue musterCheckinCopyCache 0" checkBoxGrpCopyCache;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "Checkin 文件" -value1 `optionVar -query "musterCheckinCheckin"` -onCommand1 "optionVar -intValue \"musterCheckinCheckin\" 1" -offCommand1 "optionVar -intValue \"musterCheckinCheckin\" 0" -enable `optionVar -query "musterCheckinCheckin"` chekinCTL;
+					string $path = `optionVar -query musterCheckinProject` + "\\scenes\\" + `file -query -sceneName -shortName`;
+					optionMenuGrp -label "上传文件方式:" -columnAlign 1 "right" optionMenuGrpSave;
+						menuItem -label "另存";
+						menuItem -label "复制";
+						menuItem -label "使用网上已有的文件";
+					optionMenuGrp -edit -select `optionVar -query "musterCheckinSave"` optionMenuGrpSave;
+				//	checkBoxGrp -enable `filetest -f $path` -label "" -label1 "不存盘。Maya文件已手动复制到网渲目录" -value1 `optionVar -query "musterCheckinSave"` -onCommand "optionVar -intValue \"musterCheckinSave\" 1" -offCommand "optionVar -intValue \"musterCheckinSave\" 0" -adjustableColumn 2 checkBoxGrpSave;
+					setParent ..;
+				setParent ..;
+			frameLayout -label "提交渲染" -borderStyle "etchedIn" -collapsable true;
+				columnLayout -adjustableColumn true -columnAlign "left" -rowSpacing 2;
+					textFieldGrp -label "任务名:" -text `optionVar -query musterCheckinJob` -adjustableColumn 2 jobnameCTL;
+					textFieldGrp -label "服务器(右键选):" -text `optionVar -query musterCheckinServer` -changeCommand "OnTextFieldGrpDispatcherChanged 1" dispatcherCTL;
+						//popupMenu -button 1 -postMenuCommandOnce true -postMenuCommand "zwMusterServerMenu \"popupMenuServerL\" \"dispatcherCTL\"" popupMenuServerL;
+						popupMenu -button 3 -postMenuCommandOnce true -postMenuCommand "zwMusterServerMenu \"popupMenuServerR\" \"dispatcherCTL\"" popupMenuServerR;
+					textFieldGrp -label "渲染池(右键选):" -text `optionVar -query musterCheckinPool` -changeCommand "OnTextFieldGrpDispatcherChanged 2" poolCTL;
+						popupMenu -button 3 -postMenuCommand "zwMusterPoolMenu \"popupMenuPoolR\" \"poolCTL\"" popupMenuPoolR;
+					intFieldGrp -enable1 false -label "Start Frame:" -value1 `optionVar -query musterCheckinStart` sfCTL;
+					intFieldGrp -enable1 false -label "End Frame:"  -value1 `optionVar -query musterCheckinEnd` efCTL;
+					floatFieldGrp -label "By Frame:"  -value1 `optionVar -query musterCheckinBy` bfCTL;
+					intFieldGrp -label "Packet:"  -value1 `zwMusterPacket` pkgCTL;
+					intFieldGrp -label "Priority:" -enable $isTd -value1 `optionVar -query musterCheckinPriority` priCTL;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "每层一个任务" -value1 `optionVar -query "musterCheckinLayer"` -onCommand1 "optionVar -intValue \"musterCheckinLayer\" 1" -offCommand1 "optionVar -intValue \"musterCheckinLayer\" 0" layerCTL;
+					checkBoxGrp -numberOfCheckBoxes 1 -label "" -label1 "自动补帧" -enable `zwMusterEnableFramecheck` -value1 `optionVar -query "musterCheckinFramecheck"` -onCommand1 "optionVar -intValue \"musterCheckinFramecheck\" 1" -offCommand1 "optionVar -intValue \"musterCheckinFramecheck\" 0" framecheckCTL;
+					textFieldButtonGrp -label "图像输出路径:" -text `optionVar -query "musterCheckinOut"` -editable false -buttonLabel "自定义.." -buttonCommand OnSelectOutPutBT -adjustableColumn 2 OutPutPathCTL;
+//					button -label "自动选择输出路径" -command OnAutoSelectOutput AutoOutputCTL;
+					optionMenuGrp -label "渲染器:" -columnAlign 1 "right" optionMenuGrpRenderer;
+						menuItem -label "file";
+					//	menuItem -label "mayaSoftware";
+					//	menuItem -label "mayaHardware";
+					//	menuItem -label "mentalRay";
+					//	menuItem -label "mayaVector";
+						menuItem -label "MayaMan";
+						menuItem -label "3Delight";
+						menuItem -label "3Delight_shave";
+					optionMenuGrp -edit -value `optionVar -query musterCheckinRenderer` optionMenuGrpRenderer;
+					setParent ..;
+				setParent ..;
+			frameLayout -visible $isTd -label "TD组测试" -borderStyle "etchedIn" -collapsable true;
+				columnLayout -adjustableColumn true -rowSpacing 2;
+					checkBoxGrp -label "" -label1 "只生成提交命令，不实质提交" -value1 `optionVar -query "musterCheckinTest"` -onCommand "optionVar -intValue \"musterCheckinTest\" 1" -offCommand "optionVar -intValue \"musterCheckinTest\" 0" -adjustableColumn 2 checkBoxGrpTest;
+					intFieldGrp -label "CPU:" -value1 `optionVar -query "musterCheckinCPU"` -changeCommand "optionVar -intValue \"musterCheckinCPU\" #1" intFieldGrpCPU;
+					setParent ..;
+				setParent ..;
+			string $formLayoutButton = `formLayout`;
+				string $button1 = `button -label "提交渲染" -command "Monsubmit"`;
+				string $MExplorer = zwMusterGetMrtool() + "\\MExplorer.exe";
+				if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+				{
+					$MExplorer = zwMusterGetMrtool() + "\\HA_MExplorer.exe";
+				}
+				$MExplorer = `encodeString $MExplorer`;
+				string $button2 = `button -label "打开 Muster Explorer" -command ("system \"start " + $MExplorer + "\"")`;
+				string $button3 = `button -label "关闭" -command "McloseUI"`;
+				setParent ..;
+			formLayout -edit
+				-attachForm		$button1	"left"		0
+				-attachPosition		$button1	"right"		0	33
+
+				-attachControl		$button2	"left"		0	$button1
+				-attachPosition		$button2	"right"		0	67
+
+				-attachControl		$button3	"left"		0	$button2
+				-attachForm		$button3	"right"		0
+			$formLayoutButton;
+			setParent ..;
+	showWindow;
+
+	MinkInit;
+}
+
+global proc zwMusterPoolMenu(string $popupMenu, string $textFieldGrp)
+{
+	string $pools[];
+	string $dispatcher = `textFieldGrp -query -text dispatcherCTL`;
+	if ($dispatcher == "192.168.3.181")
+	{
+		$pools = {"3dlight"};
+	}
+	else if ($dispatcher == "192.168.3.182")
+	{
+		$pools = {"P5", "3Dlight", "LC", "arnold", "MAYA2014"};
+	}
+	else if ($dispatcher == "192.168.3.185")
+	{
+		$pools = {"Entire Farm","test", "MA_test", "4instances"};
+	}
+	else if ($dispatcher == "192.168.168.183")
+	{
+		$pools = {"toCloud"};
+	}
+	$pools = sort($pools);
+	stringArrayInsertAtIndex(0, $pools, "Entire Farm");
+
+	popupMenu -edit -deleteAllItems $popupMenu;
+	setParent -menu $popupMenu;
+	for ($pool in $pools)
+	{
+		menuItem -label $pool -command ("textFieldGrp -edit -text \"" + $pool + "\" \"" + $textFieldGrp + "\"; OnTextFieldGrpDispatcherChanged 2;");
+	}
+}
+
+global proc zwMusterServerMenu(string $popupMenu, string $textFieldGrp)
+{
+	setParent -menu $popupMenu;
+
+	string $buf[];
+	clear $buf;
+	if (`getenv "OFFICE_LOCATION"` == "chongqing")
+	{
+		$buf = {"192.168.23.23"};
+	}
+	else if (`getenv "OFFICE_LOCATION"` == "shenzhen")
+	{
+		$buf = {"192.168.3.181", "192.168.3.182", "192.168.3.185", "192.168.168.183"};
+	}
+	for ($server in $buf)
+	{
+		menuItem -label $server -command ("textFieldGrp -edit -text \"" + $server + "\" \"" + $textFieldGrp + "\"; OnTextFieldGrpDispatcherChanged 1;");
+	}
+}
+
+global proc OnTextFieldGrpDispatcherChanged(int $ctrl)
+{
+	string $project = zwMusterGetProject("");
+	//if (($project == "ChangBaiShan" || $project == "EarthQuake") || $project == "TomAndJerry")
+	{
+		string $projectFolder;
+		string $musterCheckinOut = GetOutputPathByName();
+
+		string $dispatcher = `textFieldGrp -query -text dispatcherCTL`;
+		if ($dispatcher == "192.168.168.183" && $project != "Strawberry")// && (($project == "ChangBaiShan" || $project == "EarthQuake") || $project == "TomAndJerry"))
+		{
+			string $date;
+			string $musterCheckinPool = `textFieldGrp -query -text poolCTL`;
+			if ($musterCheckinPool == "hanhong")
+			{
+				$date = "hanhong";
+			}
+			else
+			{
+				if ($ctrl != 2)
+				{
+					$musterCheckinPool = "toCloud";
+				}
+				python "import datetime";
+				$date = `python "(datetime.datetime.now() + datetime.timedelta(0, 0, 0, 0, 0, 7)).strftime('%Y%m\\%Y%m%d')"`;
+			}
+			$projectFolder = "\\\\file-cluster\\GDC\\Netrender\\Maya_Odd\\cloud\\" + $date;
+
+			$musterCheckinOut = `substitute $project $musterCheckinOut ("cloud\\" + $project)`;
+
+			optionVar -stringValue musterCheckinPool $musterCheckinPool;
+			textFieldGrp -edit -text $musterCheckinPool poolCTL;
+
+		//	if ($project == "VickyTheViking")
+		//	{
+		//		intFieldGrp -edit -value1 40 priCTL;
+		//	}
+		}
+		else
+		{
+			$projectFolder = zwGetMusterProject("");
+
+		//	if ($project == "VickyTheViking")
+		//	{
+		//		intFieldGrp -edit -value1 90 priCTL;
+		//	}
+			if ($project == "VickyTheViking" || $project == "Ninjago" )
+			{
+				string $musterCheckinPool = `textFieldGrp -query -text poolCTL`;
+				if ($ctrl != 2)
+				{
+					$musterCheckinPool = "Entire Farm";
+				}
+				optionVar -stringValue musterCheckinPool $musterCheckinPool;
+				textFieldGrp -edit -text $musterCheckinPool poolCTL;
+			}
+		}
+		optionVar -stringValue musterCheckinProject $projectFolder;
+		textFieldGrp -edit -text $projectFolder projpathCTL;
+
+		optionVar -stringValue "musterCheckinOut" $musterCheckinOut;
+		textFieldButtonGrp -edit -text $musterCheckinOut OutPutPathCTL;
+	}
+}
+
+global proc int zwMusterCPU()
+{
+	int $cpu = 1;
+
+// 黄仲维20100723屏蔽
+//	string $username = `getenv "USERNAME"`;
+//	$username = tolower($username);
+//	if ($username == "baoran" || $username == "sunwang")
+//	{
+//		$cpu = 4;
+//	}
+
+	return $cpu;
+}
+
+global proc int zwMusterIsShiXun()
+{
+	string $project = zwMusterGetProject("");
+
+	return ($project == "ShiXun");
+}
+
+global proc string zwMusterGetProject(string $str)
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project;
+	if (`match "_HIG_hair" $sceneName` != "")
+	{
+		$project = "ROMA";
+	}
+	else
+	{
+		$project = zwGetProject($sceneName);
+	}
+
+	return $project;
+}
+
+global proc int zwIsMayaMan()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+
+	if (`match "_HIG_hair" $sceneName` != "" || `match "_RM[._]" $sceneName` != "")
+	{
+		return true;
+	}
+
+	string $str = tolower($sceneName);
+	if ($project == "TTMS" && `match "hair" $str` != "")
+	{
+		return true;
+	}
+
+	int $isMayaMan = (`match "^lighting_" $sceneName` != "" );//&& `match "_shaveExport_" $sceneName` == "");
+
+	return $isMayaMan;
+}
+
+//2006.11.16 根据项目要求 对不同的项目提交到不同的渲染主机
+global proc string hjpoolset()
+{
+	global string $zwMusterCheckinServer;	// 外部工具批量提交时指定了服务器
+	if ($zwMusterCheckinServer != "")
+	{
+		return $zwMusterCheckinServer;
+	}
+
+	string $server = "192.168.3.185";
+
+	string $sceneName = `file -query -sceneName -shortName`;
+	string $project = zwMusterGetProject($sceneName);
+	if (zwIsRainbowProject($project))
+	{
+		if (!`zwIsMayaMan`)
+		{
+			$server = "192.168.3.181";
+		}
+	}
+//	else if ($project == "Ninjago")
+//	{
+//		//string $sceneName = `file -query -sceneName`;
+//		//int $size = `idmtFile -size $sceneName`;
+//		//$sceneName = `file -query -sceneName -shortName`;
+//		//$sceneName = tolower($sceneName);
+//		//if (($size > 300000000 && $size <= 500000000) || (`match "bbg" $sceneName` != "" || `match "crowd" $sceneName` != ""))
+//		//{
+//		//	$server = "192.168.3.182";
+//		//}
+//		//else
+//		//{
+//			$server = "192.168.168.183";
+//		//}
+//	}
+//	else if (($project == "ChangBaiShan" || $project == "EarthQuake") || ($project == "TomAndJerry" && `match "fur" (tolower($sceneName))` != ""))
+//	{
+//		//if (zwAboutVersion() == "2011")
+//		//{
+//		//	$server = "192.168.3.182";
+//		//}
+//		$server = "192.168.168.183";
+//	}
+	else if ($project == "VickyTheViking" && (`match "_CA_" (toupper($sceneName))` != "" || `match "_CD_" (toupper($sceneName))` != ""))
+	{
+	}
+	else if ($project == "VickyTheViking" && `match "fx" (tolower($sceneName))` != "")
+	{
+	}
+	else if (`match "^DiveollyDive" $project` != "" && `match "_ef[_.]" (tolower($sceneName))` != "")
+	{
+		$server = "192.168.3.182";
+	}
+	else
+	{
+		string $str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/dispatcher')")`;
+		if ($str != "")
+		{
+			$server = $str;
+		}
+	}
+	if (`match "3dl" (tolower($sceneName))` != "")
+	{
+		$server = "192.168.3.182";
+	}
+	if (zwAboutVersion() == "2016")
+	{
+		$server = "192.168.3.181";
+	}
+
+	return $server;
+}
+
+//set render pool
+global proc string jayefilename()
+{
+	global string $zwMusterCheckinPool;	// 外部工具批量提交时指定了渲染池
+	if ($zwMusterCheckinPool != "")
+	{
+		return $zwMusterCheckinPool;
+	}
+
+	string $pool = "Entire Farm";
+
+	string $sceneName = `file -query -sceneName -shortName`;
+	string $project = zwMusterGetProject($sceneName);
+	if ($project == "ZhuZhuPets")
+	{
+		if (`gmatch (tolower($sceneName)) "*fur*"`)
+		{
+			$pool = "shave09";
+		}
+	}
+	else if ($project == "Ninjago")
+	{
+
+			$pool = "Entire Farm";
+	}	
+//	else if ($project == "Ninjago")
+//	{
+//		//string $sceneName = `file -query -sceneName`;
+//		//int $size = `idmtFile -size $sceneName`;
+//		//$sceneName = `file -query -sceneName -shortName`;
+//		//$sceneName = tolower($sceneName);
+//		//if (($size > 300000000 && $size < 500000000) || (`match "bbg" $sceneName` != "" || `match "crowd" $sceneName` != ""))
+//		//{
+//		//	$pool = "MMan";
+//		//}
+//		//else
+//		//{
+//			$pool = "NJ";
+//		//}
+//	}
+//	else if (($project == "ChangBaiShan" || $project == "EarthQuake") || ($project == "TomAndJerry" && `match "fur" (tolower($sceneName))` != ""))
+//	{
+//		//if (zwAboutVersion() == "2011")
+//		//{
+//		//	$pool = "Relight";
+//		//}
+//		$pool = "toCloud";
+//	}
+	else if ($project == "ratchetandclank")
+	{
+		$sceneName = tolower($sceneName);
+		if (`match "fur" $sceneName` != "")
+		{
+			$pool = "RenderI";
+		}
+	}
+	else if ($project == "VickyTheViking" && (`match "_CA_" (toupper($sceneName))` != "" || `match "_CD_" (toupper($sceneName))` != ""))
+	{
+	}
+	else if ($project == "VickyTheViking" && `match "fx" (tolower($sceneName))` != "")
+	{
+	}
+	else if (`match "^diveollydive[0-9]+$" (tolower($project))` != "" && `match "_sc" (tolower($sceneName))` != "")
+	{
+		$pool = "4instances";
+	}
+	else
+	{
+		string $str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/pool')")`;
+		if ($str != "")
+		{
+			$pool = $str;
+		}
+	}
+	if (`match "3dl" (tolower($sceneName))` != "")
+	{
+		$pool = "OT";
+	}
+
+	return  $pool;
+}
+
+global proc zwMusterSetOptionVars(int $forceFactorySettings)
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwMusterGetProject($sceneName);
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinChangeMap`)
+	{
+		optionVar -intValue musterCheckinChangeMap 1;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinCopyLocal`)
+	{
+		optionVar -intValue musterCheckinCopyLocal 0;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinProject`)
+	{
+		string $projectFolder = zwGetMusterProject("");
+		optionVar -stringValue musterCheckinProject $projectFolder;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinJob`)
+	{
+		string $musterCheckinJob = `match "[^.]+" $sceneName`;
+		if (size(`ls -type hairSystem`) > 0 && `match "hair" $musterCheckinJob` == "")
+		{
+			$musterCheckinJob += "_hair";
+		}
+		optionVar -stringValue musterCheckinJob $musterCheckinJob;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinServer`)
+	{
+		string $musterCheckinServer = hjpoolset();
+		optionVar -stringValue musterCheckinServer $musterCheckinServer;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinPool`)
+	{
+		string $musterCheckinPool = jayefilename();
+		optionVar -stringValue musterCheckinPool $musterCheckinPool;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinStart`)
+	{
+		global int $zwMusterCheckinSingle;
+		if ($zwMusterCheckinSingle)
+		{
+			global int $zwMusterCheckinStarFame;
+			optionVar -intValue musterCheckinStart $zwMusterCheckinStarFame;
+		}
+		else
+		{
+			int $startFrame = `getAttr defaultRenderGlobals.startFrame`;
+			optionVar -intValue musterCheckinStart $startFrame;
+		}
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinEnd`)
+	{
+		global int $zwMusterCheckinSingle;
+		if ($zwMusterCheckinSingle)
+		{
+			global int $zwMusterCheckinStarFame;
+			optionVar -intValue musterCheckinEnd $zwMusterCheckinStarFame;
+		}
+		else
+		{
+			int $endFrame = `getAttr defaultRenderGlobals.endFrame`;
+			optionVar -intValue musterCheckinEnd $endFrame;
+		}
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinBy`)
+	{
+		float $byFrameStep = `getAttr "defaultRenderGlobals.byFrameStep"`;
+		if ($project == "TTMS")
+		{
+			$byFrameStep = 0.5;
+		}
+		optionVar -floatValue "musterCheckinBy" $byFrameStep;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinPacket`)
+	{
+		int $packet = zwMusterPacket();
+		optionVar -intValue musterCheckinPacket $packet;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinPriority`)
+	{
+		int $priority = zwMusterCheckinPriority();
+		optionVar -intValue musterCheckinPriority $priority;
+	}
+	if( $forceFactorySettings || !`optionVar -exists "musterCheckinOut"`)
+	{
+		string $out = GetOutputPathByName();
+		optionVar -stringValue "musterCheckinOut" $out;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinLayer`)
+	{
+		int $musterCheckinLayer = 0;
+		if (`match "^diveollydive[0-9]+$" (tolower($project))` != "" || $project == "VickyTheViking" || $project == "Calimero")
+		{
+			$musterCheckinLayer = 1;
+		}
+		global string $zwMusterCheckinLayer;
+		if ($zwMusterCheckinLayer != "")
+		{
+			$musterCheckinLayer = (int)$zwMusterCheckinLayer;
+		}
+		optionVar -intValue "musterCheckinLayer" $musterCheckinLayer;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinOptimize`)
+	{
+//		int $isMayaMan = zwIsMayaMan();
+//	//	optionVar -intValue "musterCheckinOptimize" (!($isMayaMan || `match "_DYN[._]" $sceneName` != ""));
+//		optionVar -intValue "musterCheckinOptimize" (`match "_DYN[._]" $sceneName` == "");
+
+		optionVar -intValue "musterCheckinOptimize" 0;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinCheckin`)
+	{
+		string $mode = zwGetMode($sceneName);
+	//	optionVar -intValue "musterCheckinCheckin" (!($project == "" || $project == "ShiXun" || zwIsRainbowProject($project)) && $mode == "lighting");
+		optionVar -intValue "musterCheckinCheckin" (!($project == "" || $project == "ShiXun") && ($mode == "lighting" || $mode == "keylight" || $mode == "seqlighting" || $mode == "03_Rendering" || $mode == "06_FinalLayout"));
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinTest`)
+	{
+		optionVar -intValue "musterCheckinTest" (`getenv "USERNAME"` == "huangzhongwei");
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinSave`)
+	{
+		int $musterCheckinSave = 1;
+		string $path = `file -query -sceneName`;
+		int $size = `idmtFile -size $path`;
+		if ($size > 500000000  )
+		{
+			$musterCheckinSave = 2;
+		}
+		optionVar -intValue "musterCheckinSave" $musterCheckinSave;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinCPU`)
+	{
+		int $cpu = zwMusterCPU();
+		optionVar -intValue "musterCheckinCPU" $cpu;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinCopyCache`)
+	{
+		int $musterCheckinCopyCache = zwMusterCheckinGetCopyCache();
+		optionVar -intValue "musterCheckinCopyCache" $musterCheckinCopyCache;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinDelHair`)
+	{
+		optionVar -intValue "musterCheckinDelHair" false;
+	}
+	if( $forceFactorySettings || !`optionVar -exists musterCheckinFramecheck`)
+	{
+		int $MMRender = zwIsMayaMan();
+	//	int $musterCheckinFramecheck = ($MMRender && !`gmatch (tolower($sceneName)) "*rib*"` && zwAboutVersion() == "8.5");
+		int $musterCheckinFramecheck = !$MMRender && `about -apiVersion` >= 200900 && ($project == "ShenShou" || $project == "Ninjago");
+		optionVar -intValue "musterCheckinFramecheck" 0;//$musterCheckinFramecheck;
+	}
+	if($forceFactorySettings || !`optionVar -exists musterCheckinRenderer`)
+	{
+		string $renderer = zwMusterCheckinGetRenderer1();
+		optionVar -stringValue "musterCheckinRenderer" $renderer;
+	}
+
+	string $dispatcher = `optionVar -query musterCheckinServer`;
+	string $pool = `optionVar -query musterCheckinPool`;
+	if ($dispatcher == "192.168.168.183" && $pool == "toCloud")
+	{
+		python "import datetime";
+		string $date = `python "(datetime.datetime.now() + datetime.timedelta(0, 0, 0, 0, 0, 7)).strftime('%Y%m\\%Y%m%d')"`;
+		string $projectFolder = "\\\\file-cluster\\GDC\\Netrender\\Maya_Odd\\cloud\\" + $date;
+		optionVar -stringValue musterCheckinProject $projectFolder;
+
+		string $musterCheckinOut = GetOutputPathByName();
+		string $project = zwMusterGetProject("");
+		$musterCheckinOut = `substitute $project $musterCheckinOut ("cloud\\" + $project)`;
+		optionVar -stringValue "musterCheckinOut" $musterCheckinOut;
+	}
+}
+
+global proc int zwMusterEnableFramecheck()
+{
+//	int $MMRender = zwIsMayaMan();
+//	return (!$MMRender && `about -apiVersion` >= 200900);
+	return false;
+}
+
+global proc MusterCheckinCallback()
+{
+	optionVar -intValue musterCheckinChangeMap `menuItem -query -checkBox ChangeMapPathMU`;
+	optionVar -intValue musterCheckinCopyLocal `checkBoxGrp -query -value1 copyLocalCTL`;
+	optionVar -stringValue musterCheckinProject `textFieldGrp -query -text projpathCTL`;
+	optionVar -stringValue musterCheckinJob `textFieldGrp -query -text jobnameCTL`;
+	optionVar -stringValue musterCheckinServer `textFieldGrp -query -text dispatcherCTL`;
+	optionVar -stringValue musterCheckinPool `textFieldGrp -query -text poolCTL`;
+	optionVar -intValue musterCheckinStart `intFieldGrp -query -value1 sfCTL`;
+	optionVar -intValue musterCheckinEnd `intFieldGrp -query -value1 efCTL`;
+	optionVar -floatValue musterCheckinBy `floatFieldGrp -query -value1 bfCTL`;
+	optionVar -intValue musterCheckinPacket `intFieldGrp -query -value1 pkgCTL`;
+	optionVar -intValue musterCheckinPriority `intFieldGrp -query -value1 priCTL`;
+	optionVar -stringValue "musterCheckinOut" `textFieldButtonGrp -query -text OutPutPathCTL`;
+	optionVar -intValue musterCheckinLayer `checkBoxGrp -query -value1 layerCTL`;
+	optionVar -intValue musterCheckinTest `checkBoxGrp -query -value1 checkBoxGrpTest`;
+	optionVar -intValue musterCheckinSave `optionMenuGrp -query -select optionMenuGrpSave`;
+	optionVar -intValue musterCheckinCPU `intFieldGrp -query -value1 intFieldGrpCPU`;
+	optionVar -intValue musterCheckinCopyCache `checkBoxGrp -query -value1 checkBoxGrpCopyCache`;
+	optionVar -intValue musterCheckinDelHair `checkBoxGrp -query -value1 checkBoxGrpDelHair`;
+	optionVar -stringValue musterCheckinRenderer `optionMenuGrp -query -value optionMenuGrpRenderer`;
+}
+
+global proc int zwMusterPacket()
+{
+	global int $zwMusterCheckinPacket;	// 外部工具批量提交时指定了packet
+	if ($zwMusterCheckinPacket != 0)
+	{
+		return $zwMusterCheckinPacket;
+	}
+
+	int $packet = 1;
+
+	string $sceneName = `file -query -sceneName -shortName`;
+	string $project = zwMusterGetProject($sceneName);
+	string $str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/packet')")`;
+	if ($str != "")
+	{
+		$packet = int($str);
+	}
+
+	return $packet;
+}
+
+global proc MinkInit()
+{
+	// 检查系统版本
+	string $texturelist[] = `ls -type "file"`;
+	string $tmptex;
+	string $namelist[];
+	int $index = 0;
+
+	for($tmptex in $texturelist)
+	{
+		$namelist[$index] = `getAttr ($tmptex + ".fileTextureName")`;
+		$index ++;
+	}
+
+	// Bug Fixed:  list image plane map
+	// call the "getimageplanemap()" proc to get all the image planes
+	string $imageplanemap[] = getimageplanemap();
+
+	// and then add them to the namelist
+	appendStringArray($namelist,$imageplanemap,size($imageplanemap));
+	// End Fix
+
+	// remove those repeated ones
+	$namelist = stringArrayRemoveDuplicates($namelist);
+
+	// display all the pictures on the namelist in the maplistCTL
+	for($tmptex in $namelist)
+	{
+		textScrollList -e -append $tmptex maplistCTL;
+	}
+
+	// release variables
+	clear $namelist;
+	clear $texturelist;
+}
+
+global proc Moutputwindow()
+{
+	if (`zwMusterIsBatch`)
+	{
+		return;
+	}
+
+	if(`window -ex MoutputUI`)
+	{
+		deleteUI MoutputUI;
+	}
+	window
+		-widthHeight 500 400
+		-sizeable 1
+		-title "Connector Output"
+		-ret
+		MoutputUI;
+
+	string $form = `formLayout -numberOfDivisions 100`;
+
+	string $a1 =` scrollField -wordWrap false -editable false outputCTL`;
+
+	formLayout
+		-edit
+		-attachForm $a1 "top"    5
+		-attachForm $a1 "bottom" 5
+		-attachForm $a1 "left"   5
+		-attachForm $a1 "right"  5
+		$form;
+
+	showWindow;
+}
+
+// WinxClub 检查输出格式
+// AO 层的渲染输出格式应该设为：TIFF uncompressed (.tif)；其他层：Maya16 IFF (iff)
+global proc int zwCheckAOlayer()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if (!zwIsRainbowProject($project))
+	{
+		return true;
+	}
+	if (`match "^lighting_" (tolower($sceneName))` != "" && (`match "_stt[._]" (tolower($sceneName))` != "" || `match "_sqr[._]" (tolower($sceneName))` != "" || `match "_str[._]" (tolower($sceneName))` != ""))
+	{
+		return true;
+	}
+
+	string $defaultRenderGlobals[] = `ls -type "renderGlobals" "defaultRenderGlobals*"`;
+
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for ($renderLayer in $renderLayers)
+	{
+		if (`getAttr ($renderLayer + ".renderable")`)
+		{
+			string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".imageFormat");
+			int $imageFormat = `getAttr $attr`;
+
+			$attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+			string $currentRenderer = `getAttr $attr`;
+
+			int $isAO = (toupper($renderLayer) == "AO" || `gmatch (toupper($renderLayer)) "AO_*"` || `gmatch (toupper($renderLayer)) "*_AO"` || `gmatch (toupper($renderLayer)) "*OCCLUSION*"`);
+			if (($isAO && $imageFormat != 51) || ((!$isAO) && $imageFormat != 10 && $currentRenderer != "mentalRay"))
+			{
+				return false;
+			}
+
+		//	string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		//	if ($currentRenderLayer != $renderLayer)
+		//	{
+		//		editRenderLayerGlobals -currentRenderLayer $renderLayer;
+		//	}
+		//	int $imageFormat = `getAttr ($defaultRenderGlobals[0] + ".imageFormat")`;
+		//	if ($currentRenderLayer != $renderLayer)
+		//	{
+		//		editRenderLayerGlobals -currentRenderLayer $currentRenderLayer;
+		//	}
+		//	int $isAO = (toupper($renderLayer) == "AO" || `gmatch (toupper($renderLayer)) "AO_*"` || `gmatch (toupper($renderLayer)) "*_AO"` || `gmatch (toupper($renderLayer)) "*OCCLUSION*"`);
+		//	if (($isAO && $imageFormat != 51) || ((!$isAO) && $imageFormat != 4))
+		//	{
+		//		return false;
+		//	}
+		}
+	}
+
+	return true;
+}
+
+global proc string zwMusterCheckinGetRenderer()
+{
+	string $renderer = "";
+
+	string $defaultRenderGlobals[] = `ls -type renderGlobals "defaultRenderGlobals*"`;
+
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for ($renderLayer in $renderLayers)
+	{
+		if (`getAttr ($renderLayer + ".renderable")`)
+		{
+			string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+			string $currentRenderer = `getAttr $attr`;
+
+		//	string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		//	if ($currentRenderLayer != $renderLayer)
+		//	{
+		//		editRenderLayerGlobals -currentRenderLayer $renderLayer;
+		//	}
+		//	string $currentRenderer = `getAttr ($defaultRenderGlobals[0] + ".currentRenderer")`;
+		//	if ($currentRenderLayer != $renderLayer)
+		//	{
+		//		editRenderLayerGlobals -currentRenderLayer $currentRenderLayer;
+		//	}
+
+			if ($currentRenderer != $renderer)
+			{
+				if ($renderer == "")
+				{
+					$renderer = $currentRenderer;
+				}
+				else
+				{
+					$renderer = "file";
+					if (!`zwMusterIsBatch`)
+					{
+						string $rs = `confirmDialog -title "Warning" -message "每个渲染层使用了不同的渲染器，这可能会导致渲染问题\n\n点击\"Continue\" 继续提交任务，\"Cancel\" 取消提交任务" -button "Continue" -button "Cancel" -defaultButton "Cancel" -dismissString "Cancel"`;
+						if ($rs == "Cancel")
+						{
+							return "";
+						}
+					}
+					break;
+				}
+			}
+		}
+	}
+	if ($renderer == "")
+	{
+		$renderer = "file";
+	}
+
+	return $renderer;
+}
+
+global proc string zwMusterCheckinGetRenderer1()
+{
+	string $renderer = "file";
+
+	string $sceneName = `file -query -sceneName -shortName`;
+	if (zwIsMayaMan())
+	{
+		$renderer = "MayaMan";
+	}
+//	else
+//	{
+//		string $defaultRenderGlobals[] = `ls -type renderGlobals "defaultRenderGlobals*"`;
+//
+//		string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+//		for ($renderLayer in $renderLayers)
+//		{
+//			if (`getAttr ($renderLayer + ".renderable")`)
+//			{
+//				string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+//				string $currentRenderer = `getAttr $attr`;
+//
+//				if ($currentRenderer != $renderer)
+//				{
+//					if ($renderer == "")
+//					{
+//						$renderer = $currentRenderer;
+//					}
+//					else
+//					{
+//						$renderer = "file";
+//						break;
+//					}
+//				}
+//			}
+//		}
+//		if ($renderer == "")
+//		{
+//			$renderer = "file";
+//		}
+//	}
+	else if (`match "shave3dl" (tolower($sceneName))` != "")
+	{
+		$renderer = "3Delight_shave";
+	}
+	else if (`match "3dl" (tolower($sceneName))` != "")
+	{
+		$renderer = "3Delight";
+	}
+
+	return $renderer;
+}
+
+global proc zwMusterCheckinSetStartFrame(string $node, int $startFrame)
+{
+	if (`getAttr ($node + ".startFrame")` != $startFrame)
+	{
+		zwSetAttrInt ($node + ".startFrame") $startFrame;
+	}
+	if (`getAttr ($node + ".startTime")` != $startFrame)
+	{
+		zwSetAttrInt ($node + ".startTime") $startFrame;
+	}
+}
+
+global proc zwSetHairSyatemStartFrame()
+{
+	string $buf[];
+
+	string $defaultRenderGlobals[] = `ls -type renderGlobals "defaultRenderGlobals*"`;
+	int $startFrame = `getAttr ($defaultRenderGlobals[0] + ".startFrame")` - 1;
+
+	$buf = `ls -type "hairSystem"`;
+	for ($node in $buf)
+	{
+		zwMusterCheckinSetStartFrame($node, $startFrame);
+	}
+
+	$buf = `ls -type "fluidShape"`;
+	for ($node in $buf)
+	{
+		zwMusterCheckinSetStartFrame($node, $startFrame);
+	}
+}
+
+global proc zwCheckCache()
+{
+	string $project = zwGetProject("");
+
+	string $hairSystems[] = `ls -type "hairSystem" "*_CONTROLLER*" "*:*_CONTROLLER*"`;
+	for ($hairSystem in $hairSystems)
+	{
+		string $parent[] = `listRelatives -fullPath -parent $hairSystem`;
+		deleteIfNotReferenced $parent[0];
+	}
+
+	string $str = "";
+	string $buf[] = `ls -type diskCache`;
+	for ($diskCache in $buf)
+	{
+		int $simulation = false;
+		string $hairSystems[] =  `listConnections ($diskCache + ".diskCache")`;
+		for ($hairSystem in $hairSystems)
+		{
+			if (`objExists ($hairSystem + ".simulationMethod")`)
+			{
+				if (`getAttr ($hairSystem + ".simulationMethod")` > 1)
+				{
+					$simulation = true;
+				}
+			}
+		}
+		if ($simulation)
+		{
+			string $cacheName = `getAttr ($diskCache + ".cacheName")`;
+		//	$cacheName = `optionVar -query musterCheckinProject` + "\\data\\" + `match "[^/\\]+$" $cacheName`;
+			string $url;
+		//	if (zwIsRainbowProject($project))
+		//	{
+		//		$url = `match "[/\\]data[/\\].*" $cacheName`;
+		//	}
+		//	else
+		//	{
+				$url = "\\data\\" + `match "[^/\\]+$" $cacheName`;
+		//	}
+			$cacheName = `optionVar -query musterCheckinProject` + $url;
+			$cacheName = `substituteAllString $cacheName "/" "\\"`;
+			if (!`filetest -f $cacheName`)
+			{
+				$str += $diskCache + "\t" + $cacheName + "\n";
+			}
+		}
+	}
+	if ($str != "")
+	{
+		error ("Could not find the following caches:\n" + $str);
+	}
+}
+
+global proc string zwMusterCheckinGetLayers()
+{
+	string $str = "";
+
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for ($renderLayer in $renderLayers)
+	{
+		if (`getAttr ($renderLayer + ".renderable")`)
+		{
+			if (`match ":" $renderLayer` != "")
+			{
+				error "渲染层的名字不能带有冒号(:)";
+			}
+			if ($str != "")
+			{
+				$str += ", ";
+			}
+			$str += $renderLayer;
+		}
+	}
+
+	if ($str == "")
+	{
+		string $sceneName = `file -query -sceneName -shortName`;
+		string $project = zwMusterGetProject($sceneName);
+		string $renderer = `optionVar -query "musterCheckinRenderer"`;
+		if (!((zwIsRainbowProject($project) && `gmatch (tolower($sceneName)) "*hair*"` && zwAboutVersion() == "8.5") || `match "3Delight" $renderer` != "") 
+		    && match("^[hH][fF]_.*_animation_",$sceneName) == "")
+		{
+			error "没有渲染层";
+		}
+		$str = "0";
+	}
+
+	return ("layer: " + $str);
+}
+
+global proc string zwMusterCheckinGetJobName(string $layer)
+{
+	string $jobName = `optionVar -query musterCheckinJob`;
+
+	int $arnold = false;
+	string $defaultRenderGlobals[] = `ls -type "renderGlobals" "defaultRenderGlobals*"`;
+
+	if ($layer == "")
+	{
+		string $renderLayers[];
+		clear $renderLayers;
+		string $renderer = `optionVar -query "musterCheckinRenderer"`;
+		if (`match "3Delight" $renderer` != "")
+		{
+			string $plugin = "3delight_for_maya" + zwAboutVersion();
+			if (`pluginInfo -query -loaded $plugin`)
+			{
+				$renderLayers = `ls -type "delightRenderPass"`;
+			}
+			for ($renderLayer in $renderLayers)
+			{
+			//	if (`getAttr ($renderLayer + ".renderable")`)
+				{
+					if ($layer != "")
+					{
+						$layer += ",";
+					}
+					$layer += $renderLayer;
+				}
+			}
+		}
+		else
+		{
+			$renderLayers = `listConnections "renderLayerManager.renderLayerId"`;
+			for ($renderLayer in $renderLayers)
+			{
+				if (`getAttr ($renderLayer + ".renderable")`)
+				{
+					if ($layer != "")
+					{
+						$layer += ",";
+					}
+					$layer += $renderLayer;
+
+					if (!$arnold)
+					{
+						string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+						string $currentRenderer = `getAttr $attr`;
+						if ($currentRenderer == "arnold")
+						{
+							$arnold = true;
+						}
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		string $attr = zwGetOverrideAttr($layer, $defaultRenderGlobals[0] + ".currentRenderer");
+		string $currentRenderer = `getAttr $attr`;
+		if ($currentRenderer == "arnold")
+		{
+			$arnold = true;
+		}
+	}
+	if ($arnold)
+	{
+		$jobName = `substitute "_lr_" $jobName "_a_lr_"`;
+	}
+	if ($layer != "")
+	{
+		$jobName += "(" + $layer + ")";
+	}
+
+	return $jobName;
+}
+
+global proc zwMusterCheckinSetMRfilter()
+{
+	string $attrs[] = {"filterWidth", "filterHeight"};
+
+	string $defaultRenderGlobals[] = `ls -type "renderGlobals" "defaultRenderGlobals*"`;
+
+	string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for ($renderLayer in $renderLayers)
+	{
+		if (`getAttr ($renderLayer + ".renderable")`)
+		{
+			string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+			string $currentRenderer = `getAttr $attr`;
+			if ($currentRenderer == "mentalRay")
+			{
+			//	$attr = zwGetOverrideAttr($renderLayer, "miDefaultOptions.filter");
+			//	int $filter = `getAttr $attr`;
+
+				int $i;
+				for ($i=0; $i<size($attrs); $i++)
+				{
+					$attr = zwGetOverrideAttr($renderLayer, "miDefaultOptions." + $attrs[$i]);
+					if (`getAttr $attr` != 1)
+					{
+						if (`editRenderLayerGlobals -query -currentRenderLayer` != $renderLayer)
+						{
+							editRenderLayerGlobals -currentRenderLayer $renderLayer;
+						}
+
+						int $lock = `getAttr -lock ("miDefaultOptions." + $attrs[$i])`;
+						if ($lock)
+						{
+							setAttr -lock false ("miDefaultOptions." + $attrs[$i]);
+						}
+					//	evalEcho ("setAttr \"" + $attr + "\" 1");
+						evalEcho ("setAttr \"miDefaultOptions." + $attrs[$i] + "\" 1");
+						if ($lock)
+						{
+							setAttr -lock true ("miDefaultOptions." + $attrs[$i]);
+						}
+					}
+				}
+			}
+		}
+	}
+
+
+	if (`editRenderLayerGlobals -query -currentRenderLayer` != $currentRenderLayer)
+	{
+		editRenderLayerGlobals -currentRenderLayer $currentRenderLayer;
+	}
+}
+
+global proc zwMusterCheckinFinalGather()
+{
+	string $defaultRenderGlobals[] = `ls -type "renderGlobals" "defaultRenderGlobals*"`;
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for ($renderLayer in $renderLayers)
+	{
+		if (`getAttr ($renderLayer + ".renderable")`)
+		{
+			string $attr = zwGetOverrideAttr($renderLayer, $defaultRenderGlobals[0] + ".currentRenderer");
+			if (`getAttr $attr` == "mentalRay")
+			{
+				$attr = zwGetOverrideAttr($renderLayer, "miDefaultOptions.finalGather");
+				if (`getAttr $attr`)
+				{
+					string $attrFilename = zwGetOverrideAttr($renderLayer, "miDefaultOptions.finalGatherFilename");
+					string $finalGatherFilename = `getAttr $attrFilename`;
+					string $attrRebuild = zwGetOverrideAttr($renderLayer, "miDefaultOptions.finalGatherRebuild");
+					int $finalGatherRebuild = `getAttr $attrRebuild`;
+					if ($finalGatherRebuild == 1)
+					{
+					//	zwSetAttrInt($attrRebuild, 1);
+						if ($finalGatherFilename != "")
+						{
+							error "Final Gathering. Rebuild为On的时候，Final Gather File应该设为空";
+						}
+					}
+					else
+					{
+						if (!`filetest -f $finalGatherFilename`)
+						{
+						//	error "Final Gather File 不存在";
+							error "Final Gathering. Rebuild为Off的时候，Final Gather File应该为Netrender工程目录上面的图片";
+						}
+						else
+						{
+							string $unc = `idmtFile -fullPath $finalGatherFilename`;
+							if (`match ":" $unc` != "")
+							{
+							//	error "Final Gather File 不能指向本机";
+								error "Final Gathering. Rebuild为Off的时候，Final Gather File应该为Netrender工程目录上面的图片";
+							}
+							else
+							{
+								string $str = substituteAllString($finalGatherFilename, "\\", "/");
+								$unc = substituteAllString($unc, "\\", "/");
+								if ($unc != $str)
+								{
+									setAttr -type "string" $attrFilename $unc;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc Monsubmit()
+{
+	string $sceneName = `file -query -sceneName`;
+	$sceneName = `match "[^/\\@]+$" $sceneName`;
+	string $project = zwMusterGetProject("");
+
+	if (!`zwMusterIsBatch`)
+	{
+		MusterCheckinCallback();
+	}
+
+	string $buf[];
+	if ($project == "Strawberry")
+	{
+		string $references[] = `file -query -reference -shortName -withoutCopyNumber`;
+		string $argv = $sceneName + "|lighting|";
+		for ($i=0; $i<size($references); $i++)
+		{
+			if ($i != 0)
+			{
+				$argv += ",";
+			}
+			$argv += $references[$i];
+		}
+		string $result = `idmtService "AssetFileSerInAnim_GetLockState" $argv`;
+		if (`match "^[1-9]+" $result` != "")
+		{
+			string $str = "由于以下文件被锁定修改中，不能进行网络渲染";
+			tokenize $result "|" $buf;
+			for ($i=1; $i<size($buf); $i+=3)
+			{
+				$str += "\n" + $buf[$i] + ", " + $buf[$i+1] + ", " + $buf[$i+2];
+			}
+			error $str;
+		}
+	}
+
+	string $message = "";
+	int $messageId = 0;
+
+	///add by wanshoulong 11/12/2013   VV项目修正贴图为file-cluset路径
+	if ($project == "VickyTheViking")
+	{
+		print $project;
+		source slCGReplaceTexturePath.mel;slCGReplaceServicePath("Z:");
+	}
+
+
+
+
+// 20100705
+// wangzhenxing(王振兴) 09:39:53
+// 帅哥，可不可以把最近任务名里包含env，occ，hair的任务提交时全部设置为1帧一个任务包， -pk 为1？
+// 还有就是当任务包含超过4层时，弹出一个提示信息，不准他们这么提交。
+// 因为现在任务太多了，他们随便设置，任务好多都渲不了
+// wangzhenxing(王振兴) 2010-07-05 10:45:42
+// 帅哥，winx说IDP文件大多都是很多层，idp文件提交时不限制层数，可以吗？
+// 麻烦了，不好意思
+// 20100705
+// wangzhenxing(王振兴-- 各位亲,如对网渲有疑问,请随时给我发消息,谢谢!) 10:01:05
+// hi，仲维哥，我又来麻烦你了，不好意思。
+// 能不能帮忙设置下就是文件提交时，只要包含超过4层渲染层，哪怕只设置渲染其中一层。也提醒他们拆分后再提交。因为gt有的人一个文件包含10层，提交时设置了一层一个任务提交，这样也提交成功了，但是渲染太慢了。
+//	if (!`optionVar -query "musterCheckinLayer"` && `match "idp" (tolower($sceneName))` == "")
+//	{
+//		int $num = 0;
+//		string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+//		for ($renderLayer in $renderLayers)
+//		{
+//			if (`getAttr ($renderLayer + ".renderable")`)
+//			{
+//				$num ++;
+//			}
+//		}
+//		if ($num > 4)
+//		{
+//			$messageId ++;
+//			$message += $messageId + "）不能包含多于4个可渲染层\n\n";
+//		}
+//	}
+	if (!($project == "MayaTheBee" || ($project == "ChangBaiShan" || $project == "EarthQuake")))  //mayathebee只有一个分层文件 wanshoulong
+	{
+		string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+		if (size($renderLayers) > 5)
+		{
+			$messageId ++;
+			$message += $messageId + "）不能包含多于4个渲染层，请拆分后再提交\n\n";
+		}
+	}
+
+	if ($project == "ROMA" && `match "_veg" $sceneName` != "")
+	{
+		int $CheckUseRayTraceShadows = `python "idmt.maya.Muster.CheckUseRayTraceShadows()"`;
+		if (!$CheckUseRayTraceShadows)
+		{
+			$messageId ++;
+			$message += $messageId + "）勾选了Use Ray Trace Shadows，应该勾选Use Depth Map Shadows，详情请查看Script Editor\n\n";
+		}
+	}
+//GT项目添加对特定角色缓存是否关闭进行检查并关闭 添加人：李锐
+
+if ($project == "GummiTarzan")
+	{
+                        source "//file-cluster/GDC/Resource/Support/Maya/projects/JT/HbCloseClothAndHair.mel" ;
+                        HbCloseClothAndHair;
+        }
+
+//////////////////////////////////////////////////////////////////////////
+
+// 20150413
+// wangzhenxing(王振兴-诚挚为您服务~请直接说重点) 14:44:59
+// hi 仲维哥，请帮忙把nj提交任务时的超过500M的提醒，暂时关闭吧，或者可以让他们点下确定再提交。
+// nj2016现在制作流程是把参考全部导入，很多文件超过了这个大小限制
+//	if ($project == "Ninjago")
+//	{
+//		string $path = `file -query -sceneName`;
+//		int $size = `idmtFile -size $path`;
+//		if ($size > 500000000 && `gmatch $sceneName "*nj_E0260*"`!=1)
+//		{
+//			$messageId ++;
+//			$message += $messageId + "）文件大于 500 MB\n\n";
+//		}
+//	}
+
+	if ($message != "")
+	{
+		$message = "注意！请修正以下错误：\n\n" + $message;
+		print $message;
+		if (!`zwMusterIsBatch`)
+		{
+			confirmDialog -title "提交网络渲染" -message $message -button "OK";
+			ScriptEditor;
+		}
+		return;
+	}
+
+	// 鸡毛蒜皮也要检查
+	$message = "";
+	$messageId = 0;
+	if ($project == "")
+	{
+		$messageId ++;
+		$message += $messageId + "）" + `match "^[0-9a-zA-Z]+" $sceneName` + " 项目不存在，确定文件命名正确吗？\n\n";
+	}
+
+	int $musterCheckinStart = `optionVar -query musterCheckinStart`;
+	int $musterCheckinEnd = `optionVar -query musterCheckinEnd`;
+	if ($musterCheckinStart == 1 && $musterCheckinEnd == 10)
+	{
+		$messageId ++;
+		$message += $messageId + "）确定是渲染 1-10 帧吗？\n\n";
+	}
+
+	int $count = `python "idmt.maya.Muster.GetRenderableCameraCount()"`;
+	if ($count > 2)
+	{
+		error "不能有多于两个渲染摄像机";
+	}
+	if ($project == "ROMA")
+	{
+		zwSetAttrInt "defaultRenderGlobals.extensionPadding" 4;
+
+		if (`match "^lighting_" $sceneName` != "")
+		{
+			string $RibBase = zwGetPath("RibBase", "");
+			zwSetAttrStr "MayaManNugget.RibBase" $RibBase;
+		}
+
+		int $CheckLodGroup = `python "idmt.maya.Muster.CheckLodGroup()"`;
+		if (!$CheckLodGroup)
+		{
+			return;
+		}
+
+		if (`match "_env" $sceneName` != "" || `match "_veg" $sceneName` != "")
+		{
+			int $CheckShadowMap = `python "idmt.maya.Muster.CheckShadowMap()"`;
+			if (!$CheckShadowMap)
+			{
+				$messageId ++;
+				$message += $messageId + "）需要预先生成Shadow Map，详情请查看Script Editor\n\n";
+			}
+		}
+	}
+
+	string $renderer = `optionVar -query "musterCheckinRenderer"`;
+	int $CheckTexture = `python ("idmt.maya.Muster.CheckTexture('" + $renderer + "')")`;
+
+////	Ninjago项目不检查贴图路径中的空格
+//	if ($project == "Ninjago" )	$CheckTexture=1;
+
+	if (!$CheckTexture)
+	{
+		$messageId ++;
+		$message += $messageId + "）贴图问题 - 可能导致不能网渲，详情请查看Script Editor\n\n";
+	}
+
+	if (!zwIsRainbowProject($project))
+	{
+		zwImportModule("idmt.maya.cache", true);
+		int $CheckUNC = `python "idmt.maya.cache.CheckUNC()"`;
+		if (!$CheckUNC)
+		{
+			$messageId ++;
+			$message += $messageId + "）Cache 路径问题，详情请查看Script Editor\n\n";
+		}
+	}
+
+	if ($message != "")
+	{
+		if (!`zwMusterIsBatch`)
+		{
+			$message = "注意！请确认以下问题：\n\n" + $message;
+			print $message;
+			$message += "点击 \"Continue\" 继续提交任务，\"Cancel\" 取消提交任务";
+			string $rs = `confirmDialog -title "提交网络渲染" -message $message -button "Continue" -button "Cancel" -defaultButton "Cancel" -dismissString "Cancel"`;
+			if ($rs == "Cancel")
+			{
+				ScriptEditor;
+				return;
+			}
+		}
+	}
+
+// 建立工程文件夹
+	string $source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/8.5";
+	string $dest = `optionVar -query musterCheckinProject`;
+	zwXcopyEx $source $dest false false;
+
+//	// WinxClub 项目检查AO 层
+//	if (!zwCheckAOlayer())
+//	{
+//		error "AO 层的渲染输出格式应该设为：TIFF uncompressed (.tif)；其他层：Maya16 IFF (iff)";
+//	}
+
+//	string $renderer = zwMusterCheckinGetRenderer();
+//	if ($renderer == "")
+//	{
+//		return;
+//	}
+//	optionVar -stringValue "musterCheckinRenderer" $renderer;
+	if (zwIsRainbowProject($project))	// mentalRay: 16bit
+	{
+		zwSetAttrInt "miDefaultFramebuffer.datatype" 3;
+	}
+
+	if (zwMusterGetProject("") == "BenAndIzzy")
+	{
+		zwMusterCheckinSetMRfilter;	// 设置mental ray 的Multi-pixel Filtering
+	}
+	zwMusterCheckinFinalGather;	// if (miDefaultOptions.finalGatherFilename == "") { miDefaultOptions.finalGatherRebuild = 1; }
+
+	// setAttr hairSyatem.startFrame 1000;
+//	zwSetHairSyatemStartFrame;	// 黄仲维20100621屏蔽，似乎有问题，例如defaultRenderGlobals.startFrame = 1050而不是1001时
+
+	// 检查灯光场景
+	zjFixLightingOptions();
+
+	// open the output window
+	Moutputwindow();
+
+	// 1. Optimize Scene
+	Moutput("Step 1: Optimize\nWaiting to Optimize Current Scene.....\n");
+
+
+	if (zwIsRainbowProject($project))
+	{
+		zzjCheckSmoothLevel;
+///*
+////modify by zzj 2009.02.16
+//		eval "source \"zwSetImageFilePrefix.mel\"";
+//		eval "zwSetImageFilePrefix";
+//*/
+		python "try:\n\treload(idmt.maya.roma)\nexcept:\n\timport idmt.maya.roma";
+		python "idmt.maya.roma.FixedReference()";
+	}
+
+	if (`optionVar -query "musterCheckinOptimize"`)
+	{
+		cleanUpScene 0;
+	}
+
+	// for debug
+	string $expression = "render_debug_exp";
+	if (`objExists $expression`)
+	{
+		delete $expression;
+	}
+//	if (!`gmatch $sceneName "br_*"`)
+//	{
+//		expression -name $expression -string "if (`about -batch`)\n{\n\tprint(\"IDMT Debug Info: Current Frame: --->  \"  + frame + \"\\t@\" + `about -currentTime` + \"\\n\");\n}";
+//	}
+
+	int $ids[] = zwMusterQueryJobs();
+	if (size($ids) > 0)
+	{
+		string $confirmDialog = "Yes";
+		if (!`zwMusterIsBatch`)
+		{
+			$confirmDialog = `confirmDialog -title "RenderFarm Connect" -message "服务器上已有相同的任务，重复提交将会删除旧的任务，确定提交吗？" -button "Yes" -button "No" -defaultButton "Yes" -cancelButton "No" -dismissString "No"`;
+		}
+		if ($confirmDialog == "Yes")
+		{
+			zwMusterDeleteJobs($ids);
+		}
+		else
+		{
+			return;
+		}
+	}
+
+	// 删除灯光摄像机
+	string $lights[] = `ls -long -lights`;
+	string $cameras[] = `ls -cameras`;
+	for ($camera in $cameras)
+	{
+
+	//	if (`objExists ($camera+".farClipPlane")` && !`getAttr -l ($camera+".farClipPlane")`)
+	//		setAttr  ($camera+".farClipPlane") 100000.00;
+
+		string $parent[] = `listRelatives -fullPath -parent $camera`;
+		string $children[] = `listRelatives -fullPath -children $parent[0]`;
+		if (size($children) == 2)
+		{
+			for ($obj in $children)
+			{
+				if (`objExists $obj`)
+				{
+					if (`nodeType $obj` != "camera" && `nodeType $obj` != "transform")
+					{
+						for ($light in $lights)
+						{
+							if ($light == $obj)
+							{
+								deleteIfNotReferenced $camera;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//set renderglobal
+	source zwSceneOpenedScriptJob.mel;
+	zwWinxSetRenderable();
+
+	zjRenderSetting();
+	slFurRenderSetting();
+
+
+
+ 	if (`gmatch $sceneName "br_*"`)
+		hjfursetpath();
+	// Check texture link to iff
+	zwIff2Bot "bot2Iff";
+
+	// 1+. Check texture link
+	//update texture list
+
+	if (!`zwMusterIsBatch`)
+	{
+		// clear the maplistCTL
+		textScrollList -e -removeAll maplistCTL;
+	}
+
+	string $texturelist[] = `ls -type "file"`;
+	string $tmptex;
+	string $namelist[];
+	int $index = 1;
+
+	for($tmptex in $texturelist)
+	{
+		string $soustr = `getAttr ($tmptex + ".fileTextureName")`;
+
+		// Rename it at the same time;
+		string $startchar = `substring $soustr 1 2`;
+
+		$startchar = `toupper $startchar`;
+
+		string $restr = $soustr;
+
+		if($startchar == "Z:" && `optionVar -query musterCheckinChangeMap`)
+		{
+			int $size = size($soustr);
+			$restr = "//file-cluster/GDC" + `substring $soustr 3 $size`;
+			setAttr -type "string" ($tmptex + ".fileTextureName") $restr;
+		}
+
+	$namelist[$index] = $restr;
+	$index ++;
+	}
+
+	$namelist = stringArrayRemoveDuplicates($namelist);
+
+	if (!`zwMusterIsBatch`)
+	{
+		for($tmptex in $namelist)
+		{
+			textScrollList -e -append $tmptex maplistCTL;
+		}
+	}
+
+	Moutput("Optimize Done!  (See Script Editor For Details)\n\n");
+
+	// 参考不能指向Z:
+	if ( $project != "MayaTheBee") // 客户的映射路径 wanshoulong 3/21/2012
+	{
+		string $references[] = `file -query -reference`;
+		for ($reference in $references)
+		{
+			if (`match "^.:" $reference` != "" && `match "^L" (toupper($reference))` == "")
+			{
+				string $message = "终止提交！！！\n\n场景中包含本地或不正确的参考文件路径，可能会导致渲染出错。\n\n" + $reference;
+				if (`zwMusterIsBatch`)
+				{
+					confirmDialog -title "出错啦！" -message $message -button "OK";
+					deleteUI connectorGUI;
+					deleteUI MoutputUI;
+				}
+				error $message;
+			}
+		}
+	}
+
+	// 1.5.   按bratz 的项目名称 有br 加 hair 命名的文件 会按hair systems cache 设置来优化场景 没有hair命名的文件 hairsystems 都会被删除
+		if ($project != "Strawberry")
+		{
+		hjhairsystem;//优化头发程序 检查动力解算头发
+		}
+	
+
+	string $jcurfilescene = `file -q -sceneName -shortName`;
+//	if (zwIsRainbowProject($project) || `gmatch (tolower($jcurfilescene)) "*occ*"`)
+//	{
+//		string $jayenhairsystem[] = `ls -type hairSystem`;
+//		if (size($jayenhairsystem))
+//		{
+//			string $retun = "是";
+//			if (!`zwMusterIsBatch`)
+//			{
+//				$retun = `confirmDialog -title "警告" -message "是否删除所有头发系统？" -button "是" -button "否" -ds "是" -db "是"`;
+//			}
+//			if($retun == "是")
+//			{
+//				for($i=0; $i<size($jayenhairsystem); $i++)
+//					deleteIfNotReferenced $jayenhairsystem[$i];
+//			}
+//		}
+//	}
+	if (`optionVar -query musterCheckinDelHair`)
+	{
+		string $hairSystems[] = `ls -type "hairSystem"`;
+		for ($hairSystem in $hairSystems)
+		{
+			deleteIfNotReferenced $hairSystem;
+		}
+	}
+
+// 黄仲维20150408删，没什么用吧？
+//	if (!`zwMusterIsBatch`)
+//	{
+//		if(`pluginInfo -q -l shaveNode.mll`)
+//		{
+//			string $jayenhairsystem[] = `ls -type shaveHair`;
+//			if ((!(`gmatch (tolower($jcurfilescene)) "*shave*"` || `gmatch (tolower($jcurfilescene)) "*hair*"`)) && size($jayenhairsystem))
+//			{
+//				string $retun = `confirmDialog -title "警告" -message "是否删除所有shave节点？(请检查文件命名)" -button "是" -button "否" -ds "是" -db "是"`;
+//				if($retun == "是")
+//				{
+//					for($i=0; $i<size($jayenhairsystem); $i++)
+//						deleteIfNotReferenced $jayenhairsystem[$i];
+//				}
+//			}
+//		}
+//	}
+
+	if (`gmatch (tolower($jcurfilescene)) "*hair*"`)
+	{
+		setAttr "defaultRenderGlobals.oversamplePaintEffects" 1;
+		setAttr "defaultRenderGlobals.oversamplePfxPostFilter" 1;
+		print ("\nPaint Effect Rendering Option Has Been Set!\n");
+	}
+
+// DOD 项目
+	if (`gmatch $jcurfilescene "do_*"`)
+	{
+		// set renderGlobal 2006.8.11
+		setAttr "defaultRenderQuality.edgeAntiAliasing"		0;
+		setAttr "defaultRenderQuality.shadingSamples"		2;
+		setAttr "defaultRenderQuality.maxShadingSamples"	8;
+		setAttr "defaultRenderQuality.useMultiPixelFilter"	1;
+		setAttr "defaultRenderQuality.pixelFilterType"		2;
+		setAttr "defaultRenderQuality.redThreshold"		0.4;
+		setAttr "defaultRenderQuality.greenThreshold"		0.3;
+		setAttr "defaultRenderQuality.blueThreshold"		0.6;
+		zjPfxOn;
+	}
+
+	if (`match "^diveollydive[0-9]+$" (tolower($project))` != "")
+	{
+		setState "iksolver" off;
+		setState "iksolver" on;
+	}
+
+//LT
+	if (`gmatch $jcurfilescene "lt_*"`)
+		zjPfxOn;
+
+
+
+// -----------------------------------------------------------------------------------------------------------------------------
+// processing mayaman netrender setting up...zhaozhongjie
+// update: 2009/03/03
+	string $dispatcher = `optionVar -query musterCheckinServer`;
+	string $pool = `optionVar -query musterCheckinPool`;
+
+
+
+//	int $PRender = zwIsMayaMan();
+
+	int $PRender = ($renderer == "MayaMan");
+	if ($PRender)// && zwAboutVersion() == "8.5"
+	{
+		//	string $mmhair[] = `ls -type hairSystem`;
+		//	for ($item in $mmhair)
+		//	setAttr ($item + ".simulationMethod") 3;
+
+		string $projpath = `optionVar -query musterCheckinProject`;
+		Moutput("Processing MayaMan Render Settings......\n\n");
+		string $shortname = `substring $sceneName 1 (size($sceneName)-3)`;
+		string $version = zwAboutVersion();
+		string $MMribdir = ("D:\\MAYAMAN\\RIB\\" + `substitute "[.]" $version ""` + "\\"+$shortname);
+		setAttr "MayaManNugget.Renderer" -type "string" "Pixar - prman 13.5";
+	//	setAttr -type "string" MayaManNugget.RenderDisplayDriver "mayaiff";
+	//	setAttr "MayaManNugget.DisplayChannels" 0;
+	//	setAttr -type "string" MayaManNugget.DisplayExtension "iff";
+		setAttr "MayaManNugget.QuanOne" 65535;
+		setAttr "MayaManNugget.QuanMax" 65535;
+
+		setAttr "MayaManNugget.NumCpus" 1;
+		setAttr "MayaManNugget.NumProcs" 1;
+		setAttr "MayaManNugget.NumRenders" 1;
+		if ($dispatcher == "192.168.3.185" && $pool == "F1")
+		{
+			setAttr "MayaManNugget.NumCpus" 1;
+		}
+
+		if (`gmatch (tolower($sceneName)) "*rib*"`||`gmatch (tolower($sceneName)) "*hig_hair*"`)
+		{
+			string $MMribbase = $shortname;
+			setAttr -type "string" MayaManNugget.RibBase $MMribbase;
+			setAttr -type "string" MayaManNugget.RibDir $MMribdir;
+//	add by zzj 2009.3.1@@@set MAYAMAN output path
+			setAttr -type "string" MayaManNugget.ImageOutputDir `optionVar -query "musterCheckinOut"`;
+		//	setAttr "MayaManNugget.ExternalTextureCache" 2;
+			setAttr MayaManNugget.GenerateRibOnly 0;
+		}
+		else
+		{
+			setAttr -type "string" MayaManNugget.RibDir $MMribdir;
+//	add by zzj 2009.3.1@@@set MAYAMAN output path
+		//	setAttr -type "string" MayaManNugget.ImageOutputDir `optionVar -query "musterCheckinOut"`;
+		//	setAttr "MayaManNugget.ExternalTextureCache" 2;
+			if (`pluginInfo -query -loaded "Fur.mll"`)
+			{
+		//		string $fd[] = `ls -type FurDescription`;
+		//		for ($item in $fd)
+		//		{
+		//			setAttr ($item + ".ReuseWigUVN") 1;
+		//			setAttr -type "string" ($item + ".WigUVNDir") ($projpath + "\\mayaman\\" + $shortname);
+		//		}
+			}
+		}
+	}
+
+// ------------------------------------------------------------------------------------------------------------------------------
+
+	//add by WansHoulOng 2008-11-11-----------------------------------------------------------------
+	//strawberry项目要求非hair文件不需要弹出copy cache窗口，他们会规范命名
+	int $skhair = 1;
+	if ($project  == "Strawberry" && `match "hair_" $sceneName` == "")
+	{
+		$skhair = 0;
+	}
+	//-------------------------------------------------------------------------------------------------------------
+
+	string $conres = "No";
+//	if (!`zwMusterIsBatch` )//&& $skhair)
+//	{
+//		$conres = `confirmDialog -title "Warning" -message ("Do you want to copy hairs cache?")
+//					-button "Yes"
+//					-button "No"
+//					-defaultButton "No"
+//					-dismissString "No"`;
+//	}
+	if (`optionVar -query "musterCheckinCopyCache"`)
+	{
+		$conres = "Yes";
+	}
+	if($conres == "No" && `gmatch $jcurfilescene "lt_*"`)	// by huangzhongwei, 20070618
+	{
+		string $hairSystems[] = `ls -type "hairSystem"`;
+		for ($hairSystem in $hairSystems)
+		{
+			if (`getAttr ($hairSystem + ".simulationMethod")` != 1)
+			{
+				evalEcho ("setAttr \"" + $hairSystem + ".simulationMethod\" 1");
+			}
+		}
+	}
+
+
+	if (`pluginInfo -query -loaded "Mayatomr.mll"`)
+	{
+		string $ment[] = `ls -type mentalrayTexture`;
+		if (size($ment) > 0)
+		{
+			string $SSS_Tex = `optionVar -query musterCheckinProject` + "\\renderData\\mentalray\\lightMap";
+			if (!`filetest -d $SSS_Tex`)
+			{
+				sysFile -makeDir $SSS_Tex;
+			}
+			$SSS_Tex = $SSS_Tex + "\\" + $sceneName + ".iff";
+			if (!`filetest -f $SSS_Tex`)
+			{
+				int $fileId = `fopen $SSS_Tex "w"`;
+				fclose $fileId;
+			}
+			for ($temp in $ment )
+			{
+				setAttr -type "string" ($temp + ".fileTextureName") $SSS_Tex;
+			}
+		}
+		//根据渲染要求 如果文件使用FG 光子保存模式为Freez 光子图将提交到网络渲染本机机器下面
+
+
+	}
+
+//////////////////////////
+////modified by tazz , to submit animation for checking
+//	if (`gmatch $sceneName "animation_*_DYN*.mb"`)
+//	{
+///*		string $hs[] = `ls "*:*HAIR_GROUP*"`;
+//		for ($item in $hs)
+//		{
+//			if (`objExists ($item + ".visibility")`)
+//				setAttr ($item + ".visibility") 0;
+//		}
+//		string $hs[] = `ls -type hairSystem`;
+//		for ($item in $hs)
+//		{
+//			if (`isConnected time1.outTime ($item + ".currentTime")`)
+//				disconnectAttr time1.outTime ($item + ".currentTime");
+//			if (`isConnected time1.outTime ($item + ".currentTime")`)
+//				disconnectAttr time1.outTime ($item + ".currentTime");
+//
+//			string $hs[] = `ls -type diskCache`;
+//			delete $hs;
+//		}
+//		string $hs[] = `ls -type follicle`;
+//		for ($item in $hs)
+//		{
+//			setAttr ($item + ".simulationMethod") 0;
+//		}
+//*/
+//		string $references[] = `file -query -reference`;
+//		for ($reference in $references)
+//		{
+//			if (`match "/characters/" $reference` != "")
+//			{
+//				catch(`file -importReference $reference`);
+//			}
+//		}
+//		string $hairSystems[] = `ls -type "hairSystem"`;
+//		for ($hairSystem in $hairSystems)
+//		{
+//			deleteIfNotReferenced $hairSystem;
+//		}
+//
+//		global int $zwMusterDynSmooth;
+//		if ($zwMusterDynSmooth == 0)
+//		{
+//			$zwMusterDynSmooth = 2;
+//		}
+//
+//		zjRemoveNamespace;
+//		string $MSHs[] = `ls -noIntermediate -type "mesh" "MSH_*"`;
+//		string $renderLayer = `createRenderLayer -name "check" -number 1 -noRecurse $MSHs`;
+//		for ($MSH in $MSHs)
+//		{
+//			polySmooth  -mth 0 -dv $zwMusterDynSmooth -c 1 -kb 0 -ksb 1 -khe 0 -kt 1 -kmb 1 -suv 1 -sl 1 -dpe 1 -ps 0.1 -ro 1 -ch 1 $MSH;
+//		}
+//
+//		string $cameraShapes[] = `ls -long -cameras`;
+//		for ($cameraShape in $cameraShapes)
+//		{
+//			if (`match "|cam_[^|]+|[^|]+$" $cameraShape` != "")
+//			{
+//				string $camera = `substitute "|[^|]+$" $cameraShape ""`;
+//			//	defaultAmbientLight(1, 0.45, 1,1,1, "0", 0,0,0, "1");
+//			//	string $ambientLight[] = `ls -sl`;
+//			//	pointConstraint -offset 0 0 0 -weight 1 $camera $ambientLight[0];
+//				string $light = `directionalLight -intensity 1.2 -rgb 1 0 0 -rotation -32 52 0`;
+//				move -r 16 16 11 ;
+//
+//				string $light1 = `directionalLight -intensity 0.8 -rgb 0 1 0 -rotation -40 -20 40`;
+//				move -r -7 9 9 ;
+//
+//				string $light2 = `pointLight -intensity 0.4 -rgb 0 0 1`;
+//				move 0 5 -14;
+//
+//				string $locator[] = `spaceLocator -p 0 0 0`;
+//				parent $light $light1 $light2 $locator[0];
+//
+//				pointConstraint -offset 0 0 0 -weight 1 $camera $locator[0];
+//
+//				editRenderLayerMembers -noRecurse $renderLayer $camera $locator[0];
+//				break;
+//			}
+//		}
+//
+//		Moutput("Step 2: Save\nSaving Current Scene......\n");
+//		string $source = `file -query - sceneName`;
+//		string $dest = `optionVar -query musterCheckinProject` + "\\scenes\\" + $sceneName;
+//		$dest = `substituteAllString $dest "\\" "/"`;
+//if (!`optionVar -query "musterCheckinSave"`)
+//{
+//		file -rename $dest;
+//		string $saveinfo = `file -f -save -options "v=0;p=17" -type "mayaBinary"`;
+//		file -rename $source;
+//
+//		//  set back post mel to NULL
+//	//	setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+//		Moutput("Result: " + $saveinfo + "\n\n");
+//}
+//		// 4. copy texture and scene file
+//		Moutput("Step 4: Transfering Texture files...\n");
+//
+//		// 5. transfering scene file
+//		zwMusterCopyTextureImage;
+//
+//		Mcustomjob();
+//		return;
+//	}
+
+	// 2 . Save Scene
+
+//	// 20100428黄仲维加，网渲补
+//	if (zwIsRainbowProject($project))
+//	{
+//		eval "source \"//file-cluster/GDC/Resource/Support/Maya/projects/WinxClubII/rnd_wxII_FixBeforeRender.mel\"";
+//		catch(`wxII_FixBeforeRender "online"`);
+//	}
+	// 20110106黄仲维加，网渲补
+	if (zwIsRainbowProject($project))
+	{
+		if (`objExists "MayaManNugget"`)
+		{
+			string $ImageOutputDir = `zwGetPath "ImageOutputDir" ""`;
+			string $pathOld = `getAttr "MayaManNugget.ImageOutputDir"`;
+			$pathOld = `substituteAllString $pathOld "\\" "/"`;
+			string $pathNew = `substitute ".*/footage_" $pathOld ($ImageOutputDir + "/footage_")`;
+			if ($pathOld != $pathNew)
+			{
+				evalEcho("setAttr -type \"string\" \"MayaManNugget.ImageOutputDir\" \"" + $pathNew + "\"");
+			}
+
+			int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+			for ($i=0; $i<$noOfElements; $i++)
+			{
+				string $pathOld = `MayaManInfo -getrawstring "EOPath" $i`;
+				$pathOld = `substituteAllString $pathOld "\\" "/"`;
+				string $pathNew = `substitute ".*/footage_" $pathOld ($ImageOutputDir + "/footage_")`;
+				if ($pathOld != $pathNew)
+				{
+					evalEcho("MayaManSetData -setstring \"EOPath\" \"" + $pathNew + "\" " + $i);
+				}
+			}
+			if (!`about -batch`)
+			{
+				if (`scriptTable -exists chansList`)
+				{
+					mayaManExtraChannelsRefreshList;
+				}
+			}
+		}
+	}
+	zwMusterMayaManUpdateCustomShader;	// 20100607黄仲维加，MayaManCustomShader节点按一下"Init"按钮
+
+	if ($project == "ROMA")
+	{
+		zwMayaManSetData "EODriver" "";	// 去it
+		python "idmt.maya.Muster.texMirrow()";
+		python "idmt.maya.Muster.MayaManTexturePreRenderScript()";
+	}
+
+	if ($project == "DiveOllyDive5")
+	{
+		python "from idmt.maya.ShunLiu_common import csl_VariablePathSwitch";
+		python "reload(csl_VariablePathSwitch)";
+		python "csl_VariablePathSwitch.csl_VariablePathSwitch().csl_VariableSwitch(1,1,1,0)";
+	}
+
+
+
+
+
+
+//	string $conres = "No";
+//	if (!`zwMusterIsBatch`)
+//	{
+//		$conres = `confirmDialog -title "Warning" -message ("Do you want to copy particle cache?")
+//					-button "Yes"
+//					-button "No"
+//					-defaultButton "No"
+//					-dismissString "No"`;
+//	}
+	zwImportModule("idmt.maya.cache", true);
+	python "idmt.maya.cache.ImportDiskCache()";
+	if($conres == "Yes")
+	{
+		Mcopycaches;
+	}
+	else
+	{
+		Moutput("Skip copy caches\n\n");
+	}
+
+//	// 20090211添加
+//	//20090304zzj添加
+//	string $conres = "No";
+//	string $project = zwGetProject("");
+//	if (!`zwMusterIsBatch` && zwIsRainbowProject($project))//&& $skhair)
+//	{
+//		$conres = `confirmDialog -title "Warning" -message ("Do you want to copy GEO cache?")
+//					-button "Yes"
+//					-button "No"
+//					-defaultButton "No"
+//					-dismissString "No"`;
+//	}
+//	if (zwIsRainbowProject($project) && $conres=="Yes")
+//	{
+//		zwMusterCheckinWinxClubIIcacheFile;
+//	}
+
+
+
+
+
+
+
+	Moutput("Step 2: Save\nSaving Current Scene......\n");
+	$source = `file -query - sceneName`;
+	$dest = `optionVar -query musterCheckinProject` + "\\scenes\\" + $sceneName;
+	$dest = `substituteAllString $dest "\\" "/"`;
+
+	int $musterCheckinSave = `optionVar -query "musterCheckinSave"`;
+	if ($musterCheckinSave == 1)
+	{
+		if (`match "^diveollydive[0-9]+$" (tolower($project))` != "")
+		{
+			eval "source \"slCGReplaceTexturePath.mel\"; slCGReplaceServicePath(\"L:\");";
+		}
+		else if ($project == "Strawberry")
+		{
+			eval "source \"slCGReplaceTexturePath.mel\"; slCGReplaceServicePath(\"Z:\");";
+		}
+
+		zwMusterL2FileCluster;
+
+		file -rename $dest;
+		string $type[] = `file -query -type`;
+		int $rs = catch(`file -f -save -type $type[0]`);
+		file -rename $source;
+		if ($rs == 1)
+		{
+			error "不能存盘";
+		}
+	}
+	else if ($musterCheckinSave == 2)
+	{
+		int $rs = `sysFile -copy $dest $source`;
+		if (!$rs)
+		{
+			error "不能复制文件到Netrender";
+		}
+	}
+	else if ($musterCheckinSave == 3)
+	{
+		int $rs = `filetest -f $dest`;
+		if (!$rs)
+		{
+			error "Netrender没有当前文件";
+		}
+	}
+
+	//  set back post mel to NULL
+//	setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+//	Moutput("Result: " + $saveinfo + "\n\n");
+
+	// 4. copy texture and scene file
+	Moutput("Step 4: Transfering Texture files...\n");
+
+	// 5. transfering scene file
+	zwMusterCopyTextureImage;
+
+	// 6.   Copy cache files
+	Moutput("Step 6: Transfering Cache files...\n");
+
+
+
+
+
+
+
+	// 检查cache
+	zwCheckCache;
+
+	// 7.   Send muster custom job
+	Moutput("Step 7: Submit Muster Job...\n");
+	Mcustomjob();
+	Moutput("\n\nJOB SUBBMITTED!\n\n");
+	Moutput("-------------------------------------------------------------------------\n\n");
+	Moutput("NOTE: Please open muster explorer to see if your job's already been submitted!\n");
+	Moutput("      If your job does not appear in the explorer in several seconds,please\n");
+	Moutput("      re-submit your job from the muster explorer.\n");
+	Moutput("      <<  Maybe The job's lost because of the net traffic >> \n\n");
+	Moutput("--------------------------------------------------------------------------\n");
+
+	if (!`zwMusterIsBatch`)
+	{
+		deleteUI connectorGUI;
+	}
+
+	if (`optionVar -query "musterCheckinCheckin"`)
+	{
+		zwMusterCheckinLrLayer;
+	}
+
+	string $mode = zwGetMode($sceneName);
+	if (`match "^vv_[^_]+_[^_]+_[^_]+_fx[_.]" (tolower($sceneName))` != "" || $mode == "effect")
+	{
+		idmtService "FxMusterSubmitTime" $sceneName;
+	}
+}
+
+global proc Moutput(string $newout)
+{
+	if (`zwMusterIsBatch`)
+	{
+		print $newout;
+	}
+	else
+	{
+		scrollField -e -ip 0 -it $newout outputCTL;
+		setFocus outputCTL;
+	}
+}
+
+global proc string zwMusterCopyMapsWinxIIGetSource()
+{
+	string $source = "";
+
+	string $files[] = `ls -type "file"`;
+	for ($file in $files)
+	{
+		string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+		string $projectPath = `workspace -projectPath $fileTextureName`;
+		if (`match "sourceimages/([^/]+/)+[^/]+" $projectPath` == $projectPath && $projectPath != "")
+		{
+			$source = `substitute "/[^/]+$" $projectPath ""`;
+			return $source;
+		}
+	}
+	if ($source == "")
+	{
+		if (`pluginInfo -query -loaded "Fur.mll"`)
+		{
+			string $furs[] = `ls -type "FurDescription"`;
+			for ($fur in $furs)
+			{
+				string $attrs[] = `listAttr -string "*Map" $fur`;
+				for ($attr in $attrs)
+				{
+					string $maps[] = `listConnections -plugs true -connections true ($fur + "." + $attr)`;
+					for ($i=0; $i<size($maps); $i+=2)
+					{
+						string $map = `getAttr $maps[$i]`;
+						string $projectPath = `workspace -projectPath $map`;
+						if (`match "sourceimages/([^/]+/)+[^/]+" $projectPath` == $projectPath && $projectPath != "")
+						{
+							$source = `substitute "/[^/]+$" $projectPath ""`;
+							return $source;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return $source;
+}
+
+global proc zwMusterCopyMapsWinxII()
+{
+	string $source = zwMusterCopyMapsWinxIIGetSource();
+	if ($source == "")
+	{
+		return;
+	}
+
+	string $sourceFolder = `workspace -fullName` + "/" + $source;
+	string $destFolder = `optionVar -query musterCheckinProject` + "/" + $source;
+	if (!`filetest -d $destFolder`)
+	{
+		sysFile -makeDir $destFolder;
+	}
+	zwXcopyEx $sourceFolder $destFolder false false;
+}
+
+global proc zwMusterCopyTextureImage()
+{
+	eval "source zwCopyTextureImage.mel";
+
+	if(!`optionVar -query musterCheckinCopyLocal`)
+	{
+		return;
+	}
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	if (`match "_HIG_hair" $sceneName` != "")
+	{
+		zwMusterCopyMapsWinxII();
+		return;
+	}
+
+	string $project = zwMusterGetProject("");
+	string $sourceimages = `optionVar -query musterCheckinProject` + "\\sourceimages";
+
+	zwCopyTextureImage(3, {"file", "fileTextureName", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+	if (`pluginInfo -query -loaded "Mayatomr"`)
+	{
+		zwCopyTextureImage(3, {"mentalrayTexture", "fileTextureName", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+		zwCopyTextureImage(3, {"mentalrayIblShape", "texture", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+	}
+	zwCopyTextureImage(3, {"imagePlane", "imageName", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+	zwCopyTextureImage(3, {"brush", "imageName", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+	zwCopyTextureImage(3, {"brush", "leafImage", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+	zwCopyTextureImage(3, {"brush", "flowerImage", $sourceimages, "0", "0", "0", "100", $project, "0", "0"});
+}
+
+global proc Mcustomjob()
+{
+	string $project = zwMusterGetProject("");
+
+	Moutput("Job Name:    " + `optionVar -query musterCheckinJob` + "\n");
+
+	string $dispatcher = `optionVar -query musterCheckinServer`;
+	string $pool = `optionVar -query musterCheckinPool`;
+	if (`getenv "OFFICE_LOCATION"` == "shenzhen" && $pool == "2008")
+	{
+		$dispatcher = "192.168.3.181";
+	}
+	Moutput("Dispatcher:    " + $dispatcher + "        Render Pool: " + $pool + "\n");
+
+	string $scene = `optionVar -query musterCheckinProject` + "\\scenes\\";
+	string $name = `file -q -sn`;
+	string $buffer[];
+	int $numTokens = `tokenize $name "//" $buffer`;
+        $scene = $scene + $buffer[$numTokens -1];
+	Moutput("Scene File:    " + $scene + "\n");
+
+	string $projpath = `optionVar -query musterCheckinProject`;
+	string $outpath = $projpath + "\\images";
+	int $startframe = `optionVar -query musterCheckinStart`;
+	int $endframe = `optionVar -query musterCheckinEnd`;
+	float $byframe = `optionVar -query musterCheckinBy`;
+	int $packet = `optionVar -query musterCheckinPacket`;
+	int $priority = `optionVar -query musterCheckinPriority`;
+	if ($dispatcher == "192.168.3.182" && $pool == "LC" && $priority < 95)
+	{
+		$priority = 95;
+	}
+
+	string $renderer = `optionVar -query "musterCheckinRenderer"`;
+     	if ($dispatcher == "192.168.3.185" && $pool == "F1" && $renderer == "file" && $priority == 50)
+	{
+		$priority = 51;
+	}
+
+     	string $outfolder = `optionVar -query "musterCheckinOut"`;
+     	$outfolder = substituteAllString($outfolder,"/","\\");
+
+	int $musterCheckinFramecheck = `optionVar -query "musterCheckinFramecheck"`;
+
+	string $musterpath = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Muster\\MExplorer.exe";
+
+	string $mrtool = zwMusterGetMrtool() + "\\Mrtool.exe";
+	if ($dispatcher == "192.168.3.185")
+	{
+		$mrtool = zwMusterGetMrtool() + "_185\\Mrtool.exe";
+	}
+	else if ($dispatcher == "192.168.3.181")
+	{
+		$mrtool = zwMusterGetMrtool() + "_181\\Mrtool.exe";
+	}
+	else if ($dispatcher == "192.168.3.182")
+	{
+		$mrtool = zwMusterGetMrtool() + "_182\\Mrtool.exe";
+	}
+	else if ($dispatcher == "192.168.168.183")
+	{
+		$mrtool = zwMusterGetMrtool() + "_183\\Mrtool.exe";
+	}
+	string $fullcommand;
+
+	string $sceneName = `file -query -sceneName -shortName`;
+
+	int $max = `python "idmt.maya.Muster.GetMax()"`;
+
+	int $extensionPadding = 4;
+	string $info = "user: " + `getenv "USERNAME"` + " time: " + `about -currentDate` + " " + `about -currentTime` + " " + zwMusterCheckinGetLayers();
+
+	string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+
+	string $version = zwAboutVersion();
+
+	// -----------------------------------------------------------------------------------------
+	// mayaman rendering command concatenation start......chenzhong
+//	int $MMRender = zwIsMayaMan();
+	int $MMRender = ($renderer == "MayaMan");
+	if ($MMRender && !`gmatch (tolower($sceneName)) "*rib*"`)// && zwAboutVersion() == "8.5"
+	{
+		// remind if defaultRenderGlobals.imageFilePrefix is not set correctly
+		string $outputImageName = `getAttr defaultRenderGlobals.imageFilePrefix`;
+		if(($outputImageName == ""||$outputImageName == "%/l%s%_l"||gmatch($outputImageName, "<Layer>*<Layer>"))&& !zwIsRainbowProject($project))
+		{
+			error("Output image name problem in defaultRenderGlobals! This may result in losing output images!");
+		}
+
+		string $MMbatchproc = "D:\\Alias\\MAYA" + $version + "\\bin\\mayaman_batch_m" + `substitute "[.]" $version ""` + ".exe";
+		string $MMprojectdir = $projpath;
+		string $MMribdir = `getAttr MayaManNugget.RibDir`;
+		string $MMribbase = `getAttr MayaManNugget.RibBase`;
+		string $MMimagedir = `getAttr MayaManNugget.ImageOutputDir`;
+
+		$MMimagedir = `substituteAllString $MMimagedir "/" "\\"`;
+		$MMimagedir = `substitute "^.*[\\]sq_[^\\_]+[\\]sc_[^\\_]+" $MMimagedir $outfolder`;
+
+		int $MAYAMANCPUNUMS = 1;
+		if ($dispatcher == "192.168.3.185" && $pool == "F1")
+		{
+			$MAYAMANCPUNUMS = 8;
+		}
+
+		int $EOType = `MayaManInfo -getarraysize "EOType"`;
+		if (!$musterCheckinFramecheck)
+		{
+			$EOType = 1;
+		}
+		string $framecheck = "";
+
+		string $engine = "66";
+		if ($version == "2008")
+		{
+			$engine = "67";
+		}
+		if (`match "_shaveExport_" $sceneName` != "")
+		{
+			$engine = "99";
+			$fullcommand = "\"" + $mrtool + "\""
+				+ " -b"
+				+ " -s " + $dispatcher
+				+ " -u skywalker"
+				+ " -e " + $engine
+				+ " -n " + zwMusterCheckinGetJobName("")
+				+ " -f " + $scene
+				+ " -proj " + $projpath
+				+ " -sf " + $startframe
+				+ " -ef " + $endframe
+				+ " -bf " + $byframe
+				+ " -se " + $startframe
+				+ " -st 1"	// + $byframe
+				+ " -pk " + $packet
+				+ " -pr " + $priority
+				+ " -pool \"" + $pool + "\""
+				+ " -max " + $max
+				+ " -info \"" + $info + "\""
+				+ " -add \"zwMusterRomaShaveExport\"";
+		}
+		else if (`optionVar -query "musterCheckinLayer"`)
+		{
+			$fullcommand = "";
+			for ($renderLayer in $renderLayers)
+			{
+				if (`getAttr ($renderLayer + ".renderable")`)
+				{
+					if ($EOType == 0)
+					{
+						$framecheck = " -framecheck Scene -expectedframes \"" + `substituteAllString $MMimagedir "/" "\\"` + "\\" + $MMribbase + "_" + $renderLayer + ".1\" -recursion 2";
+					}
+
+					$fullcommand += "\"" + $mrtool + "\""
+							+ " -b"
+							+ " -s " + $dispatcher
+							+ " -u skywalker"
+							+ " -e " + $engine + " -attr MAYADIGITS 4 0"
+							+ " -attr MAYAMANCPUNUMS " + $MAYAMANCPUNUMS + " 1"
+							+ " -n " + zwMusterCheckinGetJobName($renderLayer)
+							+ " -f " + $scene
+							+ " -proj " + $projpath
+							+ " -dest " + $MMimagedir
+							+ " -sf " + $startframe
+							+ " -ef " + $endframe
+							+ " -bf " + $byframe
+							+ " -pk " + $packet	// 4
+							+ " -pr " + $priority
+							+ " -pool \"" + $pool + "\""
+							+ " -max " + $max
+							+ " -info \"" + $info + "\""
+							+ " -add \" -us"
+							+ " -dolayer " + $renderLayer
+							+ " -ribdir " + $MMribdir
+							+ " -ribbase " + $MMribbase + "\""
+							+ $framecheck + "\r\n";
+				}
+			}
+		}
+		else
+		{
+			if ($EOType == 0)
+			{
+				for ($renderLayer in $renderLayers)
+				{
+					if (`getAttr ($renderLayer + ".renderable")`)
+					{
+						if ($framecheck != "")
+						{
+							$framecheck = "";
+							break;
+						}
+						$framecheck = " -framecheck Scene -expectedframes \"" + `substituteAllString $MMimagedir "/" "\\"` + "\\" + $MMribbase + "_" + $renderLayer + ".1\" -recursion 2";
+					}
+				}
+			}
+
+			$fullcommand = "\"" + $mrtool + "\""
+					+ " -b"
+					+ " -s " + $dispatcher
+					+ " -u skywalker"
+					+ " -e " + $engine + " -attr MAYADIGITS 4 0"
+					+ " -attr MAYAMANCPUNUMS " + $MAYAMANCPUNUMS + " 1"
+					+ " -n " + zwMusterCheckinGetJobName("")
+					+ " -f " + $scene
+					+ " -proj " + $projpath
+					+ " -dest " + $MMimagedir
+					+ " -sf " + $startframe
+					+ " -ef " + $endframe
+					+ " -bf " + $byframe
+					+ " -pk " + $packet	// 4
+					+ " -pr " + $priority
+					+ " -pool \"" + $pool + "\""
+					+ " -max " + $max
+					+ " -info \"" + $info + "\""
+					+ " -add \" -us"
+					+ " -ribdir " + $MMribdir
+					+ " -ribbase " + $MMribbase + "\""
+					+ $framecheck;
+		}
+	}
+	else if ($MMRender && `gmatch (tolower($sceneName)) "*rib*"`)// && zwAboutVersion() == "8.5"
+	{
+		string $MMribdir = `getAttr MayaManNugget.RibDir`;
+		$fullcommand = "\"" + $mrtool + "\""
+				+ " -b"
+				+ " -s " + $dispatcher
+				+ " -u " + "skywalker"
+				+ " -e " + "26"
+				+ " -attr MAYADIGITS 4 0"
+				+ " -n " + zwMusterCheckinGetJobName("")
+				+ " -f " + $scene
+				+ " -proj " + $projpath
+				+ " -sf " + $startframe
+				+ " -ef " + $endframe
+				+ " -bf " + $byframe
+				+ " -pk " + $packet
+				+ " -pr " + $priority
+				+ " -pool \"" + $pool + "\""
+				+ " -max " + $max
+				+ " -info \"Generate ribs; " + $info + "\""
+				+ " -add \" -us -ribonly -ribdir " + $MMribdir + " -script do_ribgen.mel";
+	}
+	// mayaman rendering command concatenation end.....chenzhong
+	// -----------------------------------------------------------------------------------------
+//	else if (`about -version`=="2008" && (`getenv "USERNAME"` == "zhaozhijie"
+//	//||`getenv "USERNAME"` == "zhengjiawei"||`getenv "USERNAME"` == "pangjing"||`getenv "USERNAME"` == "tuchuanchun"
+//	//||`getenv "USERNAME"` == "chenjiarun"||`getenv "USERNAME"` == "renli"||`getenv "USERNAME"` == "zhongyijun"
+//	//||`getenv "USERNAME"` == "tujianxing"
+//	//||`getenv "USERNAME"` == "hongyaling"
+//	))
+//	{
+//		//setAttr -type "string" defaultRenderGlobals.imageFilePrefix "";
+//		string $allCam[] = `ls -cameras`;
+//		string $targetCam;
+//		for ($each in $allCam){
+//			int $flag = `getAttr ($each+".renderable")`;
+//			if ($flag){
+//				$targetCam = $each;
+//				break;
+//			}
+//		}
+//
+//		// Royal Render command & parameters
+//		string $RR_Commline;
+//		string $ver = `about -version`;
+//		switch ($ver)
+//		{
+//		case "7.0.1":
+//			$ver = "70";
+//			break;
+//		case "2008":
+//			$ver = "28";
+//			break;
+//		}
+//
+//		string $l[] = `listConnections "renderLayerManager.renderLayerId"`;
+//
+//		for($i = 0; $i < size($l); $i++)
+//		{
+//			if (`getAttr ($l[$i] + ".renderable")`&&(!`gmatch $l[$i] "*defaultRenderLayer*"`)){
+//				if ($targetCam!="")
+//				{
+//					string $RR_DIR = "//Renderc26-jr/RRender/";
+//					string $Image_Output = `substring $sceneName 1 (size($sceneName)-3)`;
+//
+//					$RR_result_print = eval(" RR_PrintSetPassValues56(" + $i + ")");
+//					$RR_Commline= $RR_DIR + "tools/Submitter_commandline.exe \""+ $scene + "\" -NoAutoSceneRead -PID " + $i;
+//					$RR_Commline= $RR_Commline + " -ImageDir \"" + $outfolder +"\\\"";
+//					$RR_Commline= $RR_Commline + " -ImageDirAdd \"" + $l[$i] +"\\\"";
+//					$RR_Commline= $RR_Commline + " -ImageOutput \"" + $Image_Output +".\"";
+//					$RR_Commline= $RR_Commline + " -ImageExtention \"" + $RR_result_print[10] +"\"";
+//					$RR_Commline= $RR_Commline + " -ImageFormat \"" + $RR_result_print[11] +"\"";
+//					$RR_Commline= $RR_Commline + " -SeqIn " + $RR_result_print[4] + " -SeqOut " + $RR_result_print[5] + " -SeqStep " + $RR_result_print[6];
+//					$RR_Commline= $RR_Commline + " -Setsoftware \"Maya,"+$RR_result_print[18]+",0,0,0," +$ver+ "\"";
+//					$RR_Commline= $RR_Commline + " -Sendpass  \"Default\"" + " -OverridePassname  \"" + $targetCam + ": " + $l[$i] + "\"";
+//					print("\nEXECUTING " + $RR_Commline + "\n");
+//					exec ($RR_Commline);
+//					pause -sec 0.5;
+//				}
+//
+//			}
+//		}
+//	}
+	else
+	{
+		string $engine = "26";
+		string $addCpu = "";
+		switch ($renderer)
+		{
+		case "mayaSoftware":
+			$renderer = "sw";
+		//	$addCpu = " -add \" -n 1 \"";
+			break;
+		case "mayaHardware":
+			$renderer = "hw";
+			break;
+		case "mentalRay":
+			$renderer = "mr";
+		//	$engine = "16";
+		//	$addCpu = " -add \" -rt 1 \"";
+			break;
+		case "mayaVector":
+			$renderer = "vr";
+			$engine = "22";
+			break;
+		}
+
+	//	if (`optionVar -query musterVersion` == 5)
+		{
+			$engine = "7";
+			if ($version == "8.5")
+			{
+				$engine = "71";
+			}
+			else if ($version == "2008")
+			{
+				if (!`about -is64` || `getenv "OFFICE_LOCATION"` == "shenzhen")
+				{
+					$engine = "72";
+				}
+				else
+				{
+					$engine = "76";
+				}
+			}
+			else if ($version == "2009")
+			{
+				if (`about -is64` || `getenv "OFFICE_LOCATION"` == "shenzhen")
+				{
+					$engine = "74";
+				}
+				else
+				{
+					$engine = "73";
+				}
+			}
+			else if ($version == "2010")
+			{
+				$engine = "78";
+			}
+			else if ($version == "2011")
+			{
+				$engine = "75";
+			}
+			else if ($version == "2012")
+			{
+				$engine = "77";
+			}
+			else if ($version == "2014")
+			{
+				$engine = "79";
+			}
+			else if ($version == "2016")
+			{
+				$engine = "80";
+			}
+			if ($renderer == "3Delight")
+			{
+				$engine = "85";
+				if ($version == "2009")
+				{
+					$engine = "83";
+				}
+			}
+			else if ($renderer == "3Delight_shave")
+			{
+				$engine = "84";
+				if ($version == "2009")
+				{
+					$engine = "82";
+				}
+			}
+
+			int $cpu = `optionVar -query "musterCheckinCPU"`;
+			if ($cpu != 1)
+			{
+				if ($renderer == "sw")
+				{
+					$engine = "1";
+					$addCpu = " -attr PROCUSAGE " + $cpu + " 0";
+				}
+				else if ($renderer == "mr")
+				{
+					$engine = "2";
+					$addCpu = " -attr RT " + $cpu + " 0";
+				}
+			}
+
+			global string $zwMusterCheckinFrames;
+			string $MusterCheckinFrames = $zwMusterCheckinFrames;
+			$MusterCheckinFrames = `substituteAllString $MusterCheckinFrames " " ""`;
+			$MusterCheckinFrames = `substituteAllString $MusterCheckinFrames "；" ";"`;
+			$MusterCheckinFrames = `substituteAllString $MusterCheckinFrames "," ";"`;
+			$MusterCheckinFrames = `substituteAllString $MusterCheckinFrames "，" ";"`;
+			if ($MusterCheckinFrames == "" || $MusterCheckinFrames == "0-0")
+			{
+				$MusterCheckinFrames = $startframe + "-" + $endframe;
+			}
+			string $framesStrs[];
+			tokenize $MusterCheckinFrames ";" $framesStrs;
+			$fullcommand = "";
+			for ($framesStr in $framesStrs)
+			{
+				string $frames[] = `python ("idmt.maya.Muster.GetFrames('" + $framesStr + "')")`;
+				$startframe = int($frames[0]);
+				if ($frames[2] == "")
+				{
+					$endframe = $startframe;
+				}
+				else
+				{
+					$endframe = int($frames[2]);
+				}
+				if (`optionVar -query "musterCheckinLayer"`)
+				{
+					for ($renderLayer in $renderLayers)
+					{
+						string $expectedframes = `python ("idmt.maya.Muster.GetExpectedFrames(framecheck = " + ($musterCheckinFramecheck ? "True" : "False") + ", dest = r'" + $outfolder + "', layer = '" + $renderLayer + "')")`;
+
+						if (`getAttr ($renderLayer + ".renderable")`)
+						{
+							string $add = "-rl " + $renderLayer;
+							if ($project == "Ninjago")
+							{
+								$add += " -preRender \\\"source \\\\\\\"//file-cluster/gdc/Resource/Support/Maya/projects/Ninjago/nj_Rnd_FixBeforeNetRender.mel\\\\\\\"\\\"";
+							}
+							if ($project == "MayaTheBee")
+							{
+								$add += " -preRender \\\"maCGRepairBtyXtra\\\"";
+							}
+							if ($add != "")
+							{
+								$add = " -add \"" + $add + "\"";
+							}
+							$fullcommand += "\"" + $mrtool + "\""
+									+ " -b"
+									+ " -s " + $dispatcher
+									+ " -u " + "skywalker"	// `getenv "USERNAME"`
+									+ " -e " + $engine
+									+ $addCpu
+									+ " -attr MAYADIGITS " + $extensionPadding + " 0"
+									+ $add
+									//+ " -n " + (`optionVar -query musterCheckinJob` + "_" + $renderLayer)
+									+ " -n " + zwMusterCheckinGetJobName($renderLayer)
+									+ " -f " + $scene
+									+ " -proj " + $projpath
+									+ " -sf " + $startframe
+									+ " -ef " + $endframe
+									+ " -bf " + $byframe
+									+ " -se " + $startframe
+									+ " -st 1"	// + $byframe
+									+ " -pk " + $packet
+									+ " -pr " + $priority
+									+ " -pool \"" + $pool + "\""
+									+ " -max " + $max
+									+ " -info \"" + $info + "\""
+									+ " -dest " + $outfolder
+									+ $expectedframes + "\r\n";
+						}
+					}
+				}
+				else
+				{
+					string $expectedframes = `python ("idmt.maya.Muster.GetExpectedFrames(framecheck = " + ($musterCheckinFramecheck ? "True" : "False") + ", dest = r'" + $outfolder + "', layer = '')")`;
+					string $add = "";
+					if ($project == "Ninjago")
+					{
+						$add += " -preRender \\\"source \\\\\\\"//file-cluster/gdc/Resource/Support/Maya/projects/Ninjago/nj_Rnd_FixBeforeNetRender.mel\\\\\\\"\\\"";
+					}
+					if ($project == "MayaTheBee")
+					{
+						$add += " -preRender \\\"maCGRepairBtyXtra\\\"";
+					}
+					if ($add != "")
+					{
+						$add = " -add \"" + $add + "\"";
+					}
+					$fullcommand += "\"" + $mrtool + "\""
+							+ " -b"
+							+ " -s " + $dispatcher
+							+ " -u " + "skywalker"	// `getenv "USERNAME"`
+							+ " -e " + $engine
+							+ $addCpu
+							+ " -attr MAYADIGITS " + $extensionPadding + " 0"
+							+ $add
+							//+ " -n " + `optionVar -query musterCheckinJob`
+							+ " -n " + zwMusterCheckinGetJobName("")
+							+ " -f " + $scene
+							+ " -proj " + $projpath
+							+ " -sf " + $startframe
+							+ " -ef " + $endframe
+							+ " -bf " + $byframe
+							+ " -se " + $startframe
+							+ " -st 1"	// + $byframe
+							+ " -pk " + $packet
+							+ " -pr " + $priority
+							+ " -pool \"" + $pool + "\""
+							+ " -max " + $max
+							+ " -info \"" + $info + "\""
+							+ " -dest " + $outfolder
+							+ $expectedframes + "\r\n";
+				}
+			}
+		}
+	}
+
+	//  write command .txt file to project folder
+        string $file = substituteAllString($projpath,"\\","/") + "/" + $buffer[$numTokens -1] + ".txt";
+
+        $fileID = `fopen $file "w"`;
+        fprint $fileID $fullcommand;
+        fclose $fileID;
+        Moutput($fullcommand + "\n");
+
+	// Moutput("\n\nDebug Stop!\n");
+	// return;
+
+	if (!`optionVar -query "musterCheckinTest"`)	// 测试
+	{
+		string $temp = `internalVar -userTmpDir` + $buffer[$numTokens -1] + ".bat";
+		sysFile -copy $temp $file;
+	//	$temp = `substituteAllString $temp "/" "\\"`;
+	//	if (`about -batch`)
+	//	{
+	//		Moutput(`system ("\"" +$temp + "\"")`);
+	//		sysFile -del $temp;
+	//	}
+	//	else
+	//	{
+	//		system ("start " + $temp);
+	//	}
+		string $cmds[];
+		tokenize $fullcommand "\r\n" $cmds;
+		for ($cmd in $cmds)
+		{
+			if ($cmd != "")
+			{
+				string $jobId = `system ("\"" + $cmd + "\"")`;
+				Moutput($jobId);
+				$jobId = `match "new job has ID: [0-9]+" $jobId`;
+				$jobId = `match "[0-9]+$" $jobId`;
+				if ($jobId == "" && `getenv USERNAME` != "liuzheng" && `getenv USERNAME` != "mozihong")
+				{
+					WarningMsg "Muster" "任务提交失败，请检查原因" true;
+				}
+			}
+		}
+		sysFile -del $temp;
+	}
+
+	Mwritelog(`optionVar -query musterCheckinJob`, $dispatcher, $pool, $scene, $startframe, $endframe);
+}
+
+global proc McloseUI()
+{
+       if(`window -ex MoutputUI`) deleteUI MoutputUI;
+	   deleteUI connectorGUI;
+}
+
+global proc Mcopycaches()
+{
+	int $missing = 0;
+	chdir "c:/";
+	string $ptcache = `dynGlobals -q -a`;
+	if($ptcache != "")
+	{
+
+	   if(`getAttr ($ptcache + ".useParticleDiskCache")`==0)
+	   {
+		Moutput(" This scene does not use particle cache \n");
+	   }
+
+                string $shortcachedir = `getAttr ($ptcache + ".cacheDirectory")`;
+	        string $projdir = `workspace -q -act`;
+
+	// handle the default maya project folder
+
+		if($projdir=="default")
+		{
+		    $projdir = `getenv USERPROFILE` + "/My Documents/maya/projects/default";
+		}
+
+	        $cachedir = $projdir + "/particles/" + $shortcachedir;
+		int $cpcache = 1;
+		if(`filetest -d $cachedir`==0||`filetest -d ($cachedir+"_startup")`==0)
+		{
+		   string $fn = `file -q -sn`;
+	           string $buf[];
+	           int $num = `tokenize $fn "/" $buf`;
+	           string $pname = `substring $buf[$num-1] 1 (size($buf[$num-1]) - 3)`;
+	           string $pfolder = $projdir + "/particles/" + $pname + "_startup/";
+	           if(`filetest -d $pfolder` == 1)
+	           {
+	               $cachedir = $projdir + "/particles/" + $pname;
+	               $shortcachedir = $pname;
+	               Moutput("Found Startup particle cache\n");
+	               $cpcache = 1;
+	           }else{
+	               Moutput("Warning: Can not find startup particle cache!\n");
+	               $cpcache = 0;
+	           }
+
+	        }
+
+	        if($cpcache==1)
+	        {
+
+	           string $cachelist[];
+	           string $startlist[];
+	           if(`filetest -d $cachedir`!=0)
+	           {
+	                $cachelist = `getFileList -folder ($cachedir + "/")`;
+	           }
+
+	           if(`filetest -d ($cachedir+"_startup")`!=0)
+	           {
+	                $startlist = `getFileList -folder ($cachedir + "_startup/")`;
+		   }
+
+// create cache folder on net path
+
+		   string $projpath = `optionVar -query musterCheckinProject`;
+		   Moutput("Create cache folder......\n");
+		   string $netfolder = $projpath + "\\particles\\" + $shortcachedir;
+		   workspace -create $netfolder;
+		   Moutput("Cache folder: " + $netfolder + "\n");
+		   $netstartfolder = $projpath + "\\particles\\" + $shortcachedir + "_startup";
+                   workspace -create $netstartfolder;
+		   Moutput("Startup Cache folder: " + $netstartfolder + "\n");
+
+//  copy partical cache files
+
+                   if(`size($cachelist)`==0) Moutput("Warning: Cache folder is empty,please check your cache settings!\n");
+		   if(`size($startlist)`==0) Moutput("Warning: Startup cache folder is empty!\n");
+
+	           string $tmpfile;
+		   for($tmpfile in $cachelist)
+		   {
+		        $tmpfile = $cachedir + "/" + $tmpfile;
+		        $tmpfile = substituteAllString($tmpfile,"/","\\");
+		        string $cmd = "copy \"" + $tmpfile + "\" " + $netfolder;
+			Moutput("Copying ... " + $tmpfile + "...");
+			string $result = `system($cmd)`;
+			Moutput($result);
+			if(`gmatch $result "*cannot*"` || `gmatch $result "*找不到*"`) $missing = 1;
+		   }
+
+		   for($tmpfile in $startlist)
+		   {
+		        $tmpfile = $cachedir + "_startup/" + $tmpfile;
+			$tmpfile = substituteAllString($tmpfile,"/","\\");
+		        string $cmd = "copy \"" + $tmpfile + "\" " + $netstartfolder;
+			Moutput("Copying ...... " + $tmpfile + "...");
+			string $result = `system($cmd)`;
+			Moutput($result);
+			if(`gmatch $result "*cannot*"` || `gmatch $result "*找不到*"`) $missing = 1;
+		   }
+		}
+
+//	  }
+
+
+
+   }
+    Moutput("Done!\n");
+
+ //copy hair cache file;
+    Moutput("\nCopy hair Cache\n");
+    zwMusterCheckinDiskCache();
+//
+//	string $allsolverhair[] = `ls -type "diskCache"`;
+//
+//	for($item in $allsolverhair)
+//	{
+//
+//		string $cname = `getAttr ($item + ".cacheName")`;
+//		$cname = `match "[^/\\]+$" $cname`;
+//
+//// add by zzj>>>>>>>>>>>>>>>>>>WXII haircache Path change
+////	int $isMayaMan = zwIsMayaMan();
+////	if ($isMayaMan)
+////	{
+////		string $cnameWXII=`getAttr ($item + ".cacheName")`;
+////		$cname = `match "cache.*" $cname`;
+////	}
+//// add by zzj<<<<<<<<<<<<<<<<<<<
+//
+//	//	if ($cname != ""&&`gmatch $cname "*.mchp"`)
+//		if ($cname != "")
+//		{
+//			string $cachenamehair = `workspace -expandName ("data/" + $cname)`;
+//
+//			if (!`filetest -f $cachenamehair`)
+//			{
+//				string $filespec = "//file-cluster/GDC/Netrender/Maya/Bratz/data/" + `substitute "^[^.]*" $cname "*"`;
+//				string $buf[] = `getFileList -filespec $filespec`;
+//				if (size($buf) == 1)
+//				{
+//					$cachenamehair = "//file-cluster/GDC/Netrender/Maya/Bratz/data/" + $buf[0];
+//				}
+//			}
+//
+//		//	string $workfolder = `workspace -q -rd`;
+//		//	if (`gmatch $cname ($workfolder + "*")`)
+//		//		$cachenamehair = $cname;
+//			if (`filetest -f $cachenamehair`)
+//			{
+//				$cachenamehair = substituteAllString($cachenamehair,"/","\\");
+//				string $projpath = `optionVar -query musterCheckinProject`;
+//				Moutput("Copying ... " + $cachenamehair);
+//				string $result = `system("copy \"" + $cachenamehair + "\" " + $projpath + "\\data")`;
+//				Moutput($result);
+//				if(`gmatch $result "*cannot*"` || `gmatch $result "*找不到*"`) $missing = 1;
+//			}
+//			else {
+//				Moutput("Cannot find caches file: " + $cname + "\n");
+//				WarningMsg("警告", "cache 没有导入", false);
+//			}
+//		}
+//	}
+
+//  copy cloth cache files;
+    Moutput("\nCopy Cloth Cache\n");
+
+	if(!`pluginInfo -q -l CpClothPlugin.mll`)
+	{
+	    Moutput("Maya Cloth not loaded! \n\n");
+		return;
+	}
+	string $allsolver[] = `ls -type "cpClothSolver"`;
+    if(size($allsolver) == 0) Moutput("This scene does not use cloth cache\n");
+	for($tmpsolver in $allsolver)
+	{
+		if(`getAttr ($tmpsolver + ".solverEnabled")`==0) continue;
+
+        if(`getAttr ($tmpsolver + ".cacheEnabled")` ==0)
+		{
+			 Moutput("Solver " + $tmpsolver + ": the cache disabled\n");
+			 continue;
+		}else{
+			    string $shotcachename = `getAttr ($tmpsolver + ".cacheName")`;
+			    string $projdir = `workspace -q -act`;
+				if($projdir=="default")
+				{
+					$projdir = `getenv USERPROFILE` + "/My Documents/maya/projects/default";
+				}
+			   	string $cachename = $projdir + "/scenes/" + $shotcachename;
+
+				if(!`filetest -f $cachename`)
+				{
+					Moutput("Cannot find caches file: " + $cachename + "\n");
+				}else{
+					$cachename = substituteAllString($cachename,"/","\\");
+					string $projpath = `optionVar -query musterCheckinProject`;
+				    Moutput("Copying ... " + $cachename);
+					string $result = `system("copy \"" + $cachename + "\" " + $projpath + "\\scenes")`;
+					Moutput($result);
+					if(`gmatch $result "*cannot*"` || `gmatch $result "*找不到*"`) $missing = 1;
+
+				}
+		}
+	}
+	if($missing)
+	{
+	      Moutput("\n\nWARNING: Some cache files failed to copy. please copy your cache folder by yourself\n\n");
+	}else
+	{
+		Moutput("\n\nDone! \n\n");
+	}
+
+}
+
+global proc Mwritelog(string $job, string $server, string $pool, string $scene, float $start, float $end)
+{
+	string $filename = zwGetMusterProject($scene);
+	$filename = `substitute "[^/\\]+$" $filename "JobsInfo.txt"`;
+	int $fileId = `fopen $filename "a"`;
+	if ($fileId != 0)
+	{
+		string $str = `about -currentDate` + " " + `about -currentTime` + "\t" + `getenv USERNAME` + "\t" + $job + "\t" + $server + "\t" + $pool + "\t" + $start + "-" + $end + "\t" + $scene + "\r\n";
+		fprint $fileId $str;
+		fclose $fileId;
+	}
+}
+
+global proc string [] getimageplanemap()
+{
+	string $planes[] = `ls -type imagePlane`;
+	string $namelist[];
+	int $index =0;
+	for($ple in $planes)
+	{
+		string $map = `getAttr ($ple + ".imageName")`;
+		if($map != "")
+		{
+			$namelist[$index] = $map;
+			$index ++;
+		}
+	}
+	return $namelist;
+
+}
+
+global proc OnAutoSelectOutput()
+{
+	string $path = GetOutputPathByName();
+	textFieldButtonGrp -edit -text $path OutPutPathCTL;
+	optionVar -stringValue "musterCheckinOut" $path;
+}
+
+global proc string GetOutputPathByName()
+{
+	string $sceneName = `file -query- shortName -sceneName`;
+	if (`match "[^a-zA-Z0-9_.]" $sceneName` != "")
+	{
+		error "文件命名不规范，文件名只能包含数字、字母和下划线";
+	}
+
+//	if (`gmatch (tolower($sceneName)) "*fire*"`)
+//	{
+//		return (`optionVar -query musterCheckinProject` + "\\images");
+//	}
+
+	string $path = substituteAllString(`getenv "NETRENDER_PATH"`, "/", "\\") + "\\Scenes\\Others";
+	if (`match "_HIG_hair" $sceneName` != "")
+	{
+		$path = substituteAllString(`getenv "NETRENDER_PATH"`, "/", "\\") + "\\Scenes\\WinxClubII\\hair\\" + `match "[^.]+" $sceneName`;
+	}
+	else if (`match "^wxii(_[^_.]+){4}" (tolower($sceneName))` != "")
+	{
+		string $buf[];
+		tokenize $sceneName "_." $buf;
+		$path = "\\\\file-cluster\\GDC\\Netrender\\Scenes\\WinxClubII\\Even\\Pre\\" + `getenv "USERNAME"` + "\\" + $buf[1] + "\\" + $buf[2] + "\\" + $buf[3] + "\\" + $buf[4];
+	}
+	else
+	{
+		$path = `zwGetPath "ImageOutputDir" $sceneName`;
+		if ($path == "")
+		{
+			error "文件命名不规范，正确的文件命名应该例如：br_211_175_l1woman_lr_c002.mb（项目_场次_镜头_层名_lr_cxxx.mb）";
+		}
+		$path = `substituteAllString $path "/" "\\"`;
+	}
+
+	if(!`filetest -d $path`)
+	{
+		sysFile -makeDir $path;
+	}
+
+	return $path;
+}
+
+global proc WarningMsg(string $title, string $msg, int $stop)
+{
+	if (!`zwMusterIsBatch`)
+	{
+		confirmDialog -title $title -message $msg -button "OK";
+	}
+	if ($stop)
+	{
+		error $msg;
+	}
+	else
+	{
+		warning $msg;
+	}
+}
+
+global proc OnSelectOutPutBT()
+{
+//	string $netrenderPath = substituteAllString(`getenv "NETRENDER_PATH"`, "/", "\\");
+//	string $project = zwGetProject("");
+//	if ($project == "")
+//	{
+//		$project = "Others";
+//	}
+//	string $initialDir = $netrenderPath + "\\Scenes\\" + $project;
+//	if (zwMusterIsShiXun())
+//	{
+//		$initialDir = $netrenderPath + "\\Scenes\\Shixun";
+//	}
+	string $initialDir = `optionVar -query "musterCheckinOut"`;
+	string $dir = `idmtFolderDialog -initialDir $initialDir`;
+	if($dir != "")
+	{
+		textFieldButtonGrp -edit -text $dir OutPutPathCTL;
+		optionVar -stringValue "musterCheckinOut" $dir;
+	}
+}
+
+global proc zwMusterCheckinLrLayer()
+{
+	if (`optionVar -query "musterCheckinTest"`)	// 测试
+	{
+		return;
+	}
+
+//	putenv "IDMTPROXY_RETRY" "4";
+	waitCursor -state on;
+	int $rs = `idmtProject -checkin`;
+	waitCursor -state off;
+	putenv "IDMTPROXY_RETRY" "1";
+	if (!$rs)
+	{
+		WarningMsg "Checkin" "自动Checkin失败，如有需要，请用Checkin工具单独Checkin" false;
+	}
+}
+
+global proc zwMusterCheckinWinxClubIIlighting()
+{
+	string $path = `file -query -sceneName`;
+	$sceneName = `match "[^/\\]+$" $path`;
+
+	string $doby = `getenv "USERNAME"`;
+	string $edition = `about -version`;
+
+	int $sizeByte = `idmtFile -size $path`;
+	int $size = $sizeByte / 1024;
+	if ($sizeByte % 1024 != 0)
+	{
+		$size ++;
+	}
+
+	string $argv = $sceneName + "|" + $doby + "|" + $edition + "|" + $size;
+
+	waitCursor -state on;
+
+	putenv "IDMTPROXY_RETRY" "4";
+	string $rs = `idmtService "CheckinBatch" $argv`;
+	putenv "IDMTPROXY_RETRY" "1";
+
+	if ($rs == "")
+	{
+		WarningMsg "Checkin" "自动Checkin失败，如有需要，请用Checkin工具单独Checkin" false;
+	}
+	else
+	{
+		string $dest = zwGetPath("scene", $sceneName) + "/" + `match "[^@]+$" $rs`;
+		string $history = zwGetPath("history", $sceneName) + "/" + $rs;
+		zwSysFile "copy" $path $dest true;
+		zwSysFile "copy" $path $history true;
+	}
+
+	waitCursor -state off;
+}
+
+//geoCache,nClothCache......
+global proc zwMusterCheckinWinxClubIIcacheFile()
+{
+	string $done[];
+	clear $done;
+
+	int $batchMode = `zwMusterIsBatch`;
+
+	string $destData = `optionVar -query musterCheckinProject` + "/data";
+
+	string $cacheFiles[] = `ls -type "cacheFile"`;
+	for ($cacheFile in $cacheFiles)
+	{
+		string $sourceFolder = `getAttr ($cacheFile + ".cachePath")`;
+		int $find = false;
+		for ($folder in $done)
+		{
+			if ($folder == $sourceFolder)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+		$done[size($done)] = $sourceFolder;
+		string $destFolder = `substitute ".*/data/" $sourceFolder ($destData + "/")`;
+		string $fileNames[] = `getFileList -filespec ($sourceFolder + "/*.*")`;
+
+		// progressWindow
+		int $progress;
+		int $max;
+		if (!$batchMode)
+		{
+			$max = `progressWindow -query -max`;
+			$progress = `progressWindow -query -progress`;
+			if ($progress <= 0)
+			{
+				$max = size($fileNames);
+				$progress = 0;
+				progressWindow -progress $progress -max $max -title "Copy File" -status ($progress + "/" + $max) -isInterruptable true;
+			}
+			else
+			{
+				$max += size($fileNames);
+				progressWindow -edit -max $max;
+			}
+		}
+
+		for ($fileName in $fileNames)
+		{
+			// progressWindow
+			if (!$batchMode)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					progressWindow -endProgress;
+					error "User cancelled.";
+				}
+				$progress = `progressWindow -query -progress`;
+				$progress ++;
+				$max = `progressWindow -query -max`;
+				progressWindow -edit -progress $progress -status ($progress + "/" + $max + "    " + $fileName);
+			}
+
+			string $sourceFile = $sourceFolder + "/" + $fileName;
+			if (`filetest -f $sourceFile`)
+			{
+				string $destFile = $destFolder + "/" + $fileName;
+				string $msg = "copy \"" + `substituteAllString $sourceFile "/" "\\"` + "\" \"" + `substituteAllString $destFile "/" "\\"` + "\"";
+				print ($msg + "\n");
+				if (!`filetest -d $destFolder`)
+				{
+					sysFile -md $destFolder;
+				}
+				sysFile -copy $destFile $sourceFile;
+			}
+		}
+	}
+
+	// progressWindow
+	if (!$batchMode)
+	{
+	//	if ($progress == $max)
+		{
+			progressWindow -endProgress;
+		}
+	}
+}
+
+//hairCache
+global proc zwMusterCheckinDiskCache1()
+{
+	string $project = zwGetProject("");
+
+	string $diskCaches[] = `ls -type "diskCache"`;
+	for ($diskCache in $diskCaches)
+	{
+		string $cacheName = `getAttr ($diskCache + ".cacheName")`;
+		$cacheName = `substituteAllString $cacheName "\\" "/"`;
+
+//		if (zwIsRainbowProject($project))
+//		{
+//			$cacheName = `match "/data/.*" $cacheName`;
+//			$cacheName= `substitute "/data/" $cacheName ""`;
+//		}
+//		else
+//		{
+			$cacheName = `match "[^/]+$" $cacheName`;
+//		}
+
+		string $source = `workspace -expandName ("data/" + $cacheName)`;
+		if (!`filetest -f $source`)
+		{
+			continue;
+		}
+
+		string $dest = `optionVar -query musterCheckinProject` + "/data/" + $cacheName;
+		$dest = `substituteAllString $dest "\\" "/"`;
+
+		string $folder = `substitute "[/][^/]+$" $dest ""`;
+		if (!`filetest -d $folder`)
+		{
+			sysFile -md $folder;
+		}
+
+		string $msg = "copy \"" + `substituteAllString $source "/" "\\"` + "\" \"" + `substituteAllString $dest "/" "\\"` + "\"";
+		print ($msg + "\n");
+
+		sysFile -copy $dest $source;
+	}
+}
+
+global proc zwMusterCheckinDiskCache()
+{
+	string $folder = `optionVar -query musterCheckinProject` + "/data";
+	$folder = `substituteAllString $folder "\\" "/"`;
+
+	int $i = 0;
+	string $buf[] = `ls -type diskCache`;
+
+	// progressWindow
+	int $progress = 0;
+	int $max = 1;
+	int $batchMode = `about -batch`;
+	if (!$batchMode)
+	{
+		progressWindow -progress $progress -max $max -title "Copy Disk Cache" -isInterruptable true;
+	}
+
+	for ($diskCache in $buf)
+	{
+		// progressWindow
+		if (!$batchMode)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				progressWindow -endProgress;
+				break;
+			}
+		}
+
+		string $cacheName = `getAttr ($diskCache + ".cacheName")`;
+		$cacheName = `match "[^/\\]+$" $cacheName`;
+		if ($cacheName == "")
+		{
+			continue;
+		}
+
+		string $source = `workspace -query -rootDirectory` + "data/" + $cacheName;
+		string $dest = $folder + "/" + $cacheName;
+
+		python "import re";
+		string $pattern = `python ("re.compile(r'__-?[0-9]+(.[0-9a-z]+)$', re.IGNORECASE).sub('__*\\g<1>', '" + $cacheName + "')")`;
+		string $workspace = `workspace -query -rootDirectory`;
+		string $frames[] = `getFileList -filespec ($workspace + "data/" + $pattern)`;
+
+		// progressWindow
+		if (!$batchMode)
+		{
+			$max += size($frames);
+			progressWindow -edit -max $max;
+		}
+
+		for ($frame in $frames)
+		{
+			// progressWindow
+			if (!$batchMode)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					progressWindow -endProgress;
+					break;
+				}
+				$progress ++;
+				progressWindow -edit -progress $progress -status $frame;
+			}
+
+			$source = $workspace + "data/" + $frame;
+			$dest = $folder + "/" + $frame;
+			if (!`filetest -d $folder`)
+			{
+				sysFile -md $folder;
+			}
+
+			int $rs1 = `evalEcho ("sysFile -copy \"" + $dest + "\" \"" + $source + "\"")`;
+			if (!$rs1)
+			{
+				warning ("上传cache失败：" + $diskCache);
+			}
+			$i ++;
+		}
+	}
+
+	// progressWindow
+	if (!$batchMode)
+	{
+		progressWindow -edit -progress $max;
+		progressWindow -endProgress;
+	}
+
+	print ("\n共成功上传 " + $i + " 个cache 文件\n");
+}
+
+// 根据文件名设置优先级
+global proc int zwMusterCheckinPriority()
+{
+	int $priority = 50;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if (zwIsRainbowProject($project))
+	{
+		if (`optionVar -query musterCheckinStart` == `optionVar -query musterCheckinEnd`)
+		{
+			$priority = 100;
+		}
+		else if (`match "_ptc_" $sceneName` != "" || `match "_shaveExport_" $sceneName` != "")
+		{
+			$priority = 99;
+		}
+		else
+		{
+			$priority = 60;
+		}
+	}
+	else if (`match "^tu_" $sceneName` != "")
+	{
+		$priority = 40;
+	}
+	else if ($project == "ChangBaiShan")
+	{
+		if (zwAboutVersion() == "2011")
+		{
+			$priority = 90;
+		}
+	}
+	else if (`match "^diveollydive[0-9]+$" (tolower($project))` != "" && `match "_sc" (tolower($sceneName))` != "")
+	{
+		$priority = 70;
+	}
+	else if (`match "yd_mini" (tolower($sceneName))` != "")
+	{
+		$priority = 80;
+	}
+	else
+	{
+		string $str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/priority')")`;
+		if ($str != "")
+		{
+			$priority = (int)$str;
+		}
+		$str = "";
+		if ($project == "MayaTheBee" || $project == "VickyTheViking")
+		{
+			string $mode = zwGetMode($sceneName);
+			string $argv = $sceneName + "|" + $mode;
+			$str = `idmtService "GetMusterPriority" $argv`;
+			if ($str == "" || $str == "0")
+			{
+				$str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/priority')")`;
+			}
+		}
+		else
+		{
+			$str = `python ("idmt.pipeline.project.GetSetting('" + $project + "', 'muster/priority')")`;
+		}
+		if ($str != "")
+		{
+			$priority = (int)$str;
+		}
+	}
+
+	return $priority;
+}
+
+global proc int zwMusterIsBatch()
+{
+	if (`about -batch`)
+	{
+		return true;
+	}
+
+	global int $zwMusterIsBatch;
+	if ($zwMusterIsBatch == 1)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+global proc zzjCheckSmoothLevel()
+{
+	string $mesh[]=`ls -type mesh`;
+	for ($m in $mesh)
+	{
+		string $his[]=`listHistory $m`;
+		int $smoothLevel=0;
+		for ($h in $his)
+		{
+			if (`nodeType $h`=="polySmoothFace")
+			{
+				$smoothLevel+=`getAttr ($h+".divisions")`;
+			}
+		}
+
+		if ($smoothLevel>2)
+		{
+			string $parent[]=`listRelatives -parent $m`;
+			string $parentLong[]=`listRelatives -fullPath -parent $m`;
+			string $message=$parent[0]+"这个物体的smooth级别大于2级";
+			string $doWhat=`confirmDialog -title "恐怖的smooth级别" -message $message -button "继续提交" -button "select"`;
+			if ($doWhat=="select")
+			{
+				select $parentLong;
+				error $message;
+			}
+		}
+	}
+}
+
+
+global proc string zwMusterGetMrtool()
+{
+	string $mrtool;
+
+	if (`getenv OFFICE_LOCATION` == "chongqing")
+	{
+		if (`optionVar -query musterVersion` == 4)
+		{
+			$mrtool = `getenv "DEV_PATH"` + "/Muster";
+		}
+		else
+		{
+			$mrtool = `getenv "DEV_PATH"` + "/Virtual Vertex/Muster5.57x32";
+		}
+	}
+	else
+	{
+		$mrtool = `getenv "DEV_PATH"` + "/Virtual Vertex/Muster5.54x32";
+	}
+	$mrtool = `substituteAllString $mrtool "/" "\\"`;
+
+	return $mrtool;
+}
+
+global proc slFurRenderSetting()
+{
+
+	if (`pluginInfo -query -loaded "Fur.mll"`)
+	{
+
+		//HfBuildHairGlobal;
+		if (`objExists defaultFurGlobals.equalMap`)
+			setAttr "defaultFurGlobals.equalMap" 0;
+
+		string $furLayer[];
+		string $hair[]= `ls -type FurFeedback`;
+
+		if (`objExists $hair[0]`)
+		{
+			for ($temp in $hair )
+			{
+				select $temp;
+				string $up[],$adj;
+				while (true)
+				{
+					$adj = $up[0];
+					$up=`pickWalk -d up`;
+					string $render[]=`listConnections -t renderLayer $up[0]`;
+						for ($lay in $render )
+						{
+							if (!endsWith($lay,"defaultRenderLayer"))
+								editRenderLayerMembers -noRecurse $lay $temp;
+						}
+					if ($adj == $up[0])
+					break;
+				}
+			}
+			select -cl;
+		}
+
+
+		for ($tem in $hair)
+		{
+			string $fur[]=`listConnections -t renderLayer $tem`;
+			for ($rl in $fur)
+			{
+				if ($rl != "" && $rl != "defaultRenderLayer")
+				{
+					$adj = stringArrayCount ($rl,$furLayer);
+					if ($adj == 0) $furLayer[size($furLayer)] = $rl;
+				}
+			}
+		}
+
+		string $fileName = `file -q -sceneName`;
+		string $buffer[];
+		tokenize $fileName "\/" $buffer;
+		tokenize $buffer[`size $buffer`-1] "." $buffer;
+		string $name1 = $buffer[0];
+
+/* modified by huangzhongwei, 20070516
+		if (!`about -batch`)	// add if by huangzhongwei
+		{
+			radioButtonGrp -e -select 2 LayerEditorTypeRadio;
+			tabLayout -edit -selectTab RenderLayerTab DisplayLayerUITabLayout;
+			for ($layer in $furLayer )
+			{
+				editRenderLayerAdjustment -layer $layer "defaultRenderGlobals.imageFilePrefix";
+				layerEditorLayerButtonSelect 0 $layer;
+				updateHighlightSelectIcon;
+				setAttr -type "string" defaultRenderGlobals.imageFilePrefix ($name1 + "_" + $layer);
+			}
+			layerEditorLayerButtonSelect 0 defaultRenderLayer;
+			updateHighlightSelectIcon;
+		}
+
+		setAttr -type "string" defaultRenderGlobals.imageFilePrefix "%/l%s%_l";
+*/
+		string $project = zwGetProject("");
+		if (!zwIsRainbowProject($project))	// add if by huangzhongwei, 20091120
+		{
+			string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+			for ($layer in $furLayer )
+			{
+				editRenderLayerGlobals -currentRenderLayer $layer;
+				editRenderLayerAdjustment -layer $layer "defaultRenderGlobals.imageFilePrefix";
+				setAttr -type "string" defaultRenderGlobals.imageFilePrefix ($name1 + "_" + $layer);
+			}
+			editRenderLayerGlobals -currentRenderLayer $currentRenderLayer;
+		}
+	}
+
+}
+
+global proc zwMusterMapListMenu(string $popupMenu, string $textScrollList)
+{
+	popupMenu -edit -deleteAllItems $popupMenu;
+	setParent -menu $popupMenu;
+
+	string $path[] = `textScrollList -query -selectItem $textScrollList`;
+	menuItem -enable (size($path) == 1) -label "View" -command "zwMusterMapListView";
+	menuItem -enable (size($path) == 1) -label "Select" -boldFont true -command "zwMusterMapListDBClick";
+	menuItem -enable (size($path) == 1) -label "Explore" -command "zwMusterMapListExplore";
+}
+
+global proc zwMusterMapListDBClick()
+{
+	select -clear;
+
+	string $path[] = `textScrollList -query -selectItem maplistCTL`;
+	string $files[] = `ls -type "file"`;
+	if (size($path) == 1)
+	{
+		for ($file in $files)
+		{
+			if (`getAttr ($file + ".fileTextureName")` == $path[0])
+			{
+				select -add $file;
+			}
+		}
+	}
+}
+
+global proc zwMusterMapListView()
+{
+	string $path[] = `textScrollList -query -selectItem maplistCTL`;
+	if (size($path) == 1)
+	{
+		string $currFile = `workspace -expandName $path[0]`;
+		if (`filetest -f $currFile`)
+		{
+			launchImageEditor -viewImageFile $currFile;
+		}
+	}
+}
+
+global proc zwMusterMapListExplore()
+{
+	string $path[] = `textScrollList -query -selectItem maplistCTL`;
+	if (size($path) == 1)
+	{
+		string $currFile = `workspace -expandName $path[0]`;
+		$currFile = `workspace -expandName $currFile`;
+		$currFile = `substitute "[/\\][^/\\]+$" $currFile ""`;
+		if (`filetest -d $currFile`)
+		{
+			showHelp -absolute $currFile;
+		}
+	}
+}
+
+global proc int zwMusterCheckinGetCopyCache()
+{
+	int $copyCache = false;
+
+	string $diskCaches[] = `ls -type "diskCache"`;
+	for ($diskCache in $diskCaches)
+	{
+		string $cacheName = `getAttr ($diskCache + ".cacheName")`;
+		$cacheName = `match "[^/\\]+$" $cacheName`;
+		string $source = `workspace -expandName ("data/" + $cacheName)`;
+		if (!`filetest -f $source`)
+		{
+			continue;
+		}
+		string $dest = `optionVar -query musterCheckinProject` + "/data/" + $cacheName;
+		if (!`filetest -f $dest`)
+		{
+			$copyCache = true;
+			break;
+		}
+	}
+
+	return $copyCache;
+}
+
+global proc int zwMusterCheckinGetDelHair()
+{
+	int $delHair = false;
+
+	string $hairSystems[] = `ls -type "hairSystem"`;
+	for ($hairSystem in $hairSystems)
+	{
+		if (!`referenceQuery -isNodeReferenced $hairSystem`)
+		{
+			$delHair = true;
+			break;
+		}
+	}
+
+	return $delHair;
+}
+
+global proc zwMusterMayaManUpdateCustomShader()
+{
+	if (!`pluginInfo -query -loaded "MayaMan"`)
+	{
+		return;
+	}
+
+	string $MayaManCustomShaders[] = `ls -type "MayaManCustomShader"`;
+	for ($MayaManCustomShader in $MayaManCustomShaders)
+	{
+		if (`objExists ($MayaManCustomShader + ".maxdisp")`)
+		{
+			continue;
+		}
+		string $ShaderFile = `getAttr ($MayaManCustomShader + ".ShaderFile")`;
+		if ($ShaderFile == "")
+		{
+			continue;
+		}
+		catch(`evalEcho ("MayaManUpdateCustomShader \"" + $MayaManCustomShader + "\" \"" + $ShaderFile + "\"")`);
+	}
+}
+
+global proc int[] zwMusterQueryJobs()
+{
+	string $server = `optionVar -query musterCheckinServer`;
+
+	string $mrtool = zwMusterGetMrtool() + "\\Mrtool.exe";
+	if ($server == "192.168.3.185")
+	{
+		$mrtool = zwMusterGetMrtool() + "_185\\Mrtool.exe";
+	}
+	else if ($server == "192.168.3.181")
+	{
+		$mrtool = zwMusterGetMrtool() + "_181\\Mrtool.exe";
+	}
+	else if ($server == "192.168.3.182")
+	{
+		$mrtool = zwMusterGetMrtool() + "_182\\Mrtool.exe";
+	}
+	else if ($server == "192.168.168.183")
+	{
+		$mrtool = zwMusterGetMrtool() + "_183\\Mrtool.exe";
+	}
+
+	int $sf = `optionVar -query musterCheckinStart`;
+	int $ef = `optionVar -query musterCheckinEnd`;
+
+	int $jobs[];
+	clear $jobs;
+
+	string $jobnames[];
+	clear $jobnames;
+	if (`optionVar -query "musterCheckinLayer"`)
+	{
+		string $renderLayers[] = `listConnections "renderLayerManager.renderLayerId"`;
+		for ($renderLayer in $renderLayers)
+		{
+			$jobnames[size($jobnames)] = zwMusterCheckinGetJobName($renderLayer);
+		}
+	}
+	else
+	{
+		$jobnames[size($jobnames)] = zwMusterCheckinGetJobName("");
+	}
+
+	string $cmd = "\"" + $mrtool + "\" -s " + $server + " -u admin -p 110 -q j -jf id,name,status,sf,ef";
+	string $rs = `system $cmd`;
+	string $lines[];
+	tokenize $rs "\n" $lines;
+	for ($line in $lines)
+	{
+		string $fields[];
+		if (`tokenize $line "|" $fields` != 6)
+		{
+			continue;
+		}
+
+		int $find = false;
+		string $name = strip($fields[1]);
+		for ($i=0; $i<size($jobnames); $i++)
+		{
+			if ($name == $jobnames[$i])
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			continue;
+		}
+
+		string $status = strip($fields[2]);
+		if (`match "Completed" $status` != "")
+		{
+			continue;
+		}
+
+		int $sf1 = int(strip($fields[3]));
+		int $ef1 = int(strip($fields[4]));
+		if (!($sf == $sf1 && $ef == $ef1))
+		{
+			continue;
+		}
+
+		int $id = int(strip($fields[0]));
+		$jobs[size($jobs)] = $id;
+	}
+	return $jobs;
+}
+
+global proc zwMusterDeleteJobs(int $ids[])
+{
+	string $server = `optionVar -query musterCheckinServer`;
+
+	string $mrtool = zwMusterGetMrtool() + "\\Mrtool.exe";
+	if ($server == "192.168.3.185")
+	{
+		$mrtool = zwMusterGetMrtool() + "_185\\Mrtool.exe";
+	}
+	else if ($server == "192.168.3.181")
+	{
+		$mrtool = zwMusterGetMrtool() + "_181\\Mrtool.exe";
+	}
+	else if ($server == "192.168.3.182")
+	{
+		$mrtool = zwMusterGetMrtool() + "_182\\Mrtool.exe";
+	}
+	else if ($server == "192.168.168.183")
+	{
+		$mrtool = zwMusterGetMrtool() + "_183\\Mrtool.exe";
+	}
+
+	for ($id in $ids)
+	{
+		string $cmd = "\"" + $mrtool + "\" -s " + $server + " -u admin -p 110 -jobrm " + $id;
+		system $cmd;
+	}
+}
+
+global proc zwMusterL2FileCluster()
+{
+	string $files[] = `ls -type "file"`;
+	for ($file in $files)
+	{
+		string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+		string $str = `substitute "^L:" $fileTextureName "//file-cluster/GDC"`;
+		if ($fileTextureName != $str)
+		{
+			evalEcho ("setAttr \"" + $file + ".fileTextureName\" -type \"string\" \"" + $str + "\"");
+		}
+	}
+}

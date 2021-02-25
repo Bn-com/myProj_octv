@@ -1,0 +1,409 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc string kcBRCreateScript(string $command)
+{
+	string $scriptDir = `internalVar -userScriptDir`;
+	string $filename = $scriptDir + "kcBRscript.mel";
+
+	int $fileID = `fopen $filename "w"`;
+
+	if ($fileID == 0)
+		error("Cannot create " + $filename);
+
+	fprint $fileID $command;
+	fclose $fileID;
+	
+	return $filename;
+}
+
+proc string kcBRFileType(string $filename)
+{
+	string $buf[];
+
+	if (`tokenize $filename "." $buf` > 0)
+		return $buf[size($buf) - 1];
+
+	return "";
+}
+
+proc int kcBRAlreadyAdded(string $filename)
+{
+	string $allFiles[] = `textScrollList -q -allItems kcBRFileList`;
+
+	for ($item in $allFiles)
+		if ($item == $filename)
+			return true;
+
+	return false;
+}
+
+proc string kcBRAddPostfixCB(string $filename, string $postfix)
+{
+	string $newFilename;
+
+	// break the extension from $filename
+
+	string $buf[];
+	
+	if (`tokenize $filename "." $buf` == 2)
+	{
+		$newFilename += $buf[0];
+		$newFilename += $postfix + ".";
+		$newFilename += $buf[size($buf) - 1];
+	}
+
+	return $newFilename;
+}
+
+proc string[] kcBRReadFile(string $filename)
+{
+	string $lines[];
+
+	int $fileID = `fopen $filename "r"`;
+
+	if ($fileID == 0)
+		warning("Cannot open " + $filename);
+	else
+	{
+	    string $buffer = `fgetline $fileID`;
+
+	    while (size($buffer) > 0) 
+		{
+			$buffer = substituteAllString($buffer, "\n", "");
+			$lines[size($lines)] = $buffer;
+
+			$buffer = `fgetline $fileID`;
+		}
+
+		fclose $fileID;
+	}
+	
+	return $lines;
+}
+
+proc kcBRWriteFile(string $filename, string $content)
+{
+	int $fileID = `fopen $filename "w"`;
+
+	if ($fileID == 0)
+		warning("Cannot write to " + $filename);
+	else
+	{
+		fprint($fileID, $content);
+		fclose $fileID;
+	}
+}
+
+global proc kcBRChangeRadioCB()
+{
+	int $selected = `radioButtonGrp -q -select kcBRSaveRadio`;
+
+	if ($selected == 3)
+	{
+		// select "save as" radio, enable the postfix text field
+
+		textFieldGrp -edit -enable true kcBRPostfixField;
+	}
+	else
+		textFieldGrp -edit -enable false kcBRPostfixField;
+}
+
+global proc int kcBROpenCB(string $filename, string $fileType)
+{
+	string $fileType = kcBRFileType($filename);
+
+	if ($fileType == "txt")
+	{
+		string $lines[] = kcBRReadFile($filename);
+
+		for ($item in $lines)
+			if (`file -q -exists $item`)
+			{
+				int $alreadyAdded = kcBRAlreadyAdded($item);
+				
+				if (!$alreadyAdded)
+					textScrollList -edit -append $item kcBRFileList;
+				else
+					warning($item + " already added.");
+			}
+	}
+	else
+		if (($fileType == "mb") ||
+			($fileType == "ma"))
+		{
+			int $alreadyAdded = kcBRAlreadyAdded($filename);
+			
+			if (!$alreadyAdded)
+				textScrollList -edit -append $filename kcBRFileList;
+			else
+				warning($filename + " already added.");
+		}
+		else
+			warning($filename + ": can only add mb, ma or txt file.");
+
+    return 1;
+}
+
+global proc int kcBROpenMELCB(string $filename, string $fileType)
+{
+	if ($fileType == "mel")
+	{
+		text -e -label $filename kcBRMELfilenameText;
+		
+		string $lines[] = kcBRReadFile($filename);
+
+		scrollField -e -clear kcBRMELField;
+
+		for ($item in $lines)
+			scrollField -e -insertText ($item + "\n") kcBRMELField;
+	}
+	else
+		warning("Only choose mel file.");
+
+    return 1;
+}
+
+global proc int kcBRSaveMELCB(string $filename, string $fileType)
+{
+	if ($fileType == "mel")
+	{
+		string $content = `scrollField -q -text kcBRMELField`;
+		kcBRWriteFile($filename, $content);
+
+		text -e -label $filename kcBRMELfilenameText;
+	}
+	else
+		warning("Only choose mel file.");
+
+    return 1;
+}
+
+global proc kcBRRemoveCB()
+{
+	string $selected[] = `textScrollList -q -selectItem kcBRFileList`;
+
+	for ($item in $selected)
+		textScrollList -edit -removeItem $item kcBRFileList;
+}
+
+global proc kcBRAddCB()
+{
+//	fileBrowserDialog -mode 0 -fileCommand "kcBROpenCB" -fileType "Best Guess" -actionName "Add";
+
+	string $buf[] = `idmtFileDialog -filter "Maya Scene (*.ma)|*.ma||" -m`;
+
+	for ($item in $buf)
+	{
+		string $buf2[];
+
+		if (`tokenize $item "." $buf2` > 1)
+			kcBROpenCB($item, $buf2[size($buf2) - 1]);
+		else
+			kcBROpenCB($item, "");
+	}
+}
+
+global proc kcBRClearCB()
+{
+	scrollField -e -clear kcBRMELField;
+}
+
+global proc kcBRBrowseCB()
+{
+	fileBrowserDialog -mode 0 -fileCommand "kcBROpenMELCB" -fileType "mel" -actionName "Open";
+}
+
+global proc kcBRSaveCB()
+{
+	string $filename = `text -q -label kcBRMELfilenameText`;
+
+	if ($filename != "")
+		kcBRSaveMELCB($filename, "mel");
+	else
+		kcBRSaveAsCB;
+}
+
+global proc kcBRSaveAsCB()
+{
+	fileBrowserDialog -mode 1 -fileCommand "kcBRSaveMELCB" -fileType "mel" -actionName "Save";
+}
+
+global proc kcBRRunCB()
+{
+	string $allFiles[] = `textScrollList -q -allItems kcBRFileList`;
+	string $command = `scrollField -q -text kcBRMELField`;
+
+	int $selected = `radioButtonGrp -q -select kcBRSaveRadio`;
+
+	if ($selected == 1)
+	{
+		// save
+
+		$command += "\nfile -save;";
+
+		string $script = kcBRCreateScript($command);
+
+		for ($item in $allFiles)
+			if (`file -q -exists $item`)
+			{
+				string $execute = "mayaBatch -file \"" + $item + "\" -script \"" + $script + "\"";
+				print($execute + "\n");
+				string $output = system($execute);
+				print($output + "\n");
+			}
+	}
+	else
+		if ($selected == 2)
+		{
+			// don't save
+
+			for ($item in $allFiles)
+				if (`file -q -exists $item`)
+				{
+//					$command = substring($command, 1, size($command) - 1);
+
+					string $tokens[];
+					tokenize $item "\\" $tokens;
+					string $filename = substring($tokens[size($tokens) - 1], 1, size($tokens[size($tokens) - 1]) - 3);
+					$filename += "_cam.mb";
+					
+					string $script = kcBRCreateScript($command + " \"" + $filename + "\";");
+
+					string $execute = "mayaBatch -file \"" + $item + "\" -script \"" + $script + "\"";
+					print($execute + "\n");
+					string $output = system($execute);
+					print($output + "\n");
+				}
+		}
+		else
+			if ($selected == 3)
+			{
+				$postfix = `textFieldGrp -q -text kcBRPostfixField`;
+
+				for ($item in $allFiles)
+					if (`file -q -exists $item`)
+					{	
+						string $newFilename = kcBRAddPostfixCB($item, $postfix);
+						
+						string $newCommand = $command;
+						$newCommand += "\nfile -rename \"" + $newFilename + "\";\n";
+						$newCommand += "file -save;";
+
+						string $script = kcBRCreateScript($newCommand);
+
+						string $execute = "mayaBatch -file \"" + $item + "\" -script \"" + $script + "\"";
+						print($execute + "\n");
+						string $output = system($execute);
+						print($output + "\n");
+					}
+			}
+}
+
+global proc kcBatchRunTemp()
+{
+	if (`window -q -exists kcBatchRunWnd`)
+		deleteUI -window kcBatchRunWnd;
+
+	window -title "Batch Run" -resizeToFitChildren true kcBatchRunWnd;
+		
+		string $formLayout = `formLayout`;
+
+			text -label "FILES:" kcBRFileText;
+			textScrollList -numberOfRows 8 -allowMultiSelection true kcBRFileList;
+			button -label "Add" -command "kcBRAddCB" kcBRAddButton;
+			button -label "Remove" -command "kcBRRemoveCB" kcBRRemoveButton;
+
+			separator kcBRSeparator1;
+
+			text -label "MEL: " kcBRMELText;
+			text -label "" kcBRMELfilenameText;
+			scrollField -wordWrap false kcBRMELField;
+			button -label "Clear" -command "kcBRClearCB" kcBRClearButton;
+			button -label "Open..." -command "kcBRBrowseCB" kcBRBrowseButton;
+			button -label "Save" -command "kcBRSaveCB" kcBRSaveButton;
+			button -label "Save As..." -command "kcBRSaveAsCB" kcBRSaveAsButton;
+
+			string $command = "select -clear;\nstring $cameras[] = `ls -cameras`;\nfor ($item in $cameras)\n\tif (`gmatch $item \"cam_*\"`)\n\t\tselect -add $item;\nfile -type \"mayaBinary\" -exportSelected ";
+			scrollField -e -text $command kcBRMELField;	
+
+			separator kcBRSeparator2;
+
+			radioButtonGrp -numberOfRadioButtons 3 -columnWidth4 20 70 100 80 -label "" -labelArray3 "Save" "Don't Save" "Save As" -select 2 -changeCommand "kcBRChangeRadioCB" kcBRSaveRadio;
+			textFieldGrp -enable false -columnWidth 1 80 -adjustableColumn 2 -label "postfix" -text "_postfix" kcBRPostfixField;
+			button -label "Run" -command "kcBRRunCB" kcBRRunButton;
+		
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		kcBRFileText	"top"	5
+			-attachForm		kcBRFileText	"left"	5
+
+			-attachControl	kcBRFileList	"top"	5	kcBRFileText
+			-attachForm		kcBRFileList	"left"	5
+			-attachForm		kcBRFileList	"right"	5
+
+			-attachControl	kcBRAddButton	"top"	5	kcBRFileList
+			-attachForm		kcBRAddButton	"left"	5
+			-attachPosition	kcBRAddButton	"right"	5	50	
+
+			-attachControl	kcBRRemoveButton	"top"	5	kcBRFileList
+			-attachControl	kcBRRemoveButton	"left"	0	kcBRAddButton
+			-attachForm		kcBRRemoveButton	"right"	5	
+
+			-attachControl	kcBRSeparator1		"top"	10	kcBRRemoveButton
+			-attachForm		kcBRSeparator1		"left"	5
+			-attachForm		kcBRSeparator1		"right"	5
+
+			-attachControl	kcBRMELText		"top"	10	kcBRSeparator1
+			-attachForm		kcBRMELText		"left"	5
+
+			-attachControl	kcBRMELfilenameText		"top"	10	kcBRSeparator1
+			-attachControl	kcBRMELfilenameText		"left"	5	kcBRMELText
+
+			-attachControl	kcBRMELField	"top"		5	kcBRMELText
+			-attachForm		kcBRMELField	"left"		5
+			-attachForm		kcBRMELField	"right"		5
+			-attachControl	kcBRMELField	"bottom"	5	kcBRBrowseButton
+
+			-attachForm		kcBRClearButton	"left"		5
+			-attachPosition	kcBRClearButton	"right"		0	25	
+			-attachControl	kcBRClearButton	"bottom"	5	kcBRSeparator2
+
+			-attachControl	kcBRBrowseButton	"left"		0	kcBRClearButton
+			-attachPosition	kcBRBrowseButton	"right"		0	50	
+			-attachControl	kcBRBrowseButton	"bottom"	5	kcBRSeparator2
+
+			-attachControl	kcBRSaveButton	"left"		0	kcBRBrowseButton
+			-attachPosition	kcBRSaveButton	"right"		0	75
+			-attachControl	kcBRSaveButton	"bottom"	5	kcBRSeparator2
+
+			-attachControl	kcBRSaveAsButton	"left"		0	kcBRSaveButton
+			-attachForm		kcBRSaveAsButton	"right"		5
+			-attachControl	kcBRSaveAsButton	"bottom"	5	kcBRSeparator2
+
+			-attachForm		kcBRSeparator2	"left"		5
+			-attachForm		kcBRSeparator2	"right"		5
+			-attachControl	kcBRSeparator2	"bottom"	30	kcBRSaveRadio
+
+			-attachForm		kcBRSaveRadio	"left"		5
+			-attachControl	kcBRSaveRadio	"bottom"	10	kcBRRunButton
+
+			-attachControl	kcBRPostfixField	"left"		0	kcBRSaveRadio
+			-attachForm		kcBRPostfixField	"right"		5		
+			-attachControl	kcBRPostfixField	"bottom"	10	kcBRRunButton
+
+			-attachForm		kcBRRunButton	"left"		5
+			-attachForm		kcBRRunButton	"right"		5	
+			-attachForm		kcBRRunButton	"bottom"	5	
+		$formLayout;
+
+	showWindow kcBatchRunWnd;
+}

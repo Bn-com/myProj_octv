@@ -1,0 +1,267 @@
+global proc yuCbImportGeoTool()
+{
+
+	if(`window -exists importExGeoUI`)
+		deleteUI importExGeoUI;
+	window -title "Import Geometry Cache Tool"
+	       -width 200 -height 360  importExGeoUI;
+	//scrollLayout  -w 200;
+	columnLayout -adjustableColumn true -cw 160;
+
+	radioCollection selectRadio;
+ 		radioButton -label "One File Per Frame" -al left -sl oneFileForFrame;
+ 		radioButton -label "One File Per Geometry" -al left oneFileForGeo;
+
+
+	button -l "Import " -c importGeoCache;
+	button -l "合并cache节点" -c zwOptimizeGeoCache;
+	button -l "导入相机" -c "source zwCameraImportExport.mel; zwGetCameraUI" ;
+
+
+	showWindow importExGeoUI;
+}
+
+
+
+global proc importGeoCache()
+{
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $scenetype=`match "[^.]+$"$sceneName`;
+	//source zwCameraImportExport.mel;
+	string $cbProject = shortProjectNameFuc();
+	string $shots[];
+	tokenize $sceneName ("_") $shots;
+	//catch(`zwGetCameraUIGetCamera $project $shots[1] $shots[3]`);
+	string $project = zwGetProject("");
+	string $filepath = `file -q -sceneName`;
+	string $base = basename($filepath,$scenetype);
+	string $filenamearray[]=stringToStringArray($base, "_");
+	string $episode = ("episode_"+$filenamearray[1]);
+	string $scene = ("scene_"+$filenamearray[2]);
+	string $path=`zwGetPath "geoCache" $filepath`+"/";
+	string $folders[] =`getFileList -folder $path`;
+	string $filetype[]=`file -query -type -sceneName`;
+	string $mspat=`zwGetPath "scenes" $filepath`+"/";
+	if(size($folders)>0)
+	{
+			for($character in $folders)
+			{
+				string $characterName[]=stringToStringArray($character, "_");
+				string $masterFolder;
+				if(`match "^p" (tolower($characterName[1]))` != "")
+				{
+				   $masterFolder="props";
+				}
+				else
+				{
+				    $masterFolder="characters";
+				}
+				string $fileName;
+				string $refPath;
+				if(`gmatch $character "*SLP"`>=1)
+				{
+				    $fileName=$characterName[0]+"_"+$characterName[1]+"_h_hr"+"."+$scenetype;
+				    $refPath=$mspat+$masterFolder+"/"+$characterName[1]+"/hair/"+$fileName;
+
+				}
+				else if(`match "wa_c003001eagle" $character`!="")
+				{
+				    $fileName="tt_c003001BaldEagle_h_ms_cache"+"."+$scenetype;
+				    $refPath="//file-cluster/GDC/Projects/DomesticProject/TerrorTower/Project/scenes/characters/c003001BaldEagle/master/"+$fileName;
+				}
+				else
+				{
+				    $fileName=$characterName[0]+"_"+$characterName[1]+"_"+"h_ms_cache"+"."+$scenetype;
+				    $refPath=$mspat+$masterFolder+"/"+$characterName[1]+"/master/"+$fileName;
+				}
+				source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjReturnMatList.mel";
+				zzjGetMatList;
+				// 黄仲维加，20090415
+				if (!`filetest -f $refPath`)
+				{
+					continue;
+				}
+
+				string $geoCachePath=$path+$character+"/";
+				string $geoCacheNames[]=`getFileList -folder ($geoCachePath) -filespec "*.xml"`;
+				string $geoFile=$geoCachePath+$geoCacheNames[0];
+				string $rightShape[];
+				clear $rightShape;
+				string $ResolvedName=`slImportRef $refPath $filetype[0]`;
+				string $SLPNameSpace;
+				$SLPNameSpace=basename(`file  -q -referenceNode $ResolvedName`,"RN");
+				for($geoFileName in $geoCacheNames)
+				{
+					string $cacheName[]=stringToStringArray($geoFileName, ".");
+					string $cacheFileName=$geoCachePath+$geoFileName;
+					string $cachefilename=`cacheFile -createCacheNode -fileName $cacheFileName`;
+					string $channelNames[] =`cacheFile -q -cnm  $cachefilename`;
+					string $sel[];
+					clear $sel;
+					$sel=`ls -type "mesh" ($SLPNameSpace+":*")`;
+					string $slpObject;
+					if(`gmatch $geoFileName "*SLP.xml"`>=1)
+					{
+					    for($each in $sel)
+					    {
+					        if(`gmatch $each "*SLPShape"`>=1)
+					        {
+					            $slpObject=$each;
+					        }
+					    }
+					    clear $sel;
+					    $sel[size($sel)]=$slpObject;
+					}
+					for ($eachObj in $sel)
+					{
+					    if (!(`match "Orig" $eachObj` != "" || `match "[0-9]$" $eachObj` != ""))
+					    {
+					        $rightShape[size($rightShape)]=$eachObj;
+					    }
+					}
+				}
+				print $rightShape;
+				doImportCacheFile($geoFile,".xml",$rightShape,{});
+				zwOptimizeGeoCache();
+				zzjSetMatList();
+			}
+	}
+	file -f -save  -options "v=0" -type $filetype[0];
+	replaceCachePathToVar();
+}
+
+global proc writeXML()
+{
+
+	string $project = zwGetProject("");
+	string $path = `file -q -sceneName`;
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $scenetype=`match "[^.]+$"$sceneName`;
+	string $base = basename($path,$scenetype);
+	string $filenamearray[]=stringToStringArray($base, "_");
+	string $episode = ("episode_"+$filenamearray[1]);
+	string $scene = ("scene_"+$filenamearray[3]);
+	string $path ="\\\\file-cluster\\GDC\\Projects\\DomesticProject\\" + $project + "\\Project\\data\\"+$episode+"\\"+$scene+"\\geoCache\\";
+	string $folders[] =`getFileList -folder $path`;
+	float $mintime = `playbackOptions -q -min`;
+	float $maxtime =`playbackOptions -q -max`;
+	if(size($folders)>0)
+	{
+		for($character in $folders)
+		{
+			string $xml="";
+			string $timeRange;
+			int $sameTime;
+			int $startTime;
+			int $endTime;
+			string $geoCachePath=$path+$character+"\\";
+			string $geoCacheNames[]=`getFileList -folder ($geoCachePath) -filespec "*.xml"`;
+			int $sameTime;
+			for($geoCacheName in $geoCacheNames)
+			{
+				string $path=$geoCachePath+$geoCacheName;
+				int $fileId = `fopen $path "r"`;
+				while (!`feof $fileId`) //判断是否在文件的最后一行，为了逐行读
+				{
+					string $strLine = `fgetline $fileId`;//读每一行
+					string $tim = `match "time Range=\"[^\"]+\"" $strLine`;//这行是否有匹配的字符
+					if($tim != "")
+					{
+						$timeRange = $strLine;
+					}
+					string $cacheTime = `match "TimePerFrame=\"[0-9]+\"" $strLine`;
+					if($cacheTime !="")
+					{
+						$sameTime = `match "[0-9]+" $cacheTime`;
+					}
+					string $str = `match "StartTime=\"[0-9]+\"" $strLine`;
+					string $endStr= `match "EndTime=\"[0-9]+\"" $strLine`;
+					if($str !="")
+					{
+						$startTime = $mintime*$sameTime;
+						$endTime = $maxtime*$sameTime;
+						//替换字符
+						$strLine = `substitute "SamplingRate=\"[^\"]+\"" $strLine ("SamplingRate=\""+$sameTime+"\"")`;
+						//替换字符
+						$strLine = `substitute $str $strLine ("StartTime=\""+$startTime+"\"")`;
+						//替换字符
+						$strLine = `substitute $endStr $strLine ("EndTime=\""+$endTime+"\"")`;
+
+					}
+
+					$xml += $strLine;
+				}
+				fclose $fileId;
+				$strLine = `substitute "time Range=\"[^\"]+\"" $timeRange ("time Range=\""+$startTime+"-"+$endTime+"\"")`;
+				$xml = `substitute $timeRange $xml $strLine`;
+				print $xml;
+				//如果要写文件的话fopen $path "w"
+				int $fileId = `fopen $path "w"`;
+				//写文件
+				fwrite $fileId $xml;
+				fclose $fileId;
+				print ("XML文件已经修改完成!!!\n");
+			}
+		}
+	}
+
+}
+
+global proc string cutSTime()
+{
+	string $project = zwGetProject("");
+	string $minFrame;
+	if($project=="Strawberry")
+	{
+		$minFrame="950";
+	}
+	else if($project=="Enyo")
+	{
+		$minFrame="980";
+	}
+	else
+	{
+		$minFrame=`playbackOptions -q -min`;
+	}
+	return $minFrame;
+}
+
+global proc replaceCachePathToVar()
+{
+	python("import sys");
+	python("sys.path.append(\"//File-cluster/GDC/Resource/Support/Maya/Python/IDMT/yfsScripts\")");
+	python("from yfsChangeProxyPath import *");
+	python("changeCachePath()");
+}
+
+global proc string shortProjectNameFuc()
+{
+    string $projectName= zwGetProject("");
+    string $shortProjectName;
+    if($projectName=="ChangBaiShan")
+    {
+        $shortProjectName="cb";
+    }
+    else if($projectName=="EarthQuake")
+    {
+        $shortProjectName="eq";
+    }
+    else if($projectName=="TerrorTower")
+    {
+        $shortProjectName="tt";
+    }
+    return $shortProjectName;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+

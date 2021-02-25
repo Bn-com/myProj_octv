@@ -1,0 +1,850 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-6-13
+//
+//	Update/Change: WanShouLong
+//	Last Updated: 
+//	Description:
+//			动作库（包含表情库）。和动画面板的库文件通用
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc slAnimPoseLibraryNew()
+{
+	//source "ddAnimationPanelUI.mel";
+	
+	global string $anzovinInterfaceCurrentCharacterNamespace;
+	
+	string $fmCamera = "FM_faceMapCam";
+	string $reCamera = "re_cam_faceRigging";
+
+	string $view = "";
+	int $selectView = 0;
+
+
+	string $characters[] = slAnimPoseLibraryNewGetCharacter();
+	
+	if(`window -exists slAnimPoseLibraryNewWin`)
+		deleteUI slAnimPoseLibraryNewWin;
+	if(`modelPanel -exists slAnimPoseLibraryNewWin_fmView`)
+		deleteUI -panel slAnimPoseLibraryNewWin_fmView;
+	
+	window -title "Pose Library " -in "PL" -menuBar  true -mxb false -mnb false slAnimPoseLibraryNewWin;
+
+		paneLayout -configuration "vertical2" slAnimPoseLibraryNewWin_pan;
+			
+			string $child1 = `formLayout`;
+				popupMenu ;
+					menuItem -l "选择口型      "	-c "slAnimPoseLibraryNewSelectMouthControls \"mouth\" 0";
+					menuItem -l "K口型      "		-c "slAnimPoseLibraryNewSelectMouthControls \"mouth\" 1";
+					menuItem -d true ;
+					menuItem -l "选择表情      "	-c "slAnimPoseLibraryNewSelectMouthControls \"face\" 0";
+					menuItem -l "K表情      "		-c "slAnimPoseLibraryNewSelectMouthControls \"face\" 1";
+
+				string $charbutton = `optionMenu -label "Character:" -changeCommand "slAnimPoseLibraryNewCharChange" slAnimPoseLibraryNewWin_charOptionMenu`;
+				for($character in $characters)
+					menuItem -label $character;
+
+				string $currentnamespace = `optionMenu -q -v  slAnimPoseLibraryNewWin_charOptionMenu`;
+				if ($currentnamespace == "Unnamed")
+					$currentnamespace = "";
+				
+				$anzovinInterfaceCurrentCharacterNamespace = $currentnamespace;
+
+				string $tfmbuuton = `checkBox -label "TFM On/Off"  -cc "fm_toggleFaceMachineEvaluation" -value 1	slAnimPoseLibraryNewWin_Tfmable`;
+
+				if (`objExists ($anzovinInterfaceCurrentCharacterNamespace + "FM_data")`)
+				{
+					int $value = `getAttr ($anzovinInterfaceCurrentCharacterNamespace + "FM_data.enableFaceMachine")`;
+					checkBox -e -v $value slAnimPoseLibraryNewWin_Tfmable;
+				}
+				else
+					checkBox -e -en false slAnimPoseLibraryNewWin_Tfmable;
+				
+				string $panel = `paneLayout -configuration "single"`;
+					string $lookCamera = ($currentnamespace+$fmCamera);
+					if (`objExists $lookCamera`)
+					{
+						modelPanel  -camera $lookCamera  -menuBarVisible false  slAnimPoseLibraryNewWin_fmView;
+						setParent ..;
+						modelEditor -edit -grid 1 -displayAppearance "smoothShaded" -joints 0 -displayTextures off -viewSelected false -displayLights "default" slAnimPoseLibraryNewWin_fmView;
+						modelEditor -edit -grid 0 -viewSelected false slAnimPoseLibraryNewWin_fmView;
+					}
+					else 
+					{
+						$lookCamera = ($currentnamespace+$reCamera);
+						$view = $currentnamespace+"CHR";
+						modelPanel  -camera $lookCamera  -menuBarVisible false  slAnimPoseLibraryNewWin_fmView;
+						setParent ..;
+						modelEditor -edit -grid 1 -displayAppearance "smoothShaded" -joints 0 -camera 0 -displayTextures off -viewSelected false -displayLights "default" slAnimPoseLibraryNewWin_fmView;
+						if (`objExists $view`)
+						{	select -replace $view ;
+							modelEditor -edit -grid 0 -viewSelected true slAnimPoseLibraryNewWin_fmView ;
+							isolateSelect -as  slAnimPoseLibraryNewWin_fmView;
+						}
+						select -cl;
+					}
+				setParent ..;
+
+				formLayout -edit
+					-attachForm     $charbutton		"top"		5
+					-attachForm     $charbutton		"left"		10
+					-attachControl  $charbutton		"right"		10	$tfmbuuton
+
+					-attachForm     $tfmbuuton		"top"		10
+					-attachForm     $tfmbuuton		"right"		10
+
+					-attachControl	$panel			"top"		5	$charbutton
+					-attachForm     $panel			"left"		10
+					-attachForm     $panel			"right"		10
+					-attachForm     $panel			"bottom"	10
+				$child1;
+			//setParent ..;
+			setParent slAnimPoseLibraryNewWin_pan;
+
+			string $child2 = `formLayout `;
+				checkBox -label "Key"		-value 1	slAnimPoseLibraryNewWin_Keyable;
+				checkBox -label "Mirror"	-value 0	slAnimPoseLibraryNewWin_Mirrorable;
+				floatSliderGrp -label "Value" -field true -cw 1 40 -cw 2 40 -cw 3 10 -adj 3
+						-minValue 0 -maxValue 2.0 -fieldMinValue 0 -fieldMaxValue 10 -value 1 slAnimPoseLibraryNewWin_KeyValue;
+				optionMenuGrp 	-label "Path: " -columnWidth2 40 600 -columnAlign 1 "right"  
+						-cc "slAnimPoseLibraryNewFaceGetPresets;slAnimPoseLibraryNewUpdatOptionVar;" slAnimPoseLibraryNewWin_CustomPath;
+					menuItem -label "   ";
+					if (`optionVar -ex slAnimPoseLibraryNewWin_path`)
+					{
+						string $children[] = `optionMenuGrp -q -ill  slAnimPoseLibraryNewWin_CustomPath`;
+							deleteUI $children;
+						
+						string $path[] = `optionVar -q slAnimPoseLibraryNewWin_path`;
+						for ($item in $path)
+						{
+							menuItem -label $item ;
+							optionMenuGrp -e -v $item  slAnimPoseLibraryNewWin_CustomPath;	
+						}
+					}
+				button -label "Browse" -c "slAnimPoseLibraryNewGetPath;slAnimPoseLibraryNewFaceGetPresets;" slAnimPoseLibraryNewWin_Browse;
+				button -label "Creat New Facial..." -c "slAnimPoseLibraryNewCreateNew" slAnimPoseLibraryNewWin_CreateNew;
+				frameLayout -bv false -lv false slAnimPoseLibraryNewWin_Custom_fr;
+					shelfLayout -cwh 60 90 -st "iconAndTextVertical" slAnimPoseLibraryNewWin_CustomBut;
+						shelfButton -annotation "please select correct path" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "null" -fn "boldLabelFont";
+						slAnimPoseLibraryNewFaceGetPresets();
+				setParent ..;
+			setParent ..;
+			formLayout -edit
+				-af		slAnimPoseLibraryNewWin_Mirrorable		"top"		10
+				-af		slAnimPoseLibraryNewWin_Mirrorable		"right"		2	
+				
+				-af		slAnimPoseLibraryNewWin_Keyable		"top"		10
+				-ac		slAnimPoseLibraryNewWin_Keyable		"right"		10	slAnimPoseLibraryNewWin_Mirrorable
+				
+				-af		slAnimPoseLibraryNewWin_KeyValue		"top"		10
+				-af		slAnimPoseLibraryNewWin_KeyValue		"left"		2
+				-ac		slAnimPoseLibraryNewWin_KeyValue		"right"		10	slAnimPoseLibraryNewWin_Keyable
+				
+				-ac		slAnimPoseLibraryNewWin_CustomPath		"top"		5	slAnimPoseLibraryNewWin_Keyable
+				-af		slAnimPoseLibraryNewWin_CustomPath		"left"		5
+				-ac		slAnimPoseLibraryNewWin_CustomPath		"right"		10	slAnimPoseLibraryNewWin_Browse
+
+				-ac		slAnimPoseLibraryNewWin_Browse			"top"		5	slAnimPoseLibraryNewWin_Keyable
+				-ac		slAnimPoseLibraryNewWin_Browse			"right"		10	slAnimPoseLibraryNewWin_CreateNew
+
+				-ac		slAnimPoseLibraryNewWin_CreateNew		"top"		5	slAnimPoseLibraryNewWin_Keyable
+				-af		slAnimPoseLibraryNewWin_CreateNew		"right"		2
+				
+				-ac		slAnimPoseLibraryNewWin_Custom_fr		"top"		10	slAnimPoseLibraryNewWin_CustomPath
+				-af		slAnimPoseLibraryNewWin_Custom_fr		"left"		2
+				-af		slAnimPoseLibraryNewWin_Custom_fr		"right"		2
+				-af		slAnimPoseLibraryNewWin_Custom_fr		"bottom"	2
+			$child2;
+			setParent slAnimPoseLibraryNewWin_pan;
+
+	showWindow slAnimPoseLibraryNewWin;
+}
+
+global proc string[] slAnimPoseLibraryNewGetCharacter()
+{
+	string $fmCamera = "FM_faceMapCam";
+	string $reCamera = "re_cam_faceRigging";
+	
+	string $chars[] = `ls "*Character" "*:Character" "*:*:Character" "*:*:*:Character" "*Main" "*:Main" "*:*:Main" "*:*:*:Main"`;
+
+	string $namespace[];
+	for ($char in $chars)
+	{
+		string $buff[];
+		int $num = `tokenize $char ":" $buff`;
+
+		if ($num == 1)
+		{
+			$namespace[size($namespace)] = "Unnamed";
+		}
+		else
+		{
+			$namespace[size($namespace)] = `substring $char 1 (size($char)-size($buff[$num-1]))`;
+		}
+		
+		
+		/*if ($num == 1 && `objExists $fmCamera`)
+		{
+			if (`objExists $fmCamera`)
+				$namespace[size($namespace)] = "Unnamed";
+		}
+		else
+		{
+			string $pre = `substring $char 1 (size($char)-size($buff[$num-1]))`;
+			if (`objExists ($pre+$fmCamera)`)
+				$namespace[size($namespace)] = `substring $char 1 (size($char)-size($buff[$num-1]))`;
+		}
+
+		if ($num == 1 && `objExists $reCamera`)
+		{
+			if (`objExists $reCamera`)
+				$namespace[size($namespace)] = "Unnamed";
+		}
+		else
+		{
+			string $pre = `substring $char 1 (size($char)-size($buff[$num-1]))`;
+			if (`objExists ($pre+$reCamera)`)
+				$namespace[size($namespace)] = `substring $char 1 (size($char)-size($buff[$num-1]))`;
+		}*/
+	}
+
+	return $namespace;
+}
+
+global proc slAnimPoseLibraryNewCharChange()
+{
+	global string $anzovinInterfaceCurrentCharacterNamespace;
+	
+	string $fmCamera = "FM_faceMapCam";
+	string $reCamera = "re_cam_faceRigging";
+
+	string $currentnamespace = `optionMenu -q -v slAnimPoseLibraryNewWin_charOptionMenu`;
+	if ($currentnamespace == "Unnamed")
+		$currentnamespace = "";
+
+	$anzovinInterfaceCurrentCharacterNamespace = $currentnamespace;
+
+	if (`objExists ($anzovinInterfaceCurrentCharacterNamespace + "FM_data")`)
+	{
+		int $value = `getAttr ($anzovinInterfaceCurrentCharacterNamespace + "FM_data.enableFaceMachine")`;
+		checkBox -e -en true slAnimPoseLibraryNewWin_Tfmable;
+		checkBox -e -v $value slAnimPoseLibraryNewWin_Tfmable;
+	}
+	else
+		checkBox -e -en false slAnimPoseLibraryNewWin_Tfmable;
+
+	string $lookCamera = ($currentnamespace+$fmCamera);
+	if (`objExists $lookCamera`) 
+	{
+		modelPanel -e -camera $lookCamera  slAnimPoseLibraryNewWin_fmView;
+		modelEditor -edit -grid 0 -viewSelected false slAnimPoseLibraryNewWin_fmView ;
+	}
+	else
+	{
+		$lookCamera = ($currentnamespace+$reCamera);
+		$view = $currentnamespace+"CHR";
+		if (`objExists $view`)
+		{
+			modelPanel -e -camera $lookCamera  slAnimPoseLibraryNewWin_fmView;
+			isolateSelect -s  0 slAnimPoseLibraryNewWin_fmView;
+			select -replace $view ;
+			modelEditor -edit -grid 0 -viewSelected true slAnimPoseLibraryNewWin_fmView ;
+			isolateSelect -as  slAnimPoseLibraryNewWin_fmView;
+			select -cl;
+		}
+	}
+}
+
+
+global proc slAnimPoseLibraryNewFaceGetPresets()
+{
+	string $buffer[],$buff[];
+	string $path,$shelf;
+
+	
+	$path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+	$shelf = "slAnimPoseLibraryNewWin_CustomBut";
+	
+
+	string $files[] =`getFileList -fld $path -fs  "*.dat"`;
+	if (`size $files`)
+	{
+		string $children[] = `shelfLayout -q -ca $shelf`;
+		for ($child in $children)
+			deleteUI $child;
+	}
+	else
+	{
+		string $children[] = `shelfLayout -q -ca $shelf`;
+		for ($child in $children)
+			deleteUI $child;
+		
+		shelfButton -annotation "please select character" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "no" -fn "boldLabelFont" -p $shelf;
+	}
+
+	string $index[] = `getFileList -fld $path -fs  "public.ind"`;
+	string $names[],$label[];
+	if (size($index))
+	{
+		$fileId = `fopen ($path + $index[0]) "r"`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " " $buff;
+			$names[size($names)] = $buff[0];
+			$label[size($names)-1] = $buff[1];
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}
+
+	for ($i=0;$i<`size $files`;$i++)
+	{
+		string $btName=basename($files[$i],".dat");
+		string $image1 = $btName + ".bmp";
+		string $imagefile[] = `getFileList -fld $path -fs ($btName+".bmp")`;
+		if (!size($imagefile))
+			$image1 = "commandButton.xpm";
+		if (!stringArrayCount($btName,$names))
+			shelfButton -annotation $btName -style "iconAndTextVertical" -image1 ($path+$image1) -l $btName	-fn "boldLabelFont" -p $shelf
+			-command ("slAnimPoseLibraryNewKey(\""+$btName+"\",\""+$path+"\")");
+				popupMenu -button 3  ;
+					menuItem -en on -label "Remove" -c ("slAnimPoseLibraryNewRemoveKey(\""+$names[$i]+"\")") ;
+					menuItem -divider true;
+					menuItem -en on -label "..." ;
+	}
+	
+	for ($i=0;$i<size($names);$i++)
+	{
+		string $fileName = $names[$i] + ".dat" ;
+		string $image = $names[$i] + ".bmp";
+
+		string $existImg[] = `getFileList -fs ($path+$image)`;
+		if (!size($existImg))
+			$image = "commandButton.xpm";
+		
+		string $anno = $names[$i];
+		if (`size $label[$i]`)
+			$anno = $label[$i];		
+		shelfButton -annotation $anno -style "iconAndTextVertical" -image1 ($path+$image) -l $anno	-fn "boldLabelFont" -p $shelf
+		-command ("slAnimPoseLibraryNewKey(\""+$names[$i]+"\",\""+$path+"\")");
+			popupMenu -button 3  ;
+				menuItem -en on -label "Remove" -c ("slAnimPoseLibraryNewRemoveKey(\""+$names[$i]+"\")") ;
+				menuItem -divider true;
+				menuItem -en on -label "..." ;
+	}
+}
+
+global proc string slAnimPoseLibraryNewGetPath()
+{
+	string $facialDefaultPath = `fileBrowserDialog -m 4 -fc "slAnimPoseLibraryNewSetPath" -an "select_folder"`;
+	return ""; 
+}
+
+global proc slAnimPoseLibraryNewSetPath(string $filePath,string $fileType)
+{
+	string $buff[];
+	string $children[] =`optionMenuGrp -q -ill slAnimPoseLibraryNewWin_CustomPath`;
+	tokenize $children[0] "|" $buff;
+	string $optionMenu = `substring $children[0] 1 (size($children[0])-size($buff[size($buff)-1])-1)`;
+
+	if (`optionVar -ex slAnimPoseLibraryNewWin_path`)
+	{
+		string $vars[] = `optionVar -q slAnimPoseLibraryNewWin_path`;
+		if (!stringArrayContains($filePath,$vars))
+		{	
+			menuItem -label $filePath -p $optionMenu;
+			optionVar -sva "slAnimPoseLibraryNewWin_path" $filePath;
+		}
+	}
+	else
+	{
+		deleteUI $children;
+		menuItem -label $filePath -p $optionMenu;
+		optionVar -sva "slAnimPoseLibraryNewWin_path" $filePath;
+	}
+	optionMenuGrp -e -v $filePath slAnimPoseLibraryNewWin_CustomPath;
+
+}
+
+global proc slAnimPoseLibraryNewUpdatOptionVar()
+{
+	if (!`optionVar -ex slAnimPoseLibraryNewWin_path`)
+		return ;
+	
+	string $children[] =`optionMenuGrp -q -ill slAnimPoseLibraryNewWin_CustomPath`;
+	string $buff[];
+	tokenize $children[0] "|" $buff;
+	string $optionMenu = `substring $children[0] 1 (size($children[0])-size($buff[size($buff)-1])-1)`;
+	string $last = `optionMenuGrp -q -v slAnimPoseLibraryNewWin_CustomPath`;
+	for ($child in $children)
+	{
+		string $mi = `menuItem -q -l $child`;
+		if ($mi == $last)
+		{
+			deleteUI $child;
+			menuItem -l $last -p $optionMenu;
+		}
+	}
+	optionMenuGrp -e -sl (size($children)) slAnimPoseLibraryNewWin_CustomPath;
+
+	string $vars[] = `optionVar -q slAnimPoseLibraryNewWin_path`;
+	int $loc;
+	for ($i=0;$i<size($vars);$i++)
+	{
+		if ($vars[$i] == $last) $loc = $i;
+	}
+	optionVar -rfa slAnimPoseLibraryNewWin_path $loc;
+	optionVar -sva slAnimPoseLibraryNewWin_path $last;
+}
+
+global proc slAnimPoseLibraryNewInitialOptionVar()
+{
+	if (!`optionVar -ex slAnimPoseLibraryNewWin_path`)
+		return ;
+	
+	string $vars[] = `optionVar -q slAnimPoseLibraryNewWin_path`;
+	int $total = `optionVar -as slAnimPoseLibraryNewWin_path`;
+	if ($total >6)
+	{
+		for ($i=0;$i<($total-6) ;$i++ )
+		{
+			optionVar -rfa slAnimPoseLibraryNewWin_path $i;
+		}
+	}
+}
+
+global proc slAnimPoseLibraryNewCreateNew()
+{
+	string $cam = "persp";
+	
+	if(`window -exists slAnimPoseLibraryNewCreateNewWin`)
+		deleteUI slAnimPoseLibraryNewCreateNewWin;
+	window -title "创建" -s true  slAnimPoseLibraryNewCreateNewWin;
+		columnLayout -adjustableColumn true;
+				
+			frameLayout -borderStyle "etchedOut" -cl false -cll false -m on -labelVisible false -width 250 -height 250 slAnimPoseLibraryNewCreateNewWin_iconframe;
+				paneLayout -w 250 -h 250;	
+					string $createPoseCamera = `modelPanel -mbv false -camera $cam`;  
+						modelEditor -e -grid 0 -da smoothShaded $createPoseCamera;
+						modelEditor -e -allObjects 0 $createPoseCamera;
+						modelEditor -e -nurbsSurfaces  1 $createPoseCamera;
+						modelEditor -e -polymeshes  1 $createPoseCamera;
+						modelEditor -e -subdivSurfaces  1 $createPoseCamera;
+						setParent ..;
+					setParent..;
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	setParent..;
+
+			frameLayout -borderStyle "etchedOut" -labelVisible false -width 250 -height 70 ;
+				columnLayout -adjustableColumn true;
+					textFieldGrp -cw2 50 200 -l "Name:" -tx "" slAnimPoseLibraryNewCreateNewWin_name;
+					button  -label "Preview Icon" -align "center" -c "button -e -en on slAnimPoseLibraryNewCreateNewWin_creat;slAnimPoseLibraryNewCreateNewIcon" -w 250 -h 23;
+					button -label "Create facial" -en off -c "slAnimPoseLibraryNewCreateNewFacial;" -w 250 -h 23 slAnimPoseLibraryNewCreateNewWin_creat;
+				setParent ..;
+			setParent ..;
+		//setParent ..;
+	showWindow slAnimPoseLibraryNewCreateNewWin;
+	
+	window -edit -w 258 -h 350 -s false slAnimPoseLibraryNewCreateNewWin;
+}
+
+global proc slAnimPoseLibraryNewCreateNewIcon()
+{
+	string $cam = "persp";
+	int $facialLibIconsSize[] = {60,60};
+	float $currentTime = `currentTime -q`; 
+
+	int $currentIF = `getAttr "defaultRenderGlobals.imageFormat"`;
+	setAttr "defaultRenderGlobals.imageFormat" 20;
+
+//	playblast -v false -frame $currentTime -w $facialLibIconsSize[0] -h $facialLibIconsSize[1] -orn 0 -cf "iconTmp.bmp" -fmt "image" -p 100;
+	// modified by huangzhongwei@idmt.com.cn, 20120323
+	if(`about -apiVersion` >= 201200)
+	{
+		string $temp = `internalVar -userTmpDir`;
+		string $tempOld[] = `getFileList -filespec ($temp + "*.bmp")`;
+		string $dest = `playblast -v false -frame $currentTime -w $facialLibIconsSize[0] -h $facialLibIconsSize[1] -orn 0 -cf "iconTmp.bmp" -fmt "image" -p 100 -compression "bmp"`;
+		string $tempNew[] = `getFileList -filespec ($temp + "*.bmp")`;
+		$tempNew = stringArrayRemove($tempOld, $tempNew);
+		if (size($tempNew) == 1)
+		{
+			sysFile -delete $dest;
+			sysFile -move $dest ($temp + $tempNew[0]);
+		}
+	}
+	else
+	{
+		playblast -v false -frame $currentTime -w $facialLibIconsSize[0] -h $facialLibIconsSize[1] -orn 0 -cf "iconTmp.bmp" -fmt "image" -p 100;
+	}
+
+	setAttr "defaultRenderGlobals.imageFormat" $currentIF;
+
+	frameLayout -e -width ($facialLibIconsSize[0] +190) -height ($facialLibIconsSize[1] + 190) -cl false -cll false -m on slAnimPoseLibraryNewCreateNewWin_iconframe;
+}
+
+global proc slAnimPoseLibraryNewCreateNewFacial ()
+{
+	string $selCon = slAnimPoseLibraryNewCreateNewFacialDate();
+	if ($selCon == "no")
+	{
+		$result1 = `confirmDialog -title "Selected Control" -message "没有选择任何控制器!"
+					-button "取消" -defaultButton "取消" -cancelButton "取消" -dismissString "取消"`;
+		return;
+	}
+	
+	
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+	string $name = `textFieldGrp -q -tx  slAnimPoseLibraryNewCreateNewWin_name`;
+	string $result = "Yes";
+
+	/*string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	int $num[];
+	$num[0] = 0;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " \n" $buff;
+			if ($buff[1] == $name)
+			{
+				$result = `confirmDialog -title "Existed Facial Found" -message "The name of facial is existed,do you want to overwrite it?"
+							-button "Yes" -button "No" -defaultButton "No"
+							-cancelButton "No" -dismissString "No"`;
+				$num[0] = (int)`substring $buff[0] 7 (size($buff[0]))`;
+			}
+			$num[1] = (int)`substring $buff[0] 7 (size($buff[0]))`;
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}*/
+
+	
+	if (`filetest -r ($path+"\\"+$name)`)
+	{
+		$result = `confirmDialog -title "Existed Facial Found" -message "The name of facial is existed,do you want to overwrite it?"
+					-button "Yes" -button "No" -defaultButton "No"
+					-cancelButton "No" -dismissString "No"`;
+	}
+	
+	if ($result == "Yes")
+	{
+		/*string $filename = "facial";
+		if ($num[0])
+			$filename += $num[0];
+		else
+			$filename += ($num[1]+1);*/
+		
+		string $filename = $name;
+
+		slAnimPoseLibraryNewCreateNewImage($filename);
+		slAnimPoseLibraryNewCreateNewData($filename);
+		slAnimPoseLibraryNewCreateNewIndex($filename);
+
+		deleteUI slAnimPoseLibraryNewCreateNewWin;
+	}
+}
+
+global proc slAnimPoseLibraryNewCreateNewImage(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+	float $frame = `currentTime -q`; 
+	
+	string $ws = `workspace -q -fullName`;
+	string $imagesDir = `workspace -q -renderTypeEntry "images"`;
+	if(`about -apiVersion` >= 201451)
+	{
+		$imagesDir = `workspace -q -fileRuleEntry "images"`;
+	}
+	string $bmp = $ws + "/" + $imagesDir + ("/iconTmp.bmp");
+	string $icon = $path + "/" + $filename + ".bmp";
+	sysFile -copy  $icon $bmp;
+	sysFile -delete $bmp;
+}
+
+global proc slAnimPoseLibraryNewCreateNewData(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+	float $frame = `currentTime -q`; 
+	
+	string $dateFile = $filename + ".dat";
+	string $facialData = slAnimPoseLibraryNewCreateNewFacialDate();
+	$fileId = `fopen ($path + $dateFile) w`;	
+	fprint $fileId $facialData;
+	fclose $fileId;
+}
+
+global proc slAnimPoseLibraryNewCreateNewIndex(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+	string $name = `textFieldGrp -q -tx  slAnimPoseLibraryNewCreateNewWin_name`;
+
+	/*string $indTxt;
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		int $exists = 0;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " \n" $buff;
+			if ($buff[1] == $name)
+				$exists = 1;
+
+			$indTxt += $nextLine;
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+		if (!$exists)
+			$indTxt += $filename + "   " + $name + "\n";
+	}
+	else 
+		$indTxt = $filename + "   " + $name + "\n";
+
+	$fileId = `fopen ($path + "public.ind") w`;
+	fprint $fileId $indTxt;
+	fclose $fileId;*/
+
+
+	slAnimPoseLibraryNewFaceGetPresets();
+}
+
+global proc string slAnimPoseLibraryNewCreateNewFacialDate()
+{
+	string $facialData = "Charactor Facial Data (Author : WansHoulOng )...\n";
+	string $sels[] = `ls -sl`;
+	string $facialCons[] = `ls -sl`;
+	$facialCons = stringArrayCatenate($sels,$facialCons);
+
+	for ($con in $facialCons)
+	{
+		string $keyableAttrs[] = `listAnimatable $con`;
+		for ($attr in $keyableAttrs)
+		{
+			string $name,$value;
+			string $buff[];
+			tokenize $attr "|:" $buff;
+			string $temp = $buff[size($buff)-1];
+			$name = $temp;
+			$value = `getAttr $attr`;
+			$facialData += $name + "   " + $value + "\n";
+		}
+	}
+
+	$facialData += "End...";
+
+	if (`size($facialCons)` == 0)
+	{
+		$facialData = "no";
+	}
+
+	return $facialData;
+}
+
+global proc slAnimPoseLibraryNewKey(string $name,string $folder)
+{
+	string $char = `optionMenu -q -v  slAnimPoseLibraryNewWin_charOptionMenu`;
+	//if ($char == "Unnamed")
+		//$char = "";
+
+	string $master[] = `ls -sl`;
+	if (size($master))
+	{
+		string $buff[] = stringToStringArray($master[0],":");
+		$char = substituteAllString($master[0],$buff[size($buff)-1],"");
+	}
+	
+	if ($char != "NONE")
+	{
+		float $extraValue = `floatSliderGrp -q -v slAnimPoseLibraryNewWin_KeyValue`;
+		
+		string $path = $folder;
+		if ($folder == "local")
+			$path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+		string $dataName = $path + $name + ".dat";
+		
+		$fileId = `fopen $dataName r`;
+			string $nextLine = `fgetline $fileId`;
+			$nextLine = `fgetline $fileId`;
+			while (size($nextLine) > 0 )
+			{
+				string $buff[];
+				tokenize $nextLine " " $buff;
+				string $name = $buff[0];
+				string $value = $buff[1];
+				float $mirror = 1;
+
+				string $extrabuff[] = {};
+				tokenize $name "." $extrabuff;
+
+				if (size($master)<=1 || (size($master)>1 && stringArrayCount(($char+$extrabuff[0]),$master)))
+				{
+					if (`checkBox -q -v slAnimPoseLibraryNewWin_Mirrorable`)
+					{
+						tokenize $name "." $buff;
+						if ($buff[size($buff)-1] == "translateX" || $buff[size($buff)-1] == "rotateY")
+							$mirror = -1;
+						
+						if (startsWith($name,"L_"))
+						{
+							string $temp = `substring $name 3 (size($name))` ;
+							$name = "R_" + $temp;
+						}
+						else if (startsWith($name,"R_"))
+						{
+							string $temp = `substring $name 3 (size($name))` ;
+							$name = "L_" + $temp;
+						}
+					}
+					
+					if (`objExists ($char+$name)`&& size(`ls ($char+$name)`)==1 && `getAttr -se ($char+$name)` )
+					{
+						//print ($char+$name+"\n");
+						setAttr ($char+$name) (((float)$value)*$extraValue*$mirror);
+						if (`checkBox -q -v slAnimPoseLibraryNewWin_Keyable`)
+							setKeyframe ($char+$name);
+					}
+				}
+				$nextLine = `fgetline $fileId`;
+			}
+		fclose $fileId;
+	}
+}
+
+global proc slAnimPoseLibraryNewRemoveKey(string $name)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibraryNewWin_CustomPath` + "/";
+
+	string $indTxt;
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " " $buff;
+			if ($buff[0] != $name)
+			{
+				$indTxt += $nextLine;
+			}
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}
+
+	$fileId = `fopen ($path + "public.ind") w`;
+	fprint $fileId $indTxt;
+	fclose $fileId;
+
+	string $dat = $path + $name + ".dat";
+	string $bmp = $path + $name + ".bmp";
+	sysFile -delete $dat;
+	sysFile -delete $bmp;
+
+	slAnimPoseLibraryNewFaceGetPresets();
+}
+
+global proc string[] slAnimPoseLibraryNewMouthControls(string $pre,string $type,string $part)
+{
+	string $curSel[] = `ls -sl`;
+	
+	string $controls[];
+	switch ($type)
+	{
+		case "tfm" :
+			switch ($part)
+			{
+				case "mouth" :
+					select  ($pre+"jawControls");
+					$controls = `ls -sl`;
+					select -r $curSel;
+					break;
+				case "face" :
+					select  ($pre+"faceControls");
+					$controls = `ls -sl`;
+					select  ($pre+"jawControls");
+					string $remove[] = `ls -sl`;
+					$controls = stringArrayRemove($remove,$controls);
+					select -r $curSel;
+					break;
+			}
+			break;
+		case "re" :
+			switch ($part)
+			{
+				case "mouth" :
+					string $temp[] = {"Jaw_MN_CTRL","CtrlRig_R_Mouth_MI_CTRL","CtrlRig_R_Mouth_MN_CTRL","CtrlRig_UpperLip_x3_MI_CTRL",
+								"CtrlRig_LowerLip_x3_MI_CTRL","CtrlRig_Upper_Lip_MA_CTRL","CtrlRig_R_Mouth_MA_CTRL",
+								"CtrlRig_Lower_Lip_MA_CTRL","CtrlRig_L_Mouth_MI_CTRL","CtrlRig_L_Mouth_MA_CTRL",
+								"CtrlRig_L_Mouth_MN_CTRL","CtrlRig_UpperLip_rm_MI_CTRL","CtrlRig_UpperLip_lm_MI_CTRL",
+								"CtrlRig_LowerrLip_lm_MI_CTRL","CtrlRig_LowerLip_rm_MI_CTRL"};
+					for ($item in $temp)
+					{
+						$controls[size($controls)] = $pre+$item;
+					}
+					break;
+				case "face" :
+					string $temp[]={ "CtrlRig_R_LowerEyeLid_x1_MI_CTRL","CtrlRig_R_LowerEyeLid_x3_MI_CTRL","CtrlRig_R_UpperEyeLid_x1_MI_CTRL",
+								"CtrlRig_R_UpperEyeLid_x3_MI_CTRL","CtrlRig_L_LowerEyeLid_x1_MI_CTRL","CtrlRig_L_LowerEyeLid_x3_MI_CTRL",
+								"CtrlRig_L_UpperEyeLid_x1_MI_CTRL","CtrlRig_L_UpperEyeLid_x3_MI_CTRL","CtrlRig_Macro_EyeBrow_MA_CTRL",
+								"CtrlRig_L_eyeInner_MA_CTRL","CtrlRig_L_eyeOutter_MA_CTRL","CtrlRig_R_eyeOutter_MA_CTRL",
+								"CtrlRig_R_eyeInner_MA_CTRL","CtrlRig_L_EyeBrow_MN_GRP","CtrlRig_R_EyeBrow_MN_GRP",
+								"CtrlRig_Nose_MN_CTRL_grp","Master_eye_CTRL","L_eye_CTRL","R_eye_CTRL","CtrlRig_L_UpperEyeLid_MN_CTRL",
+								"CtrlRig_R_UpperEyeLid_MN_CTRL","CtrlRig_L_LowerEyeLid_MN_CTRL","CtrlRig_R_LowerEyeLid_MN_CTRL",
+								"CtrlRig_L_EyeBrow_x1_MI_CTRL","CtrlRig_L_EyeBrow_x2_MI_CTRL","CtrlRig_L_EyeBrow_x3_MI_CTRL",
+								"CtrlRig_L_EyeBrow_x4_MI_CTRL","CtrlRig_R_EyeBrow_x1_MI_CTRL","CtrlRig_R_EyeBrow_x2_MI_CTRL",
+								"CtrlRig_R_EyeBrow_x3_MI_CTRL","CtrlRig_R_EyeBrow_x4_MI_CTRL","CtrlRig_L_Nose_MI_CTRL",
+								"CtrlRig_R_Nose_MI_CTRL","eyes_brow_con_right_joint1","eyes_brow_con_right_joint2","eyes_brow_con_right_joint3",
+								"eyes_brow_con_right_joint4","eyes_brow_con_left_joint2","eyes_brow_con_left_joint1","eyes_brow_con_left_joint3",
+								"eyes_brow_con_left_joint4"};
+					for ($item in $temp)
+					{
+						$controls[size($controls)] = $pre+$item;
+					}
+					break;
+			}
+			break;
+	}
+	return $controls;
+}
+
+global proc  slAnimPoseLibraryNewSelectMouthControls(string $part,int $key)
+{
+	string $currentnamespace = `optionMenu -q -v slAnimPoseLibraryNewWin_charOptionMenu`;
+	if ($currentnamespace == "Unnamed")
+		$currentnamespace = "";
+	
+	string $fmCamera = "FM_faceMapCam";
+	string $reCamera = "re_cam_faceRigging";
+
+	string $type;
+	if (`objExists ($currentnamespace+"FM_faceMapCam")`)
+		$type = "tfm";
+	else if (`objExists ($currentnamespace+"re_cam_faceRigging")`)
+		$type = "re";
+	
+	if ($type == "")
+		return ;
+	
+	string $controls[] = slAnimPoseLibraryNewMouthControls($currentnamespace,$type,$part);
+	select -r $controls;
+
+	if ($key)
+	{
+		setKeyframe;
+	}
+}

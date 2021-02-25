@@ -1,0 +1,177 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global string $kcLineComp[];
+
+global proc kcLineDeleteCompCB()
+{
+	global string $kcLineComp[];
+
+	int $selected = `optionMenuGrp -q -select kcLineSelectCompOptionMenu`;
+	$selected--;		// start index from 0
+	
+	string $result = `confirmDialog -title "Delete Component" -message "Are you sure to delete selected components?"
+    							    -button "Yes" -button "No" -defaultButton "No"
+    							    -cancelButton "No" -dismissString "No"`;
+
+	if ($result == "Yes")
+	{
+		string $selected[] = `ls -selection`;
+
+		if (size($selected) == 0)
+		{
+			warning("No component is selected.");
+			return;
+		}
+
+		// delete components
+
+		delete;
+
+		// get the finalSmooth and deleteComponent node
+
+		string $polySmoothFace = "";
+		string $deleteComponent = "";
+
+		string $history[] = `listHistory -pruneDagObjects true $selected[0]`;
+
+		for ($item in $history)
+			if ((`nodeType $item` == "polySmoothFace") && (`gmatch $item "finalSmooth*"`))
+			{
+				$polySmoothFace = $item;
+				break;
+			}
+
+		for ($item in $history)
+			if (`nodeType $item` == "deleteComponent")
+			{
+				$deleteComponent = $item;
+				break;
+			}
+
+		if ($polySmoothFace == "")
+		{
+			warning("Cannot find finalSmooth node.");
+			return;
+		}
+
+		if ($deleteComponent == "")
+		{
+			warning("Cannot find deleteComponent node.");
+			return;
+		}
+
+		// swap node position
+
+		string $polySmoothFacetIn = $polySmoothFace + ".inputPolymesh";
+		string $polySmoothFacetOut = $polySmoothFace + ".output";
+		string $deleteComponentIn = $deleteComponent + ".inputGeometry";
+		string $deleteComponentOut = $deleteComponent + ".outputGeometry";
+
+		string $polySmoothFaceInputs[] = `listConnections -source true -destination false -plugs true $polySmoothFacetIn`;
+		string $polySmoothFaceOutputs[] = `listConnections -source false -destination true -plugs true $polySmoothFacetOut`;
+		string $deleteComponentOutputs[] = `listConnections -source false -destination true -plugs true $deleteComponentOut`;
+
+		connectAttr -force $polySmoothFaceInputs[0] $deleteComponentIn;
+		connectAttr -force $deleteComponentOut $polySmoothFacetIn;
+		connectAttr -force $polySmoothFacetOut $deleteComponentOutputs[0];
+	}
+}
+
+global proc kcLineSelectCompCB()
+{
+	global string $kcLineComp[];
+
+	int $selected = `optionMenuGrp -q -select kcLineSelectCompOptionMenu`;
+	$selected--;		// start index from 0
+
+	if ($selected == 0)
+		return;
+
+	string $tokens[];
+	tokenize $kcLineComp[$selected] " " $tokens;
+
+	select -clear;
+
+	for ($item in $tokens)
+		if (`objExists $item`)
+			select -add $item;
+		else
+			warning($item + " does not exist.");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// To select components for line
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+global proc kcLineSelectComponentGUI()
+{
+	global string $kcLineComp[];
+
+	if (`window -q -exists kcLineSelectComponentWnd`)
+		deleteUI -window kcLineSelectComponentWnd;
+
+	string $kcLineComptList[] = {
+									" ",
+									"SimonYoung's eyelashes",
+									"Simon's eyelashes",
+									"CarolineYoung's eyelashes",
+									"Caroline's eyelashes",
+									"JacYoung's eyelashes",
+									"Jac's eyelashes",
+									"Hymo's eyelashes",
+									"AgentPo's eyelashes",
+									"ChiefProspector's eyelashes",
+									"AllanaYoung's beads"
+								};
+
+	string $kcLocalLineComp[] = {
+									"",
+									"simonyoung_c_lo_head.f[900:911] simonyoung_c_lo_head.f[929:952] simonyoung_c_lo_head.f[1871:1882] simonyoung_c_lo_head.f[1900:1923]",
+									"simon_c_lo_head.f[900:911] simon_c_lo_head.f[929:952] simon_c_lo_head.f[1871:1882] simon_c_lo_head.f[1900:1923]",
+									"carolineyoung01_c_lo_head.f[0:35] carolineyoung01_c_lo_head.f[916:947] carolineyoung01_c_lo_head.f[1828:1859]",
+									"caroline_c_lo_head.f[0:35] caroline_c_lo_head.f[916:947] caroline_c_lo_head.f[1828:1859]",
+									"jacyoung01_c_lo_head.f[927:968] jacyoung01_c_lo_head.f[1896:1937]",
+									"jac_r_lo_head.f[928:969] jac_r_lo_head.f[1898:1939]",
+									"hymo_c_lo_head.f[1620:1679]",
+									"agentpo_c_lo_head.f[942:974] agentpo_c_lo_head.f[1932:1964] agentpo_c_lo_head.f[2046:2048] agentpo_c_lo_head.f[2083:2085]",
+									"chiefprospecter_c_lo_head.f[1050:1097] chiefprospecter_c_lo_head.f[2150:2197]",
+									"allanayoung_c_lo_cap.f[1901:2540] allanayoung_c_lo_cap.f[3194:8057] allanayoung_c_lo_cap.f[10916:15779]"
+								};
+
+	clear $kcLineComp;
+	$kcLineComp = $kcLocalLineComp;
+	
+
+	window -menuBar true -title "Line: Select Component" -resizeToFitChildren true kcLineSelectComponentWnd;
+
+//		menu -label "Help";
+//			menuItem -label "Help on Add Mesh Prefix..." -command "zjHelpCallback kcAddMeshPrefix";
+
+		string $formLayout = `formLayout`;
+			string $optionMenu = `optionMenuGrp -columnAlign 1 "right" -label "Select Components:" -changeCommand kcLineSelectCompCB kcLineSelectCompOptionMenu`;
+				for ($item in $kcLineComptList)
+					menuItem -label $item;
+
+			string $button = `button -label "Delete before finalSmooth" -command kcLineDeleteCompCB`;
+		setParent..;
+
+		formLayout -edit
+			-attachForm		$optionMenu	"top"		5
+			-attachForm		$optionMenu	"left"		5
+			-attachForm		$optionMenu	"right"		5
+
+			-attachControl	$button		"top"		5	$optionMenu
+			-attachForm		$button		"left"		5
+			-attachForm		$button		"right"		5
+		$formLayout;
+
+	showWindow kcLineSelectComponentWnd;
+}

@@ -1,0 +1,143 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: “¸Í…
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycAssignWSSwitch2()
+{
+	string $tripleShadingSwitchList[]=`ls -type "tripleShadingSwitch"`;
+	for ($i=0;$i<size($tripleShadingSwitchList);$i++)
+	{
+		/*if (`match "soldierfacial" $tripleShadingSwitchList[$i]`!="soldierfacial" )
+		{
+			continue;
+		}*/
+		string $SwitchConnectionsAttr[]=`listConnections -d 0 -plugs true $tripleShadingSwitchList[$i]`;	
+		string $SwitchConnectionsObject[]=`listConnections -d 0 -plugs false $tripleShadingSwitchList[$i]`;
+		if (size($SwitchConnectionsObject)!=size($SwitchConnectionsAttr))
+		{
+			warning "texture isn't match!";
+		}
+
+/*
+		for ($j=1;$j<size($SwitchConnectionsObject) ;$j+=2 )
+		{
+			if ($SwitchConnectionsObject[$j]!="")
+			{
+				if (`nodeType $SwitchConnectionsObject[$j]`!="file")
+				{
+					warning "texture is empty!";
+				}
+			}
+		}
+*/
+
+//		string $ShaderList[]=`listConnections ($tripleShadingSwitchList[$i]+".output")`;
+//		string $SGList[]=`listConnections ($ShaderList[0]+".outColor")`;
+//		if (`nodeType $SGList[0]`!="shadingEngine")
+//		{
+//			$SGList=`listConnections ($SGList[0]+".outColor")`;
+//			if (`nodeType $SGList[0]`!="shadingEngine")
+//			{
+//				error "no shader!";
+//			}
+//		}
+
+		// modified by KC (16 July 2003) because switch node may NOT directly connected to a shader
+
+		string $SGList[];
+
+		string $output[] = `listHistory -future true $tripleShadingSwitchList[$i]`;
+
+		for ($item in $output)
+			if (`nodeType $item` == "shadingEngine")
+			{
+				$SGList[0] = $item;
+				break;
+			}
+
+
+
+
+
+		string $surface[] = `listConnections ($SGList[0]+".dagSetMembers")`;			
+		string $surfaceAttr[] = `listConnections -plugs true ($SGList[0]+".dagSetMembers")`;	
+		string $fileName[]=`listConnections ($tripleShadingSwitchList[$i]+".input[*].inTriple")`;
+		$fileName=`sort $fileName`;
+
+		int $nextAvailable=-1;
+		int $textureFileCount=size($fileName);
+		int $randomNumber;
+		string $tempStore[],$tempStoreTexture[],$tempStoreInTriple[];
+		clear $tempStore;
+		clear $tempStoreTexture;
+		clear $tempStoreInTriple;
+		int $storeCount=0;
+		for ($j=0;$j<size($surface) ;$j++ )
+		{
+			if (`stringArrayCount $surface[$j] $SwitchConnectionsObject`==0)
+			{
+				string $shapePlug, $shadePlug;
+				while (true)
+				{
+					$nextAvailable += 1;
+					$shapePlug = $tripleShadingSwitchList[$i] + ".input[" + $nextAvailable + "].inShape";
+					if(`nodeType $tripleShadingSwitchList[$i]` == "tripleShadingSwitch")
+						$shadePlug = $tripleShadingSwitchList[$i] + ".input[" + $nextAvailable + "].inTriple";
+					string $shape[] = `listConnections $shapePlug`;
+					string $shade[] = `listConnections $shadePlug`;
+					if (size($shape) == 0 && size($shade) == 0)
+						break;
+				}
+				connectAttr $surfaceAttr[$j] $shapePlug;
+				$randomNumber=floor(rand(0,$textureFileCount));
+				string $shape[] = `listConnections $shapePlug`;
+
+				int $judgeString = `stringArrayCount $shape[0] $tempStore`;
+				string $judgeReplace;
+				if (`match "_l_" $shape[0]`=="_l_")
+				{
+					$judgeReplace = `substitute "_l_" $shape[0] "_r_"`;
+				}
+				else
+				{
+					$judgeReplace = `substitute "_r_" $shape[0] "_l_"`;
+				}
+				int $judgeString1 = `stringArrayCount $judgeReplace $tempStore`;
+
+				if ($judgeString==0&&$judgeString1==0)
+				{
+					if (`nodeType $fileName[$randomNumber]` == "HsvAdjust")
+						connectAttr -f ($fileName[$randomNumber]+".outputRGB") ($tripleShadingSwitchList[$i]+".input["+$nextAvailable+"].inTriple");
+					else
+						connectAttr -f ($fileName[$randomNumber]+".outColor") ($tripleShadingSwitchList[$i]+".input["+$nextAvailable+"].inTriple");
+
+					$tempStore[$storeCount]=$shape[0];
+
+					if (`nodeType $fileName[$randomNumber]` == "HsvAdjust")
+						$tempStoreTexture[$storeCount]=($fileName[$randomNumber]+".outputRGB");
+					else
+						$tempStoreTexture[$storeCount]=($fileName[$randomNumber]+".outColor");
+
+					$storeCount++;
+				}
+				else if ($judgeString==0||$judgeString1==0)
+					{
+						for ($k=0;$k<size($tempStore) ;$k++ )
+						{
+							if ($tempStore[$k]==$judgeReplace)
+							{
+								connectAttr -f $tempStoreTexture[$k] ($tripleShadingSwitchList[$i]+".input["+$nextAvailable+"].inTriple");
+							}
+						}
+					}
+			}
+		}
+	}
+}
+//ycAssignWSSwitch2;

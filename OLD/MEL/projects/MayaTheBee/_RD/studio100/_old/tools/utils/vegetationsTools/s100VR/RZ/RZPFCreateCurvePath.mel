@@ -1,0 +1,155 @@
+global proc RZPFCreateCurvePath(string $curve)
+{
+/*
+$curve = $nurbsCurv[0]
+
+*/
+
+$fGrp = "VRGR_rig_grp";
+$fGrp2 = "VRGR_jnt_grp" ;
+	if(`objExists $fGrp2`)
+	{
+
+    }else{
+	group -em -n $fGrp2 -p $fGrp ;
+    }
+
+$tGrp = substituteAllString ($curve , "_curv","_jGrp") ;
+	if(`objExists $tGrp`)
+	{
+
+    }else{
+	group -em -n $tGrp -p $fGrp2 ;
+    }
+
+
+$sub = substituteAllString ($curve , "VRGR_","VRAR_") ;
+$listS = `listRelatives -s $sub ` ;
+
+
+$list = `listConnections -d 1  $listS[0]`;
+$listByType = sort (`ls -type pointOnCurveInfo $list`);
+string $follow[];
+string $grpF[] ;
+
+
+for ($i = 0 ; $i < size( $listByType) ; $i++)
+	{
+	float $maxValue = `getAttr ($listByType[$i] + ".parameter")`;
+	$nameG = substituteAllString( $listByType[$i], "_poc","_pGrp") ;
+	$nameG = substituteAllString( $nameG, "VRAR_","VRGR_") ;
+
+	$grp = `group -em -n $nameG  -p $tGrp`;
+	$nameJ = substituteAllString( $listByType[$i], "_poc","_pJnt") ;
+	$nameJ = substituteAllString( $nameJ, "VRAR_","VRGR_") ;
+
+	$jnt = `createNode -n $nameJ joint`;
+	parent $jnt $grp;
+	$NameMoPath  = substituteAllString( $listByType[$i], "_poc","_mPath") ;
+	$NameMoPath  = substituteAllString( $NameMoPath, "VRAR_","VRGR_") ;
+
+	select $grp;
+	select -add $curve ;
+	$test = `pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector"  -inverseUp false -inverseFront false -bank false -curve $curve -name $NameMoPath -worldUpVector 1 0 0 $grp`;
+	//setAttr ($test + ".parametricLength") 1 ;
+	$moPath = `rename $test $NameMoPath`;
+	$listT = `listConnections $moPath`;
+	$listAnim = `ls -type animCurve $listT`;
+	delete $listAnim ;
+	$follow[$i] = $moPath ;
+	$grpF[$i] = $grp ;
+
+    }
+
+$last =  size( $listByType) -1 ;
+addAttr -ln "anim"  -at double  -min 0 -max 1 -dv 1 ($grpF[0]);
+setAttr -e-keyable true ($grpF[0] +".anim");
+$animA = ($grpF[0] +".anim") ;
+float $lastMaxValue = `getAttr ($listByType[$last] +".parameter") ` ;
+
+	for ($i = 1 ; $i < size( $listByType) ; $i++)
+	{
+	float $maxValue = `getAttr ($listByType[$i] + ".parameter")`;
+	$clampName  = substituteAllString( $listByType[$i], "_poc","_clamp") ;
+	$clampName  = substituteAllString( $clampName, "VRAR_","VRGR_") ;
+
+	$clamp = `createNode -n $clampName clamp`;
+	connectAttr $animA ($clamp +".inputR") ;
+	setAttr -l 1 ($clamp +".minR");
+	setAttr -l 1 ($clamp +".maxR") ($maxValue/$lastMaxValue) ;
+
+
+	connectAttr ($clamp +".outputR") ($follow[$i]+".uValue") ;
+
+
+
+    }
+string $md[]  ;
+float $lastMaxValue ;
+
+
+
+
+
+for ($i = 0 ; $i < size( $listByType) ; $i++)
+	{
+
+	$setName=substituteAllString( $listByType[$i], "_poc","_animScale") ;
+	$setName=substituteAllString( $setName, "VRAR_","VRGR_") ;
+
+
+	$setR = `createNode -n $setName animCurveTU  `;
+
+
+
+	connectAttr $animA ($setR + ".input") ;
+
+
+	$j = $i - 1 ;
+	float $minValue;
+
+	float $maxValue ;
+
+
+		if ($i >  0 )
+		{
+
+		$minValue = `getAttr ($listByType[$j] + ".parameter")`;
+
+		$maxValue = `getAttr ($listByType[$i] + ".parameter")`;
+
+
+		}else{
+		$minValue = 0;
+		$m = $i + 1;
+		$maxValue = `getAttr ($listByType[$m] + ".parameter")`;
+		}
+
+
+
+
+
+	setKeyframe -v 0 -time ($minValue / $lastMaxValue )  $setR ;
+	setKeyframe -v 1 -time ($maxValue / $lastMaxValue)  $setR ;
+	selectKey -clear ;
+	selectKey -add -k -t $minValue -t $maxValue $setR ;
+	keyTangent -itt plateau -ott plateau;
+
+
+
+
+	connectAttr -f  ($setR +".output") ($grpF[$i] +".scaleX") ;
+	connectAttr -f  ($setR +".output") ($grpF[$i] +".scaleY") ;
+	connectAttr -f  ($setR +".output") ($grpF[$i] +".scaleZ") ;
+
+	//print ("	\n" +$i ) ;
+    }
+
+
+
+
+}
+
+
+
+

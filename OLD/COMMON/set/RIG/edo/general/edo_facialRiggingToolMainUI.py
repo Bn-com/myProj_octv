@@ -1,0 +1,85 @@
+#-*- coding: utf-8 -*-
+import sys as sys
+import maya.cmds as cmds
+import sys as sys
+if not '//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/' in sys.path:
+    sys.path.append('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/')
+import edo_cl_facial_rig_ui as ecfru
+
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/carRig.py')
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/addWheel.py')
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addCarRigRotateXex.py')
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_allCarSnap.py')
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_breakeSnapCar.py')
+execfile('//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_cl_facial_rig_ui.py')
+
+
+
+def edo_facialRiggingToolMainUI():
+    #edo_addRiggingEnviourmentPath()
+    w=250
+    h=330
+    if cmds.window('edo_facialRiggingToolMainUI',ex=1):
+        cmds.deleteUI('edo_facialRiggingToolMainUI')
+    cmds.window('edo_facialRiggingToolMainUI')
+    cmds.formLayout('edo_facialRiggingToolMainUI_FL01',w=w,h=h)
+    cmds.tabLayout('edo_facialRiggingToolMainUI_TB01',innerMarginWidth=5, innerMarginHeight=5)
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL01',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL02',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL03',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL04',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL05',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL06',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.columnLayout('edo_facialRiggingToolMainUI_CL07',w=w,h=h,rs=8,p='edo_facialRiggingToolMainUI_TB01')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT01',l='UnderWorldBlendShape',ann="异世界坐标系目标体",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_createUnderWorldBlendShapeUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT02',l='createFacialCtrl',ann="创建表情目标体控制器",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_facialCtrlUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT03',l='autoConnectionBlendShape',ann="自动连接目标体控制",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_autoConnectBlendShapeUI.py\');edo_autoConnectBlendShapeUI()') 
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT04',l='addInbetweenBlendShape',ann="添加inbetween模式的目标体",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addInbetweenBlendShape.py\')') 
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT05',l='convertToNewTopeBlendShape',ann="转换目标体为新拓补",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_crateNewBlendShapeMeshToNewMeshWindow.py\');edo_crateNewBlendShapeMeshToNewMeshWindow()')       
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT06',l='createSoftModSecondaryCtrl',ann="创建软变形次级控制器",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_createSoftDeformSecCtrlUI.py\')')
+    #cmds.button('edo_facialRiggingToolMainUI_CL01_BT06_1',l='createSkinClusterSecondaryCtrl',ann="创建骨骼次级控制器",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/others/secondCtrlAdd.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT07',l='mathBlendShape',ann="目标体计算器",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_mathBlendShapeUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT08',l='poseDeformer',ann="poseDeformer",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/PSD_posedeformerUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT09',l='mirrorBlendShapes',ann="镜像目标体",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_mirrorBlendShape.py\');edo_mirrorBlendShape(\'Lf\',\'Rt\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT10',l='makeBlendShapeNormalizeWeighPaintable',ann="使目标体权重可进行nomalize式绘制",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_makeBlendShapeWeightNormalizePaintableUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT11',l='transferMesh',ann="传递模型形状",w=w,p='edo_facialRiggingToolMainUI_CL01',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_transferMesh.py\');edo_transferMeshes()')
+    cmds.button('edo_facialRiggingToolMainUI_CL02_BT01',l='calimero_2dLine_rigging',ann="calimero 表情2d线制作工具",w=w,p='edo_facialRiggingToolMainUI_CL02',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/project/calimero/edo_clTwoDlineMakerUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL02_BT02',l='createInfluenceMeshFromTwoCurve',ann="用2条曲线生成影响体设置",w=w,p='edo_facialRiggingToolMainUI_CL02',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_createFacialInfluenceFormSelectedCurve.py\');edo_createFacialInfluenceFormSelectedCurve(17)')
+    cmds.button('edo_facialRiggingToolMainUI_CL02_BT03',l='createCtrlToSelectedCurve',ann="选择一条曲线，给该曲线的所有CV点生成控制器",w=w,p='edo_facialRiggingToolMainUI_CL02',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_createCtrlOnSelectCurve.py\');edo_createCtrlOnSelectCurve(\'local\',0.2,17)')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT01',l='convertSoftSelectToCluster',ann="将软选择效果转为簇",w=w,p='edo_facialRiggingToolMainUI_CL03',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_transferSelectComponentToCluster.py\');edo_transferSelectComponentToCluster()')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT02',l='mirrorCluster',w=w,p='edo_facialRiggingToolMainUI_CL03',ann='[镜像簇工具]  先选模型，再选择要镜像的簇!',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_mirrorCluster.py\');edo_mirrorCluster()')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT03',l='mirrorClusterToItself',w=w,p='edo_facialRiggingToolMainUI_CL03',ann='[镜像簇自身权重工具]  先选模型，再选择要镜像的簇!',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_mirrorCluster.py\');edo_mirroClusterWeightToSelf()')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT04',l='outputCluster',w=w,p='edo_facialRiggingToolMainUI_CL03',ann='[导出簇工具]  先选择簇，再选择模型!',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_IOCluster.py\');edo_outputCluster()')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT05',l='importCluster',w=w,p='edo_facialRiggingToolMainUI_CL03',ann='[导入簇工具]  ',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_IOCluster.py\');edo_importCluster()')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT06',l='converSoftSelectToSkinClusterWeight',ann="[将软选择转换成骨骼权重]",w=w,p='edo_facialRiggingToolMainUI_CL03',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_convertSoftSelectionToSkinClusterWeightUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL03_BT07',l='multiplySkinWight',ann="[自乘骨骼权重工具]",w=w,p='edo_facialRiggingToolMainUI_CL03',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_multiplyItSelfsWeightUI.py\')')
+    cmds.button('edo_facialRiggingToolMainUI_CL01_BT01',l='createSkeletonDrivenBall',ann="[关节驱动球]  选择要进行关节形体修复的关节骨骼点,执行此命令",w=w,p='edo_facialRiggingToolMainUI_CL04',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_skeletonBallUI.py\');edo_skeletonBallUI()')
+    cmds.button('edo_facialRiggingToolMainUI_CL04_BT02',l='outputSetDrivenKey',ann="[导出驱动关键帧]  选择dirver物体，执行此命令，可导出此物体驱动的驱动关键帧连接",w=w,p='edo_facialRiggingToolMainUI_CL04',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_IOsetDrivenKey.py\');edo_exSelectDrivenKeyData()')
+    cmds.button('edo_facialRiggingToolMainUI_CL04_BT03',l='inputSetDrivenKey',ann="[导入驱动关键帧]",w=w,p='edo_facialRiggingToolMainUI_CL04',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_IOsetDrivenKey.py\');edo_imSelectDrivenKeyData()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT01',l='addSkeletonChainRig',ann="[创建一条骨骼链，命名为XXXX_jnt_id,选根骨骼执行命令可给一串骨骼添加FK_IK控制器]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addContorlToJointChain.py\');edo_addContorlToJointChain()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT02',l='exchangeToDynControl',ann="[升级为动力学控制器]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addHairSystemCurveRig.py\');edo_addHairSystemCurveRig()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT03',l='add GDCBODYRIG tipIkCtrl',ann="[选最上层的组,给GDC2009BODYRIG添加TIP IK 控制器]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addArmLegIkTipCtrl.py\');edo_addArmLegIkTipCtrlCmd()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT04',l='add head simple sqush ctrl',ann="[创建一条骨骼链，命名为XXXX_jnt_id,选择跟骨骼执行命令]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/basic/edo_addHeadSquashRig.py\');edo_addHeadSquashRig()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT05',l='add single skeleton chain ik ctrl',ann="[创建只有2节骨骼的骨骼链，命名为XXXX_jnt_id,选择跟骨骼执行命令，可创建IK控制器]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addSingleIkCtrlCmd.py\');edo_addSingleIkCtrlCmd()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT06',l='transferSkinCluster',ann="[传递skincluster]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_transferSkinClusterToMeshes.py\');edo_transferSkinClusterToMeshes()')
+    cmds.button('edo_facialRiggingToolMainUI_CL05_BT07',l='transferTransformToParent',ann="[传递数值到父级别]",w=w,p='edo_facialRiggingToolMainUI_CL05',c='execfile(\'//file-cluster/GDC/Resource/Support/Maya/extra/Rigging_Simulation/python/edo/general/edo_addOffsetGrpFromSelected.py\');edo_addOffsetGrpFromSelected()')
+    #CAR
+    cmds.setParent('edo_facialRiggingToolMainUI_CL06')
+    cmds.button('createLocatorsButton',bgc=[0.3,0.2,0.05],l='create tyre locator',ann='按次序选择4个轮子点此按钮生成locator(前左，前右，后左，后右)',w=w,p='edo_facialRiggingToolMainUI_CL06',c='locators()')
+    cmds.button('createCarRigButton',bgc=[0.3,0.2,0.05],l='create car rig',ann='按次序选择4个轮子和定位locator点此按钮生成设置',w=w,c='wheelSetup()')
+    cmds.button('createAimWheelRigButton',bgc=[0.3,0.2,0.05],l='create wheel rig',ann='选则中心locator，再选择方向locator生成方向盘控制器',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addAimWheelRig()')
+    cmds.button('addLfWheelRigButton',bgc=[0.3,0.2,0.05],l='add left tyre rig',ann='选择需要添加的左边的轮子点击按钮添加轮子设置',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addLfWheel()')
+    cmds.button('addRtWheelRigButton',bgc=[0.3,0.2,0.05],l='add right tire rig',ann='选择需要添加的右边的轮子点击按钮添加轮子设置',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addRtWheel()')
+    cmds.button('addWheelRockButton',bgc=[0.3,0.2,0.05],l='add shake attribute of tyre',ann='选择所有的轮子控制器点击按钮',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addWheelRock()')
+    cmds.button('addWheelShakeButton',bgc=[0.3,0.2,0.05],l='add auto shake attribute of tyre',ann='选择所有的轮子控制器点击按钮',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addWheelShake()')
+    cmds.button('addGlobalScaleCtrl',bgc=[0.3,0.2,0.05],l='add global scale attribute',ann='',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addCarRigGlobalScaleCtrl()')
+    cmds.button('edo_addCarRigRotateXex',bgc=[0.3,0.2,0.05],l='add expression proxy attribute [rotateXex]',ann='',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_addCarRigRotateXex()')
+    cmds.button('edo_allCarSnap',bgc=[0.3,0.2,0.05],l='all car snap floor and follow the path',ann='选车选线再选地面',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_allCarSnap()')
+    cmds.button('edo_breakSnapCar',bgc=[0.3,0.2,0.05],l='breakSnapCar',ann='选择MIS控制器',w=w,p='edo_facialRiggingToolMainUI_CL06',c='edo_breakSnapCar()')
+    #calimero_facial_rigging
+    cmds.setParent('edo_facialRiggingToolMainUI_CL07')
+    cmds.button('calimero_facial_rig_UI_bt',bgc=[0.3,0.2,0.05],l='calimero_facial_rig_UI',ann='打开calimero表情设置面板',w=w,p='edo_facialRiggingToolMainUI_CL07',c='ecfru.edo_cl_facial_rig_ui()')
+    cmds.showWindow('edo_facialRiggingToolMainUI')
+    cmds.window('edo_facialRiggingToolMainUI',e=1,w=w,h=h)
+    cmds.tabLayout('edo_facialRiggingToolMainUI_TB01', edit=True,tabLabel=(('edo_facialRiggingToolMainUI_CL01','blendShape'), ('edo_facialRiggingToolMainUI_CL03','cluster'),('edo_facialRiggingToolMainUI_CL02','curveRig'),('edo_facialRiggingToolMainUI_CL04','setDrivenKey'),('edo_facialRiggingToolMainUI_CL05','oherRIG'),('edo_facialRiggingToolMainUI_CL06','CAR_RIG'),('edo_facialRiggingToolMainUI_CL07','CL_FACIAL_RIG')) )
+edo_facialRiggingToolMainUI()

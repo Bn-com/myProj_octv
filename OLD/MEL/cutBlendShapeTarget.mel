@@ -1,0 +1,131 @@
+global proc cutBlendShapeTarget()
+{
+	source kcConvert2instance.mel;
+	if(!`window -exists cutBlendShapeTarget`)
+	{
+		window -retain -title "Cut Blend Shape Target" -width 400 -height 320 cutBlendShapeTarget;
+			formLayout formLayout1;
+				textFieldButtonGrp -editable false -label "Source Targets:" -buttonLabel "Browse" -buttonCommand "cutBlendShapeTargetBrowse" -columnWidth 1 90 -columnWidth 3 48 -adjustableColumn 2 browse;
+				textScrollList -selectCommand "cutBlendShapeTargetSel" files;
+				button -label "Select" -command "cutBlendShapeTargetCut" cut;
+				button -label "Export" -command "cutBlendShapeTargetExport" export;
+				button -label "Close" -command "window -edit -visible false cutBlendShapeTarget;" cancel;
+				button -label "Help" -command "cutBlendShapeTargetHelp" help;
+			formLayout -edit
+				-attachForm	browse		"top"		10
+				-attachForm	browse		"left"		5
+				-attachNone	browse		"bottom"
+				-attachForm	browse		"right"		5
+
+				-attachNone	cut		"top"
+				-attachForm	cut		"left"		5
+				-attachForm	cut		"bottom"	5
+				-attachPosition	cut		"right"		5	25
+
+				-attachNone	export		"top"
+				-attachControl	export		"left"		5	cut
+				-attachForm	export		"bottom"	5
+				-attachPosition	export		"right"		5	50
+
+				-attachNone	cancel		"top"
+				-attachControl	cancel		"left"		5	export
+				-attachForm	cancel		"bottom"	5
+				-attachPosition	cancel		"right"		5	75
+
+				-attachNone	help		"top"
+				-attachControl	help		"left"		5	cancel
+				-attachForm	help		"bottom"	5
+				-attachForm	help		"right"		5
+
+				-attachControl	files		"top"		10	browse
+				-attachForm	files		"left"		5
+				-attachControl	files		"bottom"	10	cut
+				-attachForm	files		"right"		5
+			formLayout1;
+
+	}
+	showWindow cutBlendShapeTarget;
+}
+
+global proc cutBlendShapeTargetBrowse()
+{
+	fileBrowserDialog -mode 4 -fileCommand "cutBlendShapeTargetPath" -actionName "Source Blend Shape Targets:";
+}
+
+global proc cutBlendShapeTargetExport()
+{
+	fileBrowserDialog -mode 4 -fileCommand "cutBlendShapeTargetExportOk" -actionName "Target Blend Shape Targets:";
+}
+
+global proc cutBlendShapeTargetSel()
+{
+	string $obj[] = `textScrollList -query -selectItem files`;
+	$obj[0] = $obj[0] + ":target";
+	if(`objExists $obj[0]`)
+		select $obj[0];
+}
+
+global proc cutBlendShapeTargetPath(string $filename, string $fileType)
+{
+	textScrollList -edit -removeAll files;
+	string $str, $obj;
+	$filename += "/";
+	textFieldButtonGrp -edit -text $filename browse;
+	string $fileList[] = `getFileList -filespec ($filename + "*.mb")`;
+	for($str in $fileList)
+	{
+		$obj = `substring $str 1 (size($str) - 3)`;
+		file -renameAll true -namespace $obj -import ($filename + $str);
+		textScrollList -edit -append $obj files;
+		$obj = $obj + ":target";
+	}
+}
+
+global proc cutBlendShapeTargetCut()
+{
+	string $obj, $buffer[];
+	int $i;
+	string $objects[] = `textScrollList -query -allItems files`;
+	for ($i=0; $i<size($objects); $i++)
+		$objects[$i] = $objects[$i] + ":target";
+	string $selection[] = `filterExpand -expand true -selectionMask 34`;
+	for ($i=0; $i<size($selection); $i++)
+	{
+		tokenize $selection[$i] "." $buffer;
+		$selection[$i] = $buffer[1];
+	}
+	for($obj in $objects)
+		if(`objExists $obj`)
+			for ($i=0; $i<size($selection); $i++)
+				select -add ($obj + "." + $selection[$i]);
+	delete;
+}
+
+global proc int cutBlendShapeTargetExportOk(string $filename, string $fileType)
+{
+	if($filename == "")
+		return 1;
+	string $obj;
+	string $objects[] = `textScrollList -query -allItems files`;
+	for($obj in $objects)
+	{
+		if(`objExists ($obj + ":target")`)
+		{
+			rename ($obj + ":target") target;
+			select target;
+			string $str, $buffer[];
+			$buffer = `ls -sl`;
+			for($str in $buffer)
+				print $str;
+			print "\n\n";
+			file -exportSelected -type "mayaBinary" ($filename + "/" + $obj);
+			rename target ($obj + ":target");
+		}
+	}
+	return 0;
+}
+
+global proc cutBlendShapeTargetHelp()
+{
+	system("load " + substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\help\\cutBlendShape.mht");
+}

@@ -1,0 +1,246 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+vector $steerForce[];
+
+//
+// p1, p2 forms a line segment. p3 is center of circle with radius
+//
+// compute force from center of circle to the closest point on line segment
+//
+
+proc vector kcCrowdCompLineCircleIntersect(vector $p1, vector $p2, vector $p3, float $radius)
+{
+	// refer to http://astronomy.swin.edu.au/~pbourke/geometry/sphereline/
+
+	vector $force = <<0, 0, 0>>;
+
+	float $x1, $z1, $x2, $z2, $x3, $z3;
+
+	$x1 = $p1.x;		$x2 = $p2.x;		$x3 = $p3.x;		
+	$z1 = $p1.z;		$z2 = $p2.z;		$z3 = $p3.z;
+
+	float $temp = ($x2 - $x1) * ($x2 - $x1) + ($z2 - $z1) * ($z2 - $z1);
+
+	if ($temp != 0)
+	{
+		float $u = (($x3 - $x1) * ($x2 - $x1) + ($z3 - $z1) * ($z2 - $z1)) / $temp;
+
+		if (($u >= 0) && ($u <= 1.0))
+		{
+			vector $closest = $p1 + $u * ($p2 - $p1);
+			vector $p3toClosest = $closest - $p3;
+
+			float $dist = $p3toClosest.x * $p3toClosest.x + $p3toClosest.y * $p3toClosest.y + $p3toClosest.z * $p3toClosest.z;
+
+			if ($dist <= ($radius * $radius))
+			{
+				float $multiplier;
+
+				if ($dist == 0)
+					$multiplier = 10.0;
+				else
+					$multiplier = 1.0 / $dist;
+
+				vector $temp = $multiplier * ($closest - $p3);
+
+				$force = <<$temp.x, 0.0, $temp.z>>;
+			}
+		}
+	}
+
+	return $force;
+}
+
+global proc kcCrowdCompSteerForce(string $particle, int $lookAhead)
+{
+    // reset array
+
+	global vector $steerForce[];
+	clear $steerForce;
+
+
+	float $fps = 24;
+
+	vector $curVel[];
+	vector $curPos[];
+	vector $lookAheadPos[];
+	float $statePP[];
+
+	int $size = `particle -q -count $particle`;
+
+	// compute lookahead position 
+
+	for ($i = 0; $i < $size; $i++)
+	{
+		float $state[] = `particle -attribute "statePP" -order $i -q $particle`;
+
+		$statePP[$i] = $state[0];
+
+		if ($state[0] == 1) 
+		{
+			// static
+
+			float $pos[] = `particle -attribute worldPosition -order $i -q $particle`;
+
+			vector $p = <<$pos[0], $pos[1], $pos[2]>>;
+
+			$lookAheadPos[$i] = $p;
+		}
+		else 		
+			if ($state[0] == 2)		
+			{
+				// moving
+
+				float $vel[] = `particle -attribute worldVelocity -order $i -q $particle`;
+				float $pos[] = `particle -attribute worldPosition -order $i -q $particle`;
+
+				vector $v = <<$vel[0], $vel[1], $vel[2]>>;
+				vector $p = <<$pos[0], $pos[1], $pos[2]>>;
+
+				$curVel[$i] = $v;
+				$curPos[$i] = $p;
+				$lookAheadPos[$i] = $p + $lookAhead / $fps * $v;
+			}
+	}
+
+	float $collisionDist = 2.0;
+	vector $accumForce[];
+	int $numAccumForce[];
+
+	for ($i = 0; $i < $size; $i++)
+	{
+		if ($statePP[$i] == 2) 
+		{
+			// moving particle, check collision with wall
+
+			vector $p = $lookAheadPos[$i];
+
+/*
+			if (($p.x < 0) || ($p.x > 5) ||
+				($p.z < 0) || ($p.z > 5))
+			{
+				// hit wall
+
+				vector $up = <<0, 1, 0>>;
+				vector $steerDirection = cross($up, $curVel[$i]);
+
+				if (noise($i) < 0.5)
+					$accumForce[$i] += $steerDirection;
+				else
+					$accumForce[$i] += -$steerDirection;
+
+				$numAccumForce[$i] = $numAccumForce[$i] + 1;
+			}
+*/
+			// check collision with static obstacles
+
+			string $obstacles[] = `ls "crowdObstacle*"`;
+
+			for ($item in $obstacles)
+				if (kcIsType($item, "nurbsCurve"))
+				{
+					// assuming uniform scaling
+
+					float $pos[] = `xform -q -worldSpace -translation $item`;
+					float $scale[] = `xform -q -relative -scale $item`;
+
+					vector $posv = <<$pos[0], $pos[1], $pos[2]>>;
+
+					vector $i2j = $posv - $lookAheadPos[$i];
+					$i2j = <<$i2j.x, 0.0, $i2j.z>>;
+
+					float $dist = $i2j.x * $i2j.x + $i2j.y * $i2j.y + $i2j.z * $i2j.z;
+
+					if ($dist < $scale[0] * $scale[0])
+					{
+						float $multiplier;
+
+						if ($dist == 0)
+							$multiplier = 50.0;
+						else
+							$multiplier = 20.0 / $dist;
+
+						// future collision happens
+
+						$accumForce[$i] += $multiplier * -$i2j;
+						$numAccumForce[$i] = $numAccumForce[$i] + 1;
+					}
+				}
+
+
+			// check for inter-object collision
+
+			for ($j = 0; $j < $i; $j++)
+			{
+				if ($statePP[$j] != 0) 
+				{
+					// check collision between static and moving object 
+
+					vector $i2j = $lookAheadPos[$j] - $lookAheadPos[$i];
+
+					float $dist = $i2j.x * $i2j.x + $i2j.y * $i2j.y + $i2j.z * $i2j.z;
+
+					if ($dist < $collisionDist * $collisionDist)
+					{
+						float $multiplier;
+
+						if ($dist == 0)
+							$multiplier = 10.0;
+						else
+							$multiplier = 1.0 / $dist;
+
+						// future collision happens
+
+						$accumForce[$i] += $multiplier * -$i2j;
+						$numAccumForce[$i] = $numAccumForce[$i] + 1;
+
+						if ($statePP[$j] == 2) 
+						{
+							// j is a moving object 
+
+							$accumForce[$j] += $multiplier * $i2j;
+							$numAccumForce[$j] = $numAccumForce[$j] + 1;
+						}
+					}
+					else
+					{
+						vector $force = kcCrowdCompLineCircleIntersect($curPos[$i], $lookAheadPos[$i], $lookAheadPos[$j], $collisionDist);
+
+						if (($force.x != 0) ||
+							($force.y != 0) ||
+							($force.z != 0))
+						{
+//print($i + " collide with " + $j + " " + $force + "\n");
+//print($curPos[$i] + " " + $lookAheadPos[$i] + " " + $lookAheadPos[$j] + " " + $collisionDist + "\n");
+
+							$accumForce[$i] += $force;
+							$numAccumForce[$i] = $numAccumForce[$i] + 1;
+
+							if ($statePP[$j] == 2) 
+							{
+								// j is a moving object 
+							
+								$accumForce[$j] += -$force;
+								$numAccumForce[$j] = $numAccumForce[$j] + 1;
+							}
+						}
+					}			
+				}
+			}
+		}
+	}
+
+	for ($i = 0; $i < $size; $i++)
+		if ($numAccumForce[$i] == 0)
+			$steerForce[$i] = <<0, 0, 0>>;
+		else
+			$steerForce[$i] = $accumForce[$i] / $numAccumForce[$i];
+}

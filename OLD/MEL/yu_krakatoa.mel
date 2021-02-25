@@ -1,0 +1,210 @@
+global proc string padzeros(int $num, int $l)
+{
+	string $padString = string($num);
+	while (size($padString)<$l)
+		$padString="0"+$padString;
+	return $padString;
+};
+global proc yu_krakatoa_win()
+{
+    if (`window -exists MayaToKrakatoaWin`)
+        deleteUI MayaToKrakatoaWin;
+
+
+    window -wh 640 485
+           -t "yu_MayaToKrakatoa"
+           -mxb off
+           MayaToKrakatoaWin;
+    windowPref -ra;
+
+    string $about = "print \"Copy Right Saber (SmallpixeL studio) and  Bo.Schwarzstein ,Maya Particles to Krakoata  || version 1.0||smallpixel@gmail.com\"\n";
+
+    menuBarLayout;
+
+    menu -label "Help";
+		menuItem -l "Help..." -c "yu_help()" ;
+		menuItem -divider 1;
+		menuItem -l "About" -c $about ;
+
+    menu -label "Edit";
+
+		menuItem -l "Reset" -c "yu_resetUI()" ;
+
+    formLayout mainFormFL;
+    textScrollList -h 100 -ams false particleTSL ;
+    button -l "Pick selected particles" -c "yu_populateParticleTSL()" pickB;
+
+
+    textField -text "FolderPath"
+              -editable true
+              folderPathTF;
+
+    symbolButton -image "navButtonBrowse.xpm" -c yu_browseFolder browseSB;
+
+
+
+    frameLayout -collapsable true -label "Time Range" timeRangeFL;
+    formLayout timeFL;
+
+
+    radioButtonGrp -nrb 3 -l "time" -la3 "Start/end" "Time Slider" "Current Frame" -sl true timeRBG;
+
+    intFieldGrp -l "Start Frame:" -v1 1 startFG;
+    intFieldGrp -l "End Frame:" -v1 10 endFG;
+    intFieldGrp -l "Step Frame:" -v1 1 stepFG;
+
+    setParent ..;
+    setParent ..;
+
+    button -l "MayaToKrakatoa" -c "yu_m2k()" m2kB;
+
+    progressBar prgBar;
+
+    formLayout -e
+
+                -af timeRBG top 5
+                -af timeRBG left 5
+                -af timeRBG right 5
+
+                -ac startFG top 5 timeRBG
+
+                -ac endFG top 5 timeRBG
+                -af endFG left 180
+
+
+                -ac stepFG top 5 timeRBG
+                -ac stepFG left 140 startFG
+
+
+                timeFL;
+
+
+
+    formLayout -e
+
+                -af particleTSL top 5
+                -af particleTSL right 5
+                -af particleTSL left 5
+                -ac particleTSL bottom 5 pickB
+
+                //-ac pickB top 3 particleTSL
+                -af pickB right 3
+                -af pickB left 3
+                -ac pickB bottom 5 folderPathTF
+
+
+                //-ac folderPathTF top 5 pickB
+                -af folderPathTF left 5
+                -af folderPathTF right 35
+                -ac folderPathTF bottom 5 timeRangeFL
+
+                //-ac browseSB top 5 pickB
+                -ac browseSB left 5 folderPathTF
+                -af browseSB right 5
+                -ac browseSB bottom 5 timeRangeFL
+
+                -af timeRangeFL left 5
+                //-ac timeRangeFL top 5 folderPathTF
+                -af timeRangeFL right 5
+                -ac timeRangeFL bottom 5 m2kB
+
+                -af m2kB left 5
+                -af m2kB right 5
+                //-ac m2kB top 5 timeRangeFL
+                -ac m2kB bottom 5 prgBar
+
+                -af prgBar left 5
+                -af prgBar right 5
+                -af prgBar bottom 5
+
+
+                mainFormFL;
+
+
+    showWindow MayaToKrakatoaWin;
+
+    }
+
+global proc yu_browseFolder(){
+//Import Command
+fileBrowserDialog -m 4 -fc "PickFolder" -an "Choose Folder" -dialogStyle 2 -om "Import" ;
+
+}
+
+//Setting the folder name and path
+global proc  PickFolder(string $folderName,string $type )
+{
+
+	  textField -e -text $folderName folderPathTF;
+
+}
+
+global proc yu_resetUI(){
+
+	print "Just choose Some new Value. Nothing to Reset \n";
+
+}
+
+global proc yu_help(){
+
+	print "please waiting\n";
+
+}
+
+global proc yu_populateParticleTSL()
+{
+    textScrollList -e -ra particleTSL;
+
+    string $sel[] = `ls -sl`;
+
+    for ($s in $sel)
+    {
+        string $selS[] = `listRelatives -s $s`;
+        if (`nodeType $selS[0]` == "particle")
+        {
+            textScrollList -e -a $s particleTSL;
+        }
+        else
+        {
+            warning "Select particle\n";
+        }
+    }
+}
+
+global proc yu_m2k()
+{
+
+    int $minTimeline=`intFieldGrp -q -v1  startFG`  ;
+    int $maxTimeline=`intFieldGrp -q -v1  endFG` + 1;
+    int $curTimeLine=`intFieldGrp -q -v1  stepFG`;
+    progressBar -e -min $minTimeline -max ($maxTimeline-1) prgBar;
+
+    string $cmd;
+
+    for ($i=$minTimeline; $i<$maxTimeline; $i=$i+$curTimeLine)
+    {
+        currentTime $i;
+        progressBar -e -s $i prgBar;
+
+        string $root = `textField -q -tx folderPathTF`+"/";
+        string $filename[0] = `textScrollList -q -allItems particleTSL`;
+        string $particleS[0] = `listRelatives -s $filename[0]`;
+        $filename[0] = $filename[0]+"_"+padzeros($i,4);
+        string $ext = ".prt";
+        string $finalname = $root + $filename[0] + $ext;
+	string $opcityAttr="Opacity";
+	string $colorAttr="Color";
+	string $posAttr="Position";
+	string $velAttr="Velocity";
+        $cmd = "m2k " + "\"" + $finalname + "\"" + " " +"\"" + $particleS[0] +"\""+" "+"\""+$opcityAttr+"\""+" "+"\""+$colorAttr+"\""+" "+"\""+$posAttr+"\""+" "+"\""+$velAttr+"\"";
+        //print($cmd+"\n");
+        eval($cmd);
+
+    }
+    progressBar -e -pr $minTimeline prgBar;
+}
+
+
+// just type sp_krakatoa();
+
+

@@ -1,0 +1,238 @@
+global proc zwPluggy()
+{
+	eval "source \"MayaManHelpers.mel\"";
+	eval "source \"MayaManOptions.mel\"";
+
+	if (`window -exists zwPluggy`)
+	{
+		deleteUI zwPluggy;
+	}
+	window -title "Pluggy AOVs" -resizeToFitChildren true -width 260 zwPluggy;
+		columnLayout -adjustableColumn true -rowSpacing 4;
+			button -width 200 -height 32 -label "Delete All Channels" -command "zwPluggyDelAllChannels; zwPluggyRefreshChannels;";
+			button -width 200 -height 32 -label "Add pluggy AOVs" -command "zwPluggyInsertAOV";
+			button -width 200 -height 32 -label "Add __matteColor Channels" -command "zwPluggyAddMatteColor; zwPluggyRefreshChannels;";
+			button -width 200 -height 32 -label "Reset Matte Color" -command "zwPluggyClearMatteColor";
+			button -width 200 -height 32 -label "Grass AOVs" -command "zwPluggyGrassAOVs; zwPluggyRefreshChannels;";
+	showWindow zwPluggy;
+}
+
+global proc zwPluggyInsertAOV()
+{
+	py_insertAOV;
+	zwPluggySetPath;
+	zwSetAttrInt "MayaManNugget.ExternalTextureCache" 2;
+	zwSetAttrFloat "MayaManNugget.PixelFilterY" 2.0;
+	zwSetAttrFloat "MayaManNugget.PixelFilterX" 2.0;
+
+//	zwRbwFixMayaManUserRibOptions;
+	python ("try:\n\treload(insaov)\nexcept:\n\timport RBW.MC.texturing.setAOV as insaov ");
+	string $ribOptions = python ("insaov.ribOptions.__doc__");
+	$ribOptions = `substitute "Attribute \"user\" \"float occflag\" [[]0]" $ribOptions "Attribute \"user\" \"float occflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float uvwflag\" [[]0]" $ribOptions "Attribute \"user\" \"float uvwflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float nrmflag\" [[]0]" $ribOptions "Attribute \"user\" \"float nrmflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float xyzflag\" [[]0]" $ribOptions "Attribute \"user\" \"float xyzflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float ambflag\" [[]0]" $ribOptions "Attribute \"user\" \"float ambflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float lgtflag\" [[]0]" $ribOptions "Attribute \"user\" \"float lgtflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float mvflag\" [[]0]" $ribOptions "Attribute \"user\" \"float mvflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"float zdpflag\" [[]0]" $ribOptions "Attribute \"user\" \"float zdpflag\" [1]"`;
+	$ribOptions = `substitute "Attribute \"user\" \"uniform float pointbased\" [[]1]" $ribOptions "Attribute \"user\" \"uniform float pointbased\" [0]"`;
+	setAttr -type "string" "MayaManNugget.UserRibOptions" $ribOptions;
+
+	zwPluggyRefreshChannels;
+}
+
+global proc zwPluggyAddMatteColor()
+{
+	string $EOChannels[];
+	clear $EOChannels;
+
+	string $MatteNodes[] = `ls -type "MatteNode"`;
+	for ($MatteNode in $MatteNodes)
+	{
+		for ($i=1; $i<=40; $i++)
+		{
+			string $chanl = "matteColor";
+			if ($i < 10)
+			{
+				$chanl += "0";
+			}
+			$chanl += $i;
+
+			float $matteColor[] = `getAttr ($MatteNode + "." + $chanl)`;
+			string $connections[] = `listConnections -destination false ($MatteNode + "." + $chanl)`;
+			if (($matteColor[0] >= 0.001 || $matteColor[1] >= 0.001 || $matteColor[2] >= 0.001) || size($connections) != 0)
+			{
+				$EOChannels[size($EOChannels)] = "__" + $chanl;
+			}
+		}
+	}
+	$EOChannels = sort($EOChannels);
+	for ($EOChannel in $EOChannels)
+	{
+		int $find = false;
+		int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+		for ($i=0; $i<$noOfElements; $i++)
+		{
+			if (`MayaManInfo -getrawstring "EOChannel" $i` == $EOChannel)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			MayaManAddExtraOutputChannel($EOChannel, 1, true, 0, 0, 1, 0, 65535, 0, 65535, "", 0, 0, "", "", "it", "");
+		}
+	}
+
+	zwPluggySetPath;
+}
+
+global proc zwPluggyGrassAOVs()
+{
+	string $EOChannels[] = {"__key", "__fill", "__rim", "__specular"};
+	for ($EOChannel in $EOChannels)
+	{
+		int $find = false;
+		int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+		for ($i=0; $i<$noOfElements; $i++)
+		{
+			if (`MayaManInfo -getrawstring "EOChannel" $i` == $EOChannel)
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			MayaManAddExtraOutputChannel($EOChannel, 1, true, 0, 0, 1, 0, 65535, 0, 65535, "", 0, 0, "", "", "it", "");
+		}
+	}
+
+	zwPluggySetPath;
+}
+
+global proc zwPluggySetPath()
+{
+	zwSetAttrStr "MayaManNugget.RibBase" "$(SCENENAME)";
+
+	int $noOfElements = `MayaManInfo -getarraysize "EOType"`;
+	for ($i=0; $i<$noOfElements; $i++)
+	{
+		string $EOPath = `MayaManInfo -getrawstring "EOPath" $i`;
+		if ($EOPath == "")
+		{
+			$EOPath = "$(PROJECTDIR)/mayaman/$(SCENENAME)/";
+			string $EOChannel = `MayaManInfo -getrawstring "EOChannel" $i`;
+			if ($EOChannel == "__norm")
+			{
+				$EOPath += "nrm";
+			}
+			else if ($EOChannel == "__uvw")
+			{
+				$EOPath += "uvw";
+			}
+			else if ($EOChannel == "__xyz")
+			{
+				$EOPath += "xyz";
+			}
+			else if ($EOChannel == "__lights")
+			{
+				$EOPath += "lgt";
+			}
+			else if ($EOChannel == "__shadows")
+			{
+				$EOPath += "lshd";
+			}
+			else if ($EOChannel == "__extra")
+			{
+				$EOPath += "ext";
+			}
+			else if ($EOChannel == "__extrashadows" || $EOChannel == "__extrashadow")
+			{
+				$EOPath += "eshd";
+			}
+			else if ($EOChannel == "__specular")
+			{
+				$EOPath += "spc";
+			}
+			else if ($EOChannel == "__reflect")
+			{
+				$EOPath += "rfl";
+			}
+			else if (`match "^__matteColor[0-9][0-9]$" $EOChannel` != "")
+			{
+				$EOPath += "idp" + `match "[0-9]+$" $EOChannel`;
+			}
+			else if ($EOChannel == "__mtnvec")
+			{
+				$EOPath += "mvector";
+			}
+			else
+			{
+				$EOPath += `substitute "^__" $EOChannel ""`;
+			}
+			MayaManSetData -setstring "EOPath" $EOPath $i;
+		}
+	}
+}
+
+global proc zwPluggyDelAllChannels()
+{
+	int $no = `MayaManInfo -getarraysize "EOType"`;
+	for ($i=$no-1; $i>=0; $i--)
+	{
+		MayaManSetData -delarrayelement "EOChannel"		$i;
+		MayaManSetData -delarrayelement "EOEnabled"		$i;
+		MayaManSetData -delarrayelement "EOType"		$i;
+		MayaManSetData -delarrayelement "EODoDither"		$i;
+		MayaManSetData -delarrayelement "EODitherValue"		$i;
+		MayaManSetData -delarrayelement "EOQuantization"	$i;
+		MayaManSetData -delarrayelement "EOQuantMin"		$i;
+		MayaManSetData -delarrayelement "EOQuantMax"		$i;
+		MayaManSetData -delarrayelement "EOQuantZero"		$i;
+		MayaManSetData -delarrayelement "EOQuantOne"		$i;
+		MayaManSetData -delarrayelement "EOFilter"		$i;
+		MayaManSetData -delarrayelement "EOFilterX"		$i;
+		MayaManSetData -delarrayelement "EOFilterY"		$i;
+		MayaManSetData -delarrayelement "EOPath"		$i;
+		MayaManSetData -delarrayelement "EODriver"		$i;
+		MayaManSetData -delarrayelement "EODriverArgs"		$i;
+		MayaManSetData -delarrayelement "EOExt"			$i;
+	}
+}
+
+global proc zwPluggyRefreshChannels()
+{
+	if (`scriptTable -exists chansList`)
+	{
+		mayaManExtraChannelsRefreshList;
+	//	textScrollList -edit -selectIndexedItem 12 theOptionsList;
+	//	optionListSelected;
+	}
+}
+
+global proc zwPluggyClearMatteColor()
+{
+	string $MatteNodes[] = `ls -type "MatteNode"`;
+	for ($MatteNode in $MatteNodes)
+	{
+		for ($i=4; $i<=40; $i++)
+		{
+			string $attr = $MatteNode + ".matteColor";
+			if ($i < 10)
+			{
+				$attr += "0";
+			}
+			$attr += $i;
+			string $connections[] = `listConnections -destination false $attr`;
+			if (size($connections) == 0)
+			{
+				zwSetAttrFloat ($attr + "R") 0.0;
+				zwSetAttrFloat ($attr + "B") 0.0;
+				zwSetAttrFloat ($attr + "G") 0.0;
+			}
+		}
+	}
+}

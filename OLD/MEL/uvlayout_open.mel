@@ -1,0 +1,922 @@
+
+/****************************************************************\
+*                                                                *
+*                Procedures to handle transfer of                *
+*               geometry between Maya and UVLayout.              *
+*                                                                *
+*  uvlayout_open() - run plugin application                      *
+*                                                                *
+*  uvlayout_run()  - run UVLayout, and start script jobs         *
+*  uvlayout_stop() - quit UVLayout, and stop script jobs         *
+*  uvlayout_send() - send selected geometry to UVLayout          *
+*                                                                *
+*                            Phil Dench                          *
+*                      architec@headus.com.au                    *
+*                                                                *
+*                          Erik Lindqvist                        *
+*                     wolfsongmods@hotmail.com                   *
+*                                                                *
+*  10 Jan 08 : PD : reset subdiv checkbox when stop              *
+*  13 Nov 07 : PD : fixed for Maya 2008                          *
+*  22 Jun 07 : EL : created new interface with options and info  *
+*  18 Jun 07 : EL : fixed UV transfer issue for polygons         *
+*  17 Jun 07 : EL : fixed parented objects issues                *
+*  23 Oct 06 : PD : added some uvlayout_home.mel error handling  *
+*  25 Aug 06 : PD : partially fixes problem with grouped objects *
+*  18 Aug 06 : PD : first version                                *
+*                                                                *
+\****************************************************************/
+
+
+
+//Path to UVLayout
+global proc string uvlayout_home()
+{ 
+	//return "C:/Program Files/headus UVLayout v2 Demo"; 
+	//return "D:/Program Files/headus UVLayout";
+	// return "C:/Program Files/headus UVLayout v2 Hobbyist";
+	// return "C:/Program Files/headus UVLayout v2 Professional";
+	string $ovhome;
+	if (`optionVar -ex uvlayout_home`)
+		$ovhome = `optionVar -q uvlayout_home`;
+		
+
+	string $home 	= "D:/Program Files/headus UVLayout";
+
+	if( !`filetest -r ($home+"/uvlayout.exe")`)
+	{
+		if (!`filetest -r ($ovhome+"/uvlayout.exe")`)
+		{
+			string $confirm = `confirmDialog -title "警告" -message "UVLayout路径不正确，请选择新的路径" -button "Select Folder"`;
+			if ($confirm == "Select Folder")
+			{
+				fileBrowserDialog -m 4 -fc "uvlayout_homepath" -an "select_folder";
+				$home = `optionVar -q uvlayout_home`;
+				return $home;
+			}
+		}
+		else 
+			return $ovhome;
+	}
+	else
+		return $home;
+}
+
+global proc uvlayout_homepath(string $filepath,string $filetype)
+{
+	optionVar -sv "uvlayout_home" $filepath;
+}
+
+
+//Remove given file
+global proc uvlayout_rm( string $filename)
+{
+	if( `about -win`)
+	{
+		sysFile -del $filename;
+	}
+	else
+	{
+		system( "rm -f " + $filename);
+	}
+}
+
+
+//Rename given file
+global proc uvlayout_mv( string $from, string $to)
+{
+	if( `about -win`)
+	{
+		sysFile -ren $to $from;
+	}
+	else
+	{
+		system( "mv -f " + $from + " " + $to);
+	}
+}
+
+
+//Send objects to UVLayout
+global proc uvlayout_send()
+{
+	global string 	$uvlayout_tempbase;
+	global string 	$uvlayout_tempname;
+
+	global string 	$uvlayout_savename;
+	global int	$uvlayout_subdiv;
+
+	global string	$uvlayout_selected[];
+
+	//EDITED by Erik Lindqvist - 070622
+	global string	$uvlayout_exported[];
+	
+	$uvlayout_selected = `ls -sl`;
+
+	if(size($uvlayout_selected))
+	{
+		uvlayout_rm($uvlayout_tempname);
+		uvlayout_rm($uvlayout_savename);
+		clear($uvlayout_exported);
+
+		if(`checkBox -q -v subdivCheckBox`)
+		{
+			string $selected[]= `ls -dag -ap -sl -s -hd 1`;
+			
+			if(`nodeType $selected[0]` == "subdiv")
+			{
+				clear($uvlayout_selected);
+				$uvlayout_selected = `listRelatives -p $selected[0]`;
+				$uvlayout_exported[0] = "uvlayout_" + $uvlayout_selected[0];
+				
+				select $uvlayout_selected[0];
+				int $smooth[] = `subdivDisplaySmoothness -q`;
+				$uvlayout_subdiv = $smooth[0];
+
+				duplicate -rr -rc -n $uvlayout_exported[0] $uvlayout_selected[0];
+
+				$check = `listRelatives -p $uvlayout_exported[0]`;
+				if(size($check))
+				{
+					parent -w $uvlayout_exported[0];
+				}
+			
+				$check = `listRelatives -c $uvlayout_exported[0]`;
+				if(size($check))
+				{
+					for($child in $check)
+					{
+						if(`nodeType $child`!="subdiv")
+						{
+							delete $child;
+						}
+					}
+				}
+
+				select $uvlayout_exported;
+				SubdivSurfacePolygonProxyMode;
+			}
+			
+			else
+			{
+				error "First selected object is not a SubDiv mesh";
+			}
+		}
+
+		else
+		{
+			$uvlayout_subdiv	= 0;
+			$uvlayout_selected = `ls -sl`;
+
+			int $i=0;
+			string $check[];
+		
+			for( $object in $uvlayout_selected)
+			{
+				$uvlayout_exported[$i] = "uvlayout_" + $object;
+				duplicate -rr -rc -n $uvlayout_exported[$i] $object;
+
+				$check = `listRelatives  -p  $uvlayout_exported[$i]`;
+				if(size($check))
+				{
+					parent -w $uvlayout_exported[$i];
+				}
+			
+				$check = `listRelatives  -c $uvlayout_exported[$i]`;
+				if(size($check))
+				{
+					for($child in $check)
+					{
+						if(`nodeType $child`!="mesh")
+						{
+							delete $child;
+						}
+					}
+				}
+
+				$i++;
+			}
+	
+			select $uvlayout_exported;
+		}
+
+		if (!`pluginInfo -query -loaded "objExport.mll"`)
+			loadPlugin "objExport.mll";		
+		
+		file -es -type "OBJexport" -force $uvlayout_tempbase;
+		uvlayout_mv($uvlayout_tempname, $uvlayout_savename);
+		
+		delete $uvlayout_exported;
+		select $uvlayout_selected;
+
+		checkBox -e -en 0 subdivCheckBox;
+	//END EDITED SECTION - 070622
+	}
+	else
+	{
+		error "No object selected";
+	}
+}
+
+
+//Get object from UVLayout
+global proc uvlayout_load()
+{
+	global string 	$uvlayout_loadname;
+	global string	$uvlayout_selected[];
+	global int 		$uvlayout_subdiv;
+
+	//EDITED by Erik Lindqvist - 070622
+	global string	$uvlayout_exported[];
+
+	if( `filetest -r $uvlayout_loadname`)
+	{
+		file -import -uc no -type "OBJ" $uvlayout_loadname;
+
+		uvlayout_rm( $uvlayout_loadname);
+
+		if(`checkBox -q -v subdivCheckBox`)
+		{
+			select $uvlayout_exported;
+			string $converted[] = `polyToSubdiv -ch off -mpc 40000 -me 32 $uvlayout_exported`;
+			delete $uvlayout_exported;
+
+			string $parent[] = `listRelatives -p $uvlayout_selected[0]`;
+			string $children[] = `listRelatives -c $uvlayout_selected[0]`;
+
+			if(size($parent))
+			{
+				parent $converted[0] $parent[0];
+			}
+			
+			if(size($children))
+			{
+				for($child in $children)
+				{
+					if(`nodeType $child`!="subdiv")
+					{
+						parent $child $converted[0];
+					}
+				}
+			}
+
+			select $converted;
+			delete $uvlayout_selected;
+			rename $uvlayout_selected;
+
+			subdivDisplaySmoothness -s $uvlayout_subdiv;
+		}
+
+		else
+		{
+	       	int $i;
+	       	string $check[];
+			for($i=0; $i<`size($uvlayout_selected)`; $i++)
+			{
+				$check = `listRelatives -c $uvlayout_selected[$i]`;
+				if(size($check))
+				{
+					for($child in $check)
+					{
+						if(`nodeType $child`!="mesh")
+						{
+							parent -w $child;
+						}
+					}
+				}
+
+	   			polyTransfer -uv 1 -ao $uvlayout_exported[$i] $uvlayout_selected[$i];
+	   			delete $uvlayout_exported[$i];
+
+				if(size($check))
+				{
+					for($child in $check)
+					{
+						if(`nodeType $child`!="mesh")
+						{
+							parent $child $uvlayout_selected[$i];
+						}
+					}
+				}
+	   		}
+			select $uvlayout_selected;
+		}
+		
+		checkBox -e -en 1 subdivCheckBox;
+		
+		if(`checkBox -q -v subdivCheckBox`)
+		{
+			MLdeleteUnused;
+		}
+		//END EDITED SECTION - 070622
+	}
+}
+
+
+//Start processes to check for activity
+global proc uvlayout_start()
+{
+	global int $uvlayout_load_id;
+	global int $uvlayout_quit_id;
+	
+	$uvlayout_load_id	= `scriptJob -cf "busy" uvlayout_load`;
+	$uvlayout_quit_id	= `scriptJob -e "quitApplication" uvlayout_stop`;
+}
+
+
+//Enter command in CMD file for UVLayout
+global proc uvlayout_cmd( string $cmd)
+{
+	global string $uvlayout_cmdname;
+
+	int $fp = fopen( $uvlayout_cmdname, "w");
+
+	if( $fp > 0)
+	{
+		fprint( $fp, $cmd);
+
+		fclose $fp;
+	}
+}
+
+
+//Remove processes and stop UVLayout
+global proc uvlayout_stop()
+{
+	global string $uvlayout_savename;
+	global string $uvlayout_loadname;
+	global string $uvlayout_tempname;
+	global string $uvlayout_tempmtl;
+
+	global int $uvlayout_load_id;
+	global int $uvlayout_quit_id;
+
+	if( $uvlayout_load_id)
+	{
+		scriptJob -kill $uvlayout_load_id;
+	}
+
+	if( $uvlayout_quit_id)
+	{
+		scriptJob -kill $uvlayout_quit_id;
+	}
+
+	checkBox -e -en 1 subdivCheckBox;
+
+	uvlayout_rm( $uvlayout_savename);
+	uvlayout_rm( $uvlayout_loadname);
+	uvlayout_rm( $uvlayout_tempname);
+	uvlayout_rm( $uvlayout_tempmtl);
+
+	uvlayout_cmd( "exit");
+
+	uvlayout_init;
+}
+
+
+//Setup folders/variables and start UVLayout
+global proc uvlayout_run()
+{
+	global int		$uvlayout_load_id;
+
+	global string 		$uvlayout_basename;
+	global string 		$uvlayout_savename;
+	global string 		$uvlayout_loadname;
+	global string 		$uvlayout_cmdname;
+
+	global string 		$uvlayout_tempbase;
+	global string 		$uvlayout_tempname;
+	global string 		$uvlayout_tempmtl;
+
+	int			$debug			= 0;
+
+	string 			$cwd 			= `pwd`;
+	string 			$workspace_list[] 	= `workspace -lfw`;
+
+	string 			$local_savename		= "uvl" + `getpid` + ".obj";
+
+	$uvlayout_basename 	= $workspace_list[0] + "/uvlayout/uvl" + `getpid`;
+	$uvlayout_savename	= $uvlayout_basename + ".obj";
+	$uvlayout_loadname	= $uvlayout_basename + ".out";
+	$uvlayout_cmdname	= $uvlayout_basename + ".cmd";
+
+	$uvlayout_tempbase 	= $workspace_list[0] + "/uvlayout/tmp" + `getpid`;
+	$uvlayout_tempname	= $uvlayout_tempbase + ".obj";
+	$uvlayout_tempmtl	= $uvlayout_tempbase + ".mtl";
+
+	chdir 	$workspace_list[0];
+
+	if( !`filetest -d uvlayout`)
+	{
+		system( "mkdir uvlayout");
+	}
+
+	chdir 	"uvlayout";
+
+	//EDITED by Erik Lindqvist - 070617
+	string $cmdfiles[] = `getFileList -filespec "*.cmd"`;
+	if(size($cmdfiles))
+	{
+		for($eachcmd in $cmdfiles)
+		{
+			if($eachcmd != $uvlayout_cmdname)
+			{
+				uvlayout_rm($eachcmd);
+			}
+		}
+	}
+	//END EDITED SECTION - 070617
+	
+	if( `about -win`)
+	{
+		string $home 	= `uvlayout_home`;
+		string $exe		= $home + "/uvlayout.exe";
+
+		//EDITED by Erik Lindqvist - 070617
+		if( !`filetest -d $home`)
+		{
+			error ( "UVLayout 路径错误，请重新选择！");
+		}
+		/*else if( !`filetest -f $exe`)
+		{
+			error ( "uvlayout: Couldn't find application '" + $exe +"'! Check definition of home folder in uvlayout_open.mel\n");
+		}*/
+		//END EDITED SECTION - 070617
+		
+		else
+		{
+
+			if( $debug)
+			{
+				string $slash	= $home + "/";
+				string $list[] 	= `getFileList -fld $slash -fs "uvlayout*"`;
+				string $file;
+
+				print( "home " + $home + "\n");
+				print( "list ...\n");
+
+				for( $file in $list)
+				{
+					print( "  " + $file + "\n");
+				}
+
+				print( "start \"" + $exe + "\" -plugin " + $local_savename + "\n");
+			}
+
+			system( "start \"" + $exe + "\" -plugin " + $local_savename);
+		}
+	}
+	else
+	{
+		if( $debug)
+		{
+			print( "uvlayout -plugin " + $local_savename + " > /dev/null 2>&1 &" + "\n");
+		}
+
+		system( "uvlayout -plugin " + $local_savename + " > /dev/null 2>&1 &");
+	}
+
+	chdir $cwd;
+
+	if( !$uvlayout_load_id)
+	{
+		evalDeferred uvlayout_start;
+	}
+}
+
+
+//Initalize some variables and set to default
+global proc uvlayout_init()
+{
+	global int 		$uvlayout_load_id;
+	global int 		$uvlayout_quit_id;
+	global int 		$uvlayout_subdiv;
+
+	$uvlayout_load_id	= 0;
+	$uvlayout_quit_id	= 0;
+	$uvlayout_subdiv	= 0;
+}
+
+
+//ADDED by Erik Lindqvist - 070622
+//Walkthrough window for Plugin
+global proc uvlayout_using()
+{
+	if (`window -ex uvlayout_using`)
+	{
+		deleteUI uvlayout_using;
+	}
+	
+	if (`windowPref -ex uvlayout_using`)
+	{
+		windowPref -r uvlayout_using;
+	}
+		
+	window
+		-title "Workflow for Plugin"
+		-rtf true
+		-s false
+		-width 150
+		-height 96
+		uvlayout_using;
+		
+		columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+			separator -style "none" -h 10;
+		
+			text
+				-l "Workflow with Maya Plugin for UVLayout\n"
+				-align "left";
+				
+			text
+				-l "1. Press the \"Run UVLayout\" button to start UVLayout.\n"
+				-align "left";
+				
+			text
+				-l "2. Select the objects you want to send from your scene.\n"
+				-align "left";
+
+			text
+				-l "3. Check the subDiv box if your mesh is of that type.\n"
+				-align "left";
+
+			text
+				-l "4. Uncheck the Clear Nodes box if you don't want to\n     delete all unused nodes after mesh returns to Maya.\n"
+				-align "left";
+				
+			text
+				-l "5. Press the \"Send Mesh\" button and your selected mesh\n     will show up in UVLayout.\n"
+				-align "left";
+
+			text
+				-l "6. Once your work in UVLayout is done, use the \"Send\"\n     button inside UVLayout and Maya will automatically import\n     your mesh back into the scene.\n"
+				-align "left";
+
+			text
+				-l "7. Once your done using UVLayout, press the \"Stop UVLayout\"\n     button to shut down UVLayout.\n"
+				-align "left";
+
+			separator -style "none" -h 10;
+
+			button
+				-l "Close"
+				-w 128
+				-c "deleteUI uvlayout_using;";
+
+			separator -style "none" -h 10;
+		
+		setParent ..;
+		
+	showWindow uvlayout_using;
+}
+
+
+//Info window for Plugin
+global proc uvlayout_info()
+{
+	if (`window -ex uvlayout_info`)
+	{
+		deleteUI uvlayout_info;
+	}
+	
+	if (`windowPref -ex uvlayout_info`)
+	{
+		windowPref -r uvlayout_info;
+	}
+		
+	window
+		-title "Important Info"
+		-rtf true
+		-s false
+		-width 150
+		-height 96
+		uvlayout_info;
+		
+		columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+			separator -style "none" -h 10;
+		
+			text
+				-l "Tested with Maya 7.0, 8.0, 8.5 and 2008\n"
+				-align "left";
+
+			text
+				-l "Parenting always remain after using the plugin.\n"
+				-align "left";
+				
+			text
+				-l "Polygon objects are fully supported.\n"
+				-align "left";
+
+			text
+				-l "SubDiv objects have limited support:"
+				-align "left";
+
+			text
+				-l "- Only one objects can be sent at the time."
+				-align "left";
+				
+			text
+				-l "- Objects will get their transformation froozen and pivot reset to origin."
+				-align "left";
+
+			text
+				-l "- Material assignments will be lost and standard Lambert applied."
+				-align "left";
+
+			separator -style "none" -h 10;
+			separator -style "in" -h 10;
+			separator -style "none" -h 10;
+
+			text
+				-l "The subDiv checkbox is locked while an object has been checked out for work in UVLayout.\nOnce the mesh is impoted back into Maya it will be unlocked again.\n"
+				-align "left";
+
+			text
+				-l "The Clear Nodes checkbox should only be unchecked if you currently have unused nodes,\nlike materials, in the scene that you want to save."
+				-align "left";
+
+			separator -style "none" -h 10;
+
+			button
+				-l "Close"
+				-w 128
+				-c "deleteUI uvlayout_info;";
+
+			separator -style "none" -h 10;
+		
+		setParent ..;
+		
+	showWindow uvlayout_info;
+}
+
+
+//About info window for plugin
+global proc uvlayout_pluginabout()
+{
+	// Kill any existing about windows.
+	if (`window -ex uvlayout_pluginabout`)
+	{
+		deleteUI uvlayout_pluginabout;
+	}
+	
+	if (`windowPref -ex uvlayout_pluginabout`)
+	{
+		windowPref -r uvlayout_pluginabout;
+	}
+		
+	window
+		-title "About Plugin"
+		-rtf true
+		-s false
+		-width 135
+		-height 96
+		uvlayout_pluginabout;
+		
+		columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+			separator -style "none" -h 10;
+		
+			text
+				-l "UVLayout Maya Plugin\nversion 2.1"
+				-align "center";
+
+			separator -style "none" -h 10;
+
+			text
+				-l "v1.2 by Phil Dench 2006\nhttp://www.uvlayout.com/"
+				-align "center";
+
+			separator -style "none" -h 10;
+
+			text
+				-l "v2.0 by Erik Lindqvist 2007\nWolfsongMods@Hotmail.com"
+				-align "center";
+
+			separator -style "none" -h 10;
+
+			text
+				-l "?006 by headus 3D tools\n?007 by Erik Lindqvist"
+				-align "center";
+
+			separator -style "none" -h 10;
+				
+			button
+				-l "Close"
+				-w 128
+				-c "deleteUI uvlayout_pluginabout;";
+
+			separator -style "none" -h 10;
+		
+		setParent ..;
+		
+	showWindow uvlayout_pluginabout;
+}
+
+
+//About info window for UVLayout
+global proc uvlayout_about()
+{
+	// Kill any existing about windows.
+	if (`window -ex uvlayout_about`)
+	{
+		deleteUI uvlayout_about;
+	}
+	
+	if (`windowPref -ex uvlayout_about`)
+	{
+		windowPref -r uvlayout_about;
+	}
+		
+	window
+		-title "About UVLayout"
+		-rtf true
+		-s false
+		-width 135
+		-height 96
+		uvlayout_about;
+		
+		columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+			separator -style "none" -h 10;
+		
+			text
+				-l "UVLayout"
+				-align "center";
+
+			separator -style "none" -h 10;
+
+			text
+				-l "http://www.uvlayout.com"
+				-align "center";
+
+			separator -style "none" -h 10;
+
+			text
+				-l "?007 by headus 3D tools"
+				-align "center";
+
+			separator -style "none" -h 10;
+				
+			button
+				-l "Close"
+				-w 128
+				-c "deleteUI uvlayout_about;";
+
+			separator -style "none" -h 10;
+		
+		setParent ..;
+		
+	showWindow uvlayout_about;
+}
+
+
+//Feedback window for UVLayout
+global proc uvlayout_feedback()
+{
+	// Kill any existing about windows.
+	if (`window -ex uvlayout_feedback`)
+	{
+		deleteUI uvlayout_feedback;
+	}
+	
+	if (`windowPref -ex uvlayout_feedback`)
+	{
+		windowPref -r uvlayout_feedback;
+	}
+		
+	window
+		-title "Plugin Feedback"
+		-rtf true
+		-s false
+		-width 135
+		-height 96
+		uvlayout_feedback;
+		
+		columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+			separator -style "none" -h 10;
+		
+			text
+				-l "Please report bugs and suggestions for\nimprovments in the headus 3D tools forum.\n"
+				-align "center";
+
+			text
+				-l "http://www.headus.com/phpbb/"
+				-align "center";
+
+			separator -style "none" -h 10;
+				
+			button
+				-l "Close"
+				-w 128
+				-c "deleteUI uvlayout_feedback;";
+
+			separator -style "none" -h 10;
+		
+		setParent ..;
+		
+	showWindow uvlayout_feedback;
+}
+//END ADDED SECTION - 070622
+
+
+//Start program and create interface
+global proc uvlayout_open()
+{
+	//EDITED by Erik Lindqvist - 070622
+	if (!`window -ex uvlayout_window`)
+	{
+		uvlayout_init;
+	
+		int $windowWidth = 128;
+		int $windowHeight = 220;
+		int $buttonHeight = 24;
+	
+		if( `windowPref -exists uvlayout_window`) 
+		{
+			windowPref -remove uvlayout_window;
+		}
+
+		window
+			-s false
+			-rtf true
+			-ret
+			-title "UVLayout Plugin"
+			-iconName "UVLayout Plugin"
+			-wh $windowWidth $windowHeight
+			-menuBar true
+			uvlayout_window;
+		
+			menu -label "Manual" -tearOff false;
+				menuItem
+					-label "Workflow Walkthrough..."
+					-c "uvlayout_using";
+				menuItem
+					-label "Important Info..."
+					-c "uvlayout_info";
+
+			menu -label "Info" -tearOff false;
+				menuItem
+					-label "About UVLayout..."
+					-c "uvlayout_about";
+				menuItem
+					-label "About UVLayout Maya Plugin..."
+					-c "uvlayout_pluginabout";
+				menuItem
+					-label "Feedback..."
+					-c "uvlayout_feedback";
+		
+			columnLayout -adjustableColumn true -columnAttach "both" 10;
+		
+				separator -style "none" -w $windowWidth -h 10;
+		
+				button
+					-l "Run UVLayout"
+					-c "uvlayout_run"
+					-height $buttonHeight
+					-align "center"
+					-ann "Runs UVLayout in plugin mode and sets up filenames and paths for transfer between applications.";
+
+				separator -style "none" -w $windowWidth -h 10;
+				separator -style "in" -w $windowWidth -h 10;
+				separator -style "none" -w $windowWidth -h 10;
+
+				checkBox
+					-l "Using SubDiv Mesh"
+					-v 0
+					-align "left"
+					subdivCheckBox;
+
+				checkBox
+					-l "Clear Nodes At Import"
+					-v 1
+					-align "left"
+					cleanCheckBox;
+
+				separator -style "none" -w $windowWidth -h 5;
+
+				button
+					-l "Send Mesh"
+					-c "uvlayout_send"
+					-height $buttonHeight
+					-align "center"
+					-ann "Transfer copies of selected geometry to UVLayout.";
+			 
+				separator -style "none" -w $windowWidth -h 10;
+				separator -style "in" -w $windowWidth -h 10;
+				separator -style "none" -w $windowWidth -h 10;
+
+				button
+					-l "Stop UVLayout"
+					-c "uvlayout_stop"
+					-height $buttonHeight
+					-align "center"
+					-ann "Stops UVLayout and procedures used to transfer and recieve data between the applications.";
+
+				separator -style "none" -w $windowWidth -h 10;
+
+			setParent ..;
+	}
+	//END EDITED SECTION - 070622
+	showWindow uvlayout_window;
+}

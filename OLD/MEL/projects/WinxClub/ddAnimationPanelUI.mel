@@ -1,0 +1,2732 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddAnimationPanelUI
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: January 21 2007
+//	Changed Projcet Date:
+//	Last Updated: April 2 2008
+//	Update/Change this file at: Wanshoulong
+//	Note: Animation Panel
+//		
+//		
+//		
+//////////////////////////////////////////////////////////
+
+//全局变量ddAPCharCon用于保存角色控制器列表，ddAPPanelAdapter用于保存面板适配器列表
+global string $ddAPCharCon[],$ddAPPanelAdapter[],$ddAPPanelUBAttr[];
+clear $ddAPCharCon;clear $ddAPPanelAdapter;clear $ddAPPanelUBAttr;
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPSelect
+//		选择scriptJob
+//
+//	Arguments : NULL
+//
+//	Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAPSelect()
+{
+	int $sign = 0 ;
+	string $tmp ;
+	string $sciptJobsLists[] = `scriptJob -listJobs` ;
+	for($tmp in $sciptJobsLists)
+	{
+		if(`gmatch  $tmp ("*\"-e\" \"SelectionChanged\" \"ddAPButton()\"*")`)
+		{
+			//print "match!" ;
+			$sign = 1 ;
+		}
+	}
+
+	if (!$sign)
+	{
+		scriptJob -e "SelectionChanged" "ddAPButton()" ;
+	}
+
+	eval "source nsDagMenuProc85.mel";
+
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	string $charName = `substring $char 1 (size($char)-1)`;
+	ddAPWinxCharPanelInit($charName);
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPButton
+//		处理动画面板中控制器与角色控制器的关联
+//
+//	Arguments : NULL
+//	
+//	Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAPButton()
+{
+	//ddAPSelect;
+	if(!`window -exists ddAnimationPanelWin`)
+	{
+		return ;
+	}
+	//如果角色列表没有选择直接返回
+	
+	if(`iconTextRadioCollection -q -select ddAPCharListItRadCollection` == "NONE")
+	{
+		return ;
+	}
+
+
+	int $i ;
+	string $tmp,$sel,$adapter ;
+	string $selectedCon[],$selectedAdapter[] ;
+	string $AdapterList[],$selectSpecialCon[] ;
+	string $charName,$specialConList[],$tmpArray[] ;
+	global string $ddAPCharCon[],$ddAPPanelAdapter[] ;
+
+	$charName = `ddAPGetCurrentChar` ;
+
+	//print "APSEL\n" ;
+	//同步角色控制器与控制面板内的适配器
+	for ( $i = 0 ; $i<size($ddAPCharCon) ; $i++ )
+	{
+		$tmpArray = `ls -sl ($charName + $ddAPCharCon[$i])` ;
+		if (size($tmpArray[0]))
+		{
+			sets -e -nw -forceElement durdur:ddAP_selectedSG $ddAPPanelAdapter[$i] ;
+		}
+		else
+		{
+			sets -e -nw -forceElement durdur:ddAP_noSelectedSG $ddAPPanelAdapter[$i] ;
+		}
+	}
+
+	//控制面板内加减选处理
+	for ( $i = 0 ; $i<size($ddAPPanelAdapter) ; $i++ )
+	{
+		$tmpArray = `ls -sl $ddAPPanelAdapter[$i]` ;
+		if (size($tmpArray[0]))
+		{
+			select -add ($charName + $ddAPCharCon[$i]) ;
+			sets -e -nw -forceElement durdur:ddAP_selectedSG $ddAPPanelAdapter[$i];
+			select -d $tmpArray[0] ;
+		}/*
+		else
+		{
+			sets -e -forceElement durdur:ddAP_noSelectedSG $ddAPPanelAdapter[$i] ;
+		}*/
+	}
+
+	//$charName = `substring $charName 1 (size($charName)-1)`;
+	//ddAPWinxCharPanelInit($charName);
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPChannelBoxCommand
+//		用durdur Animation Panel当中的channel box的菜单命令集
+//	代码来源自 maya 7.0中的 generateChannelMenu.mel 只修改了
+//	操作channel box 的名字，其它无修改
+//	Arguments : 
+//		string $operation  "key"
+//	Return :
+//		string $APPanelNameItemList[] 列表的对象名
+//////////////////////////////////////////////////////////
+global proc ddAPChannelBoxCommand( string $operation )
+{
+	switch( $operation ) {
+		case "-key":
+			channelBox -e -exe "setKeyframe \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-keyall":
+			channelBox -e -exe "setKeyframe \"#P.#A\";" false ddAPChannelBox;
+			break;
+		case "-breakdown":
+			channelBox -e -exe "setKeyframe -breakdown true \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-breakdownall":
+			channelBox -e -exe "setKeyframe -breakdown true \"#P.#A\";" false ddAPChannelBox;
+			break;
+		case "-mute":
+			channelBox -e -exe "mute \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-muteall":
+			channelBox -e -exe "mute \"#P.#A\";" false ddAPChannelBox;
+			break;
+		case "-unmute":
+			channelBox -e -exe "mute -disable -force \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-unmuteall":
+			channelBox -e -exe "mute -disable -force \"#P.#A\";" false ddAPChannelBox;
+			break;
+		case "-lock":
+			channelBox -e -exe "setAttr -lock true \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-unlock":
+			channelBox -e -exe "CBunlockAttr \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-unkeyable":
+			channelBox -e -exe "setAttr -keyable false -channelBox false \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-unkeyableDisplayed":
+			channelBox -e -exe "setAttr -keyable false -channelBox true \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-keyable":
+			channelBox -e -exe "setAttr -keyable true \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-lockUnkeyable":
+			channelBox -e -exe "setAttr -lock true -keyable false \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-expression":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					expressionEditor "EE" $objList[0] $attrList[0];
+
+				} else {
+					$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+					$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+					if ( size($objList) > 0 && size($attrList) > 0 ){
+						expressionEditor "EE" $objList[0] $attrList[0];
+
+					} else {
+						$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+						$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+						if ( size($objList) > 0 && size($attrList) > 0 ){
+							expressionEditor "EE" $objList[0] $attrList[0];
+							
+						} else {
+							$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+							$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+							if ( size($objList) > 0 && size($attrList) > 0 ){
+								expressionEditor "EE" $objList[0] $attrList[0];
+							}
+						}		
+					}
+				}
+			}
+			break;
+		case "-driven":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					setDrivenKeyWindow "" $attrList;
+
+				} else {
+					$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+					$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+					if ( size($objList) > 0 && size($attrList) > 0 ){
+						setDrivenKeyWindow $objList[0] $attrList;
+
+					} else {
+						$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+						$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+						if ( size($objList) > 0 && size($attrList) > 0 ){
+							setDrivenKeyWindow $objList[0] $attrList;
+						} else {
+							$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+							$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+							if ( size($objList) > 0 && size($attrList) > 0 ){
+								setDrivenKeyWindow $objList[0] $attrList;
+							}
+						}
+					}
+				}
+			}
+			break;
+		case "-cut":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				string $cmd = "";
+				int $okay = 0;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				if ( $okay == 1 ){
+					evalEcho( $cmd );
+				}
+			}
+			break;
+		case "-copy":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				string $cmd = "";
+				int $okay = 0;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "copyKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "copyKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "copyKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "copyKey -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				if ( $okay == 1 ){
+					evalEcho( $cmd );
+				}
+			}
+			break;
+		case "-paste":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				string $cmd = "";
+				int $okay = false;
+				float $currentTime = `currentTime -query`;
+				string $pasteKey = ("pasteKey -connect true -time " + $currentTime);
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + $pasteKey;
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = true;
+				}
+
+				$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + $pasteKey;
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = true;
+				}
+
+				$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + $pasteKey;
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = true;
+				}
+
+				$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + $pasteKey;
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = true;
+				}
+
+				if ( $okay ){
+					evalEcho( $cmd );
+				}
+			}
+			break;
+		case "-delete":
+			{
+				string $objList[] = `channelBox -q -mainObjectList ddAPChannelBox`;
+				string $attrList[] = `channelBox -q -selectedMainAttributes ddAPChannelBox`;
+
+				string $cmd = "";
+				int $okay = 0;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -cl -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -shapeObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedShapeAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -cl -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -historyObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedHistoryAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -cl -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				$objList = `channelBox -q -outputObjectList ddAPChannelBox`;
+				$attrList = `channelBox -q -selectedOutputAttributes ddAPChannelBox`;
+
+				if ( size($objList) > 0 && size($attrList) > 0 ){
+					$cmd = $cmd + "cutKey -cl -t \":\" -f \":\"";
+					for( $channel in $attrList )
+						$cmd = $cmd + " -at \"" + $channel+"\"";
+					for ( $object in $objList )
+						$cmd = $cmd + " " + $object;
+					$cmd = $cmd + ";\n";
+					$okay = 1;
+				}
+
+				if ( $okay == 1 ){
+					evalEcho( $cmd );
+				}
+			}
+			break;
+		case "-deleteAttributes":
+			channelBox -e -exe "catch (`deleteAttr -attribute \"#A\" \"#P\"`);" true ddAPChannelBox;
+			break;
+		case "-precision":
+			{
+				int $oldPrecision = `optionVar -query channelsPrecision`;
+				int $newPrecision = precisionPrompt ("", $oldPrecision, 15);
+				if ($newPrecision > 0) {
+					
+					// Change the width of the fields depending on the
+					// precision.
+					//
+					int $oldWidth = `channelBox -q -fieldWidth ddAPChannelBox`;
+					int $newWidth;
+					if ($newPrecision <= 3) {
+						$newWidth = 65;
+					} else if ($newPrecision <= 6) {
+						$newWidth = 95;
+					} else if ($newPrecision <= 9) {
+						$newWidth = 115;
+					} else if ($newPrecision <= 12) {
+						$newWidth = 130;
+					} else {
+						$newWidth = 155;						
+					}
+					channelBox -e -pre $newPrecision 
+						-fieldWidth $newWidth 
+						ddAPChannelBox;
+					optionVar -iv channelsPrecision $newPrecision;
+					optionVar -iv channelsFieldWidth $newWidth;
+					
+					nudgeChannelsLayersWidth($newWidth-$oldWidth);
+				}
+			}
+			break;
+		case "-break":
+			channelBox -e -exe "CBdeleteConnection \"#P.#A\";" true ddAPChannelBox;
+			break;
+		case "-reset":
+			global int $gChannelsLayersWidth;
+			optionVar -iv channelsLongName 1;   // 1=nice
+			optionVar -iv channelsPrecision 3;
+			optionVar -iv channelsFieldWidth 65;
+			$gChannelsLayersWidth = 180;
+			channelBox -e -ln true -nn true
+				-precision 3 -fieldWidth 65 ddAPChannelBox;
+			setChannelsLayersWidth ($gChannelsLayersWidth);
+			checkSpeedButton "medium" true;
+			channelBox -e -hyperbolic false ddAPChannelBox;
+			channelBox -e -showNamespace true ddAPChannelBox;
+			channelBox -e -useManips "standard" ddAPChannelBox;
+			initChannelBoxButtons;
+			break;
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPListChar
+//		列出场景中的角色 目前使用角色主控制器使用MASTER的识别
+//	方法
+//
+// Arguments : string $master
+//
+//	Return :
+//		string $APPanelNameItemList[] 列表的对象名
+//////////////////////////////////////////////////////////
+global proc string[] ddAPListChar(string $master,string $second)
+{
+	string $allChar[];
+	string $charList[] = `ls ("*"+$master) ("*:"+$master) ("*:*:"+$master) ("*:*:*:"+$master)` ;
+	for ($char in $charList)
+	{
+		string $pre = `substring $char 1 (size($char)-size($master))`;
+		if (`objExists ($pre+$second)`)
+			$allChar[size($allChar)] = $char;
+	}
+
+	return $allChar;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPWinxCharVisHolisticControl
+//		EZ角色的Hide High/Low切换 头发
+//
+//	Arguments : 
+//		string $operation 角色设置显示控制
+//				-hide 角色隐藏
+//				-high 角色高模显示
+//				-low 角色低模显示
+//				-hairShow 角色头发显示/隐藏
+//				-smooth 角色无细分(smooth)/角色细分1级 (smooth 1)
+//		目前winx的hair和smooth为包含
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc ddAPWinxCharVisHolisticControl( string $operation )
+{
+	int $i,$count,$firstHair,$firstSmooth ;
+	string $masterVis[],$charName[];
+
+	string $ddAPCharList[] = `ddAPListChar "Character" "Upper_Body"` ;
+	for ($char in $ddAPCharList)
+	{
+		$charName[size($charName)] = `substitute ":Character" $char ""` ;
+	}
+
+
+	$firstHair = `checkBox -query -value ddAPCharVisHair0` ;
+	$firstSmooth = `checkBox -query -value ddAPCharSmooth0` ;
+
+	$count = `text -query -label ddAPCharCount` ;
+
+	for ($i = 0 ;$i < $count ; $i++ )
+	{
+		switch ( $operation )
+		{
+			case "-hide":
+				radioCollection -edit -select ("ddAPCharVisHide" + $i) ("ddAPCharVisHideRadioCollection" + $i) ;
+				break ;
+
+			case "-high":
+				radioCollection -edit -select ("ddAPCharVisHigh" + $i) ("ddAPCharVisHideRadioCollection" + $i) ;
+				break ;
+			
+			case "-middle":
+				radioCollection -edit -select ("ddAPCharVisMiddle" + $i) ("ddAPCharVisHideRadioCollection" + $i) ;
+				break ;
+
+			case "-low":
+				radioCollection -edit -select ("ddAPCharVisLow" + $i) ("ddAPCharVisHideRadioCollection" + $i) ;
+				break ;
+
+			case "-hair":
+				if ($firstHair)
+				{	
+					ddAPWinxCharVis($charName[$i],"-hairHide");
+					checkBox -edit -value 0 ("ddAPCharVisHair"+$i);
+				}
+				else
+				{
+					ddAPWinxCharVis($charName[$i],"-hairShow");
+					checkBox -edit -value 1 ("ddAPCharVisHair"+$i);
+				}
+				break ;
+
+			case "-smooth":
+				break ;
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPWinxCharVis
+//		EZ角色的Hide High/Low切换 头发
+//
+// Arguments : 
+//		string $charName 角色名
+//		string $operation EZ类角色设置显示控制
+//				-hide 角色隐藏
+//				-high 角色高模显示
+//				-low 角色低模显示
+//				-hairShow 角色头发显示
+//				-hairHide 角色头发隐藏
+//				-smooth0 角色无细分(smooth)
+//				-smooth1 角色无细分1级 (smooth 1)
+//		目前winx的hair和smooth为包含
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc ddAPWinxCharVis(string $charName,string $operation )
+{
+	int $i ;
+	string $masterVis[] ;
+	$masterVis[0] = ":CHR.visibility" ;
+	$masterVis[1] = ":Upper_Body.Display" ;
+
+
+	switch ( $operation )
+	{
+		case "-hide":
+			setAttr ($charName + $masterVis[0]) 0;
+			break ;
+
+		case "-high":
+			setAttr ($charName + $masterVis[0]) 1;
+			setAttr ($charName + $masterVis[1]) 0;
+			break ;
+		
+		case "-middle":
+			setAttr ($charName + $masterVis[0]) 1;
+			setAttr ($charName + $masterVis[1]) 1;
+			break ;
+
+		case "-low":
+			setAttr ($charName + $masterVis[0]) 1;
+			setAttr ($charName + $masterVis[1]) 2;
+			break ;
+
+		case "-hairShow":
+			if (`objExists ($charName + ":HAIRS")`)
+				setAttr ($charName + ":HAIRS.v") 1;
+			break ;
+
+		case "-hairHide":
+			if (`objExists ($charName + ":HAIRS")`)
+				setAttr ($charName + ":HAIRS.v") 0;
+			break ;
+
+		case "-smooth0":
+			break ;
+
+		case "-smooth1":
+			break ;
+	}
+}
+
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPGetCurrentChar
+//		获取当前角色列表上激活的角色名
+//
+//	Arguments : NULL
+//		
+//	Return :
+//		$charName 角色名
+//////////////////////////////////////////////////////////
+global proc string ddAPGetCurrentChar()
+{
+	string $charName ;
+	$charName = `iconTextRadioCollection -query -select ddAPCharListItRadCollection` ;
+	if ($charName == "NONE")
+	{
+		return $charName ;
+	}
+	$charName = `iconTextRadioButton -query -label $charName` ;
+	$charName = `substitute "Character" $charName ""` ;
+
+	return $charName ;
+
+}
+//////////////////////////////////////////////////////////
+//	Procdures Name: $ddAPReadCFG
+//		读取config文件
+//
+//	Arguments :
+//		string $cfgFile 读取参数文件名
+//		string $options -cam -camera 面板摄像机名
+//						-ms -master 角色主控制器关键字
+//						-adaTab -adapterTable 控制器对应表
+//						-visTab -visibleTable 角色显示控制对应表
+//						-chaTab -charatcerTable 角色图标对应表
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc string[] ddAPReadCFG( string $cfgFile,string $options )
+{
+	int $nextLineArray ;
+	string $currentData ;
+	string $cam[],$tempArray[],$tmp,$buffer[],$attr[];
+	global string $ddAPCharCon[],$ddAPPanelAdapter[],$ddAPPanelUBAttr[];
+
+	$configFileId=`fopen $cfgFile "r"` ;
+
+	switch ($options)
+	{
+		case "-cam":
+		case "-camera":
+			$currentData = `fgetline $configFileId` ;
+			$currentData = `fgetline $configFileId` ;
+			tokenize $currentData "=" $tempArray ;
+
+			$cam[0] = `substitute "\n" $tempArray[1] ""`;
+			fclose $configFileId ;
+			return $cam ;
+			break ;
+		case "-ms":
+		case "-master":
+			$nextLineArray = 0 ;
+			do
+			{
+				$currentData = `fgetline $configFileId` ;
+
+				tokenize $currentData "=" $buffer ;
+				if($buffer[0] == "MASTERCONTROL")
+				{
+					$buffer[1] = `substitute "\n" $buffer[1] ""` ;
+					clear $tempArray ;
+					$tempArray[0] = $buffer[1] ;
+				}
+			}while(size($currentData) > 0) ;
+			fclose $configFileId ;
+			return $tempArray ;
+			break ;
+		case "-sc":
+		case "-Second":
+			$nextLineArray = 0 ;
+			do
+			{
+				$currentData = `fgetline $configFileId` ;
+
+				tokenize $currentData "=" $buffer ;
+				if($buffer[0] == "SecondCONTROL")
+				{
+					$buffer[1] = `substitute "\n" $buffer[1] ""` ;
+					clear $tempArray ;
+					$tempArray[0] = $buffer[1] ;
+				}
+			}while(size($currentData) > 0) ;
+			fclose $configFileId ;
+			return $tempArray ;
+			break ;
+		case "-adaTab":
+		case "-adapterTable":
+			clear $ddAPCharCon;clear $ddAPPanelAdapter;
+			$nextLineArray = 0 ;
+			do
+			{
+				$currentData = `fgetline $configFileId` ;
+
+				$tmp = startString($currentData,1) ;
+				if(`gmatch $tmp "@"`)
+				{
+					tokenize $currentData "=" $tempArray ;
+					$ddAPPanelAdapter[$nextLineArray] = `substitute "@" $tempArray[0] ""` ;
+					$ddAPCharCon[$nextLineArray] = `substitute "\n" $tempArray[1] ""` ;
+					$nextLineArray++ ;
+				}
+			}while(size($currentData) > 0) ;
+			/*print $ddAPCharCon ;
+			print "\n" ;
+			print $ddAPPanelAdapter ;
+			print "\n" ;*/
+			fclose $configFileId ;
+			return $tempArray ;
+			break ;
+		case "-visTab":
+		case "-visibleTable":
+			break ;
+
+		case "-charTab":
+		case "-caratcerTable":
+			break ;
+		case "-fkik":
+			clear $ddAPPanelUBAttr;
+			string $nextLine = `fgetline $configFileId`;
+			while (size($nextLine)>0)
+			{
+				if (startsWith($nextLine,"$"))
+				{
+					tokenize $nextLine "=\n" $tempArray;
+					tokenize $tempArray[1] "{\",}" $tempArray;
+					$ddAPPanelUBAttr = $tempArray;
+				}
+				$nextLine = `fgetline $configFileId`;
+			}
+			fclose $configFileId;
+			return $ddAPPanelUBAttr;
+			break ;
+	}
+	//fclose $configFileId ;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPWinxCharPanelInit
+//		更新控制窗口显示
+//
+//	Arguments :
+//		string $charName 根据角色名来确定显示的控制器
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc ddAPWinxCharPanelInit(string $charName)
+{
+	//设置anzovin工具使用的前缀
+	global string $anzovinInterfaceCurrentCharacterNamespace;
+	$anzovinInterfaceCurrentCharacterNamespace = $charName + ":";
+	
+	
+	global string $ddAPCharCon[],$ddAPPanelAdapter[],$ddAPPanelUBAttr[];
+
+	for ($attr in $ddAPPanelUBAttr)
+	{
+		ddAPWinxCharPanelInitFKIK($charName,$attr);
+	}
+
+
+}
+
+global proc ddAPWinxCharPanelInitFKIK(string $charName,string $fkik)
+{
+	switch ($fkik)
+	{
+		case "Head_FKIK" :
+			//头部的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.Head_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:headIKAdapter.v") true ;	setAttr ("durdur:headFKAdapter.v")     false ;
+				setAttr ("durdur:neckAdapter.v")   false ;	
+			}
+			else
+			{
+				setAttr ("durdur:headIKAdapter.v") false ;	setAttr ("durdur:headFKAdapter.v")     true ;
+				setAttr ("durdur:neckAdapter.v")   true ;	
+			}
+			break;
+		case "LeftArm_FKIK" :
+			//左臂的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.LeftArm_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:armPoleVecterAdapter_left.v") true ;	setAttr ("durdur:armAdapter_left.v")     false ;
+				setAttr ("durdur:IKWristAdapter_left.v")       true ;	setAttr ("durdur:elbowAdapter_left.v")   false ;
+				setAttr ("durdur:handAdapter_left.v")          true ;	setAttr ("durdur:FKWristAdapter_left.v") false ;
+				if (!`objExists ($charName + ":LeftArm_Arm_IK_ORIENT")`)		setAttr ("durdur:handAdapter_left.v")          false ; 
+			}
+			else
+			{
+				setAttr ("durdur:armPoleVecterAdapter_left.v") false ;	setAttr ("durdur:armAdapter_left.v")     true ;
+				setAttr ("durdur:IKWristAdapter_left.v")       false ;	setAttr ("durdur:elbowAdapter_left.v")   true ;
+				setAttr ("durdur:handAdapter_left.v")          false ;	setAttr ("durdur:FKWristAdapter_left.v") true ;
+			}
+			break;
+		case "RightArm_FKIK" :
+			//右臂的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.RightArm_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:armPoleVecterAdapter_right.v") true ;	setAttr ("durdur:armAdapter_right.v")     false ;
+				setAttr ("durdur:IKWristAdapter_right.v")       true ;	setAttr ("durdur:elbowAdapter_right.v")   false ;
+				setAttr ("durdur:handAdapter_right.v")          true ;	setAttr ("durdur:FKWristAdapter_right.v") false ;
+				if (!`objExists ($charName + ":RightArm_Arm_IK_ORIENT")`)	setAttr ("durdur:handAdapter_right.v")          false ; 
+			}
+			else
+			{
+				setAttr ("durdur:armPoleVecterAdapter_right.v") false ;	setAttr ("durdur:armAdapter_right.v")     true ;
+				setAttr ("durdur:IKWristAdapter_right.v")       false ;	setAttr ("durdur:elbowAdapter_right.v")   true ;
+				setAttr ("durdur:handAdapter_right.v")          false ;	setAttr ("durdur:FKWristAdapter_right.v") true ;
+			}
+			break;
+		case "Spine_FKIK" :
+			//腰部的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.Spine_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:chestAdapter.v")  false ;		setAttr ("durdur:chestAdapter_IK.v")  true ;
+				setAttr ("durdur:waistAdapter.v")  false ;		setAttr ("durdur:waistAdapter_IK.v")  true ;
+				setAttr ("durdur:pelvisAdapter.v") false ;		setAttr ("durdur:pelvisAdapter_IK.v") true ;
+			}
+			else
+			{
+				setAttr ("durdur:chestAdapter.v")  true ;		setAttr ("durdur:chestAdapter_IK.v")  false ;
+				setAttr ("durdur:waistAdapter.v")  true ;		setAttr ("durdur:waistAdapter_IK.v")  false ;
+				setAttr ("durdur:pelvisAdapter.v") true ;		setAttr ("durdur:pelvisAdapter_IK.v") false ;
+			}
+			break;
+		case "LeftLeg_FKIK" :
+			//左腿的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.LeftLeg_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:legPoleVecterAdapter_left.v") true ;	setAttr ("durdur:legAdapter_left.v")     false ;
+				setAttr ("durdur:footIKAdapter_left.v")        true ;	setAttr ("durdur:kneeAdapter_left.v")    false ;
+				setAttr ("durdur:footFKAdapter_left.v")        false ;	setAttr ("durdur:toeFKAdapter_left.v")   false ;	
+
+				$switchHide = `getAttr ($charName + ":LeftLeg_IK_Leg.ToePivot")` ;
+				if ($switchHide)
+					setAttr ("durdur:tipAdapter_left.v")           true ;	
+				else
+					setAttr ("durdur:tipAdapter_left.v")           false ;	
+				$switchHide = `getAttr ($charName + ":LeftLeg_IK_Leg.HeelPivot")` ;
+				if ($switchHide)
+					setAttr ("durdur:toeIKAdapter_left.v")         true ;	
+				else
+					setAttr ("durdur:toeIKAdapter_left.v")         false ;	
+			}
+			else
+			{
+				setAttr ("durdur:legPoleVecterAdapter_left.v") false ;	setAttr ("durdur:legAdapter_left.v")     true ;
+				setAttr ("durdur:footIKAdapter_left.v")        false ;	setAttr ("durdur:kneeAdapter_left.v")    true ;
+				setAttr ("durdur:footFKAdapter_left.v")        true ;	setAttr ("durdur:toeFKAdapter_left.v")   true ;	
+				setAttr ("durdur:tipAdapter_left.v")           false ;	
+				setAttr ("durdur:toeIKAdapter_left.v")         false ;	
+			}
+			break;
+		case "RightLeg_FKIK" :
+			//右腿的FK/IK控制器显示
+			$switchVis = `getAttr ($charName + ":Upper_Body.RightLeg_FKIK")` ;
+			if ($switchVis)
+			{
+				setAttr ("durdur:legPoleVecterAdapter_right.v") true ;	setAttr ("durdur:legAdapter_right.v")     false ;
+				setAttr ("durdur:footIKAdapter_right.v")        true ;	setAttr ("durdur:kneeAdapter_right.v")    false ;
+				setAttr ("durdur:footFKAdapter_right.v")        false ;	setAttr ("durdur:toeFKAdapter_right.v")   false ;	
+
+				$switchHide = `getAttr ($charName + ":RightLeg_IK_Leg.ToePivot")` ;
+				if ($switchHide)
+					setAttr ("durdur:tipAdapter_right.v")           true ;	
+				else
+					setAttr ("durdur:tipAdapter_right.v")           false ;	
+				$switchHide = `getAttr ($charName + ":RightLeg_IK_Leg.HeelPivot")` ;
+				if ($switchHide)
+					setAttr ("durdur:toeIKAdapter_right.v")         true ;	
+				else
+					setAttr ("durdur:toeIKAdapter_right.v")         false ;	
+			}
+			else
+			{
+				setAttr ("durdur:legPoleVecterAdapter_right.v") false ;	setAttr ("durdur:legAdapter_right.v")     true ;
+				setAttr ("durdur:footIKAdapter_right.v")        false ;	setAttr ("durdur:kneeAdapter_right.v")    true ;
+				setAttr ("durdur:footFKAdapter_right.v")        true ;	setAttr ("durdur:toeFKAdapter_right.v")   true ;	
+				setAttr ("durdur:tipAdapter_right.v")           false ;	
+				setAttr ("durdur:toeIKAdapter_right.v")         false ;	
+			}
+			break;
+	}
+}
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAPReadWinxCharVis
+//		各角色的状态显示
+//
+//	Arguments :
+//		string $charName 角色名
+//		string $opertion 操作选项
+//				-vis	高中低模显示，或者是否显示
+//				-smooth
+//				-hair
+//			目前winx的smooth和hair没有提供控制
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+
+global proc string ddAPReadWinxCharVis(string $charName,string $opertion)
+{
+	int $smoothLevel = 0;
+	int $hair_vis = 0 ;
+	int $prox_vis = 0;
+	if (`objExists ($charName+":Upper_Body.Display")`)
+		$prox_vis = `getAttr ($charName+":Upper_Body.Display")`;
+	int $vis = `getAttr ($charName+":CHR.visibility")`;
+
+	
+	switch ($opertion)
+	{
+		case "smooth":
+			return $smoothLevel ;
+			break ;
+		case "hair":
+			if (`objExists ($charName + ":HAIRS")`)
+				$hair_vis = `getAttr ($charName + ":HAIRS.v")`;
+			return $hair_vis ;
+			break ;
+		case "vis":
+			if ($vis)
+			{
+				if ($prox_vis == 0)
+					return "ddAPCharVisHigh" ;
+				else if ($prox_vis == 1)
+					return "ddAPCharVisMiddle" ;
+				else
+					return "ddAPCharVisLow" ;
+				break ;
+			}
+			else 
+				return "ddAPCharVisHide" ;
+	
+	}
+
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_getPath
+//		选择目录面板
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc string slAnimPoseLib_getPath()
+{
+	string $facialDefaultPath = `fileBrowserDialog -m 4 -fc "slAnimPoseLib_setPath" -an "select_folder"`;
+	return ""; 
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_setPath
+//		返回选择目录，同时记录当前目录
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_setPath(string $filePath,string $fileType)
+{
+	string $buff[];
+	string $children[] =`optionMenuGrp -q -ill slAnimPoseLibFace_CustomPath`;
+	tokenize $children[0] "|" $buff;
+	string $optionMenu = `substring $children[0] 1 (size($children[0])-size($buff[size($buff)-1])-1)`;
+
+	if (`optionVar -ex slAnimPoseLibFace_button_path`)
+	{
+		string $vars[] = `optionVar -q slAnimPoseLibFace_button_path`;
+		if (!stringArrayContains($filePath,$vars))
+		{	
+			menuItem -label $filePath -p $optionMenu;
+			optionVar -sva "slAnimPoseLibFace_button_path" $filePath;
+		}
+	}
+	else
+	{
+		deleteUI $children;
+		menuItem -label $filePath -p $optionMenu;
+		optionVar -sva "slAnimPoseLibFace_button_path" $filePath;
+	}
+	optionMenuGrp -e -v $filePath slAnimPoseLibFace_CustomPath;
+
+}
+
+global proc slAminPoseLib_updatOptionVar()
+{
+	if (!`optionVar -ex slAnimPoseLibFace_button_path`)
+		return ;
+	
+	string $children[] =`optionMenuGrp -q -ill slAnimPoseLibFace_CustomPath`;
+	string $buff[];
+	tokenize $children[0] "|" $buff;
+	string $optionMenu = `substring $children[0] 1 (size($children[0])-size($buff[size($buff)-1])-1)`;
+	string $last = `optionMenuGrp -q -v slAnimPoseLibFace_CustomPath`;
+	for ($child in $children)
+	{
+		string $mi = `menuItem -q -l $child`;
+		if ($mi == $last)
+		{
+			deleteUI $child;
+			menuItem -l $last -p $optionMenu;
+		}
+	}
+	optionMenuGrp -e -sl (size($children)) slAnimPoseLibFace_CustomPath;
+
+	string $vars[] = `optionVar -q slAnimPoseLibFace_button_path`;
+	int $loc;
+	for ($i=0;$i<size($vars);$i++)
+	{
+		if ($vars[$i] == $last) $loc = $i;
+	}
+	optionVar -rfa slAnimPoseLibFace_button_path $loc;
+	optionVar -sva slAnimPoseLibFace_button_path $last;
+}
+
+global proc slAminPoseLib_initialOptionVar()
+{
+	if (!`optionVar -ex slAnimPoseLibFace_button_path`)
+		return ;
+	
+	string $vars[] = `optionVar -q slAnimPoseLibFace_button_path`;
+	int $total = `optionVar -as slAnimPoseLibFace_button_path`;
+	if ($total >6)
+	{
+		for ($i=0;$i<($total-6) ;$i++ )
+		{
+			optionVar -rfa slAnimPoseLibFace_button_path $i;
+		}
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_GetFaceViewObj
+//		设置表情窗口显示内容
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_GetFaceViewObj()
+{
+	string $cam = "durdur:ddAPHandCamera";
+
+	//string $currentTab = `tabLayout -q -st ddAPConViewTab`;
+	//if ($currentTab == "ddAPConViewFaceTab")
+	//{
+		string $char = `ddAPGetCurrentChar`;
+		if ($char != "NONE")
+		{
+			//选择摄像机
+			radioButtonGrp -e -select 1 ddAPConViewFaceTabForm_Camera;	
+			slFaceConsSwitchForTFM;
+			
+			//  设置摄像机相对头部的位置
+			string $faceCam = $char + "Head_joint4";
+			string $parent = $char + "Face_Rig_group";
+			string $romaparent = $char + "FM_controls";
+			if (`objExists $faceCam`)
+			{
+				string $existsCons[] = `listConnections -type constraint $cam`;
+				if (size($existsCons)) delete $existsCons;
+				
+				float $disScale = 1;
+				if (`objExists $romaparent`)
+					$disScale = 7;
+				
+				string $constrain[] = `parentConstraint -w 1 $faceCam $cam`;
+				delete $constrain;
+				rotate -r -os 0.185 -90 -90 $cam;
+				move -r -os -wd 0 (-7/$disScale) (140/$disScale) $cam;
+				if (`objExists $parent`)
+					parentConstraint -mo -w 1 $parent $cam;	
+				//if (`objExists $romaparent`)
+				//	parentConstraint -mo -w 1 $romaparent $cam;	
+				
+			}
+			
+			// 设置显示在face窗口的角色
+			//string $viewObjs[] = `ls ($char+"*")`;
+			select -r ($char+"CHR");
+			select -add $cam;
+			modelEditor -edit  -camera $cam -viewSelected false	slAPConViewFace;
+			modelEditor -edit  -viewSelected true slAPConViewFace;
+			isolateSelect -as  slAPConViewFace;
+			select -cl;
+		}
+	//}
+	
+}
+
+global proc slAnimPoseLib_Face_GetPresets(string $type)
+{
+	string $buffer[],$buff[];
+	string $path,$shelf;
+
+	string $scenename = `file -q -sn -shn`;
+	tokenize $scenename "_" $buff;
+	$scenename = $buff[0];
+	
+	switch ($type)
+	{
+		case "public" :
+			string $char = `ddAPGetCurrentChar`;
+			if ($char == "NONE")
+				return ;
+			$char = `substring $char 1 (size($char)-1)`;
+			
+			string $ws = "//file-cluster/GDC/Projects/";//WinxClub/WinxClub_Scratch/Animation/phonemes";
+			string $proj = GetProjnameByScenename($scenename);
+			$ws = $ws + $proj + "/" + $proj + "_Scratch/Animation/phonemes";
+
+			if (`referenceQuery -inr ($char+":Character")`)
+			{	
+				string $filename = `referenceQuery  -filename ($char+":Character")`;
+				tokenize $filename "/" $buffer;
+				tokenize $buffer[size($buffer)-1] "_" $buffer;
+			}
+			else
+			{
+				tokenize ($char+":Character") "_" $buffer;
+			}
+			string $charName = GetCharacterNameById($scenename,$buffer[1]);
+			if ($scenename == "wi")
+				$charName = zwGetCharacterNameById($buffer[1]);	
+			
+			$path=($ws + "/" + $charName + "/");
+			
+			if ($scenename=="bu"||$scenename=="BU"||$scenename=="Bu"||$scenename=="bU")
+				$path=($ws + "/common/");
+
+			//print $path;
+			$shelf = "slAnimPoseLibFace_PublicBut";
+			break;
+		case "custom" :
+			$path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+			$shelf = "slAnimPoseLibFace_CustomBut";
+			break;
+	}
+	
+
+	string $files[] =`getFileList -fld $path -fs  "*.dat"`;
+	if (`size $files`)
+	{
+		string $children[] = `shelfLayout -q -ca $shelf`;
+		for ($child in $children)
+			deleteUI $child;
+	}
+	else
+	{
+		string $children[] = `shelfLayout -q -ca $shelf`;
+		for ($child in $children)
+			deleteUI $child;
+		
+		shelfButton -annotation "please select character" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "no" -fn "boldLabelFont" -p $shelf;
+	}
+
+	string $index[] = `getFileList -fld $path -fs  "public.ind"`;
+	string $names[],$label[];
+	if (size($index))
+	{
+		$fileId = `fopen ($path + $index[0]) "r"`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " " $buff;
+			$names[size($names)] = $buff[0];
+			$label[size($names)-1] = $buff[1];
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}
+
+	for ($i=0;$i<`size $files`;$i++)
+	{
+		string $btName=basename($files[$i],".dat");
+		string $image1 = $btName + ".bmp";
+		string $imagefile[] = `getFileList -fld $path -fs ($btName+".bmp")`;
+		if (!size($imagefile))
+			$image1 = "commandButton.xpm";
+		if (!stringArrayCount($btName,$names))
+			shelfButton -annotation $btName -style "iconAndTextVertical" -image1 ($path+$image1) -l $btName	-fn "boldLabelFont" -p $shelf
+			-command ("slAnimPoseLib_Face_Creat_Key(\""+$btName+"\",\""+$path+"\")");
+				popupMenu -button 3  ;
+					menuItem -en on -label "Remove" -c ("slAnimPoseLib_Face_Remove_Key(\""+$names[$i]+"\")") ;
+					menuItem -divider true;
+					menuItem -en on -label "..." ;
+	}
+	
+	for ($i=0;$i<size($names);$i++)
+	{
+		string $fileName = $names[$i] + ".dat" ;
+		string $image = $names[$i] + ".bmp";
+
+		string $existImg[] = `getFileList -fs ($path+$image)`;
+		if (!size($existImg))
+			$image = "commandButton.xpm";
+		
+		string $anno = $names[$i];
+		if (`size $label[$i]`)
+			$anno = $label[$i];		
+		shelfButton -annotation $anno -style "iconAndTextVertical" -image1 ($path+$image) -l $anno	-fn "boldLabelFont" -p $shelf
+		-command ("slAnimPoseLib_Face_Creat_Key(\""+$names[$i]+"\",\""+$path+"\")");
+			popupMenu -button 3  ;
+				menuItem -en on -label "Remove" -c ("slAnimPoseLib_Face_Remove_Key(\""+$names[$i]+"\")") ;
+				menuItem -divider true;
+				menuItem -en on -label "..." ;
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_public
+//		表情库面板初始化工具
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_public()
+{
+	//string $path = 	`textFieldButtonGrp -q -text  slAnimPoseLibFace_pub_path` + "/";
+	
+	string $path = 	`optionMenuGrp -q -v  slAnimPoseLibFace_pub_path` + "/";
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+
+	//print "----------\n";
+	//print $index;
+	if (size($index))
+	{
+		string $names[],$label[];
+		$fileId = `fopen ($path + $index[0]) "r"`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " " $buff;
+			$names[size($names)] = $buff[0];
+			$label[size($label)] = $buff[1];
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+
+		if (size($names))
+		{
+			string $childrenArray[] = `gridLayout -q -childArray slAnimPoseLibFace_pub_grid`;
+			for ($child in $childrenArray)
+				deleteUI  $child;
+		}
+
+		for ($i=0;$i<size($names);$i++)
+		{
+			string $fileName = $names[$i] + ".dat" ;
+			string $image = $names[$i] + ".bmp";
+
+			string $existImg[] = `getFileList -fs ($path+$image)`;
+			if (!size($existImg))
+				$image = "commandButton.xpm";
+			
+			//print ("\n------"+$name);
+			columnLayout -width 60 -height 80  -p slAnimPoseLibFace_pub_grid;
+				symbolButton -ann $label[$i] -w 60 -h 60 -i ($path+$image) -c ("slAnimPoseLib_Face_Creat_Key(\""+$names[$i]+"\",\"local\")");
+					popupMenu -button 3  ;
+						menuItem -en on -label "Remove" -c ("slAnimPoseLib_Face_Remove_Key(\""+$names[$i]+"\")") ;
+						menuItem -divider true;
+						menuItem -en on -label "..." ;
+				text -w 60 -h 20 -label $label[$i];
+			setParent ..;
+		}
+	}
+	else
+	{
+		string $childrenArray[] = `gridLayout -q -childArray slAnimPoseLibFace_pub_grid`;
+		for ($child in $childrenArray)
+			deleteUI  $child;
+		
+		button -label "NULL" -p  slAnimPoseLibFace_pub_grid;
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_Key
+//		slAnimPoseLib_Face_public子程序
+//		创建表情按钮
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_Key(string $name,string $folder)
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char != "NONE")
+	{
+		float $extraValue = `floatSliderGrp -q -v slAnimPoseLibFace_KeyValue`;
+		
+		string $path = $folder;
+		if ($folder == "local")
+			$path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+		string $dataName = $path + $name + ".dat";
+		
+		$fileId = `fopen $dataName r`;
+			string $nextLine = `fgetline $fileId`;
+			$nextLine = `fgetline $fileId`;
+			while (size($nextLine) > 0 )
+			{
+				string $buff[];
+				tokenize $nextLine " " $buff;
+				string $name = $buff[0];
+				string $value = $buff[1];
+				float $mirror = 1;
+				//print ($char+"_"+$name+"\n");
+
+				if (`checkBox -q -v slAnimPoseLibFace_Mirrorable`)
+				{
+					tokenize $name "." $buff;
+					if ($buff[size($buff)-1] == "translateX" || $buff[size($buff)-1] == "rotateY")
+						$mirror = -1;
+					
+					if (startsWith($name,"L_"))
+					{
+						string $temp = `substring $name 3 (size($name))` ;
+						$name = "R_" + $temp;
+					}
+					else if (startsWith($name,"R_"))
+					{
+						string $temp = `substring $name 3 (size($name))` ;
+						$name = "L_" + $temp;
+					}
+				}
+				
+				if (`objExists ($char+$name)`&& size(`ls ($char+$name)`)==1 && `getAttr -se ($char+$name)` )
+				{
+					//print ($char+$name+"\n");
+					setAttr ($char+$name) (((float)$value)*$extraValue*$mirror);
+
+					string $noValueCons[] = {"tongue_FC.scale","lowerTeeth_FC.scale","upperTeeth_FC.scale"};
+					if (match(".scale",$name) == ".scale")
+					{
+						if (match("tongue_FC",$name) == "tongue_FC" || match("lowerTeeth_FC",$name) == "lowerTeeth_FC" || match("upperTeeth_FC",$name) == "upperTeeth_FC") 
+						{
+							setAttr ($char+$name) (((float)$value)*$mirror);
+						}
+					}
+
+					if (`checkBox -q -v slAnimPoseLibFace_Keyable`)
+						setKeyframe ($char+$name);
+					//print $nextLine;
+				}
+				$nextLine = `fgetline $fileId`;
+				//print ($nextLine+"\n");
+			}
+		fclose $fileId;
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Remove_Key
+//		slAnimPoseLib_Face_public子程序
+//		移除表情按钮
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Remove_Key(string $name)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+
+	string $indTxt;
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " " $buff;
+			if ($buff[0] != $name)
+			{
+				$indTxt += $nextLine;
+				//print $nextLine;
+			}
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}
+
+	$fileId = `fopen ($path + "public.ind") w`;
+	fprint $fileId $indTxt;
+	fclose $fileId;
+
+	string $dat = $path + $name + ".dat";
+	string $bmp = $path + $name + ".bmp";
+	sysFile -delete $dat;
+	sysFile -delete $bmp;
+
+	slAnimPoseLib_Face_GetPresets("custom");
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat
+//		创建自定义表情按钮面板
+//		
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat()
+{
+	string $cam = "durdur:ddAPHandCamera";
+	
+	if(`window -exists slAnimPoseLibFaceCreat`)
+		deleteUI slAnimPoseLibFaceCreat;
+	window -title "创建" -s true  slAnimPoseLibFaceCreat;
+		columnLayout -adjustableColumn true;
+			//rowLayout -nc 2 -cw2 70 150 ;
+				
+			frameLayout -borderStyle "etchedOut" -cl false -cll false -m on -labelVisible false -width 250 -height 250 slAnimPoseLibFaceCreat_iconframe;
+				//glRenderEditor -lt $cam hardwareRenderViewBis;
+			//setParent ..;
+				paneLayout -w 250 -h 250;	
+					string $createPoseCamera = `modelPanel -mbv false -camera $cam`;  
+					modelEditor -e -grid 0 -da smoothShaded $createPoseCamera;
+					modelEditor -e -allObjects 0 $createPoseCamera;
+					modelEditor -e -nurbsSurfaces  1 $createPoseCamera;
+					modelEditor -e -polymeshes  1 $createPoseCamera;
+					modelEditor -e -subdivSurfaces  1 $createPoseCamera;
+					setParent..;
+				//separator -h 11;  
+				setParent ..;
+			setParent ..;
+
+			frameLayout -borderStyle "etchedOut" -labelVisible false -width 250 -height 70 ;
+				columnLayout -adjustableColumn true;
+				textFieldGrp -cw2 50 200 -l "Name:" -tx "" slAnimPoseLibFaceCreat_name;
+				button  -label "Preview Icon" -align "center" -c "button -e -en on slAnimPoseLibFaceCreat_creat;slAnimPoseLib_Face_Creat_icon" -w 250 -h 23;
+				button -label "Create facial" -en off -c "slAnimPoseLib_Face_Creat_facial;" -w 250 -h 23 slAnimPoseLibFaceCreat_creat;
+			setParent ..;
+		setParent ..;
+	showWindow slAnimPoseLibFaceCreat;
+	
+	window -edit -w 258 -h 350 -s false slAnimPoseLibFaceCreat;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_icon
+//		slAnimPoseLib_Face_Creat子程序
+//		图标预览窗口
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_icon ()
+{
+	string $cam = "durdur:ddAPHandCamera";
+	int $facialLibIconsSize[] = {60,60};
+	float $currentTime = `currentTime -q`; 
+	//int $prout = `glRender -q -fs`; 
+
+	int $currentIF = `getAttr "defaultRenderGlobals.imageFormat"`;
+	setAttr "defaultRenderGlobals.imageFormat" 20;
+	playblast -v false -frame $currentTime -w $facialLibIconsSize[0] -h $facialLibIconsSize[1] -orn 0 -cf "iconTmp.bmp" -fmt "image" -p 100;
+	setAttr "defaultRenderGlobals.imageFormat" $currentIF;
+	
+	/*setAttr -type "string" defaultHardwareRenderGlobals.filename   "iconTmp";
+	setAttr "defaultHardwareRenderGlobals.extension" 1;
+	setAttr -l false "defaultHardwareRenderGlobals.startFrame";
+	setAttr "defaultHardwareRenderGlobals.startFrame" $currentTime;
+	setAttr -l false "defaultHardwareRenderGlobals.endFrame";
+	setAttr "defaultHardwareRenderGlobals.endFrame" $currentTime;
+	setAttr "defaultHardwareRenderGlobals.imageFormat" 20;
+	setAttr -type "string" defaultHardwareRenderGlobals.resolution ( $facialLibIconsSize[0] + "x" + $facialLibIconsSize[1] + " " + $facialLibIconsSize[0] + " " + $facialLibIconsSize[1] + " 1.0");
+
+
+	glRender -e -fs $currentTime;
+	glRenderEditor -e -lt $cam hardwareRenderViewBis;
+	glRender -e -ti 0 -aam "gaussian" -rs hardwareRenderViewBis;*/
+
+	frameLayout -e -width ($facialLibIconsSize[0] +190) -height ($facialLibIconsSize[1] + 190) -cl false -cll false -m on slAnimPoseLibFaceCreat_iconframe;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_facial
+//		slAnimPoseLib_Face_Creat子程序
+//		创建自定义表情
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_facial ()
+{
+	string $selCon = slAnimPoseLib_Face_Creat_facialDate();
+	if ($selCon == "no")
+	{
+		$result1 = `confirmDialog -title "Selected Control" -message "没有选择任何控制器!"
+					-button "取消" -defaultButton "取消" -cancelButton "取消" -dismissString "取消"`;
+		return;
+	}
+	
+	
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+	string $name = `textFieldGrp -q -tx  slAnimPoseLibFaceCreat_name`;
+	string $result = "Yes";
+
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	int $num[];
+	$num[0] = 0;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " \n" $buff;
+			if ($buff[1] == $name)
+			{
+				$result = `confirmDialog -title "Existed Facial Found" -message "The name of facial is existed,do you want to overwrite it?"
+							-button "Yes" -button "No" -defaultButton "No"
+							-cancelButton "No" -dismissString "No"`;
+				$num[0] = (int)`substring $buff[0] 7 (size($buff[0]))`;
+			}
+			$num[1] = (int)`substring $buff[0] 7 (size($buff[0]))`;
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+	}
+
+	if ($result == "Yes")
+	{
+		string $filename = "facial";
+		if ($num[0])
+			$filename += $num[0];
+		else
+			$filename += ($num[1]+1);
+		
+		slAnimPoseLib_Face_Creat_Image($filename);
+		slAnimPoseLib_Face_Creat_Data($filename);
+		slAnimPoseLib_Face_Creat_Index($filename);
+
+		deleteUI slAnimPoseLibFaceCreat;
+	}
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_Image
+//		slAnimPoseLib_Face_Creat_facial子程序
+//		图标图片
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_Image(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+	//string $name = `textFieldGrp -q -tx  slAnimPoseLibFaceCreat_name`;
+	float $frame = `currentTime -q`; 
+	
+	string $ws = `workspace -q -fullName`;
+	string $imagesDir = `workspace -q -renderTypeEntry "images"`;
+	string $bmp = $ws + "/" + $imagesDir + ("/iconTmp.bmp");
+	string $icon = $path + "/" + $filename + ".bmp";
+	sysFile -copy  $icon $bmp;
+	sysFile -delete $bmp;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_Data
+//		slAnimPoseLib_Face_Creat_facial子程序
+//		表情数据
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_Data(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+	//string $name = `textFieldGrp -q -tx  slAnimPoseLibFaceCreat_name`;
+	float $frame = `currentTime -q`; 
+	
+	string $dateFile = $filename + ".dat";
+	string $facialData = slAnimPoseLib_Face_Creat_facialDate();
+	$fileId = `fopen ($path + $dateFile) w`;	
+	fprint $fileId $facialData;
+	fclose $fileId;
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_Index
+//		slAnimPoseLib_Face_Creat_facial子程序
+//		表情编号
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc slAnimPoseLib_Face_Creat_Index(string $filename)
+{
+	string $path = `optionMenuGrp -q -v  slAnimPoseLibFace_CustomPath` + "/";
+	string $name = `textFieldGrp -q -tx  slAnimPoseLibFaceCreat_name`;
+
+	string $indTxt;
+	string $index[] =`getFileList -fld $path -fs  "public.ind"`;
+	if (size($index))
+	{
+		$fileId = `fopen ($path + "public.ind") r`;
+		string $nextLine = `fgetline $fileId`;
+		int $exists = 0;
+		while(size($nextLine)>0)
+		{
+			string $buff[];
+			tokenize $nextLine " \n" $buff;
+			if ($buff[1] == $name)
+				$exists = 1;
+
+			$indTxt += $nextLine;
+			$nextLine = `fgetline $fileId`;
+		}
+		fclose $fileId;
+		if (!$exists)
+			$indTxt += $filename + "   " + $name + "\n";
+	}
+	else 
+		$indTxt = $filename + "   " + $name + "\n";
+
+	$fileId = `fopen ($path + "public.ind") w`;
+	fprint $fileId $indTxt;
+	fclose $fileId;
+
+
+	//update layout
+	slAnimPoseLib_Face_GetPresets("custom");
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: slAnimPoseLib_Face_Creat_facialDate
+//		slAnimPoseLib_Face_Creat_Data子程序
+//		表情数据字符串定义
+//
+//	Arguments :NULL
+//	Return : NULL
+//
+//////////////////////////////////////////////////////////
+global proc string slAnimPoseLib_Face_Creat_facialDate()
+{
+	string $facialData = "Charactor Facial Data ...\n";
+	string $sels[] = `ls -sl`;
+	//slWinxShowHideCons("selFace");
+	string $facialCons[] = `ls -sl`;
+	$facialCons = stringArrayCatenate($sels,$facialCons);
+	//select -cl;
+
+	for ($con in $facialCons)
+	{
+		string $keyableAttrs[] = `listAnimatable $con`;
+		for ($attr in $keyableAttrs)
+		{
+			string $name,$value;
+			string $buff[];
+			tokenize $attr "|:" $buff;
+			string $temp = $buff[size($buff)-1];
+			//tokenize $temp "_" $buff;
+			$name = $temp;//`substring $temp (size($buff[0])+2) (size($temp))`;
+			$value = `getAttr $attr`;
+			$facialData += $name + "   " + $value + "\n";
+		}
+	}
+
+	$facialData += "End...";
+
+	if (`size($facialCons)` == 0)
+	{
+		$facialData = "no";
+	}
+
+	return $facialData;
+}
+
+///////////////////////////////////////////////////////////////////
+//	Procdures Name: slFKIKSwitchWithTSM
+//
+//	TSM的FK/IK切换工具。原为command，这里改为procdures
+//
+//	Arguments : NULL
+//
+//	Return : NULL
+///////////////////////////////////////////////////////////////////
+global proc slFKIKSwitchWithTSM()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	
+	string $charName = `substring $char 1 (size($char)-1)` ;
+	
+	int $i;
+	string $selNodes[] = `selectedNodes`; 
+	string $buffer[]; 
+	int $numTokens = 0;
+	$numTokens = `tokenize $selNodes[0] "|" $buffer`;
+	string $theNode = $buffer[$numTokens-1];
+	string $ns = "";
+	$numTokens = `tokenize $theNode ":" $buffer`;
+	$theNode = $buffer[ $numTokens-1 ];
+	if( $numTokens > 1 )
+	{	
+		for( $i = 0; $i < (size($buffer) - 1); $i++ )	
+		{		
+			$ns += $buffer[$i];		
+			$ns += ":";
+		}
+	}
+	$numTokens = `tokenize $theNode "_" $buffer`;
+	string $sysPref = $buffer[0];
+	string $switchAttribute = $sysPref + "_FKIK";
+	string $upperBody = $ns + "Upper_Body";
+	string $userswitch = $upperBody + "." + $switchAttribute;
+	int $currentMode = `getAttr $userswitch`;
+	string $controlSet;
+	if( $currentMode == 0 )
+	{	
+		$controlSet = $ns + $sysPref + "_IK_Controls";	
+	}
+	else
+	{	
+		$controlSet = $ns + $sysPref + "_FK_Controls";
+	}
+	select $controlSet;
+	string $controls[] = `selectedNodes`; 
+	for( $i = 0; $i < size($controls); $i++ ) 
+	{	
+		string $control = $controls[$i];	
+		$numTokens = `tokenize $control "|" $buffer`;	
+		$control = $buffer[$numTokens-1];		
+		string $switch = $control + "_SWITCH";		
+		if( `objExists $switch` )	
+		{		
+			string $controlAttributes[] = `listAttr -k $control`;		
+			string $switchAttributes[] = `listAttr -k $switch`;				
+			int $j;		
+			for( $j = 0; $j < size($controlAttributes); $j++ )		
+			{			
+				if( $controlAttributes[$j] == "Reposition" )			
+				{				
+					$j++;			
+				}				
+				string $attributeToSet = $control + "." + $controlAttributes[$j];			
+				int $foundAttribute = 0;			
+				int $k;			
+				for( $k = 0; $k < size($switchAttributes); $k++ )			
+				{				
+					if( $controlAttributes[$j] == $switchAttributes[$k] )				
+					{					
+						$foundAttribute = 1;					
+						string $attributeToGet = $switch + "." + $switchAttributes[$k];					
+						float $valueOfAttribute = `getAttr $attributeToGet`;					
+						setAttr $attributeToSet $valueOfAttribute; 				
+					}			
+				}			
+				if( $foundAttribute == 0 )			
+				{				
+					setAttr $attributeToSet 0;			
+				}			
+				setKeyframe $attributeToSet;		
+			}	
+		}
+	}
+	if( $currentMode == 0 )
+	{	
+		$currentMode = 1;	
+	}
+	else
+	{	
+		$currentMode = 0;
+	}
+	setAttr $userswitch $currentMode;
+	setKeyframe $userswitch;
+	$keytime = `findKeyframe -which previous -attribute $switchAttribute -animation objects $upperBody`;
+	$now = `currentTime -query`;
+	if( $keytime == $now )
+	{	
+		setKeyframe -time 0 $userswitch;	
+		$keytime = 0;
+	}
+	keyTangent -time $keytime -outTangentType step -attribute $switchAttribute -	animation objects $upperBody;
+	cycleCheck -e on;
+	select -clear;
+
+	ddAPWinxCharPanelInit($charName);
+}
+
+
+global proc slFaceConsSwitchForTFM()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	string $selectCam = `radioButtonGrp -q -select ddAPConViewFaceTabForm_Camera`;
+	
+	switch ($selectCam)
+	{
+		case "1" :
+			modelPanel -edit -camera "durdur:ddAPHandCamera" slAPConViewFace;
+			break;
+		case "2" :
+			if (`objExists ($char+"FM_faceMapCam")`)
+				modelPanel -edit -camera ($char+"FM_faceMapCam") slAPConViewFace;
+			break;
+		case "3" :
+			if (`objExists ($char+"FM_boxControlsOrthoCam")`)
+				modelPanel -edit -camera ($char+"FM_boxControlsOrthoCam") slAPConViewFace;
+			break;
+	}
+	
+	/*
+	//faceMap  FM_faceMapCam
+	string $faceCam = $char+"FM_faceMapCam";
+	string $faceMapObjects[];
+	if (`objExists ($char + "faceMap_buttons")`)
+	{
+		$faceMapObjects = `listRelatives -type transform -allDescendents ($char + "faceMap_buttons")`;
+		$faceMapObjects[size($faceMapObjects)] = ($char + "faceMap_background");
+	}
+
+	//controls  FM_boxControlsOrthoCam
+	string $controlCam = $char + "FM_boxControlsOrthoCam";
+	string $sandboxObjects[];
+	if (`objExists ($char + "FM_boxControlsPerspCam_buffer")`)
+	{
+		$sandboxObjects = `listRelatives -type transform -allDescendents ($char + "FM_boxControlsPerspCam_buffer")`;
+	}
+
+		
+	string $cam = "durdur:ddAPHandCamera";
+	select -r $faceMapObjects;select -add $cam;
+	modelEditor -edit -viewSelected false slAPConViewFace;
+	modelEditor -edit -viewSelected true slAPConViewFace;
+	select -cl;
+	
+	string $existsCons[] = `listConnections -type constraint $cam`;
+	if (size($existsCons)) delete $existsCons;
+	
+	string $constrain[] = `parentConstraint -w 1 $faceCam $cam`;
+	delete $constrain;
+	move -r -os -wd 0 0 0.348751 $cam;
+	parentConstraint -mo -w 1 $faceCam $cam;	*/
+}
+
+
+global proc slFaceConsSwitchWithWinx()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+
+	if (`objExists ($char+"FM_data.enableFaceMachine")`)
+	{
+		$getVis = `getAttr ($char+"FM_data.enableFaceMachine")`;
+		if ($getVis ==1) 
+			setAttr ($char+"FM_data.enableFaceMachine") 0;
+		else
+			setAttr ($char+"FM_data.enableFaceMachine") 1;	
+
+	}
+	else if (`objExists ($char+"Upper_Body.face_CTRLs")`)
+	{
+		$getVis = `getAttr ($char+"Upper_Body.face_CTRLs")`;
+		if ($getVis ==1) 
+			setAttr ($char+"Upper_Body.face_CTRLs") 0;
+		else
+			setAttr ($char+"Upper_Body.face_CTRLs") 1;	
+	}
+	/*string $vis = `getAttr ($char + "Upper_Body.face_CTRLs")`;
+	if ($vis)
+		setAttr ($char + "Upper_Body.face_CTRLs") false;
+	else
+		setAttr ($char + "Upper_Body.face_CTRLs") true;*/
+}
+
+global proc slViewTabSelAllWithWinx()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	string $currentTab = `tabLayout -q -st ddAPConViewTab`;
+
+	switch ($currentTab)
+	{
+		case "ddAPConViewFaceTabForm" :
+			if ( (`objExists ($char + "Upper_Body.face_CTRLs")` && `getAttr ($char + "Upper_Body.face_CTRLs")`)
+				|| (`objExists ($char + "FM_data.enableFaceMachine")` && `getAttr ($char+"FM_data.enableFaceMachine")`))
+				slWinxShowHideCons("selFace");
+			break;
+		case "ddAPConViewBodyTab" :
+			slSelTSMCtrlFromSet;
+			break;
+	
+	}
+}
+
+global proc slViewTabKeyAllWithWinx()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	slViewTabSelAllWithWinx;
+	source performSetKeyframeArgList;
+	performSetKeyframeArgList 1 {"0", "animationList"};
+}
+
+
+global proc slWinxShowHideCons(string $part)
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	
+	string $buff[];
+	string $scenename = `file -q -sn -shn`;
+	tokenize $scenename "_" $buff;
+	$scenename = $buff[0];
+	
+	switch ($part)
+	{
+		case "bodyCtrl" :
+			if (!`objExists ($char+"Character.v")`)	break;
+			$getVis = `getAttr ($char+"Character.v")`;
+			if ($getVis ==1) 	
+				setAttr ($char+"Character.v") 0;
+			else
+				setAttr ($char+"Character.v") 1;	
+			break;
+		case "faceCtrl" :
+			if (`objExists ($char+"FM_data.enableFaceMachine")`)
+			{
+				$getVis = `getAttr ($char+"FM_data.enableFaceMachine")`;
+				if ($getVis ==1) 
+					setAttr ($char+"FM_data.enableFaceMachine") 0;
+				else
+					setAttr ($char+"FM_data.enableFaceMachine") 1;	
+
+			}
+			else if (`objExists ($char+"Upper_Body.face_CTRLs")`)
+			{
+				$getVis = `getAttr ($char+"Upper_Body.face_CTRLs")`;
+				if ($getVis ==1) 
+					setAttr ($char+"Upper_Body.face_CTRLs") 0;
+				else
+					setAttr ($char+"Upper_Body.face_CTRLs") 1;	
+			}
+			break;
+		case "dressCtrl" :
+			if (!`objExists ($char+"Upper_Body.dress_CTRLs")`)	break;
+			$getVis = `getAttr ($char+"Upper_Body.dress_CTRLs")`;
+			if ($getVis ==1) 
+				setAttr ($char+"Upper_Body.dress_CTRLs") 0;
+			else
+				setAttr ($char+"Upper_Body.dress_CTRLs") 1;	
+			break;
+		case "hairCtrl" :
+			if (!`objExists ($char+"Upper_Body.hairs_CTRLs")`)	break;
+			$getVis = `getAttr ($char+"Upper_Body.hairs_CTRLs")`;
+			if ($getVis ==1) 
+				setAttr ($char+"Upper_Body.hairs_CTRLs") 0;
+			else
+				setAttr ($char+"Upper_Body.hairs_CTRLs") 1;	
+			break;
+		case "otherCtrl" :
+			if (!`objExists ($char+"Upper_Body.others_CTRLs")`)	break;
+			$getVis = `getAttr ($char+"Upper_Body.others_CTRLs")`;
+			if ($getVis ==1) 
+				setAttr ($char+"Upper_Body.others_CTRLs") 0;
+			else
+				setAttr ($char+"Upper_Body.others_CTRLs") 1;	
+			break;
+		case "body" :
+			if (!`objExists ($char+"MSH_person.v")`) break;
+			$getVis = `getAttr ($char+"MSH_person.v")`;
+			if ($getVis ==1) 
+				setAttr ($char+"MSH_person.v") 0;
+			else
+				setAttr ($char+"MSH_person.v") 1;	
+			break;
+		case "face" :
+			if (!`objExists ($char+"FACE.v")`)	break;
+			$getVis = `getAttr ($char+"FACE.v")`;
+			if ($getVis ==1) 
+				setAttr ($char+"FACE.v") 0;
+			else
+				setAttr ($char+"FACE.v") 1;	
+			break;
+		case "dress" :
+			if (!`objExists ($char+"MSH_outfit.v")`) break;
+			$getVis = `getAttr ($char+"MSH_outfit.v")`;
+			if ($getVis ==1) 
+				setAttr ($char+"MSH_outfit.v") 0;
+			else
+				setAttr ($char+"MSH_outfit.v") 1;	
+			break;
+		case "hair" :
+			if (!`objExists ($char+"HAIRS.v")`)	break;
+			$getVis = `getAttr ($char+"HAIRS.v")`;
+			if ($getVis ==1) 
+				setAttr ($char+"HAIRS.v") 0;
+			else
+				setAttr ($char+"HAIRS.v") 1;	
+			break;
+		case "other" :
+			break;
+		case "selFace" :
+			string $masterCons = $char + "Master_Controls";
+			if (`objExists $masterCons`)
+			{
+				string $allCons[] = `listRelatives -ad -type transform $masterCons`;
+				select -r $allCons;
+			}
+			string $FMSet = $char + "FaceMachineControls";
+			if (`objExists $FMSet`)
+			{
+				select -cl;
+				select -noExpand -deselect $FMSet;
+				select -add $FMSet;
+				
+				
+				//Strawberry 项目额外的表情控制器
+					string $addcons = "upperNose_FC";
+					if (`objExists ($char+$addcons)`)
+						select -add ($char+$addcons);
+					string $addcons = "eyes_brow_con_left_joint";
+					for ($i=1;$i<=4;$i++)
+					{
+						if (`objExists ($char+$addcons+$i)`)
+							select -add ($char+$addcons+$i);
+					}
+					string $addcons = "eyes_brow_con_right_joint";
+					for ($i=1;$i<=4;$i++)
+					{
+						if (`objExists ($char+$addcons+$i)`)
+							select -add ($char+$addcons+$i);
+					}
+			}
+			break;
+		case "keyTsm" :
+			slSelTSMCtrlFromSet;
+			source performSetKeyframeArgList;
+			performSetKeyframeArgList 1 {"0", "animationList"};
+			break;
+		case "initTsm" :
+			slSelTSMCtrlFromSet;
+			string $ctrls[] = `ls -sl`;
+			for ($ctrl in $ctrls)
+			{
+				if (!`gmatch $ctrl "*:Character"`)
+				{
+					string $attrs[] = `listAttr -k $ctrl`;
+					for ($item in $attrs)
+					{
+						if ($item == "translateX" ||$item == "translateY" ||$item == "translateZ" ||$item == "rotateX" ||$item == "rotateY" ||$item == "rotateZ")
+						{
+							setAttr ($ctrl + "." + $item ) 0;
+						}
+						if (($scenename=="bu"||$scenename=="BU"||$scenename=="Bu"||$scenename=="bU") && (endsWith($ctrl,"Tail_ctrl") || endsWith($ctrl,"finger_control")))
+						{
+							if ($item != "scaleX" && $item != "scaleY" && $item != "scaleZ")
+							{
+								setAttr ($ctrl + "." + $item ) 0;
+							}
+						}
+					}
+				}
+			}
+			break;
+	}
+}
+
+global proc slSelTSMCtrlFromSet()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	
+	select -cl;
+	string $ctrl;
+	$ctrls=`sets -q ($char+"TSM2Controls")`;
+	for ($ctrl in $ctrls)
+	{
+		select -tgl $ctrl;
+		if (`objExists ($char + "LeftArm_Arm_IK_ORIENT")`)
+		{
+			select -add ($char + "LeftArm_Arm_IK_ORIENT");
+			select -add ($char + "RightArm_Arm_IK_ORIENT");
+		}
+	}
+	
+	string $buff[];
+	string $scenename = `file -q -sn -shn`;
+	tokenize $scenename "_" $buff;
+	$scenename = $buff[0];
+	if ($scenename=="bu"||$scenename=="BU"||$scenename=="Bu"||$scenename=="bU")
+	{
+		select -add ($char + "Tail_ctrl");
+	}
+}
+
+global proc slTransTSMCtrl()
+{
+	string $char = `ddAPGetCurrentChar`;
+	if ($char == "NONE")
+		return ;
+	currentTime 1001;
+	slWinxShowHideCons("keyTsm");
+	slSelTSMCtrlFromSet;
+	timeSliderCopyKey;
+	currentTime 980;
+	evalEcho "timeSliderPasteKey false";
+	currentTime 950;
+	slWinxShowHideCons("initTsm");
+	slWinxShowHideCons("keyTsm");
+}
+
+//////////////////////////////////////////////////////////
+//	Procdures Name: ddAnimationPanelUI
+//		动画面板界面
+//
+//	Arguments : NULL
+//
+//	Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddAnimationPanelUI()
+{
+	eval "source nsDagMenuProc85.mel";
+	
+	//设置optionVar的最大值为6，超过的最先加入的会被清除
+	slAminPoseLib_initialOptionVar;
+
+	int $sign = 0 ;
+	int $numTokens,$tmpInt ;
+	string $cam,$handCam,$camFile,$tmp,$selected[],$tmpArrary[],$buff[];
+	//string $bodyMP,$handMP ;
+	string $ddAPCharList[] ;
+	string $charName ;//当前角色名
+	string $refPath,$configFileName ;
+
+	global string $ddAPPanelAdapter[] ;
+
+
+	//设定读取哪一个config文件
+	//$configFileName = "//File-cluster/gdc/Resource/Support/Maya/Import/winxclub/ddAPTSMBiped.cfg"; ;
+	//$camFile = "//File-cluster/gdc/Resource/Support/Maya/Import/winxclub/ddAPTSMBipedCam.mb";
+	//$iconPath = "//File-cluster/gdc/Resource/Support/Maya/Import/winxclub/pic/";
+	$configFileName = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/ddAPTSMBiped.cfg"; ;
+	$camFile = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/ddAPTSMBipedCam.mb";
+
+	string $scenename = `file -q -sn -shn`;
+	tokenize $scenename "_" $buff;
+	$scenename = $buff[0];
+	if ($scenename=="bu"||$scenename=="BU"||$scenename=="Bu"||$scenename=="bU")
+	{
+		$configFileName = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/ddAPBuBiped.cfg";
+		$camFile = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/ddAPBuBipedCam.mb";
+		//$iconPath = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/bu/";
+	}
+
+	$iconPath = "//File-cluster/gdc/Resource/Support/Maya/Import/animpanel/"+$scenename+"/";
+
+	
+	//print ("camFile:"+$camFile +"\n") ;
+	//检查面板camera是否已经载入场景
+	$tmpArrary = `file -query -reference` ;
+	for ( $refPath in $tmpArrary)
+	{
+		if (`gmatch $refPath $camFile`)
+		{
+			$sign++ ;
+			file -loadReference $tmp $refPath ;
+		}
+	}
+	//print $sign;
+	if (!$sign)
+	{
+		if (`namespace -ex "durdur"`)
+		{
+			string $durs[] = `ls "durdur*" "durdur*:*"`;
+			if (size($durs) && `nodeType $durs[0]` == "reference")
+			{
+				string $oldCam = `referenceQuery -filename $durs[0]`;
+				file -rr $oldCam;
+				$durs = `ls "durdur*" "durdur*:*"`;
+			}
+			if (`objExists $durs[0]`)
+				delete $durs;
+			if (`namespace -ex "durdur"`)
+				namespace -rm "durdur";
+		}		
+		file -reference	-namespace "durdur"	$camFile ;
+	}
+	string $bodyMP = "ddAPMP" ;
+	string $handMP = "ddAPHandMP" ;
+	$cam = "durdur:ddAPCamera" ;
+	$handCam = "durdur:ddAPHandCamera" ;
+
+	ddAPReadCFG $configFileName -adaTab ;//导入控制器对应表
+	ddAPReadCFG $configFileName -fkik;
+
+	$tmpArrary = `ddAPReadCFG $configFileName -ms`;
+	string $sc[] = `ddAPReadCFG $configFileName -sc`;
+	$ddAPCharList = `ddAPListChar $tmpArrary[0] $sc[0]` ;//列出场景中的角色
+	
+	//return ;
+	if(`window -exists ddAnimationPanelWin`)
+	{
+		deleteUI ddAnimationPanelWin ;
+	}
+	if(`window -exists slAnimPoseLibFaceCreat`)
+	{
+		deleteUI slAnimPoseLibFaceCreat ;
+	}
+	if(`modelPanel -exists slAPConViewFace`)
+	{
+		deleteUI -panel slAPConViewFace;
+	}
+	if(`modelPanel -exists ddAPConViewBody`)
+	{
+		deleteUI -panel ddAPConViewBody;
+	}
+	
+
+	window -title "Animation Panel" -in "Anim Pan" -mb true -widthHeight 700 530 ddAnimationPanelWin ;
+		menu -label "Help";
+			menuItem -label "Help on Animation Panel..." -subMenu true ;
+				menuItem -label "文档" -command "zjHelpCallback slAPHelpDoc.mht";
+				menuItem -label "视频" -command "zjHelpCallback slAPHelpVedio.flv";
+
+		paneLayout  -configuration "vertical2" ddAPPanelLayout ;
+			//Panel1 Start
+			tabLayout -cc "" ddAPConViewTab ;
+				//Body Tab
+				formLayout ddAPConViewBodyForm ;
+					paneLayout -configuration "single" ddAPConViewBodyTab;					
+						modelPanel  -camera $cam  -menuBarVisible false  ddAPConViewBody;
+						setParent ..;
+
+						modelEditor -edit -grid 1 -displayAppearance "smoothShaded" -joints 0 -displayTextures on -viewSelected false -displayLights "default" ddAPConViewBody ;
+						select -replace $cam ;
+						modelEditor -edit -grid 0 -viewSelected true ddAPConViewBody ;
+						isolateSelect -as  ddAPConViewBody;
+						camera -edit -displayFilmGate off -displayResolution off -overscan 1.0 $cam ;
+						select -cl;
+					setParent ..;
+				formLayout -edit
+							-attachForm ddAPConViewBodyTab "top" 0
+							-attachForm ddAPConViewBodyTab "bottom" 0
+							-attachForm ddAPConViewBodyTab "left" 0
+							-attachForm ddAPConViewBodyTab "right" 0
+							ddAPConViewBodyForm ;
+				setParent .. ;
+				
+				//Face Tab
+				formLayout ddAPConViewFaceTabForm ;
+					radioButtonGrp -numberOfRadioButtons 3 -columnWidth4 70 70 70 70	 -labelArray3  "face"  "facemap"  "boxcontrol" 
+					-select 1 -onc "slFaceConsSwitchForTFM"
+					-label "Camera:"	ddAPConViewFaceTabForm_Camera;
+						popupMenu -button 3 ;
+							menuItem -en on -label "Tear Off Copy" -c "tearOffCopyItemCmd modelPanel slAPConViewFace";
+							menuItem -divider true;
+							menuItem -en on -label "..." ;
+					paneLayout -configuration "single" ddAPConViewFaceTab;					
+						string $faceCam = "durdur:ddAPHandCamera";
+						modelPanel  -camera $faceCam  -menuBarVisible false  slAPConViewFace;
+						setParent ..;
+
+						modelEditor -edit -grid 1 -displayAppearance "smoothShaded" -joints 0 -displayTextures off -viewSelected false -displayLights "default" slAPConViewFace;
+						select -replace $faceCam ;
+						modelEditor -edit -grid 0 -viewSelected true slAPConViewFace;
+						isolateSelect -as  slAPConViewFace;
+						camera -edit -displayFilmGate off -displayResolution off -overscan 1.0 $faceCam;
+						select -cl;
+					setParent ..;
+				formLayout -edit
+						-af		ddAPConViewFaceTabForm_Camera				"top"		5
+						-af		ddAPConViewFaceTabForm_Camera				"left"		0
+
+						-ac		ddAPConViewFaceTab		"top"		5	ddAPConViewFaceTabForm_Camera
+						-af		ddAPConViewFaceTab		"bottom"	0
+						-af		ddAPConViewFaceTab		"left"		0
+						-af		ddAPConViewFaceTab		"right"		0
+						ddAPConViewFaceTabForm ;
+				setParent .. ;
+
+				tabLayout -edit
+							-tabLabel ddAPConViewBodyForm "Body"
+							-tabLabel ddAPConViewFaceTabForm "Face"
+							ddAPConViewTab ;
+			setParent ..;
+			//Panel1 End
+
+			
+			//Panel2 Start
+			tabLayout -cc "" ddAPConMiscTab;
+				paneLayout  -configuration "horizontal2" ddAPConBodyTab ;
+					//Panel2-1 Start
+					scrollLayout  ddAPMiscCharVisTab ;
+						columnLayout -columnAttach "left" 12 -columnAlign "center" -rowSpacing 2;
+							popupMenu ;
+							menuItem -label "Update Character..." -c "";
+							menuItem -divider true ;
+							menuItem -divider true ;
+							menuItem -label "Import Animation..." ;
+							menuItem -label "Export Animation..." ;
+							menuItem -divider true ;
+							menuItem -label "Graph Editor..." -command "GraphEditor" ;
+							menuItem -divider true ;
+							menuItem -label "Help..." ;
+							menuItem -divider true ;
+							menuItem -label "Ass's ass..." ;
+							
+							rowLayout -numberOfColumns 3 -columnWidth 1 52 -columnWidth 2 80 -columnWidth 3 40 ;
+								button -label "囧" -command "ddAPSelect()" ;
+								text -label "Character Total:" ;
+								text -label `size $ddAPCharList` ddAPCharCount ;
+							setParent .. ;
+
+							//symbolButton -image "autoload.xpm" -command "" ;
+							separator -style "double" -width 300 ;
+							rowLayout -numberOfColumns 7
+										-columnWidth 1 52
+										-columnWidth 2 40
+										-columnWidth 3 40
+										-columnWidth 4 40
+										-columnWidth 5 40
+										-columnWidth 6 40
+										-columnWidth 7 40 ;
+								text -label "CharName" ;
+								button -label "Hide" -command "ddAPWinxCharVisHolisticControl -hide" ;
+								button -label "Low" -command "ddAPWinxCharVisHolisticControl -low" ;
+								button -label "Mid" -command "ddAPWinxCharVisHolisticControl -middle" ;
+								button -label "High" -command "ddAPWinxCharVisHolisticControl -high" ;
+								button -label "Hair" -command "ddAPWinxCharVisHolisticControl -hair" ;
+								button -label "Smooth" -command "ddAPWinxCharVisHolisticControl -smooth" ;
+							setParent .. ;
+
+							iconTextRadioCollection ddAPCharListItRadCollection ;
+							for ( $i=0;$i< size($ddAPCharList);$i++ )
+							{
+								string $buff[];
+								if (`referenceQuery -inr $ddAPCharList[$i]`)
+								{
+									string $filename = `referenceQuery  -filename $ddAPCharList[$i]`;
+									tokenize $filename "/" $buff;
+									tokenize $buff[size($buff)-1] "_" $buff;
+								}
+								else
+								{
+									tokenize $ddAPCharList[$i] "_" $buff;
+								}
+								string $overLabel = `zwGetCharacterNameById($buff[1])`;
+								if ($scenename != "wi")
+								{
+									$overLabel = GetCharacterNameById($scenename,$buff[1]);
+								}
+								//print ("--"+$overLabel+"\n");
+								tokenize $ddAPCharList[$i] ":" $buff;
+								$charName = `substring $ddAPCharList[$i] 1 (size($ddAPCharList[$i])-size($buff[size($buff)-1])-1)`;
+
+								string $iconImage = $iconPath + $overLabel ;
+								if (!`filetest -r ($iconImage+"Off.bmp")`)
+										$iconImage = $iconPath + "default" ;
+								
+								separator -style "double" -width 300 ;
+								rowLayout -numberOfColumns 7
+										-columnWidth 1 52
+										-columnWidth 2 40
+										-columnWidth 3 40
+										-columnWidth 4 40
+										-columnWidth 5 40
+										-columnWidth 6 40
+										-columnWidth 7 40 ;
+									iconTextRadioButton -st "iconAndTextHorizontal" 
+													-image ($iconImage + "Off.bmp")
+													-imageOverlayLabel $overLabel
+													//-width 52
+													-label $ddAPCharList[$i]
+													-onCommand ("iconTextRadioButton -e -i \"" + $iconImage + "On.bmp\" ddAPCharIcon" + $i + " ;slAnimPoseLib_GetFaceViewObj;ddAPButton;ddAPWinxCharPanelInit " + $charName + " ;slAnimPoseLib_Face_GetPresets(\"public\");")
+													-offCommand ("iconTextRadioButton -e -i \"" + $iconImage + "Off.bmp\" ddAPCharIcon" + $i + ";" )
+													//-changeCommand "ddAPSelect"
+													("ddAPCharIcon" + $i) ;
+									radioCollection ("ddAPCharVisHideRadioCollection" + $i) ;
+										radioButton -label ""
+												-changeCommand ("ddAPWinxCharVis " + $charName + " -hide ")
+												("ddAPCharVisHide" + $i) ;
+										radioButton -label ""
+												-changeCommand ("ddAPWinxCharVis " + $charName + " -low ")
+												("ddAPCharVisLow" + $i) ;
+										radioButton -label ""
+												-align "left"
+												-editable false
+												-changeCommand ("ddAPWinxCharVis " + $charName + " -middle ")
+												("ddAPCharVisMiddle" + $i) ;
+										radioButton -label ""
+												-changeCommand ("ddAPWinxCharVis " + $charName + " -high ")
+												("ddAPCharVisHigh" + $i) ;
+
+									$tmp = `ddAPReadWinxCharVis $charName "vis"` ;
+									radioCollection -edit -select ($tmp + $i) ("ddAPCharVisHideRadioCollection" + $i) ;
+
+									$tmpInt = `ddAPReadWinxCharVis $charName "hair"` ;
+									checkBox -label ""
+											-value $tmpInt
+											-onCommand ("ddAPWinxCharVis " + $charName + " -hairShow ")
+											-offCommand ("ddAPWinxCharVis " + $charName + " -hairHide ")
+											("ddAPCharVisHair" + $i) ;
+									$tmpInt = `ddAPReadWinxCharVis $charName "smooth"` ;
+									checkBox -label ""
+											-value $tmpInt
+											-onCommand ("ddAPWinxCharVis " + $charName + " -smooth1 ")
+											-offCommand ("ddAPWinxCharVis " + $charName + " -smooth0 ")
+											("ddAPCharSmooth" + $i) ;
+									//text -vis true -label $ddAPCharList[$i] ;
+									setParent.. ;
+								}
+							separator -style "double" -width 300 ;
+						setParent.. ;
+					setParent.. ;
+					//Panel2-1 End
+					formLayout ddAPform ;
+						channelBox ddAPChannelBox ;
+							popupMenu ;
+								menuItem -label "Key Selected"
+										-ecr false
+										-command  "ddAPChannelBoxCommand -key"
+										-rp "N" ;
+								menuItem -label "Key All"
+										-ecr false
+										-command  "ddAPChannelBoxCommand -keyall"
+										-rp "W" ;
+								menuItem -label "Delete Selected"
+										-ecr false
+										-command  "ddAPChannelBoxCommand -delete"
+										-rp "E" ;
+								menuItem -label "-_-|||  bother me out..." ;
+								menuItem -divider true ;
+								menuItem -divider true ;
+								menuItem -label "Key Selected"
+										-command  "ddAPChannelBoxCommand -key" ;
+								menuItem -label "Key All"
+										-command  "ddAPChannelBoxCommand -keyall" ;
+								menuItem -divider true ;
+								menuItem -label "Cut Selected"
+										-command  "ddAPChannelBoxCommand -cut" ;
+								menuItem -label "Copy Selected"
+										-command  "ddAPChannelBoxCommand -copy";
+								menuItem -label "Paste Selected"
+										-command  "ddAPChannelBoxCommand -paste";
+								menuItem -label "Delete Selected"
+									-command  "ddAPChannelBoxCommand -delete";
+								menuItem -divider true ;
+								menuItem -label "Tail's tail.." ;
+
+						formLayout -edit
+									-af ddAPChannelBox "top" 0
+									-af ddAPChannelBox "left" 0
+									-af ddAPChannelBox "right" 0
+								-af ddAPChannelBox "bottom" 0
+								ddAPform ;
+					setParent.. ;
+				
+				setParent.. ;
+
+				//Winx Command
+				formLayout ddAPConWinxTab ;
+					columnLayout -columnAttach "left" 12 -columnAlign "center" -rowSpacing 2;
+						separator -style "double" -width 300 ;
+						rowColumnLayout  -nc 2 -cw 1 150 -cw 2 150;
+							button -h 30 -l "grab object" -c "LA_dropGrab 0";
+							button -h 30 -l "drop object" -c "LA_dropGrab 1";
+						setParent ..;
+						separator -style "double" -width 300 ;
+						button -w 300 -h 40 -l "Graph Editor" -c GraphEditor;
+						separator -style "double" -width 300 ;
+						rowColumnLayout -numberOfColumns 3;
+							button -label "s-h Body"		-command "slWinxShowHideCons body" ;
+							button -label "s-h Body Ctrls"	-command "slWinxShowHideCons bodyCtrl" ;
+							button -label "sel TSM Ctrls"	-command "slSelTSMCtrlFromSet" ;
+							button -label "s-h Face"		-command "slWinxShowHideCons face" ;
+							button -label "s-h Face Ctrls"	-command "slWinxShowHideCons faceCtrl" ;
+							button -label "sel FACE Ctrls"	-command "slWinxShowHideCons selFace" ;
+							button -label "s-h Dress"		-command "slWinxShowHideCons dress" ;
+							button -label "s-h Dress Ctrl"	-command "slWinxShowHideCons dressCtrl" ;
+							button -label "key TSM Ctrls"	-command "slWinxShowHideCons keyTsm" ;
+							button -label "s-h Hair"		-command "slWinxShowHideCons hair" ;
+							button -label "s-h Hair Ctrl"	-command "slWinxShowHideCons hairCtrl" ;
+							button -label "Init TSM Ctrls"	-command "slWinxShowHideCons initTsm" ;
+							button -label "s-h Other"		-command "slWinxShowHideCons other" ;
+							button -label "s-h Other Ctrl"	-command "slWinxShowHideCons otherCtrl" ;
+							button -label "Trans TSM Ctrls" -command "slTransTSMCtrl";
+						setParent ..;
+						separator -style "double" -width 300 ;
+						rowColumnLayout -numberOfColumns 3;
+							button -label "Show"		-command "BrAnimationShow" ;
+							button -label "Zoom"		-command "zoomerate" ;
+							button -label "声音"		-command "ezLoadSoundTrackMainLayout" ;
+						setParent ..;
+						separator -style "double" -width 300 ;
+					setParent ..;
+				setParent ..;
+				
+				//Face Tab
+				paneLayout  -configuration "horizontal2" ddAPConFacePanel;
+				
+					formLayout slAnimPoseLibFace_Public;
+						shelfLayout -cwh 60 90 -st "iconAndTextVertical" slAnimPoseLibFace_PublicBut;
+							shelfButton -annotation "please select character" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "no" -fn "boldLabelFont";
+							slAnimPoseLib_Face_GetPresets("public");
+						setParent ..;
+						
+					formLayout -edit
+						-af		slAnimPoseLibFace_PublicBut		"top"		2 
+						-af		slAnimPoseLibFace_PublicBut		"left"		2
+						-af		slAnimPoseLibFace_PublicBut		"right"		2
+						-af		slAnimPoseLibFace_PublicBut		"bottom"	2
+					slAnimPoseLibFace_Public;
+				setParent ..;
+					
+					formLayout slAnimPoseLibFace_Custom ;
+						checkBox -label "Key"		-value 1	slAnimPoseLibFace_Keyable;
+						checkBox -label "Mirror"	-value 0	slAnimPoseLibFace_Mirrorable;
+						button -label "on/off TFM" -command "fm_toggleFaceMachineEvaluation" ddAPTFMSwitch ;
+						floatSliderGrp -label "Value" -field true -cw 1 40 -cw 2 40 -cw 3 10 
+								-minValue 0 -maxValue 2.0 -fieldMinValue 0 -fieldMaxValue 10 -value 1 slAnimPoseLibFace_KeyValue;
+						optionMenuGrp 	-label "Path: " -columnWidth2 40 600 -columnAlign 1 "right"  -cc "slAnimPoseLib_Face_GetPresets(\"custom\");slAminPoseLib_updatOptionVar" slAnimPoseLibFace_CustomPath;
+							menuItem -label "   ";
+							if (`optionVar -ex slAnimPoseLibFace_button_path`)
+							{
+								string $children[] = `optionMenuGrp -q -ill  slAnimPoseLibFace_CustomPath`;
+									deleteUI $children;
+								
+								string $path[] = `optionVar -q slAnimPoseLibFace_button_path`;
+								for ($item in $path)
+								{
+									menuItem -label $item ;
+									optionMenuGrp -e -v $item  slAnimPoseLibFace_CustomPath;	
+								}
+							}
+						button -label "Browse" -c "slAnimPoseLib_getPath;slAnimPoseLib_Face_GetPresets(\"custom\");" slAnimPoseLibFace_CustomPath_Browse;
+						button -label "Creat New Facial..." -c "slAnimPoseLib_Face_Creat" slAnimPoseLibFace_Custom_New;
+						frameLayout -bv false -lv false slAnimPoseLibFace_Custom_fr;
+							shelfLayout -cwh 60 90 -st "iconAndTextVertical" slAnimPoseLibFace_CustomBut;
+								shelfButton -annotation "please select correct path" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "null" -fn "boldLabelFont";
+								slAnimPoseLib_Face_GetPresets("custom");
+						setParent ..;
+					setParent ..;
+					formLayout -edit
+						-af		slAnimPoseLibFace_KeyValue		"top"		10
+						-af		slAnimPoseLibFace_KeyValue		"left"		2
+						
+						-af		slAnimPoseLibFace_Keyable		"top"		10
+						-ac		slAnimPoseLibFace_Keyable		"left"		10	slAnimPoseLibFace_KeyValue
+
+						-af		slAnimPoseLibFace_Mirrorable	"top"		10
+						-ac		slAnimPoseLibFace_Mirrorable	"left"		10	slAnimPoseLibFace_Keyable
+
+						-af		ddAPTFMSwitch					"top"		10
+						-ac		ddAPTFMSwitch					"left"		10	slAnimPoseLibFace_Mirrorable
+
+						-ac		slAnimPoseLibFace_CustomPath	"top"		5	slAnimPoseLibFace_Keyable
+						-af		slAnimPoseLibFace_CustomPath	"left"		5
+						-ac		slAnimPoseLibFace_CustomPath	"right"		10	slAnimPoseLibFace_CustomPath_Browse
+
+						-ac		slAnimPoseLibFace_CustomPath_Browse	"top"		5	slAnimPoseLibFace_Keyable
+						-ac		slAnimPoseLibFace_CustomPath_Browse	"right"		10	slAnimPoseLibFace_Custom_New
+
+						-ac		slAnimPoseLibFace_Custom_New	"top"		5	slAnimPoseLibFace_Keyable
+						-af		slAnimPoseLibFace_Custom_New	"right"		2
+						
+						-ac		slAnimPoseLibFace_Custom_fr		"top"		10	slAnimPoseLibFace_CustomPath
+						-af		slAnimPoseLibFace_Custom_fr		"left"		2
+						-af		slAnimPoseLibFace_Custom_fr		"right"		2
+						-af		slAnimPoseLibFace_Custom_fr		"bottom"	2
+					slAnimPoseLibFace_Custom;
+				setParent .. ;
+				
+			setParent .. ;
+		setParent ..;
+
+				tabLayout -edit
+							-tabLabel ddAPConBodyTab "Body"
+							-tabLabel ddAPConFacePanel "Face"
+							-tabLabel ddAPConWinxTab "Command"
+							ddAPConMiscTab ;
+			//setParent .. ;
+			//Panel2 End
+	showWindow ddAnimationPanelWin ;
+	
+	source "ezRenderShow.mel";
+
+	//初始化控制面板显示
+	sets -e -nw -forceElement durdur:ddAP_noSelectedSG $ddAPPanelAdapter;
+	
+}

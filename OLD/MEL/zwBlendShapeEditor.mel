@@ -1,0 +1,4555 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// Blend Shape Editor
+//
+// $Revision$
+//
+// (c) 2000 Zebra Development 
+//
+//////////////////////////////////////////////////////////
+
+/*-----------------Update--------------------------------------------------------------------------
+2002-07-12 by Huang:
+1)Key Part
+2)auto load animation curves in grapth editor
+3)new method in update and delete targets
+
+2002-06-07 by KC:
+1)Add set driven key features for blend shape target when loading. (search by kcBSapplyDrivenKey)
+
+2002-04-08 by Huang:
+1)Add the "Connect" menu.
+
+2002-04-05 by Huang:
+1)Able to export and import BlendShape with animation, useful for TD group;
+2)Export and import do not effect the eye cluster yet;
+3)Organize the scripts into a main procedure named myBlendShapeEditor.
+
+2002-03-18 by Larry
+
+-------------------------------------------------------------------------------------------------*/
+
+/*-----------------global variables----------------------------------------------------------------
+
+global string $kCtlActive[];	=> same as $kCtls[], only store the last (short name, no path)
+global string $kCtls[];		=> array of names of the SECOND checkbox of each target (full name, include path)
+global string $nCtls[];		=> array of names of the FIRST checkbox of each target (short name, no path)
+global string $kCtlAttrs[];	=> array of names of format "blendshape.targetattribute"
+
+-------------------------------------------------------------------------------------------------*/
+
+// return only blend shapes that are used for facial animation
+// NOTE that the blend shape must be named according to the character,
+// otherwise it will not be displayed in the blend shape editor
+
+global proc string[] filterFacialBlendShape()
+{
+	string $result[];
+
+	string $nodes[] = `ls -type blendShape`;
+
+	for ($node in $nodes)
+	{
+		if ((gmatch($node, "*_BSE")) ||
+			($node == "vela_headwear") ||
+			($node == "arthuroriginal_eyelid_rightup") ||
+			($node == "arthuroriginal_eyelid_rightdown") ||
+			($node == "arthuroriginal_eyelid_leftup") ||
+			($node == "arthuroriginal_eyelid_leftdown") ||
+			($node == "agentpo") ||
+			($node == "caroline") ||
+			($node == "carolineyoung") ||
+			($node == "jac") ||
+			($node == "jacyoung") ||
+			($node == "simon") ||
+			($node == "simonyoung") ||
+			($node == "allana") ||
+			($node == "allanayoung") ||
+			($node == "akis") ||
+			($node == "bodkus") ||
+			($node == "kingespar") ||
+			($node == "kingmorep") ||
+			($node == "kingoda") ||
+			($node == "kingtor") ||
+			($node == "ragis") ||
+			($node == "ragisyoung") ||
+			($node == "shepway") ||
+			($node == "shipman") ||
+			($node == "chiefprospecter") ||
+			($node == "hymo") ||
+			($node == "spacepolic") ||
+			($node == "bethpeople01") ||
+			($node == "bethpeople02") ||
+			($node == "bethpeople03") ||
+			($node == "bethpeople04") ||
+			($node == "bethpeople05") ||
+			($node == "bethpeople07") ||
+			($node == "bethpeople12") ||
+			($node == "vip01") ||
+			($node == "vip02") ||
+			($node == "vip03") ||
+			($node == "vip04") ||
+			($node == "vip05") ||
+			($node == "vip02wife") ||
+			($node == "vip05wife") ||
+			($node == "giantkids") ||
+			($node == "fbcustomer01") ||
+			($node == "fbcustomer02") ||
+			($node == "fbcustomer03") ||
+			($node == "fbcustomer04") ||
+			($node == "fbcustomer05") ||
+			($node == "fbcustomer06") ||
+			($node == "fbcustomer07") ||
+			($node == "mbcustomer01") ||
+			($node == "mbcustomer02") ||
+			($node == "mbcustomer03") ||
+			($node == "mbcustomer04") ||
+			($node == "mbcustomer05") ||
+			($node == "mbcustomer06") ||
+			($node == "mbcustomer07") ||
+			($node == "mbcustomer08") ||
+			($node == "tromit") ||
+			($node == "espar01") ||
+			($node == "lady") ||			// for Summer_Memory project
+			($node == "vela"))
+			$result[size($result)] = $node;
+	}
+
+	return $result;
+}
+
+// treeScrollList.mel create a textList that displays hierarchies
+// return a textList initialized to, function as treeScrollList
+global proc string treeScrollList(string $name)
+{
+	string $tree=`textScrollList -allowMultiSelection true $name`;
+	textScrollList -e -doubleClickCommand ("treeToggle "+$tree) $tree;
+
+	// create a menu to hold the hierarchy
+	string $root=`popupMenu -p $tree tree`;
+
+	return $tree;
+}
+
+
+// clear all items in the tree
+global proc treeClear(string $tree)
+{
+	textScrollList -e -ra $tree;
+	deleteUI ($tree+"|tree");
+	popupMenu -p $tree tree;
+}
+
+
+// add an item to the tree
+global proc treeAddItem(string $parent,string $item,string $tree)
+{
+	if($parent!="")
+		menuItem -p ($tree+"|tree|"+$parent) $item;
+	else
+		menuItem -p ($tree+"|tree") $item;
+	treeRefresh $tree;
+}
+
+
+// add a group to the tree
+global proc treeAddGroup(string $parent,string $item,int $open,string $tree)
+{
+	if($parent!="")
+		menuItem -en $open -subMenu true -p ($tree+"|tree|"+$parent) $item;
+	else
+		menuItem -en $open -subMenu true -p ($tree+"|tree") $item;
+	treeRefresh $tree;
+}
+
+
+// refresh the list
+global proc treeRefresh(string $tree)
+{
+	textScrollList -e -ra $tree;
+
+	treeShowGroup "" "" $tree -1;
+}
+
+
+// recursively add groups to the textScrollList
+global proc int treeShowGroup(string $off,string $group, string $tree,int $toggle)
+{
+	// if this is a group, add the open/close char
+	string $items[];
+	if($group!="")
+		$items=`popupMenu -q -ia ($tree+"|tree|"+$group)`;
+	else
+		$items=`popupMenu -q -ia ($tree+"|tree")`;
+	for($item in $items)
+	{
+		$toggle--;
+		string $label = `menuItem -q -l $item`;
+		if(`menuItem -q -sm $item`)
+		{
+			// toggle this group
+			if($toggle==0)
+			{
+				int $on = `menuItem -q -en $item`;
+				menuItem -e -en (!$on) $item;
+			}
+			string $oc="+ ";
+			if(`menuItem -q -en $item`)
+				$oc="- ";
+			if($toggle<=0)
+				textScrollList -e -a ($oc+$off+$label) $tree;
+			if(`menuItem -q -en $item`)
+			{
+				if($group!="")
+					$toggle=`treeShowGroup ($off+"    ") ($group+"|"+$item) $tree $toggle`;
+				else
+					$toggle=`treeShowGroup ($off+"    ") $item $tree $toggle`;
+			}
+		}
+		else
+			if($toggle<=0)
+				textScrollList -e -a ($off+$label) $tree;
+	}
+	return $toggle;
+}
+
+
+global proc treeToggle(string $tree)
+{
+	string $item[]= `textScrollList -q -si $tree`;
+	if(substring($item[0],1,1)=="+" || substring($item[0],1,1)=="-")
+	{
+		int $toggle[]=`textScrollList -q -sii $tree`;
+		int $ne = `textScrollList -q -ni $tree`;
+		treeShowGroup "" "" $tree $toggle[0];
+		for($i=$toggle[0];$i<=$ne;$i++)
+			textScrollList -e -rii $toggle[0] $tree;
+	}
+}
+
+
+global proc string[] treeSelectedItems(string $tree)
+{
+	string $selected[];
+	string $groups[];
+	string $item[]= `textScrollList -q -si $tree`;
+	string $items[]= `textScrollList -q -ai $tree`;
+	int $depth;
+	int $i=0,$s=0;
+	for($it in $items)
+	{
+		// keep track of the current group
+		if(substring($it,1,1)=="+" || substring($it,1,1)=="-")
+		{
+			$depth=(size(match(". *",$it))-1)/4;
+			$groups[$depth]=substitute(". *",$it,"");
+			if($it==$item[$s])
+				$s++;
+			continue;
+		}
+		// if this item was selected, add it to result
+		if($it==$item[$s])
+		{
+			$depth=(size(match(" *",$it))+1)/4;
+			for($g=0;$g<$depth;$g++)
+				$selected[$i]=$selected[$i]+$groups[$g]+"|";
+			$selected[$i]=$selected[$i]+substitute(" *",$it,"");
+			$s++;
+			$i++;
+		}
+	}
+
+	return $selected;
+}
+
+
+global proc string replace(string $s1,string $s2, string $s)
+{
+	string $temp = `substitute $s1 $s $s2`;
+	while($temp != $s)
+	{
+		$s = $temp;	
+		$temp = `substitute $s1 $s $s2`;
+	}
+	return $s;
+}
+
+
+global proc shapeLibraryBrowser(string $okCmd)
+{
+	global string $currentDirBrowser;
+	global string $shapeLibrary;
+	global string $shapeLibraries[];
+	global string $tsl;
+
+	if(!`window -ex slb`)
+	{
+		window -t "Shape Library Browser" slb;
+		menuBarLayout;
+		menu File;
+		for($lib in $shapeLibraries)
+		{
+			string $buf[];
+			tokenize $lib "/" $buf;
+			menuItem -p File 
+				-c ("selectLibrary \""+$lib+"\"") $buf[size($buf)-1];
+		}
+		menuItem -d true -p File;
+
+		menuItem -p File 
+			-c ("$currentDirBrowser=$shapeLibrary;"+
+			   "dirBrowser \"Select Shape Library\" selectLibrary Select 1") "Select Library...";
+		formLayout flo;
+
+			string $menu = `optionMenu -changeCommand "selectCharLib" charLibMenu`;
+				menuItem -label " ";
+				menuItem -label "allana";
+				menuItem -label "allanayoung";
+				menuItem -label "akis";
+				menuItem -label "bodkus";
+				menuItem -label "kingespar";
+				menuItem -label "kingmorep";
+				menuItem -label "kingoda";
+				menuItem -label "kingtor";
+				menuItem -label "ragis";
+				menuItem -label "ragisyoung";
+				menuItem -label "shepway";
+				menuItem -label "vela";
+				menuItem -label "agentpo";
+				menuItem -label "caroline";
+				menuItem -label "carolineyoung01";
+				menuItem -label "jac01";
+				menuItem -label "jacyoung01";
+				menuItem -label "simon";
+				menuItem -label "simonyoung";
+				// added new characters
+				menuItem -label "shipman";
+				menuItem -label "chiefprospecter";
+				menuItem -label "hymo";
+				menuItem -label "spacepolic";
+				menuItem -label "bethpeople01";
+				menuItem -label "bethpeople02";
+				menuItem -label "bethpeople03";
+				menuItem -label "bethpeople04";
+				menuItem -label "bethpeople05";
+				menuItem -label "bethpeople07";
+				menuItem -label "bethpeople12";
+				menuItem -label "vip01";
+				menuItem -label "vip02";
+				menuItem -label "vip03";
+				menuItem -label "vip04";
+				menuItem -label "vip05";
+				menuItem -label "vip02wife";
+				menuItem -label "vip05wife";
+				menuItem -label "giantkids";
+				menuItem -label "fbcustomer01";
+				menuItem -label "fbcustomer02";
+				menuItem -label "fbcustomer03";
+				menuItem -label "fbcustomer04";
+				menuItem -label "fbcustomer05";
+				menuItem -label "fbcustomer06";
+				menuItem -label "fbcustomer07";
+				menuItem -label "mbcustomer01";
+				menuItem -label "mbcustomer02";
+				menuItem -label "mbcustomer03";
+				menuItem -label "mbcustomer04";
+				menuItem -label "mbcustomer05";
+				menuItem -label "mbcustomer06";
+				menuItem -label "mbcustomer07";
+				menuItem -label "mbcustomer08";
+				menuItem -label "tromit";
+				menuItem -label "espar01";
+
+			string $libPath = `textFieldGrp -columnWidth 1 60 -label "Library" -adjustableColumn 2 charLibPath`;
+			textFieldGrp -edit -text "" $libPath;
+
+			string $button = `button -label "Browse" -c ("$currentDirBrowser = $shapeLibrary;" + "dirBrowser \"Select Shape Library\" selectLibrary Select 1")`;
+
+			string $separator = `separator`;
+
+			string $curLibPath = `textFieldGrp -editable false -text $shapeLibrary -columnWidth 1 100 -label "Current Library" -adjustableColumn 2 curCharLibPath`;
+
+
+		//textScrollList -ams true  -sc shapeLibrarySelect tsl;
+		$tsl=`treeScrollList tsl`;
+		textScrollList -e -ams true  -selectCommand shapeLibrarySelect $tsl;
+		shapeLibraryRefresh;
+
+// OKC
+//		iconTextStaticLabel -w 80 -h 100 -l "Thumbnail" 
+//			-st "iconAndTextVertical"
+//			thumb;
+
+		string $thumbnailText = `text -label "Thumbnail"`;
+		image -w 64 -h 64 -visible false thumb;				// make image invisible so that do not have to explicitly load an empty image
+
+		button -l "Ok" -c ("shapeLibraryImport "+$okCmd) ok_but;
+		button -l "Cancel" -c "deleteUI slb" cancel_but;
+		formLayout -e
+			-attachForm		$menu		"left"		5
+			-attachForm		$menu		"top"		5
+			-attachNone		$menu		"right"
+
+			-attachForm		$libPath	"top"		5
+			-attachControl	$libPath	"left"		5	$menu
+			-attachControl	$libPath	"right"		5	$button
+
+			-attachForm		$button		"top"		5
+			-attachControl	$button		"right"		5	thumb
+
+			-attachControl	$separator	"top"		10	$menu
+			-attachForm		$separator	"left"		5	
+			-attachForm		$separator	"right"		5	
+
+			-attachControl	$curLibPath	"top"		10	$separator
+			-attachForm		$curLibPath	"left"		5
+			-attachControl	$curLibPath	"right"		5	thumb
+
+			-attachForm		tsl				"left"		5
+			-attachControl	tsl				"top"		5	$curLibPath
+			-attachControl	tsl				"bottom"	5	ok_but 
+			-attachControl	tsl				"right"		5	thumb
+			
+			-attachForm		$thumbnailText	"right"		5
+			-attachControl	$thumbnailText	"top"		5	$curLibPath
+			
+			-attachForm		thumb			"right"		5
+			-attachControl	thumb			"top"		5	$thumbnailText
+			
+			-attachForm		ok_but			"bottom"	5
+			-attachForm		ok_but			"left"		5
+			-attachPosition ok_but			"right"		5	50 
+			
+			-attachForm		cancel_but		"bottom"	5
+			-attachForm		cancel_but		"right"		5
+			-attachPosition cancel_but		"left"		5	50
+			flo;
+	}
+	showWindow slb;
+}
+
+global proc shapeLibraryImport(string $okCmd)
+{
+	global string $shapeLibrary;
+	global string $tsl;
+
+ 	string $selected[]=`treeSelectedItems $tsl`;
+	if(!size($selected))
+	{
+		confirmDialog -message "You must select a shape to import!";
+		return;
+	}
+	for($sel in $selected)
+	{
+		string $buf[];
+		tokenize $sel "|" $buf;
+	
+		// there should only be maximum 2 tokens here eg: mouth|l_mouth_small.mb
+
+		if(size($buf)>1)
+			$sel=$buf[1];
+		else
+			$sel=$buf[0];
+		
+		string $type[] = `file -q -typ ($shapeLibrary+$sel)`;
+		string $tempA = $okCmd+" \""+($shapeLibrary+$sel)+"\" "+$type[0];
+		eval ($okCmd+" \""+($shapeLibrary+$sel)+"\" "+$type[0]);
+	}
+	deleteUI slb;
+}
+
+global proc shapeLibraryRefresh()
+{
+	global string $shapeLibrary;
+	global string $tsl;
+	string $groups[];
+
+	if(!`window -ex slb`) return;
+ 
+	treeClear $tsl;
+
+// OKC
+// only read .mb files 
+
+	if($shapeLibrary == "")
+		return;
+
+	string $shapes[]=`getFileList -fs ($shapeLibrary+"*.mb")`;
+	for($shape in $shapes)
+	{
+		string $buf[];
+		tokenize $shape "_" $buf;
+		if(size($buf) == 4)
+		{
+
+// OKC
+// use the third token as group name, rather than the first token
+//
+//				if(find($groups,$buf[0])==-1)
+//				{
+//					// add a new group
+//
+//					treeAddGroup "" $buf[0] false $tsl;
+//					$groups[size($groups)]=$buf[0];
+//				}
+//				treeAddItem $buf[0] $shape $tsl;
+//
+				if(find($groups,$buf[2])==-1)
+				{
+					// add a new group
+
+					treeAddGroup "" $buf[2] false $tsl;
+					$groups[size($groups)]=$buf[2];
+				}
+
+				treeAddItem $buf[2] $shape $tsl;
+		}
+//		else
+//			treeAddItem "" $shape $tsl;
+		else
+			warning("facial target files must be of format: \"character_side_part_expression.mb\"");
+	}
+}
+
+global proc shapeLibrarySelect()
+{
+	global string $shapeLibrary;
+	global string $tsl;
+
+ 	string $selected[]=`treeSelectedItems $tsl`;
+	if(size($selected)==0) return;
+	string $buf[];
+	tokenize $selected[0] "|" $buf;
+
+// OKC
+//	string $icon=substring($buf[1],1,size($selected[0])-3);
+//	iconTextStaticLabel -e -i1 ($shapeLibrary+$icon +".icon") thumb;
+
+	string $icon = substring($buf[size($buf) - 1], 1, size($buf[size($buf) - 1]) - 3);	// strip away ".mb"
+
+	if (`file -q -exists ($shapeLibrary + $icon + ".iff")`)
+		image -e -visible true -image ($shapeLibrary + $icon + ".iff") thumb;			// make image visible if icon exists
+	else
+		image -e -visible false thumb;													// make image invisible if icon does not exist
+}
+
+global proc selectLibrary(string $selected)
+{
+	global string $shapeLibrary;
+	global string $shapeLibraries[];
+
+//	if(find( $shapeLibraries,$selected)==-1)
+//	{
+//		string $buf[];
+//		string $p="";
+//		if(size($shapeLibraries))
+//		{
+//			tokenize  $shapeLibraries[size($shapeLibraries)-1] "/" $buf;
+//			$p = $buf[size($buf)-1];
+//		}
+//		tokenize $selected "/" $buf;
+//		
+//		if(`window -ex slb`)
+//			menuItem -p File -ia $p $buf[size($buf)-1];
+//		$shapeLibraries[size($shapeLibraries)]=$selected;
+//	}
+
+	$shapeLibrary=$selected;
+	optionVar -sv bseLibrary $selected;
+	shapeLibraryRefresh;
+
+	if(`window -ex paths`) 
+		textFieldButtonGrp -e -text $shapeLibrary slPath;
+
+	// change the library path display
+
+	textFieldGrp -edit -text $shapeLibrary charLibPath;
+	textFieldGrp -edit -text $shapeLibrary curCharLibPath;
+}
+
+global proc selectGroups(string $selected)
+{
+	global string $groupsDir;
+
+	$groupsDir=$selected;
+	optionVar -sv bseGroupsDir $selected;
+	if(`window -ex paths`) 
+		textFieldButtonGrp -e -text $groupsDir gdPath;
+}
+
+global proc dirBrowser(string $title,string $callBack,string $action,int $dirOnly)
+{
+
+	if(!`window -ex dirBrowserWindow`)
+	{
+		window -t $title dirBrowserWindow;
+		formLayout flo;
+		text -l "Directories" dirLabel;
+		textScrollList -dcc ("dirDoubleClick "+$callBack+" "+$dirOnly) 
+				-sc ("dirClick "+$callBack+" "+$dirOnly) dirList;
+		formLayout fdf;
+		//finder -c ("dirFinderChanged "+$callBack+" "+$dirOnly) dirFinder;
+		if(`about -nt`)
+			finder -c ("dirFinderChanged "+$callBack+" "+$dirOnly+" `finder -q -fp dirFinder`") dirFinder;
+		else
+			textField -cc ("dirFinderChanged "+$callBack+" "+$dirOnly+" `textField -q -tx dirFinder`") 
+							dirFinder;
+		formLayout -e
+			-af dirFinder "left" 0
+			-af dirFinder "right" 0
+			fdf;
+		setParent ..;
+		if($dirOnly)
+				button -l $action -c ("dirSelect "+$callBack) ok_but;
+		else
+				button -l $action -c ("fileSelect "+$callBack) ok_but;
+		button -l "Cancel" -c "deleteUI dirBrowserWindow" cancel_but;
+		formLayout -e
+			-af dirLabel "left" 5
+			-af dirLabel "top" 5
+			-af dirList "left" 5
+			-af dirList "right" 5
+			-ac dirList "top" 5 dirLabel
+			-ac dirList "bottom" 5 fdf
+			-af fdf "left" 5
+			-af fdf "right" 5
+			-ac fdf "bottom" 5 ok_but
+			-af ok_but "bottom" 5
+			-af ok_but "left" 5
+			-ap ok_but "right" 5 50 
+			-af cancel_but "bottom" 5
+			-af cancel_but "right" 5
+			-ap cancel_but "left" 5 50
+			flo;
+		dirRefresh $dirOnly;
+	}
+	showWindow dirBrowserWindow;
+}
+
+global proc dirFinderChanged(string $callBack, int $dirOnly, string $cdb)
+{
+	global string $currentDirBrowser;
+
+	if(`filetest -d $cdb`)
+	{
+		if(substring($cdb,size($cdb),size($cdb))!="/")
+			$cdb+="/";
+		$currentDirBrowser=$cdb;
+		dirRefresh $dirOnly;
+	}
+	else if(!$dirOnly)
+	{
+		eval( $callBack+" \""+$cdb+"\"");
+		deleteUI dirBrowserWindow;	
+	}	
+}
+
+global proc fileSelect(string $callBack)
+{
+	global string $currentDirBrowser;
+	string $selected;
+	
+	if(`about -nt`)
+ 		$selected=`finder -q -fp dirFinder`;
+	else
+ 		$selected=`textField -q -tx dirFinder`;
+	eval ($callBack+" \""+ $selected+"\"");
+	deleteUI dirBrowserWindow;
+}
+	
+global proc dirClick(string $callBack, int $dirOnly)
+{
+	global string $currentDirBrowser;
+	
+ 	string $selected[]=`textScrollList -q -si dirList`;
+	if(`about -nt`)
+		finder -e -fp ($currentDirBrowser+ $selected[0]) dirFinder;
+	else
+		textField -e -tx ($currentDirBrowser+ $selected[0]) dirFinder;
+}
+
+global proc dirSelect(string $callBack)
+{
+	global string $currentDirBrowser;
+	
+ 	string $selected[]=`textScrollList -q -si dirList`;
+	if(!size($selected))
+		eval ($callBack+" \""+ $currentDirBrowser+"\"");
+	else
+		eval ($callBack+" \""+ $currentDirBrowser+ $selected[0]+"/\"");
+	deleteUI dirBrowserWindow;	
+}
+
+global proc dirRefresh(int $dirOnly)
+{
+	global string $currentDirBrowser;
+
+	string $dirs[]=`getFileList -fld ($currentDirBrowser)`;
+	textScrollList -e -ra dirList;
+	textScrollList -e -append ".." dirList;
+	for($dir in $dirs)
+	{
+		if(!$dirOnly || `filetest -d ($currentDirBrowser+$dir)`)
+			if(`filetest -r ($currentDirBrowser+$dir)`)
+			{
+				textScrollList -e -append $dir dirList;
+			}
+	}
+	if(`about -nt`)
+		finder -e -fp  $currentDirBrowser dirFinder;
+	else
+		textField -e -tx $currentDirBrowser dirFinder;
+
+}
+
+global proc dirDoubleClick(string $callBack, int $dirOnly)
+{
+	global string $currentDirBrowser;
+
+	string $selected[]=`textScrollList -q -si dirList`;
+	if(`filetest -d ($currentDirBrowser+"/"+$selected[0])`)
+	{
+	    $currentDirBrowser+=$selected[0]+"/";
+		string $cd = `pwd`;
+		chdir  $currentDirBrowser;
+		$currentDirBrowser=`pwd`+"/";
+		chdir $cd;
+		dirRefresh $dirOnly;
+	}
+	else
+		fileSelect $callBack;
+}
+
+
+global proc createBlendPanel(string $panelName)
+{
+
+}
+
+// OKC
+global proc setShowIcons(string $menuItem)
+{
+	global int $BSEshowIcons;
+
+	$BSEshowIcons = `menuItem -q -checkBox $menuItem`;
+
+	refreshBSE;
+}
+
+
+// create the blend shape panel
+//
+global proc addBlendPanel(string $panelName)
+{
+	global string $kCtlActive[];
+	global string $kCtls[];
+	global string $groupInfo[];
+	global int $kCtlIdx[];
+	global int $BSEshowIcons;
+
+	clear $kCtlActive;
+	clear $kCtlIdx;
+	clear $groupInfo;
+		
+	menu -label File;
+	menuItem -label "Load Setup..." -c loadSetup -enable false;
+	menuItem -label "Save Setup..." -c saveSetup -enable false;
+	menuItem -label "Paths..." -c pathSettings;
+
+	// filters _hidden blendshapes
+	//
+	string $bsListNF[]= filterFacialBlendShape();
+	$j=0;
+	for($i=0;$i<size($bsListNF);$i++)
+		if(!gmatch($bsListNF[$i],"*_hidden"))
+			$bsList[$j++]=$bsListNF[$i];
+	if(size($bsList)==1)
+	{
+		string $bs=$bsList[0];
+
+		menu -label Edit;
+
+// OKC
+		if (`about -v`=="3.0")
+			menuItem -label "Create Blend Shape..." -c CreateBlendShapeOptions CreateBSMenu;
+		else
+			// version 4 
+			menuItem -label "Create Blend Shape..." -c "myPerformBlendShape 1" CreateBSMenu;
+
+		menuItem -label "Add Target" -c ("addTarget "+$bs +" \"\"") AddTargetMenu;
+		menuItem -label "Import Target" -c ("importTarget "+$bs) ImportTargetMenu;
+		menuItem -label "Import Target from Library" -c ("importLibraryTarget "+$bs) ImportLibraryTargetMenu;
+		menuItem -label "Delete Selected Target" -command "removeSelectedTarget" DelSelTargetMenu;
+		menuItem -d true;
+		menuItem -label "Update" -c ("updateAllTarget " + $bs) UpdateMenu;
+		menuItem -label "Import" -c ("importBlendShapeAnimBrowse " + $bs) ImportMenu;
+		menuItem -label "Export" -c ("exportBlendShapeAnimBrowse " + $bs) ExportMenu;
+		menuItem -d true;
+		menuItem -label "Refresh" -c refreshBSE;
+	}
+	else
+	{
+		menu -label Edit;
+		if (`about -v`=="3.0")
+			menuItem -label "Create Blend Shape..." -c CreateBlendShapeOptions CreateBSMenu;
+		else 
+			menuItem -label "Create Blend Shape..." -c "myPerformBlendShape 1" CreateBSMenu;
+
+		menuItem -en false -label "Add Target" AddTargetMenu;
+		menuItem -en false -label "Import Target" ImportTargetMenu;
+		menuItem -en false -label "Import Target from Library" ImportLibraryTargetMenu;
+		menuItem -label "Delete Selected Target" -command "removeSelectedTarget" DelSelTargetMenu;
+		menuItem -d true;
+		menuItem -en false -label "Update" UpdateMenu;
+		menuItem -en false -label "Import" ImportMenu;
+		menuItem -en false -label "Export" ExportMenu;
+		menuItem -d true;
+		menuItem -label "Refresh" -c refreshBSE;
+	}
+
+	menu -label "Groups" -tearOff true;
+
+	if(size($bsList))
+	{
+		menuItem -label "Create Group" -c "createGroup" createGroupMenu;
+		menuItem -label "Load Group" -c "loadGroup \"\"" loadGroupMenu;
+		menuItem -label "Save Group" -c saveGroup saveGroupMenu;
+		menuItem -label "Delete Group" -c "deleteGroup \"\"" deleteGroupMenu;
+		menuItem -label "Add Selected to Group" -subMenu true addToGroupMenu;
+		setParent -menu ..;
+		menuItem -d true;
+		menuItem -label "Set Composite Base" -c setCompositeBase setCompositeBaseMenu;
+		menuItem -label "Set Composite Target" -c setCompositeTarget setCompositeTargetMenu;
+	}
+	else
+	{
+		menuItem -en false -label "Create Group" -c "createGroup" createGroupMenu;
+		menuItem -en false -label "Load Group" -c "loadGroup \"\"" loadGroupMenu;
+		menuItem -en false -label "Save Group" -c saveGroup saveGroupMenu;
+		menuItem -en false -label "Delete Group" -c "deleteGroup \"\"" deleteGroupMenu;
+		menuItem -en false -label "Add Selected to Group" -subMenu true addToGroupMenu;
+		setParent -menu ..;
+		menuItem -d true;
+		menuItem -en false -label "Set Composite Base" -c setCompositeBase setCompositeBaseMenu;
+		menuItem -en false -label "Set Composite Target" -c setCompositeTarget setCompositeTargetMenu;
+	}
+
+// OKC
+// add "Show Icons" menu item under "Extras" menu
+
+	menu -label "Extras";
+		menuItem -label "Phoneme Window" -c phonemes;
+		menuItem -divider true;
+		string $menuItem = `menuItem -label "Show Icons" -checkBox $BSEshowIcons`;
+		menuItem -edit -command ("setShowIcons " + $menuItem) $menuItem;
+
+	if(`scriptedPanel -query -tearOff $panelName`) 
+		refreshBSE;
+	else
+		scriptedPanel -edit -tearOff blendPanel1;
+}
+
+// open Paths window
+//
+global proc pathSettings()
+{
+	global string $shapeLibrary;
+	global string $groupsDir;
+
+	if(!`window -ex paths`)
+	{
+		window -title "Path Settings" paths;
+		columnLayout;
+		textFieldButtonGrp 
+			-label "Shape Library" 
+			-text $shapeLibrary 
+			-bc ("$currentDirBrowser=$shapeLibrary;"+
+			   "dirBrowser \"Select Shape Library\" selectLibrary Select 1")
+			-cc ("selectLibrary $1") 
+			-buttonLabel "Browse..."
+			slPath;
+		textFieldButtonGrp 
+			-label "Groups" 
+			-text $groupsDir 
+			-bc ("$currentDirBrowser=$groupsDir;"+
+			   "dirBrowser \"Select Groups Directory\" selectGroups Select 1") 
+			-buttonLabel "Browse..."
+			-cc ("selectGroups $1") 
+			gdPath;
+	}
+
+	showWindow paths;
+}	
+
+global proc loadSetup()
+{
+	global string $groupsDir;
+	global string $currentDirBrowser;
+
+	$currentDirBrowser=$groupsDir;
+	dirBrowser "Load Setup" loadSetupOk Load 0;
+}
+
+global proc loadSetupOk(string $setup)
+{
+	global string $groupInfo[];
+
+	if($setup == "") return;
+	clear $groupInfo;
+	$sin = fopen($setup,"r");
+	$line = fgetline($sin);
+	while($line!="")
+	{
+		$line = substring($line,1,size($line)-1);
+		loadGroup($line);
+		$line = fgetline($sin);
+	}
+	fclose($sin);
+}
+
+// save the current groups
+// and setup
+//
+global proc saveSetup()
+{
+	global string $groupsDir;
+	global string $currentDirBrowser;
+
+	$currentDirBrowser=$groupsDir;
+	dirBrowser "Save Setup" saveSetupOk Save 0;
+}
+
+global proc saveSetupOk(string $setup)
+{
+	global string $groupInfo[];
+	global string $groupsDir;
+
+	$sout = fopen($setup,"w");
+	for($idx=0;$idx<size($groupInfo);$idx++)
+	{
+		$group=substring($groupInfo[$idx],2,size($groupInfo[$idx]));
+		fprint ($sout, $group+"\n");
+		$out = fopen ($groupsDir+$group+".group","w");
+		for($idx++;$groupInfo[$idx]!="" && substring($groupInfo[$idx],1,1)!="*";$idx++)
+				fprint ($out, $groupInfo[$idx]+"\n");
+		$idx--;
+		fclose($out);
+	}
+	fclose($sout);
+}
+
+// 
+// open phoneme window
+//
+global proc phonemes()
+{
+	if(!`window -ex phonemes`)
+	{
+		window phonemes;
+	}
+	else
+	{
+		deleteUI ph_clo;
+	}
+	columnLayout ph_clo;
+	gridLayout -p phonemes ph_lo;
+
+	// look for blend shapes
+	//
+	string $bsListNF[]= filterFacialBlendShape();
+	$j=0;
+	for($i=0;$i<size($bsListNF);$i++)
+		if(!gmatch($bsListNF[$i],"*_hidden"))
+			$bsList[$j++]=$bsListNF[$i];
+
+	// create phoneme controls
+	//
+	for($bs in $bsList)
+	{
+		string $targets[]=`listAttr -m ($bs+".w")`; 
+		
+		for($target in $targets)
+		{
+			string $buf[];
+			tokenize $target "_" $buf;
+
+// OKC 
+// "phoneme" is now the 3rd token
+//
+//			if($buf[1]!="phoneme") continue;
+//			button -label $buf[2]
+//					-c ("setPhonemeKeys "+$bs+"."+$target);
+
+			if($buf[2]!="phoneme") continue;
+
+			button -label $buf[3] -c ("setPhonemeKeys "+$bs+"."+$target);
+		}
+	}
+	checkBox -p ph_clo -l "Expand Time Line" 
+			-onc "timeControl -e -h 200 timeControl1" 
+			-ofc "timeControl -e -h 28 timeControl1"
+			;
+	showWindow phonemes;
+}
+
+// set keys on the given target based on the selected
+// range in the time slider
+//
+global proc setPhonemeKeys(string $target)
+{
+	float $range[] = `timeControl -q -ra timeControl1`;
+	setKeyframe -t $range[0] -v 0 $target;
+	setKeyframe -t (($range[0]+$range[1])/2) -v 1 $target;
+	setKeyframe -t $range[1] -v 0 $target;
+}
+
+// set the base values for the composite 
+// target slider
+//
+global proc setCompositeBase()
+{
+	string $buf[];
+	global string $groupInfo[];
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+    string $group = $stl[$sti-1];
+
+	int $idx= find($groupInfo,"*"+$group);
+	for($idx++;$groupInfo[$idx]!="" && substring($groupInfo[$idx],1,1)!="*";$idx++)
+	{
+		tokenize $groupInfo[$idx] " " $buf;
+		
+		string $targets[] = `listAttr -multi ($buf[0] + ".weight")`;
+		if(!`stringArrayCount $buf[1] $targets`)
+			continue;
+		
+		$buf[2] = `getAttr ($buf[0]+"."+$buf[1])`;
+		if($buf[3]=="") $buf[3]=1;
+		$groupInfo[$idx]=$buf[0]+" "+$buf[1]+" "+$buf[2]+" "+$buf[3];
+	}
+}
+
+// set the target values for the composite 
+// target slider
+//
+global proc setCompositeTarget()
+{
+	string $buf[];
+	global string $groupInfo[];
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+    string $group = $stl[$sti-1];
+
+	int $idx= find($groupInfo,"*"+$group);
+	for($idx++;$groupInfo[$idx]!="" && substring($groupInfo[$idx],1,1)!="*";$idx++)
+	{
+		tokenize $groupInfo[$idx] " " $buf;
+
+		string $targets[] = `listAttr -multi ($buf[0] + ".weight")`;
+		if(!`stringArrayCount $buf[1] $targets`)
+			continue;
+
+		$buf[3] = `getAttr ($buf[0]+"."+$buf[1])`;
+		if($buf[2]=="") $buf[2]=0;
+		$groupInfo[$idx]=$buf[0]+" "+$buf[1]+" "+$buf[2]+" "+$buf[3];
+	}
+}
+
+// create a list of all visible key buttons
+//
+global proc updateVisible()
+{
+	global string $kCtlActive[];
+	global string $kCtls[];
+	global string $nCtls[];
+	global string $lastNCtl;
+	global int $kCtlIdx[];
+	global int $BSEshowIcons;
+
+	clear $kCtlActive;
+	clear $kCtlIdx;
+	clear $nCtls;
+	$lastNCtl="";
+
+	// filters _hidden blendshapes
+	//
+	string $bsListNF[]= filterFacialBlendShape();
+	$j=0;
+	for($i=0;$i<size($bsListNF);$i++)
+		if(!gmatch($bsListNF[$i],"*_hidden"))
+			$bsList[$j++]=$bsListNF[$i];
+
+	string $col = `tabLayout -q -selectTab BSEtab`;
+	if($col == "") return;
+	if($col == "Blend_Shapes")
+	{
+		// update menus
+		//
+		menuItem -edit -enable true DelSelTargetMenu;
+		
+		menuItem -e -en false saveGroupMenu;
+		menuItem -e -en false deleteGroupMenu;
+		if(size($bsList)!=1)
+		{
+			menuItem -e -en false AddTargetMenu;
+			menuItem -e -en false ImportTargetMenu;
+			menuItem -e -en false ImportLibraryTargetMenu;
+		}
+		$blends = `columnLayout -q -childArray $col`;
+
+// OKC
+// discover a bug here, $i = 0 should be set outside the for loop
+
+		int $i =0;
+
+		for($bs in $blends)
+		{
+			string $buf[] = `columnLayout -q -childArray $bs`;
+			for ($frameLayout in $buf)
+			{
+				$rows = `frameLayout -q -childArray $frameLayout`;
+				$rows = `columnLayout -q -childArray $rows[0]`;
+				for($row in $rows)
+				{
+					if(`rowLayout -ex $row`)
+					{
+						$child = `rowLayout -q -childArray $row`;
+						$nCtls[$i] = $child[1];
+
+						$kCtlActive[$i] = $child[4];
+						string $s = $child[4];
+
+						string $buf[];
+						tokenize $s "_" $buf;
+						$kCtlIdx[$i++] = $buf[1];
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		menuItem -edit -enable false DelSelTargetMenu;
+
+		menuItem -e -en true saveGroupMenu;
+		menuItem -e -en true deleteGroupMenu;
+		$rows = `columnLayout -q -ca $col`;
+		int $i =0,$skip=1;
+		for($row in $rows)
+		{
+			if($skip)
+			{
+				$skip--;
+				continue;
+			}
+			if(`rowLayout -ex $row`)
+			{
+				$child = `rowLayout -q -ca $row`;
+				$kCtlActive[$i] = $child[5];
+				$nCtls[$i] = $child[1];
+				string $buf[],$s;
+				$s= $child[5];
+				tokenize $s "_" $buf;
+				$kCtlIdx[$i++] = $buf[1];
+			}
+		}
+		if(size($bsList)!=1)
+		{
+			string $buf[];
+			if(size($nCtls))
+			{
+				tokenize $nCtls[0] "_" $buf;
+				$bs=$buf[0];
+			}
+			else
+				$bs=$bsList[0];
+			menuItem -e -en true -c ("addTarget "+$bs +" \"\"") AddTargetMenu;
+			menuItem -e -en true -c ("importTarget "+$bs) ImportTargetMenu;
+			menuItem -e -en true -c ("importLibraryTarget "+$bs) ImportLibraryTargetMenu;
+		}
+	}
+
+	for($ctl in $nCtls)
+		checkBox -e -v 0 $ctl;
+
+	updateBSE;
+}
+
+// retrieve the base shape of the specified blend shape
+//
+global proc string getBaseShape(string $blend)
+{
+	string $base[],$b;
+	$base = `blendShape -q -g $blend`;
+
+	$base =`ls -dag -lf -l $base[0]`;
+    if(size($base)>1)
+    {
+        for($bs in $base)
+        {
+            $con = `listConnections -d off $bs`;
+            if(find($con,$blend)!=-1)
+            {
+                $base[0] = $bs;
+                break;
+            }
+        }
+    }
+
+	return $base[0];
+
+//	$i = size($base);
+//	while(size($base))
+//	{
+//		$b = $base[0];
+//		$base = `listRelatives -f -p $base[0]`;
+//	}
+
+//	return $b;
+}
+
+// find an index not used in the target array
+//
+global proc int findAvailableIndex(string $blend)
+{
+	int $i,$used[];
+	string $aliases[]=`aliasAttr -q $blend`;
+	for($i=1;$i<size($aliases);$i+=2)
+	{
+		string $buf[];
+		tokenize $aliases[$i] "[]" $buf;
+		int $idx = $buf[1];
+		$used[$idx] = 1;
+	}
+	for($i=0;$i<size($used);$i++)
+		if(!$used[$i])
+			return $i;
+	return $i;
+}
+
+// OKC
+// change this procedure to handle multiple targets
+//
+// add multiple targets
+//
+global proc addTarget(string $blend, string $target)
+{
+	global int $refresh;
+
+	string $charName="vela";
+	string $connectedCharName="vela_headwear";
+	string $cntObjName="headwear";
+	
+	// add target
+	//
+
+	string $b = `getBaseShape($blend)`;
+	string $tar[];
+	if($target == "")
+	{
+		$tar = `ls -sl`;
+		if(size($tar)==0)
+		{
+			warning "You must select a target shape";
+			return;
+		}	
+	}
+	else
+		$tar[0] = $target;
+
+	for ($target in $tar)
+	{
+		$idx = findAvailableIndex($blend);
+		blendShape -e -t $b $idx $target 1 $blend;
+		hide $target;
+
+	//by mahao
+	//
+
+		if ($blend == $charName && `objExists $connectedCharName`)
+		{
+			$partName=`substring $target (size($charName)+2) (size($target)-7)`;
+			$connectableTarget=`listAttr -m ($connectedCharName+".weight")`;  
+			string $elm_connectableTar;
+			for ($elm_connectableTar in $connectableTarget)
+			{
+				$part=`substring $elm_connectableTar (size($cntObjName)+2) (size($elm_connectableTar)-7)`;
+				if ( $part == $partName)
+				{
+					connectAttr ($charName+"."+$target) ($connectedCharName+"."+$elm_connectableTar);
+				}
+			}
+		}
+		else if ($blend == $connectedCharName && `objExists $charName`)
+		{
+			$partName=`substring $target (size($cntObjName)+2) (size($target)-7)`;
+			$connectableTarget=`listAttr -m ($charName+".weight")`;  
+			string $elm_connectableTar;
+			for ($elm_connectableTar in $connectableTarget)
+			{
+				$part=`substring $elm_connectableTar (size($charName)+2) (size($elm_connectableTar)-7)`;
+				if ( $part == $partName)
+				{
+					connectAttr ($charName+"."+$elm_connectableTar) ($connectedCharName+"."+$target);
+				}
+			}
+		}
+	}
+
+	if($refresh)
+		refreshBSE;
+}
+
+// hook for import a target from a file
+//
+global proc importTarget(string $blend)
+{
+	global string $currentBlendShape;
+	global string $gv_operationMode;
+
+	$currentBlendShape = $blend;
+	$gv_operationMode = "Reference";
+	fileBrowser "addImportedTarget" "Reference" "mayaBinary" 0;
+	refreshBSE;
+}
+
+// hook for import a target from a library 
+//
+global proc importLibraryTarget(string $blend)
+{
+	global string $currentBlendShape;
+	global string $gv_operationMode;
+
+	$currentBlendShape=$blend;
+	$gv_operationMode="Reference";
+	shapeLibraryBrowser "addImportedTarget;refreshBSE;"; 
+}
+
+// import a target
+//
+global proc int addImportedTarget(string $scene, string $type)
+{
+	global string $currentBlendShape;
+	global string $groupInfo[];
+	global string $nCtls[];
+	global int $refresh;
+
+	string $curSh[]=`ls -as`;
+	int $ncs = size($curSh);
+	
+	// check if the target is already in the scene
+	//
+//	string $tlist[]= `listAttr -m ($currentBlendShape+".w")`;
+	string $tlist[]= `aliasAttr -query $currentBlendShape`;
+	string $buf[];
+	tokenize $scene "/." $buf;
+	string $fileName = $buf[size($buf)-2];
+	$target = $fileName+"_target";
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+	string $tab = $stl[$sti-1];
+	if(find($tlist,$target)!=-1)
+	{
+		if($tab=="Blend_Shapes")
+		{
+			confirmDialog -title "Error" -message "This target is already in the current blend shape";
+			return 0;
+		}
+		else
+		{
+			$ctl = $tab+"__"+$currentBlendShape+"__"+$target; 
+			if(find($nCtls,$ctl)!=-1)
+			{
+				confirmDialog -title "Error" -message "This target is already in the current group";
+				return 0;
+			}
+			// target is already loaded but is not in the current group
+			//
+
+// Larry : create eye control
+
+			int $idx= find($groupInfo,"*"+$tab);
+			$idx++;
+			for($i=size($groupInfo);$i> $idx;$i--)
+				$groupInfo[$i]=$groupInfo[$i-1];
+			$groupInfo[$idx]=$currentBlendShape+" "+$target;
+       
+			if(`gmatch $target "*l_eye_blink*"`) 
+			{
+				loadeyecontrol($currentBlendShape,($tab+"Col"),$tab,0,0);
+			        return 1;
+			}
+			if(`gmatch $target "*r_eye_blink*"`) 
+			{
+				loadeyecontrol($currentBlendShape,($tab+"Col"),$tab,0,1);
+			        return 1;
+			}
+			
+			createSlider ($tab+"Col") $currentBlendShape $target $tab 1;
+		
+			return 1;
+		}
+	}
+
+	if(!`file -q -ex $scene`)
+	{
+		confirmDialog -title "Error" -message ("Cannot find shape "+$scene);
+		return 0;
+	}
+
+	// set import options
+	//
+	$urp = `optionVar -q fileOptionsUseRenamePrefix`;     
+	$grp = `optionVar -q fileOptionsGrouping`;
+	$uns = `optionVar -q useNamespacesDuringFileIO`;
+	optionVar -iv fileOptionsUseRenamePrefix 0;
+	optionVar -iv fileOptionsGrouping 0;
+	optionVar -iv useNamespacesDuringFileIO 0;
+	print ("Loading "+$scene+"\n");
+
+	pv_performAction $scene $type;			//------------------------   To  Reference the selected scenes.  
+	
+	optionVar -iv fileOptionsUseRenamePrefix $urp;
+	optionVar -iv fileOptionsGrouping $grp;
+	optionVar -iv useNamespacesDuringFileIO $uns;
+	$curSh=`ls -as`;
+	$refresh=0;
+
+	for($i=$ncs;$i<size($curSh);$i++)
+	{
+		if(gmatch($curSh[$i],"*target*"))
+			addTarget $currentBlendShape $curSh[$i];
+
+	}
+	if($tab!="Blend_Shapes")
+	{
+		if(`gmatch $target "*l_eye_blink*"`) 
+			loadeyecontrol($currentBlendShape,$tab,$tab,0,0);
+		else if(`gmatch $target "*r_eye_blink*"`)
+			loadeyecontrol($currentBlendShape,$tab,$tab,0,1);
+		else
+			createSlider $tab $currentBlendShape $target $tab 1;
+	}
+	
+	$refresh=1;
+  //  print ($tab+" -----blendshape "+$currentBlendShape+" ----target: " + $target + "\n");
+	// look for scriptNode and execute it
+	//
+	if(size(`ls ($fileName+"_CS")`))
+	{
+		print ("Executing "+$fileName+"_CS\n");
+		scriptNode -eb ($fileName+"_CS");
+	}
+
+	if (!`attributeExists "reference" $currentBlendShape`)				//huang
+		addAttr -longName "reference" -dataType "string" $currentBlendShape;	//huang
+	setAttr -type "string" ($currentBlendShape + ".reference") (`getAttr ($currentBlendShape + ".reference")` + $scene + "\n");	//huang
+
+	// read attribute from reference node
+	addJawAttr($currentBlendShape,$target);
+
+	// KC - set up the set driven keys for blend shape target
+
+	if (size(`ls ($target + ".drivenKey")`) != 0)
+	{
+		string $drivenKey = `getAttr ($target + ".drivenKey")`;
+	
+		if ($drivenKey != "")
+			kcBSapplyDrivenKey(($currentBlendShape + "." + $target), $drivenKey);
+	}
+
+	file -removeReference $scene;							//huang
+	return 1;
+}
+
+
+
+// select a target shape
+//
+global proc selectTarget(string $target)
+{
+	select $target;
+}
+
+// set min of jaw control
+//
+global proc setJawControlMin(float $value)
+{
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+	global float $jaw_min;
+	global float $jaw_max;
+
+	$jaw_min = $value;
+
+	attrFieldSliderGrp 
+		-e
+		-at ($jaw_control_name+ "." +$jaw_control_attr)
+                -max $jaw_max
+                -min $jaw_min
+                -step 0.1
+		jaw_slider;
+}
+	
+// set max of jaw control
+//
+global proc setJawControlMax(float $value)
+{
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+	global float $jaw_min;
+	global float $jaw_max;
+
+	$jaw_max = $value;
+
+	attrFieldSliderGrp 
+		-e
+		-at ($jaw_control_name+ "." +$jaw_control_attr)
+                -max $jaw_max
+                -min $jaw_min
+                -step 0.1
+		jaw_slider;
+}
+	
+global proc selectCharLib()
+{
+	global string $currentDirBrowser;
+
+	string $char = `optionMenu -q -value charLibMenu`;
+	string $path = "//File-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/";
+	string $subpath = "";
+    string $pathstr = "/facial_target/approved/";	//huang
+
+	switch ($char)
+	{
+		case "allana":
+			$subpath = "giant/allana/allana_common";
+			break;
+
+		case "allanayoung":
+			$subpath = "giant/allanayoung/allanayoung_common";
+			break;
+
+		case "akis":
+			$subpath = "giant/akis/akis_common";
+			break;
+
+		case "bodkus":
+			$subpath = "giant/bodkus/bodkus_common";
+			break;
+
+		case "kingespar":
+			$subpath = "giant/kingespar/kingespar_common";
+			break;
+
+		case "kingmorep":
+			$subpath = "giant/kingmorep/kingmorep_common";
+			break;
+
+		case "kingoda":
+			$subpath = "giant/kingoda/kingoda_common";
+			break;
+
+		case "kingtor":
+			$subpath = "giant/kingtor/kingtor_common";
+			break;
+
+		case "ragis":
+			$subpath = "giant/ragis/ragis_common";
+			break;
+
+		case "ragisyoung":
+			$subpath = "giant/ragisyoung/ragisyoung_common";
+			break;
+
+		case "shepway":
+			$subpath = "giant/shepway/shepway_common";
+			break;
+
+		case "vela":
+			$subpath = "giant/vela/vela_common";
+			break;
+
+		case "agentpo":
+			$subpath = "human/agentpo/agentpo_common";
+			break;
+
+		case "caroline":
+			$subpath = "human/caroline/caroline_common";
+			break;
+
+		case "carolineyoung01":
+			$subpath = "human/carolineyoung01/carolineyoung01_common";
+			break;
+
+		case "jac01":
+			$subpath = "human/jac01/jac01_common";
+			break;
+
+		case "jacyoung01":
+			$subpath = "human/jacyoung01/jacyoung01_common";
+			break;
+
+		case "simon":
+			$subpath = "human/simon/simon_common";
+			break;
+
+		case "simonyoung":
+			$subpath = "human/simonyoung/simonyoung_common";
+			break;
+
+		// added new characters
+
+		case "shipman":
+			$subpath = "human/secondary_character/shipman_common";
+			break;
+
+		case "chiefprospecter":
+			$subpath = "human/secondary_character/chiefprospecter_common";
+			break;
+
+		case "hymo":
+			$subpath = "human/secondary_character/hymo_common";
+			break;
+
+		case "spacepolic":
+			$subpath = "human/secondary_character/spacepolic_common";
+			break;
+
+		case "bethpeople01":
+			$subpath = "human/secondary_character/bethpeople/bethpeople01_common";
+			break;
+
+		case "bethpeople02":
+			$subpath = "human/secondary_character/bethpeople/bethpeople02_common";
+			break;
+
+		case "bethpeople03":
+			$subpath = "human/secondary_character/bethpeople/bethpeople03_common";
+			break;
+
+		case "bethpeople04":
+			$subpath = "human/secondary_character/bethpeople/bethpeople04_common";
+			break;
+
+		case "bethpeople05":
+			$subpath = "human/secondary_character/bethpeople/bethpeople05_common";
+			break;
+
+		case "bethpeople07":
+			$subpath = "human/secondary_character/bethpeople/bethpeople07_common";
+			break;
+
+		case "bethpeople12":
+			$subpath = "human/secondary_character/bethpeople/bethpeople12_common";
+			break;
+
+		case "vip01":
+			$subpath = "giant/secondary_character/vip01_common";
+			break;
+
+		case "vip02":
+			$subpath = "giant/secondary_character/vip02_common";
+			break;
+
+		case "vip03":
+			$subpath = "giant/secondary_character/vip03_common";
+			break;
+
+		case "vip04":
+			$subpath = "giant/secondary_character/vip04_common";
+			break;
+
+		case "vip05":
+			$subpath = "giant/secondary_character/vip05_common";
+			break;
+
+		case "vip02wife":
+			$subpath = "giant/secondary_character/vip02wife_common";
+			break;
+
+		case "vip05wife":
+			$subpath = "giant/secondary_character/vip05wife_common";
+			break;
+
+		case "giantkids":
+			$subpath = "giant/secondary_character/giantkids_common";
+			break;
+
+		case "fbcustomer01":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer01/fbcustomer01_common";
+			break;
+
+		case "fbcustomer02":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer02/fbcustomer02_common";
+			break;
+
+		case "fbcustomer03":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer03/fbcustomer03_common";
+			break;
+
+		case "fbcustomer04":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer04/fbcustomer04_common";
+			break;
+
+		case "fbcustomer05":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer05/fbcustomer05_common";
+			break;
+
+		case "fbcustomer06":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer06/fbcustomer06_common";
+			break;
+
+		case "fbcustomer07":
+			$subpath = "giant/secondary_character/fbcustomer/fbcustomer07/fbcustomer07_common";
+			break;
+
+		case "mbcustomer01":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer01/mbcustomer01_common";
+			break;
+
+		case "mbcustomer02":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer02/mbcustomer02_common";
+			break;
+
+		case "mbcustomer03":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer03/mbcustomer03_common";
+			break;
+
+		case "mbcustomer04":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer04/mbcustomer04_common";
+			break;
+
+		case "mbcustomer05":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer05/mbcustomer05_common";
+			break;
+
+		case "mbcustomer06":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer06/mbcustomer06_common";
+			break;
+
+		case "mbcustomer07":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer07/mbcustomer07_common";
+			break;
+
+		case "mbcustomer08":
+			$subpath = "giant/secondary_character/mbcustomer/mbcustomer08/mbcustomer08_common";
+			break;
+
+//		case "tromit":
+//			$subpath = "giant/animal/animal_tromit/tromit_common";
+//			break;
+//
+//		case "espar01":
+//			$subpath = "giant/animal/animal_espar/espar01_common";
+//			break;
+
+		default:
+			$path = "";
+			$pathstr = "";
+	}
+
+	$path = $path + $subpath + $pathstr;
+
+	textFieldGrp -edit -text $path charLibPath;
+	textFieldGrp -edit -text $path curCharLibPath;
+
+	$currentDirBrowser = $path;
+	selectLibrary $currentDirBrowser;
+}
+
+global proc selectCharacter()
+{
+	global float $INIT_JAW_MIN;
+	global float $INIT_JAW_MAX;
+	global string $jaw_control_name;
+
+	string $charAttr = `optionMenu -q -value characterMenu`;
+
+	if (setJawControlName($charAttr))
+	{
+		// set the min and max jaw rotation
+		// must be after setJawControlName because global $jaw_control_name and $jaw_control_attr are set there
+
+		int $rxLimitEnable[] = `transformLimits -q -enableRotationX $jaw_control_name`;
+		float $rxLimits[] = `transformLimits -q -rotationX $jaw_control_name`;	
+
+		if ($rxLimitEnable[0])
+		{
+			floatField -edit -value $rxLimits[0] jcmin;
+			setJawControlMin($rxLimits[0]);
+		}
+		else
+		{
+			floatField -edit -value $INIT_JAW_MIN jcmin;
+			setJawControlMin($INIT_JAW_MIN);
+		}
+
+		if ($rxLimitEnable[1])
+		{
+			floatField -edit -value $rxLimits[1] jcmax;
+			setJawControlMax($rxLimits[1]);
+		}
+		else
+		{
+			floatField -edit -value $INIT_JAW_MAX jcmax;
+			setJawControlMax($INIT_JAW_MAX);
+		}
+	}
+}
+
+
+// set name of jaw control
+//
+global proc int setJawControlName(string $name)
+{
+	global float $INIT_JAW_MIN;
+	global float $INIT_JAW_MAX;
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+	global float $jaw_min;
+	global float $jaw_max;
+
+	string $buf[];
+	tokenize $name "." $buf;
+
+	$jaw_control_name = $buf[0];
+	$jaw_control_attr = $buf[1];
+
+	if (size(`ls ($jaw_control_name+ "." +$jaw_control_attr)`))
+	{
+		attrFieldSliderGrp 
+		-e
+		-en true
+		-at ($jaw_control_name+ "." +$jaw_control_attr)
+                -max $jaw_max
+                -min $jaw_min
+                -step 0.1
+		jaw_slider;
+
+		button -e
+			-c "float $val=`text -q -l Jaw_Value`;setAttr ($jaw_control_name+\".\"+$jaw_control_attr) $val"
+			Jaw_Set;
+
+		return true;
+	}
+	else
+	{
+		attrFieldSliderGrp 
+			-edit
+			-en false
+			-cw 1 1
+            -min 0.0
+            -max 10.0
+            -step 0.1
+			-l ""
+			jaw_slider;	
+
+		floatField -edit -value $INIT_JAW_MIN jcmin;
+		floatField -edit -value $INIT_JAW_MAX jcmax;
+	}
+
+	return false;
+}
+	
+global proc toggleTextField()
+{
+	if (`checkBox -query -value characterCheckBox`)
+	{
+		optionMenu -edit -visible false characterMenu;
+		textField -edit -visible true jcn;
+
+		string $charAttr = `textField -q -text jcn`;
+		setJawControlName $charAttr;
+	}
+	else
+	{
+		optionMenu -edit -visible true characterMenu;
+		textField -edit -visible false jcn;
+
+		selectCharacter;
+	}
+}
+
+// create all controls
+//
+global proc refreshBSE()
+{
+	global int $nctls;
+	global string $kCtls[];
+	global string $nCtls[];
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global string $groupInfo[];
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+	global float $jaw_min;
+	global float $jaw_max;
+
+	// refresh menu status
+	//
+	// filters _hidden blendshapes
+	//
+	string $bsListNF[]= filterFacialBlendShape();
+	$j=0;
+	for($i=0;$i<size($bsListNF);$i++)
+		if(!gmatch($bsListNF[$i],"*_hidden"))
+			$bsList[$j++]=$bsListNF[$i];
+	if(size($bsList)==1)
+	{
+		string $bs=$bsList[0];
+		menuItem -e -en true -c ("addTarget "+$bs +" \"\"") AddTargetMenu;
+		menuItem -e -en true -c ("importTarget "+$bs) ImportTargetMenu;
+		menuItem -e -en true -c ("importLibraryTarget "+$bs) ImportLibraryTargetMenu;
+		menuItem -e -en true -c ("updateAllTarget " + $bs) UpdateMenu;
+		menuItem -e -en true -c ("importBlendShapeAnimBrowse " + $bs) ImportMenu;
+		menuItem -e -en true -c ("exportBlendShapeAnimBrowse " + $bs) ExportMenu;
+	}
+	else
+	{
+		menuItem -e -en false AddTargetMenu;
+		menuItem -e -en false ImportTargetMenu;
+		menuItem -e -en false ImportLibraryTargetMenu;
+		menuItem -e -en false UpdateMenu;	//huang
+		menuItem -e -en false ImportMenu;	//huang
+		menuItem -e -en false ExportMenu;	//huang
+	}
+
+	if(size($bsList))
+	{
+		menuItem -e -en true createGroupMenu;
+		menuItem -e -en true loadGroupMenu;
+		menuItem -e -en true saveGroupMenu;
+		menuItem -e -en true deleteGroupMenu;
+		menuItem -e -en true setCompositeBaseMenu;
+		menuItem -e -en true setCompositeTargetMenu;
+	}
+	else
+	{
+		menuItem -e -en false createGroupMenu;
+		menuItem -e -en false loadGroupMenu;
+		menuItem -e -en false deleteGroupMenu;
+		menuItem -e -en false setCompositeBaseMenu;
+		menuItem -e -en false setCompositeTargetMenu;
+	}
+	
+	// delete the old form layout
+	//
+	if(`formLayout -ex BSEform`)
+	{
+		string $flo = `setParent BSEform`;
+		$fl = size($flo);
+		$flo = `substring $flo 1 ($fl - 8)`;
+		setParent $flo;
+		deleteUI BSEform;
+	}
+
+	// clear visible arrays
+	//
+	clear $kCtls;
+	clear $nCtls;
+	clear $kCtlAttrs;
+	clear $kCtlActive;
+
+
+	// main form
+	//
+	string $form = `formLayout -m false BSEform`;
+
+	string $tabs = `tabLayout 
+				-scrollable true 
+			//	-innerMarginWidth 15
+			//	-innerMarginHeight 15
+				-changeCommand updateVisible
+				-childResizable true
+				BSEtab`;
+
+//
+// "Key Selected", "Unkey Selected", "Reset All" button layout
+//
+
+	string $buttons = `formLayout -parent $form BSEbuttons`;
+	button -l "Key Selected" -c "keySel" BSEKeySel;
+	button -l "Unkey Selected" -c "unkeySel" BSEUnkeySel;
+	button -l "Reset All" -c "resetAll" BSEResetAll;;
+
+//	if(size(`ls jaw_control`))
+	{
+		columnLayout -adj true -rowSpacing 5 -parent $form jaw;
+
+// 
+// "Auxiliary Control" layout
+//
+
+// replace using a formLayout to better position the controls
+//
+//		rowLayout -nc 6 -cw 1 160 -cw 2 260 -cw 3 80 -cw 4 30;
+
+		string $formLayout = `formLayout -parent jaw`;
+
+		$cmd = ("cutKey -cl -t \`currentTime -q\` -at $jaw_control_attr $jaw_control_name");
+
+		checkBox -l "Auxiliary Control" Jaw_Icon;
+
+		if(size(`ls ($jaw_control_name+ "." +$jaw_control_attr)`))
+			attrFieldSliderGrp 
+				-at ($jaw_control_name+ "." +$jaw_control_attr)
+				-cw 1 1
+				-min 0.0
+				-max 10.0
+				-step 0.1
+				-l ""
+			jaw_slider;
+		else
+			attrFieldSliderGrp 
+				-en false
+				-cw 1 1
+				-min 0.0
+				-max 10.0
+				-step 0.1
+				-l ""
+			jaw_slider;
+
+		text -width 50 -l "0" Jaw_Value;
+		button -l "Set" -c "float $val=`text -q -l Jaw_Value`;setAttr ($jaw_control_name+\".\"+$jaw_control_attr) $val" Jaw_Set;
+
+		checkBox	-l "Key" 
+				-onc "setKeyframe ($jaw_control_name+ \".\" +$jaw_control_attr);"
+				-ofc $cmd
+			Jaw_Box;
+
+		formLayout -edit
+			-attachForm		Jaw_Icon	"left"		20
+			-attachForm		Jaw_Icon	"bottom"	0
+
+			-attachForm		jaw_slider	"left"		125
+			-attachOppositeControl	jaw_slider	"bottom"	0	Jaw_Icon
+
+			-attachControl		Jaw_Value	"left"		5	jaw_slider
+			-attachOppositeControl	Jaw_Value	"bottom"	0	Jaw_Icon
+
+			-attachControl		Jaw_Set		"left"		20	Jaw_Value
+			-attachOppositeControl	Jaw_Set		"bottom"	0	Jaw_Icon
+
+			-attachControl		Jaw_Box		"left"		40	Jaw_Set
+			-attachOppositeControl	Jaw_Box		"bottom"	0	Jaw_Icon
+		$formLayout;
+
+// 
+// "Auxiliary Attribute" layout
+//
+
+// OKC
+// replace using a formLayout to better position the controls
+//
+//	    rowLayout -nc 7 -cw 1 100 -cw 2 200 -cw 3 30 -cw 5 30 -p jaw;
+
+
+		string $jawRotLayout = `formLayout -parent jaw`;
+				
+		string $text1 = `text -label "Auxiliary attribute"`;
+
+		textField 
+				-visible false
+				-tx ($jaw_control_name+"."+$jaw_control_attr) 
+				-cc "setJawControlName #1"
+			jcn;
+
+		string $menu = `optionMenu -changeCommand "selectCharacter" characterMenu`;
+			menuItem -label "jaw_control.open";
+			menuItem -label "allana_jaw.rx";
+			menuItem -label "allanayoung_jaw.rx";
+			menuItem -label "akis_jaw.rx";
+			menuItem -label "bodkus_jaw.rx";
+			menuItem -label "kingespar_jaw.rx";
+			menuItem -label "kingmorep_jaw.rx";
+			menuItem -label "kingoda_jaw.rx";
+			menuItem -label "kingtor_jaw.rx";
+			menuItem -label "ragis_jaw.rx";
+			menuItem -label "ragisyoung_jaw.rx";
+			menuItem -label "shepway_jaw.rx";
+			menuItem -label "vela_jaw.rx";
+			menuItem -label "agentpo_jaw.rx";
+			menuItem -label "caroline_jaw.rx";
+			menuItem -label "carolineyoung_jaw.rx";
+			menuItem -label "jac_jaw.rx";
+			menuItem -label "jacyoung_jaw.rx";
+			menuItem -label "simon_jaw.rx";
+			menuItem -label "simonyoung_jaw.rx";
+			// added new characters
+			menuItem -label "shipman_jaw.rx";
+			menuItem -label "chiefprospecter_jaw.rx";
+			menuItem -label "hymo_jaw.rx";
+			menuItem -label "spacepolic_jaw.rx";
+			menuItem -label "bethpeople01_jaw.rx";
+			menuItem -label "bethpeople02_jaw.rx";
+			menuItem -label "bethpeople03_jaw.rx";
+			menuItem -label "bethpeople04_jaw.rx";
+			menuItem -label "bethpeople05_jaw.rx";
+			menuItem -label "bethpeople07_jaw.rx";
+			menuItem -label "bethpeople12_jaw.rx";
+			menuItem -label "vip01_jaw.rx";
+			menuItem -label "vip02_jaw.rx";
+			menuItem -label "vip03_jaw.rx";
+			menuItem -label "vip04_jaw.rx";
+			menuItem -label "vip05_jaw.rx";
+			menuItem -label "vip02wife_jaw.rx";
+			menuItem -label "vip05wife_jaw.rx";
+			menuItem -label "giantkids_jaw.rx";
+			menuItem -label "fbcustomer01_jaw.rx";
+			menuItem -label "fbcustomer02_jaw.rx";
+			menuItem -label "fbcustomer03_jaw.rx";
+			menuItem -label "fbcustomer04_jaw.rx";
+			menuItem -label "mbcustomer01_jaw.rx";
+			menuItem -label "mbcustomer02_jaw.rx";
+			menuItem -label "mbcustomer03_jaw.rx";
+			menuItem -label "mbcustomer04_jaw.rx";
+			menuItem -label "mbcustomer05_jaw.rx";
+			menuItem -label "mbcustomer06_jaw.rx";
+			menuItem -label "mbcustomer07_jaw.rx";
+			menuItem -label "tromit_jaw.rx";
+			menuItem -label "espar01_jaw.rx";
+
+
+		string $checkBox = `checkBox -label "" -changeCommand "toggleTextField" characterCheckBox`;
+					
+		string $text2 = `text -label "Min"`;
+
+		floatField 
+			-w 100
+			-cc "setJawControlMin #1"
+			-v $jaw_min
+		jcmin;
+
+		string $text3 = `text -label "Max"`;
+
+		floatField 
+			-w 100
+			-cc "setJawControlMax #1"
+			-v $jaw_max
+		jcmax;
+
+		formLayout -edit
+			-attachForm		$text1		"left"		20
+			-attachForm		$text1		"bottom"	0
+
+			-attachForm		$menu		"left"		130
+			-attachOppositeControl	$menu		"bottom"	0	$text1
+
+			-attachOppositeControl	jcn		"top"		0	$menu
+			-attachOppositeControl	jcn		"left"		0	$menu
+			-attachOppositeControl	jcn		"bottom"	0	$menu
+			-attachOppositeControl	jcn		"right"		0	$menu
+
+			-attachControl		$checkBox	"left"		5	jcn
+			-attachOppositeControl	$checkBox	"bottom"	0	$text1
+
+			-attachControl		$text2		"left"		5	$checkBox
+			-attachOppositeControl	$text2		"bottom"	0	$text1
+
+			-attachControl		jcmin		"left"		5	$text2
+			-attachOppositeControl	jcmin		"bottom"	0	$text1
+
+			-attachControl		$text3		"left"		5	jcmin
+			-attachOppositeControl	$text3		"bottom"	0	$text1
+
+			-attachControl		jcmax		"left"		5	$text3
+			-attachOppositeControl	jcmax		"bottom"	0	$text1
+		$jawRotLayout;
+
+		separator -hr true -p jaw;
+
+		formLayout -edit
+			-attachForm	$tabs		"left"		0
+			-attachForm	$tabs		"right"		0
+			-attachForm	$tabs		"top"		0
+			-attachControl	$tabs		"bottom"	5	jaw
+
+			-attachControl	jaw		"bottom"	5	$buttons
+			-attachForm	jaw		"right"		0
+			-attachForm	jaw		"left"		0
+
+			-attachForm	$buttons	"bottom"	5
+			-attachForm	$buttons	"right"		0 
+			-attachForm	$buttons	"left"		0 
+		$form;
+	}
+
+	formLayout -edit
+		-attachForm	BSEKeySel	"left"	5
+		-attachPosition	BSEKeySel	"right"	5	33 
+		-attachControl	BSEUnkeySel	"left"	5	BSEKeySel 
+		-attachControl	BSEUnkeySel	"right"	5	BSEResetAll
+		-attachPosition	BSEResetAll	"left"	5	66 
+		-attachForm	BSEResetAll	"right"	5
+	BSEbuttons;
+
+// OKC
+// use "-adjustableColumn true" option so that the child frameLayout label is displayed properly
+
+	string $Column = `columnLayout -adjustableColumn true -parent $tabs "Blend_Shapes"`;
+
+	// look for blend shapes
+	//
+	string $bsListNF[]= filterFacialBlendShape();
+	$j=0;
+	for($i=0;$i<size($bsListNF);$i++)
+		if(!gmatch($bsListNF[$i],"*_hidden"))
+			$bsList[$j++]=$bsListNF[$i];
+
+	// create main group controls
+	//
+	string $frame;
+	string $columnLayout;
+	$nctls=0;
+	for($bs in $bsList)
+	{
+		// create blend shape frame
+		//
+		string $frame = `frameLayout -parent $Column -collapsable true -borderStyle "etchedIn" $bs`;
+
+		popupMenu -button 3 -parent $frame;
+		menuItem -label Edit;
+		menuItem -d true;
+		if (`about -v`=="3.0")
+		menuItem -label "Create Blend Shape..." -c CreateBlendShapeOptions CreateBSMenu;
+		else menuItem -label "Create Blend Shape..." -c "myPerformBlendShape 1" CreateBSMenu;
+		menuItem -label "Add Target" -c ("addTarget "+$bs +" \"\"") addTargetMenu;
+		menuItem -label "Import Target" -c ("importTarget "+$bs) importTargetMenu;
+		menuItem -label "Import Target from Library" -c ("importLibraryTarget "+$bs) importLibraryTargetMenu;
+		menuItem -d true;
+		menuItem -label "Update" -c ("updateAllTarget " + $bs);
+		menuItem -label "Import" -c ("importBlendShapeAnimBrowse " + $bs);
+		menuItem -label "Export" -c ("exportBlendShapeAnimBrowse " + $bs);
+		menuItem -d true;
+		string $connectMenu = `menuItem -label "Connect" -subMenu true`;
+		menuItem -edit -postMenuCommand ("blendShapeConnect " + $bs + " " + $connectMenu) $connectMenu;
+
+		string $column = `columnLayout -adj true -parent $frame $bs`;
+
+		// layout for target sliders
+		//
+		string $groupLO = `columnLayout -adj true -co "left" 2 -parent $column $bs`;
+
+		// sort targets by part
+		//
+		string $tlist[]= `listAttr -m ($bs+".w")`;
+		for ($i=0; $i<size($tlist); $i++)
+		{
+			string $aliasAttr = `aliasAttr -query ($bs + "." + $tlist[$i])`;
+			if (size($aliasAttr))
+			{
+				$tlist[$i] = $aliasAttr;
+			}
+		}
+		int $i=0;
+		for($name in $tlist)
+		{
+			string $buffer[];
+			tokenize $name "_" $buffer;
+			if(size($buffer)==1) {$i++; continue;}
+// OKC
+			$tlist[$i]=$buffer[0] + "_" + $buffer[2] + "_" + $buffer[1];
+			int $j;
+			for( $j=3;$j<size($buffer);$j++)
+			{
+				$tlist[$i]=$tlist[$i]+"_"+$buffer[$j];
+			}
+			$i++;
+		}
+		$i=0;
+		$tlist =`sort $tlist`;
+		for($name in $tlist)
+		{
+			string $buffer[];
+			tokenize $name "_" $buffer;
+			if(size($buffer)==1) {$i++;continue;}
+// OKC
+			$tlist[$i]= $buffer[0] + "_" + $buffer[2] + "_" + $buffer[1];
+			int $j;
+			for( $j=3;$j<size($buffer);$j++)
+			{
+				$tlist[$i]=$tlist[$i]+"_"+$buffer[$j];
+			}
+			$i++;
+		}
+		string $lastGroup="";
+		int $i=0;
+
+// Larry : Create Eye Control
+		frameLayout -parent $groupLO -label ($bs + "_blink") -collapsable true -borderStyle "etchedIn" -marginWidth 5;
+			$columnLayout = `columnLayout -rowSpacing 2`;
+		loadeyecontrol($bs,$columnLayout,"Blend_Shape",1,0);
+		loadeyecontrol($bs,$columnLayout,"Blend_Shape",1,1);
+
+		for($name in $tlist)
+		{
+			if(gmatch ($name, "weight*")) continue;
+			if(gmatch ($name, "*_delta")) continue;
+			string $buffer[];
+			string $group;
+// OKC
+			tokenize $name "_" $buffer;
+			$group = $buffer[2];
+
+			if($group!= $lastGroup)
+			{
+				frameLayout -parent $groupLO -label ($bs + "_" + $group) -collapsable true -borderStyle "etchedIn" -marginWidth 5;
+					$columnLayout = `columnLayout -rowSpacing 2`;
+			}
+			$lastGroup=$group;
+			
+// Larry
+			if(`gmatch $name "*_eye_blink*"`) 
+			{
+                // do nothing;
+	        }else{
+				createSlider $columnLayout $bs $name "Blend_Shape" 1;
+				//	createSlider $groupLO $bs $name "Blend_Shape" 1;
+				}
+		}
+	}
+
+	// create group tabs
+	//
+	string $Col,$ans;
+	for($n=0;$n<size($groupInfo);$n++)
+	{
+		if(substring($groupInfo[$n],1,1)=="*")
+		{
+			$ans=substring($groupInfo[$n],2,size($groupInfo[$n]));
+			$Col = `columnLayout -parent BSEtab -adj true ($ans+"Col")`;
+			tabLayout -e -tl ($ans+"Col") $ans BSEtab;
+
+			// create composite slider
+			//
+			floatSliderGrp -label "Composite Target" -field true
+                          -minValue 0.0 -maxValue 1.0
+                          -fieldMinValue 0.0 -fieldMaxValue 1.0
+						  -dragCommand ("zwBlendShapeEditorComposite "+$ans)
+                          $ans;
+			separator -h 10 -hr true;
+			continue;
+		}
+
+		// add sliders
+		//
+        string $buf[];
+		tokenize $groupInfo[$n] " " $buf;
+        $bs = $buf[0];
+        $attr = $buf[1];
+	    
+		if(`gmatch $attr "*l_eye_blink*"`) 
+		{
+			loadeyecontrol($bs,$Col,$ans,0,0);
+	    }else if(`gmatch $attr "*r_eye_blink*"`) 
+			  {
+			    	loadeyecontrol($bs,$Col,$ans,0,1);
+		      }
+		else{
+		string $targets[] = `listAttr -multi ($bs + ".weight")`;	//huang
+               if(`stringArrayCount $attr $targets`)				//huang
+	       createSlider $Col $bs $attr $ans 0;
+		}
+	}
+
+	formLayout -e -m true BSEform;
+
+	updateVisible;
+}
+
+// set composite target value
+//
+global proc zwBlendShapeEditorComposite(string $group)
+{
+	global string $groupInfo[];
+	string $buf[];
+	float $val;
+
+	$v= `floatSliderGrp -q -v $group`;
+	int $idx= find($groupInfo,"*"+$group);
+	for($idx++;$groupInfo[$idx]!="" && substring($groupInfo[$idx],1,1)!="*";$idx++)
+	{
+		float $min = 0;
+		float $max = 1;
+		tokenize $groupInfo[$idx] " " $buf;
+		
+		string $targets[] = `listAttr -multi ($buf[0] + ".weight")`;	//huang
+		if(!`stringArrayCount $buf[1] $targets`)			//huang
+			continue;						//huang
+		
+		if(size($buf)==4)
+		{
+			$min = $buf[2];
+			$max = $buf[3];
+		}
+		$val = $min+($max-$min)*$v;
+
+// Larry:  skip eye control composite
+        
+		if(`gmatch $buf[1] "*_eye_blink"`) continue;
+	
+		setAttr ($buf[0]+"."+$buf[1]) $val;
+	}
+
+}
+
+// OKC
+// get the icon filename for this target from the reference path
+//
+global proc string getIconFilename(string $blendShape, string $targetName)
+{
+	string $str, $iconFilename, $reference[];
+
+	if (`attributeExists "reference" $blendShape`)
+	{
+		$str = `getAttr ($blendShape + ".reference")`;
+		tokenize $str "\n" $reference;
+		for ($str in $reference)
+		{
+			if ((`gmatch $str ("*" + $targetName + ".mb")`) || (`gmatch $str ("*" + $targetName + ".ma")`))
+			{
+				$iconFilename = substring($str, 1, size($str) - 3);		// get rid of ".mb" or ".ma"
+				$iconFilename += ".iff";
+				if(`filetest -f $iconFilename`)
+					return $iconFilename;
+			}
+		}
+	}
+
+	$iconFilename = "//File-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/human/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $targetName + ".iff";
+	if(`filetest -f $iconFilename`)
+		return $iconFilename;
+	
+	$iconFilename = "//File-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/giant/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $targetName + ".iff";
+	if(`filetest -f $iconFilename`)
+		return $iconFilename;
+
+	return "";
+}
+
+
+// create a slider for a blend shape target
+//
+global proc createSlider(string $parent, string $bs, string $name, string $group, int $createButton)
+{
+	global int $nctls;
+	global string $kCtls[];
+	global string $nCtls[];
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global int $BSEshowIcons;
+
+	string $rlo =`rowLayout -p $parent -numberOfColumns 7 -adjustableColumn 4 -columnWidth 1 30 -columnWidth 2 180 -columnWidth 5 50`;
+	$kCtlAttrs[$nctls] = ($bs + "." + $name);
+	$ctrlName = ($group + "__" + $bs + "__" + $name);
+	$label = $name;
+	if(gmatch($label, "*_target"))
+		$label = substring($label, 1, size($label)-7);
+
+	button -label "GE" -annotation "Graph Anim Curves" -command ("blendCurve on " + $bs + " " + $name + " " + $ctrlName);
+
+	checkBox
+		-w 180
+		-dgc sliderDrag
+		-dpc sliderDrop
+		-l $label
+		-docTag $name
+	$ctrlName;
+
+	string $menu = `popupMenu`;
+	menu -edit -postMenuCommand ("BSpopMenu \"" + $menu + "\" \"" + $bs + "\" \"" + $group + "\" \"" + $name + "\" " + $createButton) $menu;
+
+	if ($BSEshowIcons)
+	{
+		string $iconFilename = getIconFilename($bs, $label);
+
+		if ($iconFilename != "")
+			image -w 64 -h 64 -image $iconFilename;
+		else
+			image -w 64 -h 64 -visible false;
+	}
+	else
+		image -w 1 -h 1 -visible false;
+
+	$as = `attrFieldSliderGrp
+			-at ($bs + "." + $name)
+			-cw 1 1
+			-cw 2 60
+			-smx 1.0
+			-fmx 2.0
+			-step 0.1
+			-cc ("setSelected " + $bs + "." + $name)
+			-l "      "
+		($ctrlName + "__s")`;
+
+	$cmd = ("cutKey -cl -t \`currentTime -q\` -at " + $name + " " +$bs);
+	
+	$kCtls[$nctls] = `checkBox
+			-l "Key"
+			-p $rlo
+			-onc ("setKeyframe " + $bs + "." + $name)
+			-ofc $cmd
+		("keyCb_"+$nctls)`;
+
+	$nctls++;
+
+	string $buf[];
+	if(`tokenize $name "_" $buf` > 2)
+		button -label "Key Part" -command ("BSkeyPart " + $bs + " " + $buf[2]);
+
+	if ($BSEshowIcons)
+		rowLayout -edit
+				-rowAttach 1 "top" 20
+				-columnWidth 3 (64 + 10)
+				-rowAttach 4 "top" 20
+				-rowAttach 6 "top" 20
+			$rlo;
+	else
+		rowLayout -edit
+				-rowAttach 1 "top" 0
+				-columnWidth 3 10
+				-rowAttach 4 "both" 0
+				-rowAttach 6 "both" 0
+			$rlo;
+}
+
+global proc BSpopMenu(string $menu, string $bs, string $group, string $name, int $createButton)
+{
+	menu -edit -deleteAllItems $menu;
+	setParent -menu $menu;
+
+	menuItem -l $name ;
+	menuItem -d true;
+	menuItem -l "Select All" -c ("selectAlltarget 1 " + $bs + " " + $group);
+	menuItem -l "Deselect All" -c ("selectAlltarget 0 " + $bs + " " + $group);
+	menuItem -d true;
+	if($createButton)
+	{
+		menuItem -l "Delete Target" -c ("removeTarget " + $bs + " " + $name + " 1");
+
+		menuItem -l "Update Target" -c ("updateTarget " + $bs + " " + $name);
+	}
+	else
+		menuItem -l "Remove From Group" -c ("removeFromGroup " + $name + " " + $group);
+}
+
+global proc BSkeyPart(string $bs, string $part)
+{
+	int $i;
+
+	string $buf[] = `listAttr -multi ($bs + ".weight")`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		if (`gmatch $buf[$i] ("*_" + $part + "_*")`)
+			setKeyframe ($bs + "." + $buf[$i]);
+	}
+
+	updateBSE;
+}
+
+
+// drag callback for sliders
+//
+global proc string[] sliderDrag(string $dragControl, int $x, int $y, int $mods) 
+{
+	return {"Ok"};
+}
+
+// drop callback for sliders
+//
+global proc sliderDrop(string $dragControl, string $dropControl, 
+						string $msgs[], int $x, int $y, int $type) 
+{
+	global string $groupInfo[];
+	global string $nCtls[];
+	global string $kCtlActive[];
+	global string $lastNCtl;
+	int $ing = 0, $drag = -1, $drop = -1;
+
+	string $res[] = parseCtrl($dragControl);
+	string $group = $res[2];
+	string $dgt = $res[0];
+	string $dragT = ($res[1] + " " + $res[0]);
+	$res = parseCtrl($dropControl);
+	string $dropT = ($res[1] + " " + $res[0]);
+	string $dpt = $res[0];
+	string $bs = $res[1];
+	int $i =0;
+	for($g in $groupInfo)
+	{
+		if($g == ("*"+$group))
+			$ing =$i+1;
+		if($ing && $groupInfo[$i] == $dragT )
+			$drag = $i;
+		if($ing && $groupInfo[$i] == $dropT )
+			$drop = $i;
+		if($drag!=-1 && $drop!=-1)
+			break;
+		$i++;
+	}
+	if($drag !=-1 && $drop != -1)
+	{
+		if($drag>$drop)
+		{
+			string $dgtn = $nCtls[$drag-$ing];
+			renameUI $nCtls[$drag-$ing] "temp";
+			renameUI ($nCtls[$drag-$ing]+"__s") "temp__s";
+			for($i= $drag;$i>$drop;$i--)
+			{
+				$groupInfo[$i]= $groupInfo[$i-1];
+				string $buf[] =  parseCtrl($nCtls[$i-$ing-1]);
+				string $bs = $buf[1];
+				string $target = $buf[0];
+				string $label = `checkBox -q -l $nCtls[$i-$ing-1]`;
+				checkBox -e -l $label
+				//	-onc ("blendCurve on "+$bs+" "+$target+" "+ $nCtls[$i-$ing-1])
+				//	-ofc ("blendCurve off "+$bs+" "+$target+" "+ $nCtls[$i-$ing-1])
+					"temp";
+				$cmd = ("cutKey -cl -t \`currentTime -q\` -at "+$target + " " +$bs);
+				checkBox -e 
+					-onc ("setKeyframe "+$bs+"."+$target)
+					-ofc  $cmd
+					$kCtlActive[$i-$ing];
+				renameUI $nCtls[$i-$ing-1] "temp1";
+				renameUI ($nCtls[$i-$ing-1]+"__s") "temp1__s";
+				renameUI "temp" $nCtls[$i-$ing-1];
+				renameUI "temp__s" ($nCtls[$i-$ing-1]+"__s");
+				$nCtls[$i-$ing] = $nCtls[$i-$ing-1];
+				attrFieldSliderGrp -e -at ($bs + "." + $target) 
+										($nCtls[$i-$ing]+"__s");
+				renameUI "temp1" "temp";
+				renameUI "temp1__s" "temp__s";
+				
+			}
+			$groupInfo[$i]=$dragT;
+			renameUI "temp" $dgtn;
+			renameUI "temp__s" ($dgtn+"__s");
+			$label = $dgt;
+		    if(gmatch($label,"*_target"))
+				$label = substring($label,1,size($label)-7);
+			checkBox -e -l $label
+				//	-onc ("blendCurve on "+$bs+" "+$dgt+" "+ $dgtn)
+				//	-ofc ("blendCurve off "+$bs+" "+$dgt+" "+ $dgtn)
+					$dgtn;
+			$cmd = ("cutKey -cl -t \`currentTime -q\` -at "+$dgt + " " +$bs);
+			checkBox -e 
+					-onc ("setKeyframe "+$bs+"."+$dgt)
+					-ofc $cmd 
+					$kCtlActive[$drop-$ing];
+			$nCtls[$i-$ing] = $dgtn;
+			attrFieldSliderGrp -e -at ($bs + "." + $dgt) ($nCtls[$i-$ing]+"__s");
+		}
+		if($drag<$drop)
+		{
+			string $dgtn = $nCtls[$drag-$ing];
+			renameUI $nCtls[$drag-$ing] "temp";
+			renameUI ($nCtls[$drag-$ing]+"__s") "temp__s";
+			for($i= $drag;$i<$drop;$i++)
+			{
+				$groupInfo[$i]= $groupInfo[$i+1];
+				string $buf[] =  parseCtrl($nCtls[$i-$ing+1]);
+				string $bs = $buf[1];
+				string $target = $buf[0];
+				string $label = `checkBox -q -l $nCtls[$i-$ing+1]`;
+				checkBox -e -l $label
+				//	-onc ("blendCurve on "+$bs+" "+$target+" "+ $nCtls[$i-$ing+1])
+				//	-ofc ("blendCurve off "+$bs+" "+$target+" "+ $nCtls[$i-$ing+1])
+					"temp";
+				$cmd = ("cutKey -cl -t \`currentTime -q\` -at "+$target + " " +$bs);
+				checkBox -e 
+					-onc ("setKeyframe "+$bs+"."+$target)
+					-ofc  $cmd
+					$kCtlActive[$i-$ing];
+				renameUI $nCtls[$i-$ing+1] "temp1";
+				renameUI ($nCtls[$i-$ing+1]+"__s") "temp1__s";
+				renameUI "temp" $nCtls[$i-$ing+1];
+				renameUI "temp__s" ($nCtls[$i-$ing+1]+"__s");
+				$nCtls[$i-$ing] = $nCtls[$i-$ing+1];
+				attrFieldSliderGrp -e -at ($res[1] + "." + $target) 
+										($nCtls[$i-$ing]+"__s");
+				renameUI "temp1" "temp";
+				renameUI "temp1__s" "temp__s";
+			}
+			$groupInfo[$i]=$dragT;
+			renameUI "temp" $dgtn;
+			renameUI "temp__s" ($dgtn+"__s");
+			$label = $dgt;
+		    if(gmatch($label,"*_target"))
+				$label = substring($label,1,size($label)-7);
+			checkBox -e -l $label
+			//	-onc ("blendCurve on "+$bs+" "+$dgt+" "+ $dgtn)
+			//	-ofc ("blendCurve off "+$bs+" "+$dgt+" "+ $dgtn)
+				$dgtn;
+			$cmd = ("cutKey -cl -t \`currentTime -q\` -at "+$dgt + " " +$bs);
+			checkBox -e 
+					-onc ("setKeyframe "+$bs+"."+$dgt)
+					-ofc $cmd 
+					$kCtlActive[$drop-$ing];
+			$nCtls[$i-$ing] = $dgtn;
+			attrFieldSliderGrp -e -at ($res[1] + "." + $dgt) ($nCtls[$i-$ing]+"__s");
+		}
+	}
+	
+	$lastNCtl="";
+}
+
+// set the specified value in all 
+// selected target sliders
+//
+global proc setSelected(string $attrName)
+{
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global string $nCtls[];
+	global int $kCtlIdx[];
+
+	int $sel=0;
+	$val = `getAttr $attrName`;
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		$name=$nCtls[$i];
+		if(`checkBox -q -v $name`)
+			$sel++;
+	}
+	if($sel>1) 
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		$name=$nCtls[$i];
+		if(`checkBox -q -v $name`)
+		{
+			$temp = match(".*__",$name);
+			$split = size($temp);
+			$attr = substring($name,$split+1,size($name));
+			$temp = substring($name,1,$split-2);
+			$group = match(".*__",$temp);
+			$split = size($group);
+			$bs = substring($temp,$split+1,size($temp));
+			$group = substring($group,1,$split-2);
+// Larry:  skip eye control
+           if(`gmatch $attr "*_eye_blink"`)
+		   {
+		   // do Nothing;
+		   }else{
+		   		  setAttr ($bs+"."+$attr) $val;
+		   }
+		}
+	}
+	
+//  Larry: update jaw_control optimal value
+//
+//	if(size(`ls $jaw_control_name`))
+	{
+		float $jawvalue=0;
+		for($target in $kCtlAttrs)
+		{
+			string $buf = $target +"_jaw";
+			if(`gmatch $buf "*_eye_blink*"`) continue;
+			$jawval=`getAttr $buf`*`getAttr $target`;
+			if($jawval>$jawvalue)
+   		    $jawvalue=$jawval;
+		}
+		text -e -l $jawvalue Jaw_Value;
+	}
+		
+}
+
+// selects the curve associated with the
+// specified blend target and initialize 
+// the draggerContext for the virtual slider
+//
+global proc blendCurve(int $onOff,string $shape, string $attr,string $ctrl)
+{
+	global string $nCtls[];
+	global string $lastNCtl;
+
+	// check if ctrl or shift are pressed
+	//
+	$mod = `getModifiers`;
+	$mod = $mod % 256;
+
+
+// Larry:  
+
+		string $curve=$shape+"."+$attr;	
+		if(size(`ls $curve`))
+		 {
+//		    if($onOff)	select -add $curve;
+//			else select -d $curve;
+
+			select -toggle $curve;
+			GraphEditor;
+		 } 
+
+		
+	$attr = $shape+"."+$attr;
+	float $val = `getAttr $attr`;
+	if(`contextInfo -ex blendDragCtx`)
+		 draggerContext -e 
+			-pc ("blendDragSetVal "+$attr)
+			-rc ("blendDragSetVal "+$attr)
+			-dc ("blendDrag "+$attr+" "+$val) blendDragCtx;
+	else
+		 draggerContext 
+			-pc ("blendDragSetVal "+$attr)
+			-rc ("blendDragSetVal "+$attr)
+			-dc ("blendDrag "+$attr+" "+$val) blendDragCtx;
+	setToolTo blendDragCtx;
+}
+
+global proc removeBlendPanel(string $panelName) 
+
+{
+	//print "Remove\n";
+}
+
+global proc deleteBlendPanel(string $panelName) 
+{
+   // if(size(`ls "BSEupdate"`))
+	//	delete BSEupdate;
+}
+
+global proc saveStateBlendPanel(string $panelName)
+{
+	//print "SaveState\n";
+}
+
+global proc bseNewScene()
+
+{
+	global string $kCtlActive[];
+	
+	clear $kCtlActive;
+
+//    if(size(`ls "BSEupdate"`)==0)
+ //       expression -ae true -s "updateBSE" -n BSEupdate;
+
+
+
+	if(`scriptedPanel -ex "blendPanel1"`)
+	{
+		if(`scriptedPanel -ctl -q "blendPanel1"`!="")
+		{
+	/*		lookThroughModelPanel persp blendPanel1;
+			while(`control -ex blendPanel1`)
+				deleteUI blendPanel1;
+			while(`panel -ex blendPanel1`)
+				deleteUI blendPanel1;
+			scriptedPanel -type blendPanel -label "Blend Shape Editor" -unParent ;
+	*/
+		}
+	}
+	else
+		   scriptedPanel -type blendPanel -label "Blend Shape Editor" -unParent ;
+
+}
+
+// create a new group from the selected sliders
+//
+global proc createGroup()
+{
+	global string $nCtls[];
+	global string $groupInfo[];
+	string $ans;
+
+	// get group name
+	//
+	$ans = `promptDialog 
+				-title "Enter Group Name"
+				-message "Group Name:"
+				-button "Ok" 
+				-button "Cancel"
+				-defaultButton "Ok"
+				-cancelButton "Cancel"
+				-dismissString "Cancel"`;
+	if($ans!="Ok") return;
+	$ans=`promptDialog -q -tx`;
+	
+	// replace spaces with _
+	//
+	string $newans;
+	$newans=`substitute " " $ans "_"`;
+	while($newans!=$ans)
+	{
+		$ans = $newans;
+		$newans=`substitute " " $ans "_"`;
+	}
+
+	// create new tab
+	//
+	string $Column = `columnLayout -adj true -parent BSEtab ($ans+"Col")`;
+	tabLayout -e -tl ($ans+"Col") $ans BSEtab;
+
+	// update group info
+	//
+	$n = size($groupInfo);
+	$groupInfo[$n++]="*"+$ans;
+
+	// create composite slider
+	//
+	
+	floatSliderGrp -label "Composite Target" -field true
+                   -minValue 0.0 -maxValue 1.0
+                   -fieldMinValue 0.0 -fieldMaxValue 1.0
+				   -dragCommand ("zwBlendShapeEditorComposite "+$ans)
+                   $ans;
+	separator -h 10 -hr true;
+
+// OKC
+// go through all the facial targets and if it is selected, create a slider in the group
+
+	// add sliders
+	//
+	for($name in $nCtls)
+	{
+		$temp = match(".*__",$name);
+		$split = size($temp);
+		$attr = substring($name,$split+1,size($name));
+		$temp = substring($name,1,$split-2);
+		$group = match(".*__",$temp);
+		$split = size($group);
+		$bs = substring($temp,$split+1,size($temp));
+		$group = substring($group,1,$split-2);
+		if(`checkBox -q -v $name`)
+		{
+			
+// Larry: Create Eye control
+
+			if(`gmatch $attr "*l_eye_blink*"`) 
+			{
+			  loadeyecontrol($bs,$Column,$ans,0,0);
+			  $groupInfo[$n++] = $bs + " " + $attr;
+			  continue;
+			}
+			if(`gmatch $attr "*r_eye_blink*"`) 
+			{
+			  loadeyecontrol($bs,$Column,$ans,0,1);
+			  $groupInfo[$n++] = $bs + " " + $attr;
+			  continue;
+			}
+//			
+			createSlider $Column $bs $attr $ans 0;
+
+//			print ("bs: " + $bs + "\nattr: " + $attr + "\nans: " + $ans + "\nColumn: " + $Column + "\n");
+
+			$groupInfo[$n++]=$bs+" "+$attr;
+		}
+	}
+	
+	// add menuItem for this group
+	//
+	menuItem -p addToGroupMenu -c ("addSelectedToGroup "+$ans) -label $ans ($ans+"Menu");
+
+// OKC
+// enable the parent menu
+
+	menuItem -edit -enable true addToGroupMenu;
+}
+
+// save current group to file
+//
+global proc saveGroup()
+{
+	global string $nCtls[];
+    global string $groupInfo[];
+	global string $groupsDir;
+
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+    string $group = $stl[$sti-1];
+	$out = fopen ($groupsDir+$group+".group","w");
+	int $idx= find($groupInfo,"*"+$group);
+	for($idx++;$groupInfo[$idx]!="" && substring($groupInfo[$idx],1,1)!="*";$idx++)
+		fprint ($out, $groupInfo[$idx]+"\n");
+	fclose($out);
+}
+
+// delete current group
+//
+global proc deleteGroup(string $element)
+{
+    global string $groupInfo[];
+
+	string $newGroups[];
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+    string $group = $stl[$sti-1];
+	deleteUI ($group+"Menu");
+	$group="*"+$group;
+	int $n=0;
+	string $gn="";
+	for($gr in $groupInfo)
+	{
+		if(substring($gr,1,1)=="*")
+		{
+			$gn=$gr;
+		}
+		if($gn!=$group || ($element!="" && $element!=$gr))
+		{
+			$newGroups[$n++]=$gr;
+		}
+	}
+	$groupInfo=$newGroups;
+
+// OKC
+// if no more group, gray-out the "Add Selected To Group" menu
+
+	if (`size($groupInfo)` == 0)
+		menuItem -edit -enable false addToGroupMenu;
+
+	refreshBSE;
+}
+
+// load a group
+//
+global proc loadGroup(string $groupName)
+{
+	global string $nCtls[];
+	global string $groupInfo[];
+	global string $groupsDir;
+	global string $currentBlendShape;
+	global string $gv_operationMode;
+	$gv_operationMode="Reference";
+
+	int $sti = `tabLayout -q -sti BSEtab`;
+	string $stl[] = `tabLayout -q -tl BSEtab`;
+	string $col = $stl[$sti-1];
+	string $filePath;
+	if($groupName=="")
+	{
+		$filePath = `fileDialog -dm ($groupsDir+"*.group")`;
+		if($filePath=="") return;
+	}
+	else
+	{
+		$filePath = $groupsDir+$groupName+".group";
+	}
+	int $n = size($groupInfo);
+	string $buf[];
+	tokenize $filePath "/" $buf;
+	string $fileName = $buf[size($buf)-1];
+	tokenize $fileName "." $buf;
+	$group = $buf[size($buf)-2];
+	$out = fopen ($filePath,"r");
+	if(!$out)
+	{
+		confirmDialog -message ("group "+$filePath+" not found");
+		return;
+	}
+	$filePath=substring($filePath,1,size($filePath)-size($fileName)-7);
+//huang	$filePath = $filePath +"shapes/";
+	$filePath = `optionVar -query "bseLibrary"`;
+	$groupInfo[$n++]="*"+$group;
+	$line = fgetline($out);
+	while($line!="")
+	{
+		// strip \n
+		//
+		$line=substring($line,1,size($line)-1);
+
+		// check if the target is already in the scene
+		//
+		string $buf[];
+		tokenize $line " " $buf;
+		$currentBlendShape=$buf[0];
+		if(!size(`ls $buf[0]`))
+		{
+				confirmDialog -message ("Blend shape "+ $buf[0]+" not found");
+				fclose($out);
+				return;
+		}
+			
+		string $tlist[]= `listAttr -m ($buf[0]+".w")`;
+		if(find($tlist,$buf[1])==-1)
+		{
+
+// Larry : load eye control
+
+		    if(`gmatch $buf[1] "*_eye_blink"`)
+			{
+                 $groupInfo[$n]=$line;
+				 $n++;
+//				 
+			}else{
+
+					$target = substring($buf[1],1,size($buf[1])-7);
+					print ("the target is :" + $target + "\n");
+			
+					$filename= ($filePath+$target+".mb");
+					int $result = `addImportedTarget $filename "mayaBinary"`;
+					if($result)
+					{
+						$groupInfo[$n]=$line;
+						$n++;
+					}
+			}
+		}
+		else
+		{
+			$groupInfo[$n]=$line;
+			$n++;
+		}
+		$line = fgetline($out);
+	}
+	fclose($out);
+
+	// add menuItem for this group
+	//
+	if(`menuItem -ex ($group+"Menu")`)
+		deleteUI ($group+"Menu");
+
+	menuItem -p addToGroupMenu -c ("addSelectedToGroup "+$group) -label $group ($group+"Menu");
+
+// OKC
+// enable the parent menu
+
+	menuItem -edit -enable true addToGroupMenu;
+
+	refreshBSE;
+}
+ 
+global proc addToGroup(string $group, string $target)
+{
+	global string $groupInfo[];
+	global string $currentBlendShape;
+
+	int $idx= find($groupInfo,"*"+$group);
+	$idx++;
+	// test if it's already there
+	//
+	int $i=$idx;
+	while($i<size($groupInfo) && substring($groupInfo[$i],1,1)!="*")
+	{
+		if($groupInfo[$i]==($currentBlendShape+" "+$target))
+			return;
+		$i++;
+	}
+	for($i=size($groupInfo);$i> $idx;$i--)
+		$groupInfo[$i]=$groupInfo[$i-1];
+	$groupInfo[$idx]=$currentBlendShape+" "+$target;
+
+// Larry:  Eye control	
+    if(`gmatch $target "*l_eye_blink*"`) 
+	{
+	  loadeyecontrol($currentBlendShape,($group+"Col"),$group,0,0);
+	  return;
+	}
+    if(`gmatch $target "*r_eye_blink*"`) 
+	{
+	  loadeyecontrol($currentBlendShape,($group+"Col"),$group,0,1);
+	  return;
+	}
+
+	createSlider ($group+"Col") $currentBlendShape $target $group 0;
+
+}
+
+global proc addSelectedToGroup(string $group)
+{
+	global string $kCtlActive[];
+	global string $nCtls[];
+	global string $currentBlendShape;
+
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		if(`checkBox -q -v $nCtls[$i]`)
+		{
+			string $res[] = parseCtrl($nCtls[$i]);
+			$currentBlendShape = $res[1];
+			addToGroup $group $res[0];
+		}
+	}
+}
+
+// script job to update the state of key
+//
+global proc updateBSE()
+{ 
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global int $kCtlIdx[];
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+
+	if(!`tabLayout -ex BSEtab`) return;
+
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		int $idx[];
+		int $t =`currentTime -q`;
+		$idx = `keyframe -time $t -iv -q $kCtlAttrs[$kCtlIdx[$i]]`;
+		if(size($idx)>0)
+			checkBox -e -v true $kCtlActive[$i];
+		else
+			checkBox -e -v false $kCtlActive[$i];
+	}
+
+	if(size(`ls $jaw_control_name`) && `checkBox -ex  Jaw_Box` )
+	{
+		int $idx[];
+		int $t =`currentTime -q`;
+		$idx = `keyframe -time $t -iv -q ($jaw_control_name +"."+$jaw_control_attr)`;
+		if(size($idx)>0)
+			checkBox -e -v true Jaw_Box;
+		else
+			checkBox -e -v false Jaw_Box; 
+	}
+}
+
+global proc string[] parseCtrl(string $name)
+{
+	string $res[];
+
+	// strip path
+	//
+	tokenize $name "|" $res;
+	$name = $res[size($res)-1];
+	$temp = match(".*__",$name);
+	$split = size($temp);
+	$res[0] = substring($name,$split+1,size($name));
+	$temp = substring($name,1,$split-2);
+	$group = match(".*__",$temp);
+	$split = size($group);
+	$res[1] = substring($temp,$split+1,size($temp));
+	$res[2] = substring($group,1,$split-2);
+	
+	return $res;
+}
+		
+// key all sliders on the current tab
+//
+global proc keySel()
+{
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global string $nCtls[];
+	global int $kCtlIdx[];
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		$name=$nCtls[$i];
+		if(`checkBox -q -v $name`)
+		{
+			checkBox -e -v true $kCtlActive[$i];
+			$temp = match(".*__",$name);
+			$split = size($temp);
+			$attr = substring($name,$split+1,size($name));
+			$temp = substring($name,1,$split-2);
+			$group = match(".*__",$temp);
+			$split = size($group);
+			$bs = substring($temp,$split+1,size($temp));
+			$group = substring($group,1,$split-2);
+
+// Larry : Key Eye control
+  
+			if(`gmatch $attr "*_eye_blink"`) 
+			{
+				setKeyframe ($attr + ".rotateX") ;
+				continue;
+			}
+			setKeyframe ($bs+"."+$attr);
+		}
+	}
+
+	if(size(`ls $jaw_control_name`))
+		if(`checkBox -q -v Jaw_Icon`)
+		{
+			checkBox -e -v true Jaw_Box;
+			setKeyframe ($jaw_control_name+ "." +$jaw_control_attr);
+		}
+}
+
+
+// OKC
+// reset all sliders to 0
+
+global proc resetAll()
+{
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global string $nCtls[];
+	global int $kCtlIdx[];
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		$name=$nCtls[$i];
+
+//		checkBox -e -v true $kCtlActive[$i];
+		$temp = match(".*__",$name);
+		$split = size($temp);
+		$attr = substring($name,$split+1,size($name));
+		$temp = substring($name,1,$split-2);
+		$group = match(".*__",$temp);
+		$split = size($group);
+		$bs = substring($temp,$split+1,size($temp));
+		$group = substring($group,1,$split-2);
+
+// Larry : Reset Eye control
+
+		if(`gmatch $attr "*_eye_blink"`) 
+		{
+			setAttr ($attr + ".rotateX") 0;
+			continue;
+		}
+		setAttr ($bs+"."+$attr) 0;
+	}
+
+	if(size(`ls $jaw_control_name`))
+	{
+//		checkBox -e -v true Jaw_Box;
+		setAttr ($jaw_control_name+ "." +$jaw_control_attr) 0;
+	}
+}
+
+
+// key all sliders on the current tab
+//
+global proc unkeySel()
+{
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global string $nCtls[];
+	global int $kCtlIdx[];
+	global string $jaw_control_name;
+	global string $jaw_control_attr;
+
+	for($i=0;$i<size($kCtlActive);$i++)
+	{
+		$name=$nCtls[$i];
+		if(`checkBox -q -v $name`)
+		{
+			checkBox -e -v false $kCtlActive[$i];
+			$temp = match(".*__",$name);
+			$split = size($temp);
+			$attr = substring($name,$split+1,size($name));
+			$temp = substring($name,1,$split-2);
+			$group = match(".*__",$temp);
+			$split = size($group);
+			$bs = substring($temp,$split+1,size($temp));
+			$group = substring($group,1,$split-2);
+
+// Larry : Reset Eye control
+  
+			if(`gmatch $attr "*_eye_blink"`) 
+			{
+				cutKey -cl -t `currentTime -q` -at rotateX $attr;
+				continue;
+			}
+
+			cutKey -cl -t `currentTime -q` -at $attr $bs;
+		}
+	}
+	if(size(`ls $jaw_control_name`))
+	if(`checkBox -q -v Jaw_Icon`)
+	{
+		checkBox -e -v false Jaw_Box;
+		cutKey -cl -t `currentTime -q` -at $jaw_control_attr $jaw_control_name;
+	}
+}
+
+global proc int find(string $table[],string $s)
+{
+	for($i=0;$i<size($table);$i++)
+	{
+		if($table[$i]==$s)
+			return $i;
+	}
+	return -1;
+}
+
+global proc blendDragSetVal(string $attr)
+{
+	if(`draggerContext -q -bu blendDragCtx`==1)
+		setToolTo Move;
+	else
+	{
+		float $val =`getAttr $attr`;
+		draggerContext -e -dc ("blendDrag "+$attr+" "+$val) blendDragCtx;
+	}
+}
+
+global proc blendDrag(string $attr,float $val)
+{
+	$dragStart=`draggerContext -q -ap blendDragCtx`;
+	$dragEnd=`draggerContext -q -dp blendDragCtx`;
+	float $newVal =  ($val+($dragEnd[0]-$dragStart[0])/200);
+	if($newVal<0) $newVal=0;
+	if($newVal>1) $newVal=1;
+	setAttr $attr $newVal;
+}
+
+proc string kcBSgetNodeCV(string $nodeAttr)
+{
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+	{
+		string $result = $buf[0];
+
+		for ($i = 1; $i < size($buf) - 1; $i++)
+			$result = $result + "." + $buf[$i];
+
+		return $result;
+	}
+
+	return $nodeAttr;
+}
+
+//
+// Check that attribute is either xValue, yValue or zValue.
+// If so, return the other 2 attribute strings.
+//
+
+proc string[] kcBSisVtxAttr(string $nodeAttr)
+{
+	string $result[];
+	
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+		if (`strcmp $buf[size($buf) - 1] "xValue"` == 0)
+		{
+			for ($i = 0; $i < size($buf) - 1; $i++)
+			{
+				$result[0] = $result[0] + $buf[$i] + ".";
+				$result[1] = $result[1] + $buf[$i] + ".";
+			}
+
+			$result[0] = $result[0] + "yValue";
+			$result[1] = $result[1] + "zValue";
+			$result[2] = "xyz";
+		}
+		else
+		if (`strcmp $buf[size($buf) - 1] "yValue"` == 0)
+		{
+			for ($i = 0; $i < size($buf) - 1; $i++)
+			{
+				$result[0] = $result[0] + $buf[$i] + ".";
+				$result[1] = $result[1] + $buf[$i] + ".";
+			}
+
+			$result[0] = $result[0] + "xValue";
+			$result[1] = $result[1] + "zValue";
+			$result[2] = "yxz";
+		}
+		else
+		if (`strcmp $buf[size($buf) - 1] "zValue"` == 0)
+		{
+			for ($i = 0; $i < size($buf) - 1; $i++)
+			{
+				$result[0] = $result[0] + $buf[$i] + ".";
+				$result[1] = $result[1] + $buf[$i] + ".";
+			}
+
+			$result[0] = $result[0] + "xValue";
+			$result[1] = $result[1] + "yValue";
+			$result[2] = "zxy";
+		}
+
+	return $result;
+}
+
+proc float kcBSgetComponentDrivenKey(string $nodeAttr, string $buf[], int $count, float $time)
+{
+	while ($count < size($buf))
+	{
+//print("buf:***" + $buf[$count] + "***\n");
+		if (`strcmp $buf[$count++] $nodeAttr` == 0)
+		{
+			int $temp_keyCount = $buf[$count++];
+
+			for ($i = 0; $i < $temp_keyCount; $i++)
+			{
+				float $temp_time = $buf[$count++];
+				float $temp_key = $buf[$count++];
+				string $temp_inTangent = $buf[$count++];
+				string $temp_outTangent = $buf[$count++];
+
+				if ($temp_time == $time)
+					return $temp_key;
+			}
+		}
+	}
+
+	return -10000.0;
+}
+
+proc int kcBSisScaleAttr(string $nodeAttr)
+{
+	string $buf[];
+
+	if (`tokenize $nodeAttr "." $buf` > 0)
+		if ((`gmatch $buf[size($buf) - 1] "scale*"`) || 
+		    (`gmatch $buf[size($buf) - 1] "sx"`)     ||
+		    (`gmatch $buf[size($buf) - 1] "sy"`)     ||
+		    (`gmatch $buf[size($buf) - 1] "sz"`))
+			return true;
+
+	return false;
+}
+
+global proc kcBSapplyDrivenKey(string $driver, string $drivenKey)
+{
+	string $buf[];
+
+	if (`tokenize $drivenKey " " $buf` > 0)
+	{
+		int $count = 0;
+
+		while ($count < size($buf))
+		{
+			string $drivenNode = $buf[$count++];
+			int $keyCount = $buf[$count++];
+
+			string $result[] = kcBSisVtxAttr($drivenNode);
+
+			if (`size $result` > 0)
+			{
+				// if driven key is set on vertex, have to use "setAttr" to set the values first before set driven key
+				// because set driven key automatically set keys on xValue, yValue, zValue
+
+				for ($i = 0; $i < $keyCount; $i++)
+				{
+					float $time = $buf[$count++];
+					float $key = $buf[$count++];
+					string $inTangent = $buf[$count++];
+					string $outTangent = $buf[$count++];
+
+					// look for the other 2 components
+
+					float $key2 = kcBSgetComponentDrivenKey($result[0], $buf, $count, $time);
+
+					if ($key2 == -10000.0)		// cannot find the other component, meaning the driven key has been set previously
+						continue;
+
+					float $key3 = kcBSgetComponentDrivenKey($result[1], $buf, $count, $time);
+
+					if ($key3 == -10000.0)		// cannot find the other component, meaning the driven key has been set previously
+						continue;
+
+					// set vertex to driven key value
+
+					string $nodeCV = kcBSgetNodeCV($drivenNode);
+
+					if (`objExists $nodeCV`)
+					{
+						float $pos[] = `getAttr $nodeCV`;
+						move -relative (-$pos[0]) (-$pos[1]) (-$pos[2]) $nodeCV;
+
+						if ($result[2] == "xyz")
+						{
+							print("setDrivenKey - " + $driver + ":" + $nodeCV + " " + $time + ":" + $key + " " + $key2 + " " + $key3 + "\n");
+							move -relative $key $key2 $key3 $nodeCV;
+						}
+						else
+							if ($result[2] == "yxz")
+							{
+								print("setDrivenKey - " + $driver + ":" + $nodeCV + " " + $time + ":" + $key2 + " " + $key + " " + $key3 + "\n");
+								move -relative $key2 $key $key3 $nodeCV;
+							}
+							else
+							{
+								// order is "zxy"
+								print("setDrivenKey - " + $driver + ":" + $nodeCV + " " + $time + ":" + $key2 + " " + $key3 + " " + $key + "\n");
+								move -relative $key2 $key3 $key $nodeCV;
+							}
+
+						// set driven key
+
+						setDrivenKeyframe -currentDriver $driver -driverValue $time -inTangentType $inTangent -outTangentType $outTangent $nodeCV;
+
+						// reset to zero
+
+						float $pos[] = `getAttr $nodeCV`;
+						move -relative (-$pos[0]) (-$pos[1]) (-$pos[2]) $nodeCV;
+					}
+				}
+			}
+			else
+			{
+				for ($i = 0; $i < $keyCount; $i++)
+				{
+					float $time = $buf[$count++];
+					float $key = $buf[$count++];
+					string $inTangent = $buf[$count++];
+					string $outTangent = $buf[$count++];
+
+					if (`objExists $drivenNode`)
+					{
+						if (`getAttr -lock $drivenNode`)
+							warning($drivenNode + " is locked. Cannot set driven key.");
+						else
+						{
+							// set driven key
+
+							print("setDrivenKey - " + $driver + ":" + $drivenNode + " " + $time + ":" + $key + "\n");
+
+							if (kcBSisScaleAttr($drivenNode))
+							{
+								// scale attribute
+
+								setAttr $drivenNode $key;
+								
+								setDrivenKeyframe -currentDriver $driver -driverValue $time -inTangentType $inTangent -outTangentType $outTangent $drivenNode;
+								
+								setAttr $drivenNode 1;
+							}
+							else
+								setDrivenKeyframe -currentDriver $driver -driverValue $time -value $key -inTangentType $inTangent -outTangentType $outTangent $drivenNode;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc addJawAttr(string $blendshape,string $target)
+{
+	string $Attrname = $target+"_jaw";
+	if (!`attributeExists $Attrname $blendshape`)
+		addAttr -ln $Attrname -at "float" -s 1 -r 1 -w 1 $blendshape;
+	string $attrs[] = `listAttr -ud  $target`;
+	float $refjaw =0.0;
+	if(find($attrs,"jawrot")!=-1)
+	 	$refjaw =`getAttr ($target + ".jawrot")`;
+	setAttr ($blendshape + "." + $Attrname) $refjaw;
+}
+
+global proc deleteJawAtrr(string $blendshape,string $target)
+{
+	string $targetstr = $blendshape+"."+$target+"_jaw";
+	deleteAttr $targetstr;
+}
+
+
+// Larry:   remove target from group
+
+global proc removeFromGroup(string $name, string $group)
+{
+	global string $groupInfo[];
+	string $buf[] = $groupInfo;
+	clear $groupInfo;
+	string $member;
+	int $inGroup = 0;
+	int $index = 0;
+	for($member in $buf)
+	{
+		if(substring($member,1,1)=="*")
+		{
+			if($member == ("*"+$group))
+				$inGroup = 1;
+			else
+				$inGroup = 0;
+			$groupInfo[$index] = $member;
+			$index ++;
+			continue;
+		}
+
+		if(!$inGroup)
+		{
+			$groupInfo[$index] = $member;
+			$index ++;
+			continue;
+		}
+		else
+		{
+			if(!`gmatch $member ("*" + $name + "*")`)
+			{
+				$groupInfo[$index] = $member;
+				$index ++;
+			}
+		}
+	}
+	clear $buf;
+	refreshBSE;  
+}
+
+global proc selectAlltarget(int $onoff,string $blendshape,string $group)
+{
+	global string $nCtls[];
+	string $buf, $name;
+	string $indexctl = $group+"__" + $blendshape;
+	for($buf in $nCtls)
+	{
+		if(`gmatch $buf ($indexctl+"*")`)
+		{
+			checkBox -edit -value $onoff $buf;
+			$name = `checkBox -query -docTag $buf`;
+			if(`gmatch $name "*_eye_blink"`)
+				eyecontrolcheck $onoff $name;
+			else
+				blendCurve $onoff $blendshape $name $buf;
+		}
+	}
+}
+
+
+// Larry:   load eye cluster clontrol in blendshape editor.
+//
+
+global proc loadeyecontrol(string $bs,string $parent,string $group,int $onoff,int $LR)
+{
+
+   string $baseshape = getBaseShape($bs);
+   string $buff[];
+   int $basepart = `tokenize $baseshape "_" $buff`;
+   string $basename = $buff[0];
+   $basename = substring($basename,2,size($basename));
+   string $leye = $basename + "_l_eye_blink";
+   string $reye = $basename + "_r_eye_blink";
+   string $name;
+   if($LR==0) $name = $leye;
+   else $name = $reye;
+ 
+   if(size(`ls $name`) != 1) return;
+  
+	global int $nctls;
+	global string $kCtls[];
+	global string $nCtls[];
+	global string $kCtlAttrs[];
+	global string $kCtlActive[];
+	global int $BSEshowIcons;
+
+
+    // add slider
+    //
+	string $rlo =`rowLayout -p $parent -numberOfColumns 7 -adjustableColumn 4 -columnWidth 1 30 -columnWidth 2 180 -columnWidth 5 50 -columnWidth 6 65`;
+	$kCtlAttrs[$nctls] = ($name + ".rotateX");
+	$ctrlName= ($group+"__"+$bs+"__"+$name);
+	$label = $name;
+	if(gmatch($label,"*_target"))
+		$label = substring($label,1,size($label)-7);
+
+	button -label "GE" -annotation "Graph Anim Curves" -command ("eyecontrolcheck 1 " + $name);
+
+	checkBox
+		-onc ("eyecontrolcheck 1 " +$name)
+		-ofc ("eyecontrolcheck 0 " +$name)
+		-w 180
+		-h 26
+		-l $label
+		-docTag $name
+	$ctrlName;
+
+	popupMenu -button 3;
+	menuItem -l $name ;
+	menuItem -d true;
+	menuItem -l "Select All" -c ("selectAlltarget 1 " + $bs + " " + $group);
+	menuItem -l "Deselect All" -c ("selectAlltarget 0 " + $bs + " " + $group);
+
+	if(!$onoff)
+	{
+		menuItem -d true;
+		menuItem -l "Remove From Group" -c ("removeFromGroup " + $name + " " + $group);
+	}
+
+// add facial target icons beside the slider if it is turned on
+
+	image -w 1 -h 1 -visible false;
+	if ($BSEshowIcons)
+		rowLayout -e -columnWidth 3 (64 + 10) $rlo;
+	else
+		rowLayout -e -columnWidth 3 10 $rlo;
+
+	global float $Eyerange;
+	
+	$as = `attrFieldSliderGrp
+		-at ($name + ".rotateX")
+		-cw 1 1
+                -cw 2 60
+                -min (0-$Eyerange)
+		-max $Eyerange
+		-step 0.1
+		-l "      "
+		($ctrlName+"__eyeS")`;
+
+	$cmd = ("cutKey -cl -t \`currentTime -q\` -at rotateX " + $name);
+//	separator;
+	
+	$kCtls[$nctls] = `checkBox
+		-l "Key"
+		-p $rlo
+		-onc ("setKeyframe "+$name + ".rotateX")
+		-ofc  $cmd
+		("keyCb_"+$nctls)`;
+	
+	$nctls++;
+    
+	if($onoff)
+	{
+		floatField -value $Eyerange -w 55 ($ctrlName+"__eyeR");
+		floatField -e -cc ("rangechanged " + ($ctrlName+"__eyeR")) ($ctrlName+"__eyeR");
+		text -label "(+/-)Range";
+	}
+
+	rowLayout -e -rowAttach 1 "top" 0 $rlo;
+
+	// slider
+	rowLayout -e -rowAttach 4 "both" 0 $rlo;
+
+	// button
+	rowLayout -e -rowAttach 6 "both" 0 $rlo;
+}
+
+// Larry:   range change command proc
+
+global proc rangechanged(string $itself)
+{
+	global float $Eyerange;
+	$Eyerange = `floatField -q -value $itself`;
+	string $buff[] = `lsUI -controls`;
+	string $tmpctl;
+	for($tmpctl in $buff)
+	{
+		if($tmpctl == $itself)
+			continue;
+		if(`gmatch $tmpctl "*__eyeR"`)
+			floatField -e -value $Eyerange $tmpctl;
+		if(`gmatch $tmpctl "*__eyeS"`) 
+		{
+			$cmd = ("attrFieldSliderGrp -e -min -" + $Eyerange + " -max " + $Eyerange + " " + $tmpctl);
+			eval $cmd;
+		}
+	}
+}
+
+global proc eyecontrolcheck(int $onoff,string $eye)
+{	
+	if(size(`ls $eye`))
+	{
+	//	if($onoff)
+	//		select -add $eye;
+	//	else
+	//		select -d $eye;
+		select -toggle $eye;
+		GraphEditor;
+	} 
+}
+
+//huang
+global proc importBlendShape(int $pastekey, string $blendShape)
+{
+	global string $gv_operationMode;
+	$gv_operationMode="Reference";
+	
+	int $key, $index, $i;
+	string $str, $base, $target, $history, $reference[], $buffer[];
+
+	if (`attributeExists "reference" $blendShape`)
+	{
+		$buffer = `blendShape -query -geometry $blendShape`;
+		$base = $buffer[0];
+
+		$str = `getAttr ($blendShape + ".reference")`;
+		tokenize $str "\n" $reference;
+
+		$history = `historyPopupFill $base 0 0`;
+
+		if($pastekey)
+			$key = `copyKey -time ":" -hierarchy none -controlPoints 0 -shape 1 {$blendShape}`;
+
+		delete $blendShape;
+		select $base;
+		blendShape -name $blendShape;
+
+		tokenize $history " " $buffer;
+		if ($blendShape != $buffer[0])
+		{
+			for ($i=1; $i<size($buffer); $i++)
+			{
+				if($buffer[$i] == $blendShape)
+				{
+					$index = $i - 1;
+					break;
+				}
+			}
+			reorderDeformers $buffer[$index] $blendShape $base;
+		}
+
+		if ($str != "")
+		{
+			for ($str in $reference)
+				addImportedTarget $str "mayaBinary";
+		}
+
+		if ($key)
+			pasteKey -time 1 -float 1 -option insert -copies 1 -connect 1 -timeOffset 0 -floatOffset 0 -valueOffset 0 {$blendShape};
+	}
+	else
+		convertBlendShape $blendShape;
+
+	refreshBSE;
+}
+
+global proc convertBlendShape(string $blendShape)
+{
+	string $str, $command, $target, $reference, $targets[], $references[], $buffer[];
+
+	$targets = `listAttr -multi ($blendShape + ".weight")`;
+	$references = `file -query -reference`;
+	for ($reference in $references)
+	{
+		tokenize $reference "/" $buffer;
+		$str = $buffer[size($buffer)-1];
+		$str = `substring $str 1 (size($str)-3)` + "_target";
+		for ($target in $targets)
+		{
+			if ($target == $str)
+			{
+				$command += $reference + "\n";
+				file -loadReference `file -query -referenceNode $reference` $reference;
+				file -rr $reference;
+				break;
+			}
+		}
+	}
+	addAttr -longName "reference" -dataType "string" $blendShape;
+	setAttr -type "string" ($blendShape + ".reference") $command;
+}
+
+global proc exportBlendShapeAnimBrowse(string $bs)
+{
+	global string $currentBlendShape;
+	$currentBlendShape = $bs;
+	catch( `loadPlugin -quiet "animImportExport.mll"`);
+	fileBrowserDialog -mode 1 -fileCommand "exportBlendShapeAnim" -fileType "animExport" -actionName "Export";
+}
+
+global proc exportBlendShapeAnim(string $filename, string $fileType)
+{
+	string $blendShape, $str, $reference, $buffer[];
+	int $fileId;
+
+	global string $currentBlendShape;
+	$blendShape = $currentBlendShape;
+	select $blendShape;
+
+	if (`attributeExists "reference" $blendShape`)
+	{
+		$reference = `getAttr ($blendShape + ".reference")`;
+		tokenize $reference "\n" $buffer;
+		$reference = "//Start of Blend Shape Animation\n";
+		for($str in $buffer)
+			$reference += "//" + $str + "\n";
+		$reference += "//End of Blend Shape Animation\n";
+	}
+	else
+		error "The BlendShape is empty.";
+	
+	$filename = `file -exportSelected -type $fileType $filename`;
+	$fileId = `fopen $filename "a"`;
+	fprint $fileId $reference;
+	fclose $fileId;
+}
+
+global proc importBlendShapeAnimBrowse(string $bs)
+{
+	global string $currentBlendShape;
+	$currentBlendShape = $bs;
+
+	catch( `loadPlugin -quiet "animImportExport.mll"`);
+	fileBrowserDialog -mode 0 -fileCommand "importBlendShapeAnim" -fileType "animImport" -actionName "Import";
+}
+
+global proc importBlendShapeAnim(string $filename, string $fileType)
+{
+	string $blend, $nextLine, $str;
+
+	global string $currentBlendShape;
+	$blend = $currentBlendShape;
+	
+	int $fileId = `fopen $filename "r"`;
+	$nextLine = `fgetline $fileId`;
+	do
+	{
+		if($nextLine == "//Start of Blend Shape Animation\n")
+		{
+			do{
+				$nextLine = `fgetline $fileId`;
+				if ($nextLine == "//End of Blend Shape Animation\n")
+					break;
+				$str += `substring $nextLine 3 (size($nextLine))`;
+				
+			}while (!`feof $fileId`);
+		}
+		else
+			$nextLine = `fgetline $fileId`;
+	}while (!`feof $fileId`);
+	fclose $fileId;
+
+	if (!`attributeExists "reference" $blend`)
+		addAttr -longName "reference" -dataType "string" $blend;
+	setAttr -type "string" ($blend + ".reference") $str;
+	importBlendShape 0 $blend;
+	select $blend;
+	catch( `loadPlugin -quiet "animImportExport.mll"`);
+	file -import -type $fileType $filename;
+}
+
+global proc blendShapeConnect(string $bs, string $connectMenu)
+{
+	string $str, $buffer[];
+	menu -edit -deleteAllItems $connectMenu;
+	setParent -menu $connectMenu;
+	$buffer = filterFacialBlendShape();
+	if(size($buffer) == 1)
+		menuItem -label "None" -enable false;
+	else
+	{
+		menuItem -label "None" -command ("blendShapeConnectProc " + $bs + " \"\"");
+		menuItem -d true;
+		for ($str in $buffer)
+		{
+			if($str != $bs)
+				menuItem -label $str -command ("blendShapeConnectProc " + $bs + " " + $str);
+		}
+	}
+}
+
+global proc blendShapeConnectProc(string $source, string $destination)
+{
+	string $str, $str1, $str2, $sour[], $dest[], $buffer[], $buffer1[];
+	$sour = `listAttr -multi ($source + ".weight")`;
+	for ($str in $sour)
+	{
+		if(size(`connectionInfo -destinationFromSource ($source + "." + $str)`))
+		{
+			$buffer = `connectionInfo -destinationFromSource ($source + "." + $str)`;
+			for($str1 in $buffer)
+			{
+				tokenize $str "_" $buffer1;
+				$str2 = `substring $str (size($buffer1[0]) + 1) (size($str))`;
+				if(`gmatch $str1 ("*" + $str2)`)
+					disconnectAttr ($source + "." + $str) $str1;
+			}
+		}
+	}
+	if ($destination != "")
+	{
+		$dest = `listAttr -multi ($destination + ".weight")`;
+		for ($str in $sour)
+		{
+			tokenize $str "_" $buffer;
+			$str1 = `substring $str (size($buffer[0]) + 1) (size($str))`;
+			for ($str2 in $dest)
+			{
+				tokenize $str2 "_" $buffer;
+				$str3 = `substring $str2 (size($buffer[0]) + 1) (size($str2))`;
+				if($str1 == $str3)
+				{
+					connectAttr ($source + "." + $str) ($destination + "." + $str2);
+					break;
+				}
+			}
+		}
+	}
+}
+
+global proc zwBlendShapeEditor()
+{
+	// OKC
+	global int $BSEshowIcons = false;	// flag to show icons
+
+// Larry
+//  Note: Base object name must start with xxx_ to enable eye control the eye cluster name must be xxx_eye_l_blink and xxx_eye_r_blink
+
+	global float $Eyerange = 10.0;     // The default eye control range.(-10 to 10);
+
+	// Shape library browser
+	global string $shapeLibraries[];
+	global string $shapeLibrary;
+	global string $groupsDir;
+	if( `optionVar -ex bseGroupsDir`)
+		$groupsDir=`optionVar -q bseGroupsDir`;
+	else
+	{
+		$groupsDir=`workspace -q -rd`+"groups/";
+		if(!`file -q -ex $groupsDir`)
+		{
+			if(`about -nt`)
+			{
+				system ("mkdir \""+replace("/","\\",$groupsDir) + "\"");
+			}
+			else
+				system("mkdir "+$groupsDir);
+		}
+	}
+
+	if( `optionVar -ex bseLibrary`)
+		$shapeLibrary=`optionVar -q bseLibrary`;
+	else
+	{
+		$shapeLibrary=`workspace -q -rd`+"shapes/";
+		if(!`file -q -ex $shapeLibrary`)
+		{
+			if(`about -nt`)
+				system ( "mkdir \""+replace("/","\\",$shapeLibrary) + "\"");
+			else
+				system("mkdir "+$shapeLibrary);
+		}
+	}
+
+	global string $currentDirBrowser;
+	$currentDirBrowser = `pwd`+"/";
+	global string $tsl;
+
+
+	// Improved blend shape editor
+	if(!`scriptedPanelType -ex blendPanel`)
+	{
+		//  Define the callbacks for the blendPanel
+		scriptedPanelType
+			-createCallback     "createBlendPanel"
+			-addCallback        "addBlendPanel"
+			-removeCallback     "removeBlendPanel"
+			-deleteCallback     "deleteBlendPanel"
+			-saveStateCallback  "saveStateBlendPanel"
+			-unique true
+			blendPanel;
+	}
+	bseNewScene;
+	global int $sjn,$sjn2;
+	global string $currentBlendShape;
+	global string $jaw_control_name= "jaw_control";
+	global string $jaw_control_attr= "open";
+	global string $groupInfo[];
+	global int $refresh=1;
+	global float $INIT_JAW_MIN = 0;
+	global float $INIT_JAW_MAX = 10;
+	global float $jaw_min = 0;
+	global float $jaw_max = 10;
+
+	if($sjn==0)
+		$sjn =`scriptJob -e "SceneOpened" "bseNewScene"`;
+	if($sjn2==0)
+		$sjn2 =`scriptJob -e "timeChanged" "updateBSE"`;
+
+	// add hotkeys
+	//
+	nameCommand -annotation "Key Selected" -command keySel keySelNC;
+	nameCommand -annotation "Unkey Selected" -command unkeySel unkeySelNC;
+	hotkey -k "j" -name "keySelNC";
+	hotkey -k "J" -name "unkeySelNC";
+}
+
+
+//----------------------------------------------------update-----------------------------------------------------------------------------------------
+
+global proc string connectionType(string $type, string $mode)
+{
+	string $attrOut;
+	if ($mode == "out")
+	{
+		switch ($type)
+		{
+			case "mesh":
+				$attrOut	="worldMesh[0]";
+				break;
+			case "nurbsSurface":
+				$attrOut	="worldSpace[0]";
+				break;
+			case "blendShape":
+				$attrOut	="outputGeometry[0]";
+				break;
+			case "nurbsCurve":
+				$attrOut	="worldSpace[0]";
+				break;
+			case "lattice":
+				$attrOut	="worldLattice[0]";
+				break;
+		}
+	}
+	else if ($mode == "in")
+	{
+		switch ($type)
+		{
+			case "mesh":
+				$attrOut	="inMesh";
+				break;
+			case "nurbsSurface":
+				$attrOut	="create";
+				break;
+			case "blendShape":
+				$attrOut	="worldMesh[0]";
+				break;
+			case "nurbsCurve":
+				$attrOut	="create";
+				break;
+			case "lattice":
+				$attrOut	="latticeInput";
+				break;
+		}
+	}
+	return $attrOut;
+}
+
+global proc int aliasWeight(string $blendShape, string $attr)
+{
+	string $buf[];
+	int $i, $aliasWeight = -1;
+
+	$buf = `aliasAttr -query $blendShape`;
+	for ($i=0; $i<size($buf); $i+=2)
+	{
+		if ($buf[$i] == $attr)
+		{
+			$aliasWeight = `substring $buf[($i+1)] 8 (size($buf[($i+1)]) - 1)`;
+			return $aliasWeight;
+		}
+	}
+	if (`gmatch $attr "weight[*"`)
+		$aliasWeight = `substring $attr 8 (size($attr) - 1)`;
+
+	return $aliasWeight;
+}
+
+global proc substituteTarget(string $blendShape, string $attr, string $target)
+{
+	string $type = `nodeType $target`;
+	if ($type == "transform")
+	{
+		string $buf[] = `listRelatives -children $target`;
+		$target = $buf[0];
+		$type = `nodeType $target`;
+	}
+	string $connectionType = `connectionType $type "out"`;
+	string $source = $target  + "." + $connectionType;
+	
+	int $aliasWeight = `aliasWeight $blendShape $attr`;
+	string $dest = $blendShape +  ".inputTarget[0].inputTargetGroup[" + $aliasWeight + "].inputTargetItem[6000].inputGeomTarget";
+
+	connectAttr -force $source $dest;
+}
+
+global proc string BStargetFile(string $blendShape, string $attr)
+{
+	string $file, $buf[], $buf1[];
+	if (`attributeExists "reference" $blendShape`)
+	{
+		string $reference = `getAttr ($blendShape + ".reference")`;
+		tokenize $reference "\n" $buf;
+		for ($reference in $buf)
+		{
+			if (`tokenize $reference "/." $buf1` > 1)
+			{
+				if ($buf1[size($buf1)-2] + "_target" == $attr)
+				{
+					$file = $reference;
+					break;
+				}
+			}
+		}
+	}
+	if (!`filetest -f $file`)
+		$file = "";
+	
+	return $file;
+}
+
+global proc updateTarget(string $blendShape, string $attr)
+{
+	string $selection[] = `ls -sl`;
+
+	string $file = `BStargetFile $blendShape $attr`;
+	if ($file == "")
+		return;
+
+	file -reference $file;
+
+	if(`objExists $attr`)
+		catch (`substituteTarget $blendShape $attr $attr`);
+
+	file -removeReference $file;
+
+	select $selection;
+}
+
+global proc updateAllTarget(string $blendShape)
+{
+	string $attr, $attrs[];
+	$attrs = `listAttr -multi ($blendShape + ".weight")`;
+	for ($attr in $attrs)
+		updateTarget $blendShape $attr;
+}
+
+//----------------------------------------------------delete target----------------------------------------------------------------------------------
+
+global proc removeTarget(string $blendShape, string $attr, int $refresh)
+{
+	string $selection[] = `ls -sl`;
+
+	string $materialize[] = `BSmaterializeTarget $blendShape $attr`;
+	string $obiektBshowy = `tempBlendShape $blendShape`;
+	int $AutentycznaWaga = `aliasWeight $blendShape $attr`;
+
+	//musimy sprawdzic czy ma inbetweeny
+	string $zwroconetargety = `getTarget $blendShape $attr`;
+	blendShape -e -rm -t $obiektBshowy $AutentycznaWaga $zwroconetargety 1;
+	if (`size $materialize`)
+	{
+		for ($objwe in $materialize)
+		{
+			if(`objExists  $objwe`)
+				delete $objwe;
+		}
+	}
+	delete $obiektBshowy;
+
+	deleteJawAtrr $blendShape $attr;
+	$target = `substring $attr 1 (size($attr) - 7)`;
+	string $reference, $str, $buffer[];
+	$reference = `getAttr ($blendShape + ".reference")`;
+	tokenize $reference "\n" $buffer;
+	$reference = "";
+	for ($str in $buffer)
+	{
+		if (!`gmatch $str ("*" + $attr + "*")`)
+			$reference += $str + "\n";
+	}
+	setAttr -type "string" ($blendShape + ".reference") $reference;
+	if($refresh)
+		refreshBSE;
+
+	select -clear;
+	for ($obj in $selection)
+	{
+		if (`objExists $obj`)
+			select -add $obj;
+	}
+}
+
+global proc removeSelectedTarget()
+{
+	global string $kCtlActive[];
+	global string $kCtlAttrs[];
+	global string $nCtls[];
+
+	string $blend, $target, $reference, $str, $buffer[];
+
+	// get all the selected targets
+	for ($i = 0; $i < size($kCtlActive); $i++)
+	{
+		string $name = $nCtls[$i];
+
+		if (`checkBox -query -value $name`)
+		{
+			if (`gmatch $name "*_target"`)
+			{
+				string $buf[];
+				tokenize $kCtlAttrs[$i] "." $buf;
+
+				$blend = $buf[0];
+				$target = $buf[1];
+				
+				removeTarget $blend $target 0;
+			}
+		}
+	}
+
+	refreshBSE;
+}
+
+global proc string getTarget(string $blendShape, string $name)
+{
+	int $index = `aliasWeight $blendShape $name`;
+	string $geometrie;
+	string $coPodlaczyc = $blendShape +  ".inputTarget[0].inputTargetGroup[" + $index  + "].inputTargetItem[6000].inputGeomTarget";
+	string $meShZrodlowy[] = `listConnections -s 1 -d 0 -scn 1 $coPodlaczyc`;
+	if (`size $meShZrodlowy`)
+	{
+		select -r $meShZrodlowy[0];
+		return $meShZrodlowy[0];
+	}
+	else
+	{
+		warning "!!! target geometry is dematerialized !!!";
+		return "";
+	}
+}
+
+global proc string[] BSmaterializeTarget(string $blendShape, string $attr)
+{
+	string $tempTargets[];
+	$tempTargets[0] = $attr;
+	string $aliasy[] = `listAttr -m ($blendShape +".w")`;
+	float $wartosci[];
+	string $zmaterializowane[];
+	string $coBlokuje[];
+	$j=0;
+	for ($waga in $aliasy)
+	{
+		$wartosci[$j] = `getAttr ($blendShape + "."+ $waga)`;
+		$j++;
+	}
+	int $g = 0;
+	string $objee =`tempBlendShape $blendShape`;
+	string $typ =`blendShapeType $blendShape`;
+	string $loc[] = `createGeometry  ("Targety_" + $blendShape) "locator"`;
+	string $tempBShGeom[];
+	for ($target in $tempTargets)
+	{
+		string $AutentycznaWaga = `aliasWeight $blendShape $target`;
+		string $coPodlaczyc = $blendShape +  ".inputTarget[0].inputTargetGroup[" + $AutentycznaWaga + "].inputTargetItem[6000].inputGeomTarget";
+		string $meshZrodlowy[] = `listConnections -s 1 -d 0 -scn 1 $coPodlaczyc`;
+
+		//tworzymy lokator grupujacy jezeli nie istnieje
+		if (`size $meshZrodlowy` == 0)
+		{
+			$tempBShGeom = `createGeometry  $target  $typ`;
+			string $path[] = ` parent -r  $tempBShGeom[0] $loc[0]`;
+
+			//setuje wszystkie targety na zero
+			$i=0;
+			for ($waga in $aliasy)
+			{
+
+				//zablokowane
+				$coBlokuje = ` listConnections -d 1 -s 1 ($blendShape + "."+ $waga)`;
+				if ( `size $coBlokuje`    )
+				{
+					catch (`setAttr ($coBlokuje[0] + ".nodeState") 2`);
+				}
+				setAttr ($blendShape + "."+ $waga) 0;
+				$i++;
+			}
+
+			//setuje target wybrany na 1	(chyba trzeba odjac)
+			setAttr ($blendShape + "." + $target  ) 1;
+			connectAttr -f ($blendShape + "." +  (`connectionType "blendShape" "out"`)) ($tempBShGeom[1] + "." +  (`connectionType $typ "in"`));
+			refresh;
+			setAttr ($blendShape + "." + $waga) 0;
+			disconnectAttr ($blendShape + "." +  (`connectionType "blendShape" "out"`)) ($tempBShGeom[1] + "." +  (`connectionType $typ "in"`));
+			connectAttr -f ($tempBShGeom[1] + "." +  (`connectionType $typ "out"`)) ($blendShape +  ".inputTarget[0].inputTargetGroup[" + $AutentycznaWaga + "].inputTargetItem[6000].inputGeomTarget") ;
+			$zmaterializowane[$g] = $tempBShGeom[0];
+		}
+		$g++;
+	}
+	delete $objee;
+
+	//ponownie wracamy do starych wartosci bSh
+	$j=0;
+	for ($target in $aliasy)
+	{
+		setAttr ($blendShape + "."+ $target) $wartosci[$j];
+		if ( `size $coBlokuje`    )
+		{
+			setAttr ($coBlokuje[0] + ".nodeState") 0;
+		}
+		$j++;
+	}
+
+	return $zmaterializowane;
+}
+
+global proc string tempBlendShape (string $blendShape)
+{
+	//zwraca virtualnego base z bSh
+	string $typ =`blendShapeType $blendShape`;
+	string $loc[] = `createGeometry  ("Targety_" + $blendShape) "locator"`;
+	string $tempBShGeom[] = `createGeometry  ($blendShape + "_temp_Object") $typ`;
+	setAttr ($blendShape + ".envelope") 0;
+	connectAttr -f ($blendShape + "." +  (`connectionType "blendShape" "out"`)) ($tempBShGeom[1] + "." +  (`connectionType $typ "in"`));
+	setAttr ($blendShape + ".envelope") 1;
+	string $path[] = ` parent -r  $tempBShGeom[0] $loc[0]`;
+
+	return $path[0];
+}
+
+global proc string blendShapeType (string $bSh)
+{
+	//sprawdza jakiego typu jest bSh
+	string $oneNodeBefore[] = `listConnections -sh 1 -s 0  -d 1 -scn 1 ($bSh + ".outputGeometry[0]")`;
+	string $historyPast[] = `listHistory -f 1 $oneNodeBefore[0]`;
+	string $typ;
+	$typ = `nodeType $oneNodeBefore[0]`;
+	if  (  $typ == "mesh" ||  $typ == "nurbsSurface" || $typ == "nurbsCurve"  || $typ == "lattice"  )
+	{
+		return $typ;
+	}
+	for ($node in $historyPast)
+	{
+		$typ = `nodeType $node`;
+		if (  ($typ == "mesh") ||  ($typ == "nurbsSurface") || ($typ == "nurbsCurve")  )
+		{
+			return $typ;
+		}
+	}
+	string $Sell[] = `ls -sl -dag -lf   ` ;
+	if (  !`size   $Sell` )
+	{
+		error ("Can`t determine type of geometry. Select object if possible");
+	}
+	$typ = `nodeType $Sell[0]`;
+
+	return $typ;
+}
+
+global proc string[] createGeometry (string $name, string $typ)
+{
+	//generator geometri w zaleznosci od typu potrzebnego
+	string $nazwa[];
+	string $transform;
+	string $shape;
+	switch ($typ)
+	{
+		case "locator":
+			if (`objExists $name ` == 0 )
+				{
+				string $locGrupujacyTargety = `createNode transform -n $name`;
+				createNode locator -n ($name + "Shape") -p $locGrupujacyTargety;
+				$nazwa[0] = $locGrupujacyTargety;
+				return $nazwa;
+				}
+			$nazwa[0] = $name;
+			return $nazwa;
+			break;
+
+		case "mesh":
+			$transform = `createNode "transform" -n $name`;
+			$nazwa[0] =	$transform ;
+			$shape = `createNode "mesh"  -p $transform -n ($name + "Shape") `;
+			sets -e -forceElement initialShadingGroup;
+			$nazwa[1] = $shape;
+			break;
+
+		case "nurbsSurface":
+			$transform = `createNode "transform" -n $name`;
+			$nazwa[0] =	$transform ;
+			$shape = `createNode "nurbsSurface"  -p $transform -n ($name + "Shape") `;
+			sets -e -forceElement initialShadingGroup;
+			$nazwa[1] = $shape;
+			break;
+
+		case "nurbsCurve":
+			$transform = `createNode "transform" -n $name`;
+			$nazwa[0] =	$transform ;
+			$shape = `createNode "nurbsCurve"  -p $transform -n ($name + "Shape") `;
+			$nazwa[1] = $shape;
+			break;
+
+		case "lattice":
+			$transform = `createNode "transform" -n $name`;
+			$nazwa[0] =	$transform ;
+			$shape = `createNode "lattice"  -p $transform -n ($name + "Shape") `;
+			$nazwa[1] = $shape;
+			break;
+	}
+
+	return $nazwa;
+}
+
+//---------------------------------------------------------------------------------------------------------------------------------------------------

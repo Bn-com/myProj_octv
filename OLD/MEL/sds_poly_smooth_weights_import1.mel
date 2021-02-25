@@ -1,0 +1,187 @@
+/*  This file downloaded from Highend3d.com
+''  
+''  Highend3d.com File Information:
+''  
+''    Script Name: sds_poly_smooth_weights_import v1.0
+''    Author: s.d.serbos
+''    Last Updated: March 26, 2001
+''    Update/Change this file at:
+''    http://www.highend3d.com/maya/mel/?section=animation#946
+''  
+''  Please do not alter any information above this line
+''  it is generated dynamically by Highend3d.com and will
+''  be changed automatically on any updates.
+*/
+
+//----------------------------------------------------------------------------------------------------------------
+// MODIFY THIS AT YOUR OWN RISK
+//
+// Creation Date:  23 March 2001
+// Author:         S. D. Serbos <serbos@alpha.fdu.edu>
+// Home Pages	   http://alpha.fdu.edu/~serbos
+//		   http://www.sorceron.com
+// 
+//
+//  Procedure Name:
+//
+//      sds_poly_smooth_weights_import (version 1.0)   (Bug reports are welcome) 
+//
+//  Description:
+//
+//     	This script will import polygon point weights that were exported with
+//		"sds_export_poly_smooth_weights.mel"
+//	
+//	
+//
+//
+//  Instructions:
+//
+//
+//	1) Select a polygon model that is "soft bound" to a skeleton.
+//	2) Run the script.
+//	3) Select the "*.pwt" for this object that you had previously exported.
+//	4) You point weights should be the same as when you exported these wights.
+//
+//   Comments:
+//		
+//	Bug reports are welcome.
+//	
+//
+//	History:
+//
+//	23 March 2001
+//	----------------
+//	The birthday of this script.
+//----------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+global proc sds_poly_smooth_weights_import1 (string $element)
+{
+	//GET FILE NAME
+	string $file2use = (`workspace -q -act` + "/pwt/" +$element+ ".pwt");
+	int $countVtx = 0;
+	int $SkinClusterConnectionCount = 0;
+
+	//GET SURFACE AND NUMBER OF VERTICES
+	string $ShapeOfElement[] = `listRelatives -c -type mesh $element`;	
+	string $vtxrange[] = `polyListComponentConversion -tv $ShapeOfElement[0]`;
+	string $vtxUnit[]=`filterExpand -ex true -sm 31 $vtxrange[0]`;
+	int $vtxCount =  `size $vtxUnit`;
+	
+	if ($ShapeOfElement[0] != "")
+	{	
+		//FIND SKINCLUSTER FOR SURFACE
+		string $jjunk[] = `listHistory $ShapeOfElement[0]`;
+		string $isBound[] = `ls -typ skinCluster $jjunk`;
+		int $totalSkinClustersFound = `size $isBound`;
+		if  ($totalSkinClustersFound != 0)
+		{	
+			//GET NORMALIZE STATUS OF SKIN CLUSTER
+			int $normalizeWeightsStatus = `getAttr ($isBound[0] + ".normalizeWeights")`;
+			string $SkinClusterConnections[] = `listConnections ($isBound[0] + ".matrix")`;
+
+			//GET WEIGHTING INFO FROM FILE
+			$fileId=`fopen $file2use "r"`;
+			int $lineArray = 0;
+			string $line[];
+			$line[0] = `fgetline $fileId`;
+			while ( size ($line[$lineArray]) != 0 )
+			{
+				$lineArray++;
+				$line[$lineArray] = `fgetline $fileId`;
+			}
+			
+			//GET NUMBER OF JOINTS	
+			int $howManyJoints = ((`size $line`) -1);
+
+			//TURN NORMALIZE WEIGHTS OFF
+			if ($normalizeWeightsStatus == 1)
+			{
+				setAttr ($isBound[0] + ".normalizeWeights") false;
+			}
+
+			//SET WEIGHTS TO DEFAULT
+			skinPercent -rtd $isBound[0];
+
+			int $count;
+			waitCursor -state on;
+			string $jt_list[];
+			int $j = 0;
+			int $ii;
+			for ($ii = 0; $ii <= 1; $ii++)
+			{
+				for ( $count=0;  $count < ($howManyJoints); $count++ )
+				{
+					string $currentPaintOnConnection[] = `listConnections ($isBound[0] + ".ptt")`;
+					if (`size $currentPaintOnConnection` != 0)
+					disconnectAttr ($currentPaintOnConnection[0]+ ".message") ($isBound[0] + ".ptt");
+					string $jjjunk[];
+					tokenize $line[$count] "\n" $jjjunk;
+					if($ii==0)
+					{
+						$jt_list[$j] = $jjjunk[0];
+						$j++;
+					}
+					connectAttr ($jjjunk[0] + ".message") ($isBound[0] + ".ptt");
+					$count++;
+					
+					$runThis = ("setAttr " + $isBound[0] + ".ptw -type doubleArray " + $vtxCount + " " + $line[$count]);
+					eval $runThis;
+					refresh;
+					currentTime `currentTime -q`;		//just another way of refreshing	
+				}
+			}
+
+			//ZERO OUT ANY NEW JOINTS
+			string $non_jts[];
+			int $n = 0;
+			string $all_joints[] = `ls -type joint`;
+			for($jt in $all_joints)
+			{
+				int $found = 0;
+				for($jt1 in $jt_list)
+				{
+					if(`strcmp $jt $jt1`==0)
+					{
+						$found = 1;
+						break;
+					}
+				}
+				if($found==0)
+				{
+					$non_jts[$n] = $jt;
+					$n++;
+				}
+			}
+			
+			//GET TRANSFORMS FOR BIND
+			string $trans[] = `skinCluster -q -influence $isBound[0]`;
+			for($tran in $trans)
+			{
+				for($non_jt in $non_jts)
+				{
+					if(`strcmp $tran $non_jt`==0)
+					{
+						print ("UNBIND JOINT: "+$non_jt+" FROM SKINCLUSTER: "+$isBound[0]+"\n");
+						skinCluster -e -ri $non_jt $isBound[0];
+					}
+				}
+			}
+			clear $jt_list;
+			clear $non_jts;
+
+			//RESET NORMALIZE WEIGHTS
+			if ($normalizeWeightsStatus == 1)
+			setAttr ($isBound[0] + ".normalizeWeights") true;
+			refresh;
+					
+			fclose $fileId;
+		}
+	}
+	hilite -u "*";
+	waitCursor -state off;
+	print ("FINISHED WEIGHTING: "+$element+"\n\n");
+}

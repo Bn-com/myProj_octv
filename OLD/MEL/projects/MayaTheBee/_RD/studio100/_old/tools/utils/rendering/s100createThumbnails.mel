@@ -1,0 +1,363 @@
+global proc s100batchCreationOfThumbnailsOnBank()
+{
+global string $currentProdBank_path ;
+
+$bank = $currentProdBank_path ;
+
+string $listAllFiles[] = `s100listAllFilesForBatchRender ($bank) `;
+s100createThumbnails($listAllFiles , "small");
+}
+
+global proc string[] s100listAllFilesForBatchRender(string $bank)
+{
+
+//characters
+$bankC = $bank + "01_Characters/" ;
+
+string $listA[]  = `s100listAllAssetRootFolder($bankC)`;
+string $listA2[]  = `s100listAllAssetModFolder($listA) `;
+string $matchsFile[] = {"*.ma"} ;
+string $returnC[] = s100ReturnListFileInFoldersList($listA2 ,$matchsFile ) ;
+
+
+//locations
+$bankL = $bank + "02_Locations/" ;
+
+string $listA[]  = `s100listAllAssetRootFolder($bankL)`;
+string $listA2[]  = `s100listAllAssetModFolder($listA) `;
+string $matchsFile[] = {"*.ma"} ;
+string $returnL[] = s100ReturnListFileInFoldersList($listA2 ,$matchsFile ) ;
+
+
+//props
+$bankP = $bank + "03_Props/" ;
+
+string $listA[]  = `s100listAllAssetRootFolder($bankP)`;
+string $listA2[]  = `s100listAllAssetModFolder($listA) `;
+string $matchsFile[] = {"*.ma"} ;
+string $returnP[] = s100ReturnListFileInFoldersList($listA2 ,$matchsFile ) ;
+
+//vegetations
+$bankV = $bank + "04_Vegetations/" ;
+
+string $listA[]  = `s100listAllAssetRootFolder($bankV)`;
+string $listA2[]  = `s100listAllAssetModFolder($listA) `;
+string $matchsFile[] = {"*Hi.ma"} ;
+string $returnV[] = s100ReturnListFileInFoldersList($listA2 ,$matchsFile ) ;
+
+
+
+string $tmpA[] = stringArrayCatenate( $returnC , $returnL) ;
+$tmpA = stringArrayCatenate( $tmpA , $returnP) ;
+$tmpA = stringArrayCatenate( $tmpA , $returnV) ;
+return $tmpA ;
+}
+//print $listA2 ;
+
+global proc s100createThumbnailsForMVCheck()
+{
+$fNameS = `file -q -sn -shortName`;
+$start = startString($fNameS, 5 ) ;
+
+if($start == "MA_MV")
+{
+$fName = `file -q -modified`;
+
+	if($fName == 1)
+	{
+	$message = "save change to " + $fNameS +" ?";
+	$returnConf = `confirmDialog -title "scene was modified" -message $message
+		-button "Yes" -button "No" -button  "Cancel" -defaultButton "Yes"
+		-cancelButton "cancel" -dismissString "No"`;
+
+		if($returnConf == "Yes")
+		{
+		file -s;
+		s100createThumbnailsForMV ;
+		}
+		if($returnConf == "No")
+		{
+		s100createThumbnailsForMV ;
+		}
+    }else{
+
+    }
+
+
+	s100createThumbnailsForMV ;
+
+    }else{
+	warning "scene does not look like a micro vegetation scene" ;
+    }
+}
+
+global proc s100createThumbnailsForMV()
+{
+$file = `file -q -sn `;
+
+$batch[0] = $file ;
+s100createThumbnails($batch,"thumb");
+s100createThumbnails($batch,"small");
+
+
+
+
+file -f -o $file ;
+}
+
+
+
+
+
+
+
+global proc s100createThumbnails(string $path[] , string $version)
+{
+		float $iF2 = 0;
+		float $maxF = 100  ;
+		int $amount = 0;
+
+
+		 progressWindow
+			-maxValue 100
+			 -title ("transfering skin" )
+			 -progress $amount
+			 -status "% done : 0%"
+			 -isInterruptable false;
+
+	for($i  = 0 ; $i < size($path) ; $i++)
+	{
+	$iF = $i ;
+	$nFile = s100prepareAssetToBeRender($path[$i] , $version, 0)  ;
+
+	s100renderThumbnails($nFile,$version) ;
+	sysFile -delete $nFile ;
+
+
+	$amount = ($iF2 / size($path)) * 100  ;
+	progressWindow -edit
+	-progress $amount
+	-status ( "% done :"+ $amount +" % ");
+
+	print ("\n" + $path[$i] + " done" ) ;
+
+
+    }
+progressWindow -endProgress;
+
+}
+
+global proc s100prepareAssetToBeRenderManUI()
+{
+$file = `file -q -sn `;
+
+
+	$message = "save change to " + $file +" ?";
+
+	$returnConf = `confirmDialog -title "scene was modified" -message $message
+		-button "Yes" -button "No" -button  "Cancel" -defaultButton "Yes"
+		-cancelButton "cancel" -dismissString "No"`;
+
+		if($returnConf == "Yes" )
+		{
+		file -s ;
+		s100prepareAssetToBeRenderManRun ;
+        }
+
+		if($returnConf == "No" )
+		{
+		s100prepareAssetToBeRenderManRun ;
+
+        }
+
+
+
+
+
+
+}
+
+global proc s100prepareAssetToBeRenderManRun()
+{
+$file = `file -q -sn `;
+s100prepareAssetToBeRenderMan ($file, "renderScene",0 ) ;
+}
+
+global proc string s100prepareAssetToBeRenderMan(string $pathS,string $version,int $handMade)
+{
+
+//$version = "renderScene" ;
+//$handMade = 0 ;
+
+
+file -s ;
+$baseN = basename($pathS, ".ma") ;
+$thumbF = `s100returnAssetRootFolder($pathS) `;
+string $mod[] = `s100returnModFolder( $pathS)`;
+$thumbF += $mod[0] +"renderScene/" ;
+
+$renderFile  = `s100VCRlocateRenderScene`;
+$ch = `sysFile -md $thumbF `;
+
+$thumbF += "_tmp" ;
+string $add ;
+
+	if($handMade == 1)
+	$add = "_handMaded";
+$nPath = $thumbF + $baseN +"_" +$version+$add +".ma" ;
+
+$ch = `sysFile -md $thumbF `;
+$ch = `sysFile -copy $nPath $renderFile `;
+string $return = $nPath  ;
+	if($ch == 1)
+	{
+	file -f -o $nPath ;
+	file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace "renderScene" -options "v=0;p=17" $pathS;
+	file -s ;
+	$attr = `listAttr -l ("render_cam") `;
+		for($attrT in $attr)
+		{
+		setAttr -l 0 ("render_cam." +$attrT) ;
+        }
+	$attr = `listAttr -l ("render_camShape") `;
+		for($attrT in $attr)
+		{
+		setAttr -l 0 ("render_camShape." +$attrT) ;
+        }
+
+	setAttr "render_camShape.orthographic" 0;
+	setAttr "render_camShape.overscan" 2;
+
+	select `ls -type "mesh" -visible `;
+ 	viewFit "render_cam";
+	select "render_cam";
+	fitPanel  -selected;
+	s100VCRsmoothAllMeshes("renderScene:") ;
+
+	shadingNode -asTexture envBall;
+	shadingNode -asUtility place3dTexture;
+	connectAttr place3dTexture1.wim[0] envBall1.pm;
+	connectAttr -force envBall1.message mia_physicalsky1.background;
+	setAttr "defaultRenderGlobals.imageFormat" 8;
+
+    }
+return $return ;
+}
+
+
+global proc string s100prepareAssetToBeRender(string $pathS,string $version,int $handMade)
+{
+
+//$version = "small" ;
+//$handMade = 0 ;
+
+
+
+$baseN = basename($pathS, ".ma") ;
+
+string $array[] = stringToStringArray($baseN , "_") ;
+string $baseN = "" ;
+
+	for($i = 0 ; $i < 4 ; $i++)
+	{
+		$baseN += $array[$i] ;
+			if($i < 3)
+			$baseN +=  "_"	;
+    }
+
+
+
+$thumbF = `s100returnAssetThumbFolder($pathS) `;
+$renderFile  = `s100VCRlocateRenderScene`;
+$ch = `sysFile -md $thumbF `;
+$thumbF += "_tmp" ;
+string $add ;
+if($handMade == 1)
+$add = "_handMaded";
+$nPath = $thumbF + $baseN +"_" +$version+$add +".ma" ;
+
+$ch = `sysFile -md $thumbF `;
+$ch = `sysFile -copy $nPath $renderFile `;
+string $return = $nPath  ;
+	if($ch == 1)
+	{
+	file -f -o $nPath ;
+	file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace "renderScene" -options "v=0;p=17" $pathS;
+	file -s ;
+	$attr = `listAttr -l ("render_cam") `;
+		for($attrT in $attr)
+		{
+		setAttr -l 0 ("render_cam." +$attrT) ;
+        }
+	$attr = `listAttr -l ("render_camShape") `;
+		for($attrT in $attr)
+		{
+		setAttr -l 0 ("render_camShape." +$attrT) ;
+        }
+
+	setAttr "render_camShape.orthographic" 0;
+	setAttr "render_camShape.overscan" 2;
+
+	setAttr "render_cam.tx" -1.5;
+	setAttr "render_cam.ty" 1.1;
+	setAttr "render_cam.tz" 1;
+
+	setAttr "render_cam.rx" -25;
+	setAttr "render_cam.ry" -50;
+	setAttr "render_cam.rz" 0;
+
+
+	select `ls -type "mesh" -visible `;
+
+ 	viewFit "render_cam";
+	select "render_cam";
+	fitPanel  -selected;
+	s100VCRsmoothAllMeshes("renderScene:") ;
+
+	shadingNode -asTexture envBall;
+	shadingNode -asUtility place3dTexture;
+	connectAttr place3dTexture1.wim[0] envBall1.pm;
+	connectAttr -force envBall1.message mia_physicalsky1.background;
+	setAttr "defaultRenderGlobals.imageFormat" 20;
+
+    }
+return $return ;
+}
+
+global proc s100renderThumbnails(string $pathS,string $version)
+{
+// $pathS = $return ;
+setAttr "defaultRenderGlobals.imageFormat" 20;
+
+$basN =basenameEx($pathS) ;
+$basNS =basename($pathS,"") ;
+$sub = substituteAllString($pathS , $basNS , "") ;
+$cleanName = $sub + $basN +".bmp" ;
+$rez = `s100CTBgetRes($version) `;
+$test1 = `Mayatomr -pv -xResolution $rez -yResolution $rez`;
+
+$cleanName = substituteAllString($cleanName , "_tmp","");
+
+sysFile -rename $cleanName $test1 ;
+sysFile -delete  $test1 ;
+}
+
+global proc int s100CTBgetRes(string $version)
+{
+int $ret ;
+
+if($version =="thumb")
+	$ret = 30;
+if($version =="small")
+	$ret = 100;
+if($version =="medium")
+	$ret = 300;
+if($version =="large")
+	$ret = 600;
+if($version =="prev")
+	$ret = 150;
+
+
+
+return $ret;
+}

@@ -1,0 +1,208 @@
+
+global proc s1Convert3dBankToFBXBankLaunchUI()
+{
+loadPluginLanguageResources( "fbxmaya", "fbxmaya.pres.mel");
+pluginInfo -edit -autoload true "C:/Program Files/Autodesk/Maya2009/bin/plug-ins/fbxmaya.mll";
+
+	if(`window -q -exists "Convert2FBXUI"`)
+			deleteUI Convert2FBXUI;
+window -title "Convert2FBXUI" -rtf 1  Convert2FBXUI;
+columnLayout -adj 1;
+text -l "tools to convert all the ";
+text -l "Maya files into a folder ";
+text -l "to FBX files i another folder";
+separator -h 20 ;
+
+text -label "source folder : " ;
+textFieldButtonGrp -buttonLabel  "select" -buttonCommand ("s1Convert3dBankToFBXBankExpUI(0)") s1Convert3dBankToFBXBankLaunchUISource;
+separator -h 20 ;
+text -l "destination Folder" ;
+textFieldButtonGrp -buttonLabel  "select" -buttonCommand ("s1Convert3dBankToFBXBankExpUI(1)") s1Convert3dBankToFBXBankLaunchUIDest;
+separator -h 20 ;
+progressBar progressConvertFbx ;
+
+separator ;
+button -label "Convert 2 FBX" -c "s1Convert3dBankToFBXBankLaunchFromUI";
+
+showWindow;
+textFieldButtonGrp -e -text "Y:/000_BANK/Bank_3d" s1Convert3dBankToFBXBankLaunchUISource ;
+textFieldButtonGrp -e -text "Y:/000_BANK/bank_deepView/" s1Convert3dBankToFBXBankLaunchUIDest ;
+
+}
+
+global proc s1Convert3dBankToFBXBankLaunchFromUI()
+{
+$source = `textFieldButtonGrp -q -text s1Convert3dBankToFBXBankLaunchUISource `;
+$dest = `textFieldButtonGrp -q -text s1Convert3dBankToFBXBankLaunchUIDest `;
+
+s1Convert3dBankToFBXBankLaunch($source, $dest) ;
+}
+
+global proc s1Convert3dBankToFBXBankExpUI(int $case)
+{
+string $button ;
+string $command ;
+if ($case == 0 )
+	{
+	$button = "s1Convert3dBankToFBXBankLaunchUISource";
+	$command = "s1Convert3dBankToFBXBankLaunchUISourceCmd";
+    }else{
+	$button = "s1Convert3dBankToFBXBankLaunchUIDest";
+	$command = "s1Convert3dBankToFBXBankLaunchUIDestCmd";
+
+    }
+fileBrowserDialog -m 4 -fc $command -ft "directory"  -an "Import_Image" ;
+
+
+}
+
+global proc  s1Convert3dBankToFBXBankLaunchUISourceCmd(string $filename, string $fileType )
+{
+textFieldButtonGrp -e -text $filename s1Convert3dBankToFBXBankLaunchUISource ;
+}
+
+
+global proc  s1Convert3dBankToFBXBankLaunchUIDestCmd(string $filename, string $fileType )
+{
+textFieldButtonGrp -e -text $filename s1Convert3dBankToFBXBankLaunchUIDest ;
+}
+
+
+global proc s1Convert3dBankToFBXBankLaunch(string $pathSource, string $pathDest)
+{
+$listFolder = `s1ListAllSubFolder($pathSource) ` ;
+$listMayaFiles = `s1ListAllMayaScene($listFolder ) `;
+/*
+$listFolder = `s1ListAllSubFolder($source) ` ;
+$listMayaFiles = `s1ListAllMayaScene($listFolder ) `;
+$pathSource = $source ;
+$pathDest = $dest ;
+*/
+$currentScene = `file -q -sceneName `;
+
+progressBar -e  -endProgress progressConvertFbx ;
+
+$siz = size($listMayaFiles) ;
+progressBar -e -minValue 0 -maxValue $siz progressConvertFbx ;
+
+	for ($tmp in $listMayaFiles  )
+	{
+	print ("\n-----------------\nopen the files : \n----------\n" + $tmp + "\n");
+	file -f -options "v=0"  -ignoreVersion -o $tmp;
+	s1CleanSceneForFBX ;
+	s1Convert3dBankToFBXBank($pathSource,$pathDest) ;
+	progressBar -e -step 1 progressConvertFbx ;
+
+	}
+progressBar -e  -endProgress progressConvertFbx ;
+file -force -open  $currentScene ;
+
+}
+
+
+
+
+/*
+global proc s1CleanSceneForFBX()
+{
+	if (`objExists "Sets"`)
+		delete "Sets" ;
+$ls = `ls -type reference`;
+	for($tmp in $ls)
+	{
+	file -ir `referenceQuery -f $tmp`;
+	}
+$smooth = `ls -type polySmoothFace ` ;
+	if(size($smooth) > 0)
+		delete $smooth  ;
+select -all ;
+DeleteHistory;
+
+$var2 = `ls -type mesh`;
+	for ($tmp in $var2)
+	{
+	$check = nodeIsVisible($tmp) ;
+		if($check == 0 )
+			delete $tmp ;
+	}
+$var = `ls -sl -dag`;
+
+$var2 = `ls -type mesh`;
+
+$dup = `duplicate -rc $var2 `;
+$grp = `group -em -n "group_exportFBX" `;
+parent $dup $grp;
+
+delete $var ;
+setAttr ($grp + ".rx" ) 90 ;
+setAttr ($grp + ".rz" ) -90 ;
+
+$var = `ls -type mesh`;
+	for ($vart in $var)
+	{
+	polySmooth  -mth 0 -dv 1 -c 1 -kb 0 -ksb 1 -khe 0 -kt 1 -kmb 1 -suv 1 -peh 0 -sl 1 -dpe 1 -ps 0.1 -ro 1 -ch 1 $vart ;
+
+    }
+
+}
+*/
+/*
+
+global proc s100convertAll()
+{
+
+s1Convert3dBankToFBXBankLaunch($pathSource, $pathDest);
+s1Convert3dBankToFBXBankLaunch($pathSource, $pathDest);
+
+}
+
+
+*/
+global proc int nodeIsVisible( string $node )
+{
+  // If user is asking about a bogus node, return FALSE.
+  if ( !`objExists $node` ) return false;
+
+  // Object must be a DAG node, or it's not visible.
+
+  // There's no MEL query to identify a DAG node, but the kDagNode class adds
+  // the '.visibility' attribute, so we'll use its existence as a cue.
+
+  if ( !`attributeQuery -node $node -exists "visibility"` ) return false;
+
+  // The obvious: Start with the '.visibility' attribute on the node.
+  int $visible = `getAttr ( $node + ".visibility" )`;
+
+
+  // If this is an intermediate mesh, it's not visible.
+  if ( `attributeQuery -node $node -exists "intermediateObject"` )
+  {
+    $visible = $visible && !`getAttr ( $node + ".intermediateObject" )`;
+
+  }
+
+  // If the object is in a displayLayer, and the displayLayer is hidden,
+  // then the object is hidden.
+  if ( `attributeQuery -node $node -exists "overrideEnabled"` &&
+
+       `getAttr ( $node + ".overrideEnabled" )` )
+  {
+    $visible = $visible && `getAttr ( $node + ".overrideVisibility" )`;
+  }
+
+  // Ascend the hierarchy and check all of the parent nodes.
+
+  if ( $visible )
+  {
+    string $parents[] = `listRelatives -parent $node`;
+    if ( `size $parents` > 0 )
+    {
+      $visible = $visible && nodeIsVisible( $parents[0] );
+    }
+  }
+
+
+  return $visible;
+}
+
+

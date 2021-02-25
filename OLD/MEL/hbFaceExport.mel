@@ -1,0 +1,122 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: hb
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc unlockTransform (string $obj)
+{
+	string $attrs[];
+	$attrs[0] = "tx";
+	$attrs[1] = "ty";
+	$attrs[2] = "tz";
+	$attrs[3] = "rx";
+	$attrs[4] = "ry";
+	$attrs[5] = "rz";
+	$attrs[6] = "sx";
+	$attrs[7] = "sy";
+	$attrs[8] = "sz";
+	$attrs[9] = "visibility";
+	for ($attr in $attrs)
+		setAttr -keyable true -lock false ($obj + "." + $attr);
+}
+
+proc exportFace (string $filename, string $fileType )
+{
+	file -options "v=0"  -chn 0 -con 0 -exp 0 -sh 0 -type "mayaBinary" -preserveReferences -exportSelected $filename;
+	
+}
+
+proc optimize (string $filename)
+{
+	waitCursor -state on;
+	//string $cmd_1 = "\"cleanUpScene(3); file -save; \"";
+	
+	string $mayalocation =`getenv "MAYA_LOCATION"`;
+	string $cmd = ("\"\"" + $mayalocation + "/bin/mayabatch.exe \" -command \"cleanUpScene(3); file -save;\" -file " + "\"" + $filename + "\"\"");
+	system $cmd;
+
+	//system ("D:\\Alias\\MAYA6~1.0\\bin\\mayabatch.exe -command " + $cmd_1 + " -file " + "\"" + $filename + "\"" );
+	waitCursor -state off;
+}
+
+global proc makeFace (string $filename, string $fileType)
+{
+	string $select[] = `ls -sl`;
+	if ((`size $select` == 0) ||(`nodeType $select[size($select)-1]` != "blendShape") )
+		error ("Please select the Removing Faces first, and a BlendShape Node last.");
+	select -d $select[size($select)-1];
+	string $slFaces[] = `filterExpand -sm 34 -ex 1`;
+	string $BSnode = $select[size($select)-1];
+	string $orgSkinShape[1] = `selectedNodes -dagObjects`;
+	string $orgSkin[1] = `listTransforms $orgSkinShape[0]`;
+	string $name = $orgSkin[0];
+	string $pxName = $name + "_PX";
+	string $temName_1 = $name + "_TEM_1";
+
+	string $pxBlendShape = $name + "_pxBlendShape";
+	string $RMfaces[];
+
+	int $BScount = 50 ;//`blendShape -q -weightCount $BSnode`;
+
+	duplicate -rr -ic -n $temName_1 $name;
+
+
+	select -cl;
+	for ($i = 0 ; $i < (size($slFaces)) ; $i++ )
+	{
+		$RMfaces[$i] = `substitute $orgSkin[0] $slFaces[$i] $temName_1`;
+		select -add $RMfaces[$i];
+	}
+
+	catch(`delete`) ;
+	unlockTransform $temName_1;
+
+	duplicate -rr -n $pxName $temName_1;
+
+	if (`objExists $pxBlendShape`)
+		delete $pxBlendShape;
+	blendShape -n $pxBlendShape $pxName;
+
+	for ($i = 0; $i < $BScount; $i++ )
+	{
+		string $bsAttr = ($BSnode + ".weight[" + $i + "]");
+		string $pxAttr = ($pxBlendShape + ".weight[" + $i + "]");
+		string $sAttr = `connectionInfo -sourceFromDestination $bsAttr`;
+		if ($sAttr != "")
+			disconnectAttr $sAttr $bsAttr;
+		if (`getAttr -l $bsAttr`)
+			setAttr -lock 0 $bsAttr;
+		setAttr $bsAttr 1;
+		duplicate -rr -n ($name + "_target" + $i) $temName_1;
+		setAttr $bsAttr 0;
+		if ($sAttr != "")
+			connectAttr $sAttr $bsAttr;
+
+		blendShape -e -t  $pxName $i ($name + "_target" + $i) 1 ($pxBlendShape);
+
+		string $tgName = `aliasAttr -q $bsAttr`;
+		if ($tgName != "")
+			aliasAttr $tgName $pxAttr;
+		delete ($name + "_target" + $i);
+	}
+
+	string $layer[] = `listConnections -type displayLayer ($pxName+".drawOverride")`;
+	if (size($layer)!= 0)
+		delete $layer[0];
+
+	parent -world $pxName;
+	select -r $pxName;
+	exportFace ($filename, $fileType );
+	optimize ($filename);
+
+}
+
+global proc hbFaceExport ()
+{
+	fileBrowserDialog -mode 1 -fileCommand "makeFace" -fileType "mayaBinary" -actionName "Export_Face" -operationMode "ExportAll";
+}

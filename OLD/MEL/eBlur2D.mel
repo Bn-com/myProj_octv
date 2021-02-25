@@ -1,0 +1,205 @@
+/*  This file downloaded from Highend3d.com
+''  
+''  Highend3d.com File Information:
+''  
+''    Script Name: eBlur2D v1.1
+''    Author: Elie Jamaa / David Hofmann
+''    Last Updated: January 9, 2003
+''    Update/Change this file at:
+''    http://www.highend3d.com/maya/mel/?section=rendering#2092
+''  
+''  Please do not alter any information above this line
+''  it is generated dynamically by Highend3d.com and will
+''  be changed automatically on any updates.
+*/
+
+/*
+      ----------------------------------------------------------
+                 Elie Jamaa - Double Negative
+                eBlur2D.mel - GUI for A|W's blur2D
+         Comments and suggestions welcome -> elie@dneg.com
+      ----------------------------------------------------------
+
+Results will only be visible on images rendered with "Keep Motion Vectors" turned on in the Render Globals
+
+modified by David Hofmann (dh@traumkinder.de) to work on NT and Linux (and probably IRIX also)
+now also includes the "max memory" setting introduced with Maya 4.0
+
+Usage:
+ render one image with 2D motion blur, but with "keep motion vectors" set to ON. 
+ Run the script. Select the rendered image (which will have no motion blur) and 
+ it will load into you render view. Each time you click "Apply" blur2d will be 
+ executed in the background and the blured image will automatically be loaded 
+ into the render view. You can compare different settings just like you can with 
+ normal renderings. Each time you hit apply you will also get a sample command 
+ line in the script editor that you can use to blur your sequence later. 
+
+Results will only be visible on images rendered with "Keep Motion Vectors" turned on in the Render Globals
+
+*/
+
+
+
+global proc eBlur2D () {
+
+	if (`window -ex eBlur2DWin` == 1)
+		deleteUI -wnd eBlur2DWin;
+
+	RenderViewWindow;
+
+	window -w 400 -h 250  -t " - eBlur2D - by Elie Jamaa/David Hofmann" -in "eBlur2D" -rtf 1 eBlur2DWin;
+
+		menuBarLayout;
+		menu -l "Help" -hm 1;
+		menuItem -l "Help..." -c "";	// Help goes here
+
+		string $form = `formLayout -nd 100`;
+
+		string $b1=`button -l "<<< APPLY >>>" -en 0 -al "center" -command eBlur2D_APPLY eBlur2D_ApplyButton`;
+		string $b2=`button -l "Cancel"	-al "center" -command "deleteUI -wnd eBlur2DWin"`;
+
+		string $col=`columnLayout -adj 1 -cal "left"`;
+			separator; separator; separator; separator -vis 0 -h 10;
+			rowColumnLayout -w 400 -h 36 -nc 2 -cw 1 360 -cw 2 26;
+				textFieldGrp -cw 2 220 -label "Image name" -cc "fileBrowser_eBlur2D 0" eBlur2D_Entry;
+				symbolButton -w 26 -h 26 -i "navButtonBrowse.xpm" -c "fileBrowser_eBlur2D 1";
+				setParent ..;
+			separator; separator -vis 0 -h 8;
+			floatSliderGrp
+				-label "Blur Length"
+				-field true
+				-precision 3
+				-value 1.0
+				-minValue .001
+				-maxValue 10
+				-fieldMinValue .001
+				-fieldMaxValue 999999
+				-sliderStep .1
+				eBlur2D_Length;
+			floatSliderGrp
+				-label "Blur Sharpness"
+				-field true
+				-precision 3
+				-value 1.0
+				-minValue .001
+				-maxValue 10
+				-fieldMinValue .001
+				-fieldMaxValue 999999
+				-sliderStep .1
+				eBlur2D_Sharpness;
+			intSliderGrp
+				-label "Smooth Value"
+				-field true
+				-value 2
+				-minValue 0
+				-maxValue 20
+				-fieldMinValue 0.0
+				-fieldMaxValue 999999
+				eBlur2D_Smooth;
+			intSliderGrp		// this setting is new sice Maya 4.0
+				-label "Max Memory"
+				-field true
+				-value 256
+				-minValue 32
+				-maxValue 1024
+				-fieldMinValue 32
+				-fieldMaxValue 1024
+				-sliderStep 32
+				eBlur2D_Mem;
+			checkBoxGrp
+				-label " "
+				-label1 "Smooth Color"
+				eBlur2D_SmoothColor;
+			setParent..;
+
+		formLayout -e	-attachPosition $b1 "left" 0 0
+						-attachPosition $b1 "right" 0 50
+						-attachPosition $b2 "left" 0 50
+						-attachPosition $b2 "right" 0 100
+						-attachForm $b1 "bottom" 0
+						-attachForm $b2 "bottom" 0
+						-attachForm $col "top" 0
+						-attachForm $col "left" 0
+						-attachForm $col "right" 0
+						$form;
+
+	showWindow;
+
+	// Force Window Size
+	window -e -w 400 -h 250 -rtf 1 eBlur2DWin;
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+global proc eBlur2D_APPLY () {
+
+
+	string $app="blur2d";		// location of A|W's blur2d program, might be different on non-NT systems
+
+
+	float $bLength=`floatSliderGrp -q -v eBlur2D_Length`;
+	float $bSharp=`floatSliderGrp -q -v eBlur2D_Sharpness`;
+	int $bSmooth=`intSliderGrp -q -v eBlur2D_Smooth`;
+	int $bMem = `intSliderGrp -q -v eBlur2D_Mem`;
+	float $bSmoothColor=`checkBoxGrp -q -v1 eBlur2D_SmoothColor`;
+	string $filename=`textFieldGrp -q -fi eBlur2D_Entry`;
+	string $renderView="renderView";		// Change accordingly if not using default renderView
+	string $a;
+	string $output;
+	
+	string $cmd = $app+" -l "+$bLength+" -s "+$bSharp+" -m "+$bSmooth+" -r "+$bSmoothColor+" -o "+$bMem+" -f "+$filename;
+	string $result=`system($cmd)`;
+
+// blur2d outputs a long string on the commandline as result
+// with the following commands we capture only the last part of it which is hopefully the file name of the blured image
+	if (size($result)) {
+		string $einz[];
+		tokenize $result $einz;
+		int $nu = `size($einz)`;
+		$output = $einz[$nu-1];
+		
+		print ("Output file = " + $output + "\n");
+		print ("to reproduce these settings on the command line use this command: \n\"blur2d -l " + $bLength + " -s " + $bSharp + " -m " + $bSmooth + " -r " + $bSmoothColor + " -o " + $bMem + " -f filename\"\n\n");
+		renderWindowEditor -e -li $output $renderView;
+
+		if (`file -q -exists $output`) {
+		renderWindowEditor -e -li $output $renderView;
+		} else {
+			print "\n !!! Resulting Output Not found - Cannot display.";
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+global proc fileBrowser_eBlur2D (int $mode) {
+	string $renderView="renderView";	// Change accordingly if not using default renderView
+
+	if ($mode) {
+		string $cmd=("loadImageRenderView "+$renderView);
+		fileBrowser $cmd "Load Motion Vector Image" "image" 0;
+	} else {
+		string $filename=`textFieldGrp -q -fi eBlur2D_Entry`;
+		loadImageRenderView $renderView $filename "image";
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////
+
+global proc int loadImageRenderView (string $renderView, string $filename, string $type) {
+
+	if (!`file -q -exists $filename`) {
+		button -e -en 0 eBlur2D_ApplyButton;
+		return 0;
+	}
+
+	if ($type=="image") {
+		renderWindowEditor -e -li $filename $renderView;
+		renderWindowEditor -e -cap $filename -realSize $renderView;
+		textFieldGrp -e -fi $filename eBlur2D_Entry;
+		button -e -en 1 eBlur2D_ApplyButton;
+	} else {
+		return 0;
+	}
+	return 1;
+}

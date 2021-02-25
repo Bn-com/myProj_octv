@@ -1,0 +1,287 @@
+global proc zwBatchImportFinishing()
+{
+	global string $zwBatchImportFinishing[];
+	clear $zwBatchImportFinishing;
+
+	if (!`optionVar -exists zwBatchImportFinishingHair`)
+	{
+		optionVar -intValue zwBatchImportFinishingHair 2;
+	}
+	int $zwBatchImportFinishingHair = `optionVar -query zwBatchImportFinishingHair`;
+	if (!`optionVar -exists zwBatchImportFinishingSet`)
+	{
+		optionVar -intValue zwBatchImportFinishingSet false;
+	}
+	int $zwBatchImportFinishingSet = `optionVar -query zwBatchImportFinishingSet`;
+
+	if(`window -exists zwBatchImportFinishing`)
+	{
+		deleteUI zwBatchImportFinishing;
+	}
+	window -title "批处理器 - finishing check" -width 540 -height 360 -resizeToFitChildren true zwBatchImportFinishing;
+		string $formLayout = `formLayout`;
+			string $textScrollList = `textScrollList -allowMultiSelection true`;
+			textScrollList -edit -deleteKeyCommand ("zwBatchImportFinishingDel \"" + $textScrollList + "\"") $textScrollList;
+			string $radioButtonGrp = `radioButtonGrp -numberOfRadioButtons 3 -label "" -label1 "无头发" -label2 "SHN" -label3 "HRS" -select $zwBatchImportFinishingHair -onCommand1 "optionVar -intValue zwBatchImportFinishingHair 1" -onCommand2 "optionVar -intValue zwBatchImportFinishingHair 2" -onCommand3 "optionVar -intValue zwBatchImportFinishingHair 3"`;
+			string $checkBoxGrp = `checkBoxGrp -label "" -label1 "SET" -value1 $zwBatchImportFinishingSet -onCommand1 "optionVar -intValue zwBatchImportFinishingSet true" -offCommand1 "optionVar -intValue zwBatchImportFinishingSet false"`;
+			string $textFieldButtonGrp = `textFieldButtonGrp -label "输出到：" -buttonLabel "Browse" -adjustableColumn 2 -fileName "//file-cluster/GDC/Netrender/Scenes/WinxClubII/finishing"`;
+			textFieldButtonGrp -edit -buttonCommand ("zwBatchImportFinishingBrowse \"" + $textFieldButtonGrp + "\"") $textFieldButtonGrp;
+			string $buttonAdd = `button -label "添加Shot" -command ("zwBatchImportFinishingAdd \"" + $textScrollList + "\"")`;
+			string $buttonAction = `button -label "开始执行" -command ("zwBatchImportFinishingAction \"" + $textScrollList + "\" \"" + $textFieldButtonGrp + "\"")`;
+
+	formLayout -edit
+		-attachForm	$textScrollList		"top"		0
+		-attachControl	$textScrollList		"bottom"	0	$radioButtonGrp
+		-attachForm	$textScrollList		"left"		0
+		-attachForm	$textScrollList		"right"		0
+
+		-attachControl	$radioButtonGrp		"bottom"	0	$checkBoxGrp
+		-attachForm	$radioButtonGrp		"left"		0
+		-attachForm	$radioButtonGrp		"right"		0
+
+		-attachControl	$checkBoxGrp		"bottom"	0	$textFieldButtonGrp
+		-attachForm	$checkBoxGrp		"left"		0
+		-attachForm	$checkBoxGrp		"right"		0
+
+		-attachControl	$textFieldButtonGrp	"bottom"	0	$buttonAdd
+		-attachForm	$textFieldButtonGrp	"left"		0
+		-attachForm	$textFieldButtonGrp	"right"		0
+
+		-attachForm	$buttonAdd		"left"		0
+		-attachForm	$buttonAdd		"bottom"	0
+		-attachPosition	$buttonAdd		"right"		0	50
+
+		-attachControl	$buttonAction		"left"		0	$buttonAdd
+		-attachForm	$buttonAction		"bottom"	0
+		-attachForm	$buttonAction		"right"		0
+	$formLayout;
+
+	showWindow zwBatchImportFinishing;
+}
+
+global proc zwBatchImportFinishingAdd(string $textScrollList)
+{
+	global string $zwBatchImportFinishing[];
+
+//	string $path = `workspace -fullName`;
+	string $path = `optionVar -query zwBatchImportFinishingInitialDir`;
+	$path = `idmtFolderDialog -initialDir $path`;
+	if ($path == "")
+	{
+		return;
+	}
+	optionVar -stringValue zwBatchImportFinishingInitialDir $path;
+
+	$path = `substituteAllString $path "\\" "/"`;
+	int $find = false;
+	int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+	for ($i=0; $i<$numberOfItems; $i++)
+	{
+		if ($path == $zwBatchImportFinishing[$i])
+		{
+			$find = true;
+			break;
+		}
+	}
+	if ($find)
+	{
+		return;
+	}
+	string $filename = `match "[^/\\]+$" $path`;
+	textScrollList -edit -append $filename $textScrollList;
+	$zwBatchImportFinishing[$numberOfItems] = $path;
+}
+
+global proc zwBatchImportFinishingDel(string $textScrollList)
+{
+	global string $zwBatchImportFinishing[];
+
+	int $selectIndexedItem[] = `textScrollList -query -selectIndexedItem $textScrollList`;
+	for ($i=0; $i<size($selectIndexedItem); $i++)
+	{
+		textScrollList -edit -removeIndexedItem ($selectIndexedItem[$i]-$i) $textScrollList;
+		int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+		for ($j=$selectIndexedItem[$i]-$i-1; $j<$numberOfItems; $j++)
+		{
+			$zwBatchImportFinishing[$j] = $zwBatchImportFinishing[$j+1];
+		}
+		$zwBatchImportFinishing[$numberOfItems] = "";
+	}
+}
+
+global proc zwBatchImportFinishingBrowse(string $textFieldButtonGrp)
+{
+	string $path = `idmtFolderDialog`;
+	if ($path == "")
+	{
+		return;
+	}
+	textFieldButtonGrp -edit -fileName $path $textFieldButtonGrp;
+}
+
+global proc zwBatchImportFinishingAction(string $textScrollList, string $textFieldButtonGrp)
+{
+	global string $zwBatchImportFinishing[];
+
+	string $dest = `textFieldButtonGrp -query -fileName $textFieldButtonGrp`;
+	if (!`filetest -d $dest`)
+	{
+		error ("输出目录不存在：" + $dest);
+	}
+
+	HideUIElements;
+
+	evalDeferred -lowestPriority ("zwBatchImportFinishingActionDeferred \"" + $textScrollList + "\" \"" + $textFieldButtonGrp + "\"");
+}
+
+global proc zwBatchImportFinishingActionDeferred(string $textScrollList, string $textFieldButtonGrp)
+{
+	global string $zwBatchImportFinishing[];
+
+	string $dest = `textFieldButtonGrp -query -fileName $textFieldButtonGrp`;
+	if (!`filetest -d $dest`)
+	{
+		error ("输出目录不存在：" + $dest);
+	}
+
+	int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+	for ($i=0; $i<$numberOfItems; $i++)
+	{
+		catch(`zwBatchImportFinishingProc $zwBatchImportFinishing[$i] $dest`);
+	}
+
+	RestoreUIElements;
+}
+
+global proc zwBatchImportFinishingProc(string $folder, string $dest)
+{
+	file -force -newFile;
+
+	setNamedPanelLayout "Single Perspective View";
+	DisplayShaded;
+
+	string $workspace = `substitute "/scenes/.*$" $folder ""`;
+	setProject $workspace;
+	zwBatchImportFinishingRecursion $folder $dest;
+	if (`file -query -sceneName` == "")
+	{
+		return;
+	}
+	catch(`zwSceneOpened`);
+
+//	zwSetIntAttrAll "file" "useCache" false;
+
+//	string $MSHs[] = `ls -noIntermediate -type "mesh" "*MSH_*"`;
+//	string $renderLayer = `createRenderLayer -name "check" -number 1 -noRecurse $MSHs`;
+//	for ($MSH in $MSHs)
+//	{
+//		polySmooth  -mth 0 -dv 2 -c 1 -kb 0 -ksb 1 -khe 0 -kt 1 -kmb 1 -suv 1 -sl 1 -dpe 1 -ps 0.1 -ro 1 -ch 1 $MSH;
+//	}
+
+	if (`pluginInfo -query -loaded "shaveNode"`)
+	{
+		string $shaveHairs[] = `ls -type "shaveHair"`;
+		if (size($shaveHairs) > 0)
+		{
+			delete $shaveHairs;
+		}
+	}
+
+	if (!`filetest -d ($dest + "/mayafiles")`)
+	{
+		sysFile -md ($dest + "/mayafiles");
+	}
+	file -save;
+
+	string $cameras[];
+	string $cameraShapes[] = `ls -long -cameras`;
+	for ($cameraShape in $cameraShapes)
+	{
+		string $parent[] = `listRelatives -fullPath -parent $cameraShape`;
+		string $camera = `match "[^|]+$" $parent[0]`;
+		if (`match "cam_" $camera` != "")
+		{
+			$cameras[size($cameras)] = $cameraShape;
+			break;
+		}
+	}
+	if (size($cameras) == 0)
+	{
+		return;
+	}
+
+//	setUIComponentVisibility("Channel Box / Layer Editor", false);
+//	setUIComponentVisibility("Tool Settings", false);
+//	setUIComponentVisibility("Attribute Editor", false);
+
+	setNamedPanelLayout "Single Perspective View";
+	
+	string $modelPanel = `getPanel -withFocus`;
+	if (`getPanel -typeOf $modelPanel` != "modelPanel")
+	{
+		return;
+	}
+
+	modelEditor -edit -camera $cameras[0] $modelPanel;
+	modelEditor -edit -allObjects false $modelPanel;
+	modelEditor -edit -polymeshes true $modelPanel;
+	modelEditor -edit -nurbsSurfaces true $modelPanel;
+	modelEditor -edit -strokes true modelPanel4;
+	isolateSelect -state false $modelPanel;
+	modelEditor -edit -grid 0 $modelPanel;
+//	DisplayShadedAndTextured;
+	DisplayShaded;
+	select -clear;
+
+	string $filename = `file -query -sceneName -shortName`;
+	$filename = $dest + "/video/" + `match "[^.]+" $filename` + ".avi";
+	if (!`filetest -d ($dest + "/video")`)
+	{
+		sysFile -md ($dest + "/video");
+	}
+//	if (`match "^finishing_" $filename` != "")
+//	{
+		playblast -forceOverwrite -format movie -filename $filename -clearCache 1 -viewer 0 -showOrnaments 0 -fp 4 -percent 100 -compression none -widthHeight 1024 436;
+//	}
+//	else
+//	{
+//		playblast -forceOverwrite -format image -filename $filename -clearCache 1 -viewer 0 -showOrnaments 0 -fp 4 -percent 100 -widthHeight 1024 436;
+//	}
+}
+
+global proc zwBatchImportFinishingRecursion(string $folder, string $dest)
+{
+	string $buf[] = `getFileList -filespec ($folder + "/*.*")`;
+	for ($file in $buf)
+	{
+		string $path = $folder + "/" + $file;
+		if (`filetest -d $path`)
+		{
+			if ($file == "tmp" || $file == "data")
+			{
+				continue;
+			}
+			zwBatchImportFinishingRecursion($path, $dest);
+		}
+		else
+		{
+			if (`match "/finishing/" $path` == "")
+			{
+				continue;
+			}
+			if (!(`match "_MSH[.]m[ab]$" $file` != ""
+				|| ((`match "_SHN[.]m[ab]$" $file` != "" && `optionVar -query zwBatchImportFinishingHair` == 2) || (`match "_HRS[.]m[ab]$" $file` != "" && `optionVar -query zwBatchImportFinishingHair` == 3))
+				|| `match "_CAM[.]m[ab]$" $file` != ""
+				|| (`match "_SET[.]m[ab]$" $file` != "" && `optionVar -query zwBatchImportFinishingSet` == true)))
+			{
+				continue;
+			}
+			file -prompt false -import $path;
+			string $sceneName = `match "finishing(_[^_.]+){4}" $file`;
+			if ($sceneName != "")
+			{
+				file -rename ($dest + "/mayafiles/" + $sceneName + "_check.mb");
+			}
+		}
+	}
+}

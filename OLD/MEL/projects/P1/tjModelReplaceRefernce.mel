@@ -1,0 +1,198 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc tjModelReplaceRefernce()
+{
+	if (`window -q -ex tjModelReplaceRefernceUI`)
+		deleteUI tjModelReplaceRefernceUI;
+
+
+	window -t "replace reference tools" tjModelReplaceRefernceUI;
+	columnLayout -adj 1;
+		button -l "copy->reference" -c "tjModelReplaceRefernceCTR(\"h\")";
+		button -l "H" -c "tjModelReplaceRefernceHML(\"h\")";
+		button -l "M" -c "tjModelReplaceRefernceHML(\"m\")";
+		button -l "L" -c "tjModelReplaceRefernceHML(\"l\")";
+	
+	showWindow tjModelReplaceRefernceUI;
+	eval "source zwNamespace.mel";
+}
+
+global proc tjModelReplaceRefernceCTR(string $ver)
+{
+	string $sel[] = `ls -sl -l`;
+	if (!size($sel))
+		error "请选择需要替换的组";
+	
+	for ($p in $sel)
+	{
+		int $single=0;
+		string $children[] = `listRelatives -f -c $p`;
+		if (match("_[aA][lL][lL]$",$p) == "")
+		{
+			$children = {$p};
+			$single=1;
+		}
+		for ($c in $children)
+		{
+			if (!`referenceQuery -inr $c`)
+			{
+				string $buff1[]=stringToStringArray($c,"|");
+				string $buff2[] = stringToStringArray($buff1[size($buff1)-1],"_");
+				string $assetname = "tj2_"+$buff2[1]+"_"+$ver+"_ms_anim.ma";
+				string $assetfile = `idmtService "GetAssetPath" $assetname`;
+				if (`filetest -r $assetfile`)
+				{
+					string $namespace = `zwGetNamespaceByPath $assetfile`;
+					$namespace = `zwValidateNamespace $namespace`;	
+					
+					file -r -ns $namespace -shd "shadingNetworks" $assetfile;
+
+					string $copy[] = `ls ($namespace+":*_"+$buff2[1]+"_geo")`;
+					if (size($copy))
+					{
+						setAttr ($copy[0]+".tx") (`getAttr ($c+".tx")`);
+						setAttr ($copy[0]+".ty") (`getAttr ($c+".ty")`);
+						setAttr ($copy[0]+".tz") (`getAttr ($c+".tz")`);
+						setAttr ($copy[0]+".rx") (`getAttr ($c+".rx")`);
+						setAttr ($copy[0]+".ry") (`getAttr ($c+".ry")`);
+						setAttr ($copy[0]+".rz") (`getAttr ($c+".rz")`);
+						setAttr ($copy[0]+".sx") (`getAttr ($c+".sx")`);
+						setAttr ($copy[0]+".sy") (`getAttr ($c+".sy")`);
+						setAttr ($copy[0]+".sz") (`getAttr ($c+".sz")`);
+					}
+					
+					string $all[] = `ls -as ($namespace+":*")`;
+					
+					if ($single)
+					{
+						string $parent[] = `listRelatives -f -p $c`;
+						if (size($parent))
+						{
+							parent $all[0] $parent[0];
+							parent -w $all[0];
+							parent $all[0] $parent[0];
+						}
+					}
+					else 
+					{
+						parent $all[0] $p;
+						parent -w $all[0];
+						parent $all[0] $p;
+					}
+					delete  $c;
+				}
+			}
+		}
+	}
+}
+
+global proc tjModelReplaceRefernceHML(string $ver)
+{
+	string $sel[] = `ls -sl -l`;
+	if (!size($sel))
+		error "请选择需要替换的组";
+	
+	for ($p in $sel)
+	{
+		if (match("_[aA][lL][lL]$",$p) != "")
+		{
+			tjModelReplaceRefernceCTR($ver);
+
+			string $children[] = `listRelatives -f -c $p`;
+			for ($c in $children)
+			{
+				if (`referenceQuery -inr $c`)
+				{
+					string $reffile = `referenceQuery -f $c`;
+					if (match(("_"+$ver+"_"),$reffile)=="")
+					{
+						string $newfile = substituteAllString($reffile,"_h_",("_"+$ver+"_"));
+						$newfile = substituteAllString($newfile,"_m_",("_"+$ver+"_"));
+						$newfile = substituteAllString($newfile,"_l_",("_"+$ver+"_"));
+						string $buff[] = stringToStringArray($newfile,"{}");
+						$newfile = $buff[0];
+						
+						if (`filetest -r $newfile`)
+						{
+							string $grp[] = tjModelReplaceRefernceGetRefTop($c);
+							
+							string $rfn = `referenceQuery -rfn $c`;
+							file -lr $rfn $newfile;
+
+							string $en[] = `referenceQuery -n $grp[1]`;
+							string $first[] = stringToStringArray($en[0],"|");
+							string $ps[] = `listRelatives  -f -p $first[0]`;
+							if ($grp[0]!= "NULL" && $ps[0]!=$grp[0])
+							{
+
+								parent $first[0] $grp[0];
+							}
+						}
+					}
+				}
+			}
+		}
+		else 
+		{
+			if (!`referenceQuery -inr $p`)
+			{
+				tjModelReplaceRefernceCTR($ver);
+			}
+			else
+			{
+				string $reffile = `referenceQuery -f $p`;
+				if (match(("_"+$ver+"_"),$reffile)=="")
+				{
+					string $newfile = substituteAllString($reffile,"_h_",("_"+$ver+"_"));
+					$newfile = substituteAllString($newfile,"_m_",("_"+$ver+"_"));
+					$newfile = substituteAllString($newfile,"_l_",("_"+$ver+"_"));
+					string $buff[] = stringToStringArray($newfile,"{}");
+					$newfile = $buff[0];
+
+					if (`filetest -r $newfile`)
+					{
+						string $grp[] = tjModelReplaceRefernceGetRefTop($p);
+
+						string $rfn = `referenceQuery -rfn $p`;
+						file -lr $rfn $newfile;
+
+						string $en[] = `referenceQuery -n $grp[1]`;
+						string $first[] = stringToStringArray($en[0],"|");
+						string $ps[] = `listRelatives  -f -p $first[0]`;
+						if ($grp[0]!= "NULL" && $ps[0]!=$grp[0])
+						{
+							parent $first[0] $grp[0];
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc string[] tjModelReplaceRefernceGetRefTop(string $obj)
+{
+	string $return[]={"",""};
+	string $rfn = `referenceQuery -rfn $obj`;
+	string $en[] = `referenceQuery -n $rfn`;
+	string $buff[] = stringToStringArray($en[0],"|");
+	$return[1]=$rfn;
+
+	string $parent[] = `listRelatives -p -f $buff[0]`;
+	if (!size($parent))
+		$return[0]="NULL";
+	else
+		$return[0]=$parent[0];
+
+	return $return;
+}

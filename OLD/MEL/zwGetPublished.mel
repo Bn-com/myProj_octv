@@ -1,0 +1,289 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwGetPublished()
+{
+	if (!`window -exists getPublish`)
+	{
+		window -width 600 -height 400 -title "Get Published 1.1" getPublish;
+		formLayout -numberOfDivisions 100 formLayout1;
+
+		textFieldButtonGrp -label "Folder:" -buttonLabel "Browse" -annotation "Approved folder" -columnWidth 1 50 -columnWidth 3 48 -columnAlign 1 "left" -adjustableColumn 2 -buttonCommand "getPublishedBrowse" folder;
+		radioButtonGrp -numberOfRadioButtons 2 -select 1 -label "Sort by" -labelArray2 "Name" "Date" -onCommand "getPublishedSortBy" -columnWidth 1 50 -columnWidth 2 60 -columnAlign 1 "left" sortBy;
+		checkBox -label "Latest" -annotation "List the latest files only" -changeCommand "getPublishedSortBy" Latest;
+		textScrollList -selectCommand "getPublishedSumInfo" fileList;
+		
+		formLayout formLayout2;
+			columnLayout -adjustableColumn true columnLayout1;
+				textFieldGrp -editable false -adjustableColumn 2 -columnWidth 1 80 -label "Modified:" modified;
+				textFieldGrp -editable false -adjustableColumn 2 -columnWidth 1 80 -label "ID:" textFieldGrpID;
+				textFieldGrp -enable false -editable false -adjustableColumn 2 -columnWidth 1 80 -label "Publisher:";
+				textFieldGrp -editable false -adjustableColumn 2 -columnWidth 1 80 -label "Creator:" creator;
+				scrollField -wordWrap true -editable false comments;
+				setParent..;
+			image  -width 128 -height 128 -visible false fimage;
+			setParent..;
+		formLayout -edit
+			-attachForm	fimage		"top"	5
+			-attachForm	fimage		"right"	5
+
+			-attachForm	columnLayout1	"left"	0
+			-attachControl	columnLayout1	"right"	5	fimage
+		formLayout2;
+	
+		button -label "Open" -command "getPublishedOpen" open;
+		button -label "Import" -command "getPublishedImport" ok;
+		button -label "Create Reference" -command "getPublishedReference" cancel;
+
+		formLayout -edit
+			-attachForm	folder		"top"		5
+			-attachForm	folder		"left"		5
+			-attachNone	folder		"bottom"
+			-attachForm	folder		"right"		5
+
+			-attachControl	sortBy		"top"		5	folder
+			-attachForm	sortBy		"left"		5
+			-attachNone	sortBy		"bottom"
+			-attachNone	sortBy		"right"
+
+			-attachControl	Latest		"top"		5	folder
+			-attachControl	Latest		"left"		5	sortBy
+			-attachNone	Latest		"bottom"
+			-attachNone	Latest		"right"
+
+			-attachForm	open		"left"		5
+			-attachForm	open		"bottom"	5
+			-attachPosition	open		"right"		0	33
+
+			-attachControl	cancel		"left"		5	open
+			-attachForm	cancel		"bottom"	5
+			-attachPosition	cancel		"right"		5	66
+
+			-attachControl	ok		"left"		5	cancel
+			-attachForm	ok		"bottom"	5
+			-attachForm	ok		"right"		5
+
+			-attachNone	formLayout2	"top"
+			-attachForm	formLayout2	"left"		5
+			-attachControl	formLayout2	"bottom"	5	ok
+			-attachForm	formLayout2	"right"		5
+
+			-attachControl	fileList	"top"		5	sortBy
+			-attachForm	fileList	"left"		5
+			-attachControl	fileList	"bottom"	5	formLayout2
+			-attachForm	fileList	"right"		5
+		formLayout1;
+	}
+	showWindow getPublish;
+}
+
+global proc getPublishedBrowse()
+{
+	string $Folder = `workspace -query -dir`;
+	workspace -dir "//file-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/MASTER/";
+	fileBrowserDialog -mode 4 -fileCommand "getPublishedApprovedFolder" -actionName "Approved Folder";
+	workspace -dir $Folder;
+}
+
+global proc getPublishedApprovedFolder(string $filename, string $fileType)
+{
+	string $fileList[], $filenames[];
+	int $i;
+	textFieldButtonGrp -edit -text $filename folder;
+	getPublishedSortBy();
+}
+
+global proc getPublishedSortBy()
+{
+	string $filename, $fileList[];
+	$filename = `textFieldButtonGrp -query -text folder`;
+	if (match("MASTER", `toupper $filename`) == "MASTER" && match("APPROVED", `toupper $filename`) == "APPROVED")
+	{
+		if (`filetest -d $filename` != 0)
+		{
+			$filename = `substituteAllString $filename "/" "\\"`;
+			
+			if (`radioButtonGrp -query -select sortBy` == 1)
+				$pipe = popen(("DIR /B /O:N " + $filename), "r" );
+			else
+				$pipe = popen(("DIR /B /O:-D " + $filename), "r" );
+			while (!feof($pipe))
+			{
+				$str = fgetline( $pipe );
+				if(size($str) > 10)
+				{
+					if(`substring $str (size($str) - 2) (size($str) - 1)` == "mb")
+						$fileList[size($fileList)] = `substring $str 1 (size($str) - 1)`;
+				}
+			}
+			pclose( $pipe );
+			textScrollList -edit -removeAll fileList;
+			if (`checkBox -query -value Latest`)
+				$fileList = getPublishedListLatest($fileList);
+			for($i=0; $i<size($fileList); $i++)
+				textScrollList -edit -append $fileList[$i] fileList;
+		}
+		textFieldGrp -edit -text "" modified;
+		textFieldGrp -edit -text "" creator;
+		scrollField -edit -text "" comments;
+	}
+	else
+		error "Not an approved folder.";
+	print "";
+}
+
+global proc getPublishedSumInfo()
+{
+	string $id, $creator, $comments;
+	
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	$filename += "/" + $selected[size($selected)-1];
+	string $sumInfo = `idmtFile -modified $filename`;	// by huangzhongwei 20060425
+	textFieldGrp -edit -text $sumInfo modified;
+	
+	$filename += ".txt";
+	if (`filetest -f $filename`)
+	{
+		int $fileId = `fopen $filename "r"`;
+		string $nextLine = `fgetline $fileId`;
+		if (`gmatch $nextLine "ID:*"`)
+			$id = `substring $nextLine 5 (size($nextLine))`;
+		else
+			$creator = $nextLine;
+		while (!`feof $fileId`)
+		{
+			$nextLine = `fgetline $fileId`;
+			if(`gmatch $nextLine "Creator:*"`)
+				$creator = `substring $nextLine 10 (size($nextLine))`;
+			else if(`gmatch $nextLine "Comments:*"`)
+			{
+				if(size($nextLine)>10)
+					$comments += `substring $nextLine 11 (size($nextLine))`;
+			}
+			else
+				$comments += $nextLine;
+		}
+		fclose $fileId;
+
+		textFieldGrp -edit -text $id textFieldGrpID;
+		textFieldGrp -edit -text $creator creator;
+		scrollField -edit -text $comments comments;
+	}
+
+	$filename =  `substitute ".mb.txt" $filename ""`;
+	$filename += ".iff";
+
+	if (`filetest -f $filename`)
+	{
+		chdir "c:";
+		string $iffInfo = `system ("fcheck -cv " + $filename)`;
+		string $buffer[];
+		tokenize $iffInfo "\n" $buffer;
+		tokenize $buffer[3] " " $buffer;
+		if($buffer[2] == "64x64")
+		{
+			image -edit -visible true -width 64 -height 64 -image $filename fimage;
+			formLayout -edit
+				-attachForm	fimage		"top"	37
+				-attachForm	fimage		"right"	37
+
+				-attachForm	columnLayout1	"left"	0
+				-attachControl	columnLayout1	"right"	37	fimage
+			formLayout2;
+		}
+		else
+		{
+			image -edit -visible true -width 128 -height 128 -image $filename fimage;
+			formLayout -edit
+				-attachForm	fimage		"top"	5
+				-attachForm	fimage		"right"	5
+
+				-attachForm	columnLayout1	"left"	0
+				-attachControl	columnLayout1	"right"	5	fimage
+			formLayout2;
+		}
+	}
+	else
+		image -edit -visible false fimage;
+}
+
+global proc string[] getPublishedListLatest(string $files[])
+{
+	string $filenames[], $stri, $strj, $str1, $str2, $strMax;
+	int $num1, $num2, $find;
+	for($stri in $files)
+	{
+		$strMax = $stri;
+		for($strj in $files)
+		{
+			$str1 = `substring $stri 1 (size($stri) - 5)`;
+			$str2 = `substring $strj 1 (size($strj) - 5)`;
+			if($str1 == $str2)
+			{
+				$num1 = ((int)`substring $stri (size($stri) - 5) (size($stri) - 3)`);
+				$num2 = ((int)`substring $strj (size($strj) - 5) (size($strj) - 3)`);
+				if($num2 > $num1)
+					$stri = $strj;
+			}
+		}
+		if ($strMax == $stri)
+			$filenames[size($filenames)] = $stri;
+	}
+	return $filenames;
+}
+
+global proc getPublishedImport()
+{
+	string $before[], $after[], $buffer[], $str7, $i, $j;
+	int $find;
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected) != 0)
+	{
+		$filename += "/" + $selected[0];
+		if(`filetest -f $filename` != 0)
+		{
+			tokenize $filename "/" $buffer;
+			$str7 = `substring $buffer[size($buffer)-1] 1 (size($buffer[size($buffer)-1]) - 3)`;
+			file -namespace $str7 -import $filename;
+			zwGetPublishedRecord("Import", $filename);
+			print("Import " + $filename + " finished!");
+		}
+	}
+}
+
+global proc getPublishedReference()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected) != 0)
+	{
+		$filename += "/" + $selected[0];
+		if(`filetest -f $filename` != 0)
+		{
+			file -reference $filename;
+			zwGetPublishedRecord("Reference", $filename);
+			print("Reference " + $filename + " finished!");
+		}
+	}
+}
+
+global proc getPublishedOpen()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected) != 0)
+	{
+		$filename += "/" + $selected[0];
+		if(`filetest -f $filename`)
+			saveChanges("file -f -open "+"\""+$filename+"\"");
+	}
+}

@@ -1,0 +1,148 @@
+// setTexturesToLive.mel (c) 2004 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	This script sets all file textures in a given name space back to what is set in the live file
+Use:
+	setTexturesToLive namespace file
+Options:
+	namespace 	(string)	- Operate on textures in this namespaces
+	file 		(string)	- The file that is being referenced
+	
+Documentation:
+	This process solves a shortcoming in the texture LOD system. Once a texture resolutions have been set once in a lit file, the setAttr is
+	stored in the file indefinately. If the textures in the live asset are changed to point to a different file, this setAttr will overrule that
+	when the lit file is opened. This script sets them back to what is in the live file by reading an xml file that is exported nightly from the 
+	live file.
+	
+	Return values:
+	0 = success
+	1 = some of the file textures specified in the textureInfo xml don't exist!
+	2 = the textureInfo xml doesn't exist!
+Examples:
+
+Notes:
+	Tested on Maya5 Win2000 only
+	
+Bugs:
+
+Original:	09/24/04
+Revisions:	07/24/04	Rev 1.0
+		- Revision made
+		- Revision made
+		
+		07/25/04	Rev 1.1
+		- Revision made
+		- Revision made
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source loadAllPlugins.mel;
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global int $TMP_a = 1;
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() {
+	string $requiredPlugins[] = 
+	{
+	""
+	};
+	loadAllPlugins ($requiredPlugins);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc int setTexturesToLive(string $namespace, string $file) {
+	loadPlugins;
+	int $returnVal = 0;
+	
+	string $textureInfoFile = dirname ($file)+"/assetInfo/textureInfo.xml";
+	$textureInfoFile = substitute ("cpsv",$textureInfoFile,"work");
+	
+	// get things platform independant
+	if (`about -nt`)
+		$textureInfoFile = substitute ("/diskx/",$textureInfoFile,"X:/");
+	else
+		$textureInfoFile = substitute ("X:/",$textureInfoFile,"/diskx/");
+		
+	print ("Looking for "+$textureInfoFile+"...\n");
+	
+	if (!`filetest -f $textureInfoFile`)
+	{
+		print ($textureInfoFile+" doesn't exist!\n");
+		return 2;
+	}
+	
+	print ("Found "+$textureInfoFile+"\n");
+	
+	string $xml = readXML ($textureInfoFile,0);
+	
+	string $xmlFiles[] = xml_getTag ($xml,"file");
+	
+	//if (!size($xmlFiles))
+	//	return 2;
+		
+	for ($i=0;$i<size($xmlFiles);$i++)
+	{
+		string $xmlFileNode = xml_getVar($xmlFiles[$i],"name");
+		if (size(`ls -type "file" ($namespace+":"+$xmlFileNode)`))
+		{
+			string $fileTextureName = xml_getVar($xmlFiles[$i],"fileTextureName");
+			// check for a double "//" at the beginning of the fileTextureName
+			if (substring($fileTextureName,1,1)=="/"&& substring ($fileTextureName,2,2)=="/")
+			{
+				$fileTextureName = substring ($fileTextureName,2,size($fileTextureName));
+			}
+			$fileTextureName = `workspace -q -active`+$fileTextureName;
+			
+			
+			
+			// test for file existance
+			int $textureExists = 0;
+			if (`filetest -f $fileTextureName`)
+				$textureExists = 1;
+			else
+			{
+				// does it contain a # ?
+				if (size(substitute ("#",$fileTextureName,""))<size($fileTextureName))
+				{
+					string $tmp = substitute ("#",$fileTextureName,"*");
+					if (size(`getFileList -fs $tmp`))
+						$textureExists = 1;	
+				}	
+			}
+			
+			if ($textureExists && `objExists ($namespace+":"+$xmlFileNode+".ftn")`)
+			{
+				// 01/01/06 - test for driven ftn attribute
+				if (!size(`listConnections -s 1 -d 0 ($namespace+":"+$xmlFileNode+".ftn")`))
+					setAttr -type "string" ($namespace+":"+$xmlFileNode+".ftn") $fileTextureName;
+			}
+			else
+			{
+				$returnVal = 1;
+				print ("fileTextureName: "+$fileTextureName+"\n");
+				print ("exists? :"+($textureExists)+"\n");
+				print ("expected file node: "+($namespace+":"+$xmlFileNode)+"\n");
+				print ("exists? :"+`objExists ($namespace+":"+$xmlFileNode+".ftn")`+"\n");
+			}
+		}
+			
+	}
+	
+	return $returnVal;
+}

@@ -1,0 +1,356 @@
+
+
+global proc s100FMExportPrevizToLayoutWithList_deadline(string $toDo[]){
+	if(`s100FMExportPrevizToLayoutCheck` ){
+		setAttr -type "string" defaultRenderGlobals.ren "mayaSoftware";
+
+
+		$fileN = ` file -q -sn `;
+		$fileS = ` file -q -shortName  -sn `;
+		int $cancel = 0 ;
+		$fold  = `s100returnSequenceFolder($fileN ) `;
+		$folderInside = `s1KeepOnlyFolder($fold) `;
+		string $listFolderClean[] = sort(s100removeStringFromArrayByGmatch("_PREVIZ" ,$folderInside));
+
+		zooReorderShots;
+
+		zooShotsConstrainMaster;
+
+		$var = `ls -type "time" "shotsNode*" ` ;
+		string $listC[] = `listConnections  ($var[0] ) `;
+		string $listC2[] = `listConnections  ($var[0] +".masterCamera") `;
+		$listClean = s100removeStringFromArrayByGmatch($listC2[0] ,$listC) ;
+
+		string $attr[] = `listAttr -ud $var[0]  ` ;
+		for($i = 0 ; $i < 4 ; $i++)
+			stringArrayRemoveAtIndex(0 , $attr);
+
+		string $attrCam[] ;
+		string $attrInfo[] ;
+		$j = 0 ;
+
+		for($i = 0 ; $i < size( $attr ) ; $i+= 2){
+			$attrCam[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		$j = 0 ;
+		for($i = 1 ; $i < size( $attr ); $i+= 2){
+			$attrInfo[$j] = $attr[$i] ;
+			$j++ ;
+			}
+
+		int $toDoInt[] ;
+		if($toDo[0] ==""){
+			for($i = 0 ; $i < size($listFolderClean) ; $i++){
+				$toDoInt[$i] =1 ;
+				}
+		}else{
+			for($i = 0 ; $i < size($listFolderClean) ; $i++){
+				$toDoInt[$i] = 0 ;
+				for($j = 0 ; $j < size($toDo) ; $j++){
+					if(`gmatch $listFolderClean[$i] ("*" +$toDo[$j] +  "*")  `){
+						$toDoInt[$i] = 1 ;
+						break ;
+						}
+					}
+				}
+			}
+
+		for($i = 0 ; $i < size($listClean) ; $i++){
+			if($toDoInt[$i] ){
+				setAttr -type "string" defaultRenderGlobals.ren "mayaSoftware";
+
+				string $info[] = s100FMEPTLRebuildPathName_deadline($listFolderClean[$i] , $fileS ) ;
+				print("\nPrint l 60\n");
+				print($info);
+				$PaTh = $info[0] +$info[1] ;
+				sysFile -md ($info[0] +"WIP_Archives/Tk00/") ;
+
+				$arraTmp  = stringToStringArray($listFolderClean[$i], "/") ;
+				 $toP = size($arraTmp) - 1 ;
+
+				if(`filetest -e $PaTh`){
+					int $inc = `s100FileManagerGetLastIncNumberWithPath ($PaTh ) `;
+					$nInc = $info[0] + "WIP_Archives/Tk00/" + $info[1] ;
+					$pad = padNumber($inc,3) ;
+					$sub = substituteAllString($nInc , ".ma" , ("_" + $pad +".ma" )) ;
+					print ("\n scene "  +$sub + " created ");
+					sysFile -copy  $sub  $PaTh;
+					}
+				print("\nPrint l 76\n");
+				print($PaTh);
+
+				file -rename $PaTh ;
+				file -f -s ;
+
+				int $start ;
+				int $end ;
+				$end = `playbackOptions -q -animationEndTime `;
+
+				$listConnectCam = `listConnections ($var[0] +"." + $attrCam[$i] ) `;
+				$cam = $listConnectCam[0] ;
+				$startString = `getAttr -asString ($var[0] +"." + $attrInfo[$i] ) `;
+				$arrayStart = stringToStringArray( $startString ," " ) ;
+				$start = $arrayStart[2] ;
+
+				if($i < size($listClean) -1 ){
+					$endString = `getAttr -asString ($var[0] +"." + $attrInfo[($i+1)] ) `;
+					$arrayEnd = stringToStringArray( $endString ," " ) ;
+					$end =  $arrayEnd[2]  ;
+					$end -- ;
+					}
+
+
+				$extraCam = `s100getExtraCameras `;
+				string $camCleanAr[] =( stringArrayRemove({$listClean[$i] } ,$extraCam ) );
+				for($k = 0 ; $k < size($camCleanAr) ; $k++){
+					if(`referenceQuery -isNodeReferenced $camCleanAr[$k] `){
+						string $refNode = `referenceQuery -referenceNode $camCleanAr[$k] `;
+						file -removeReference -referenceNode $refNode;
+					} else{
+						delete $camCleanAr[$k] ;
+						}
+					}
+				delete $var;
+				scriptJob -killAll  ;
+
+				$varCtrl = ` ls "*:*ctrl" "*:*:*ctrl" "*ctrl" `;
+					for($tmp in $varCtrl){
+						setKeyframe -insert  -time $start  $tmp  ;
+						setKeyframe -insert -time $end  $tmp ;
+						}
+				$varCtrl = ` ls -type "nurbsCurve" -visible  `;
+				for($tmp in $varCtrl){
+					$listR = `listRelatives -p $tmp `;
+						for($tmp2 in $listR ){
+							setKeyframe -insert  -time $start  $tmp2  ;
+							setKeyframe -insert -time $end  $tmp2 ;
+							}
+					}
+
+				setKeyframe -insert  -time $start  $listClean[$i]   ;
+				setKeyframe -insert -time $end  $listClean[$i]  ;
+
+				//moving Key to 100
+				$varK = `ls -type animCurve`;
+				$dif = $start - 100 ;
+
+				//$dif = 10
+
+				$nEnd = $end - $dif ;
+
+				keyframe -e -iub false -an objects -time ("-10000:100000" ) -r -o over -tc  (-$dif) -fc 0.52 $varK ;
+
+				playbackOptions -animationStartTime 100 -minTime 100 -animationEndTime $nEnd -maxTime $nEnd ;
+
+				$arryName = stringToStringArray($info[1] ,"_") ;
+				string $camN ="";
+
+				for($k =1 ; $k < 4 ; $k++){
+					$camN +=$arryName[$k] + "_" ;
+					}
+
+				$camN += "cam" ;
+				if(`referenceQuery -isNodeReferenced $listClean[$i] `){
+				}else{
+					rename $listClean[$i] $camN ;
+					}
+				
+				$audio_file = `ls -type "audio"`;
+				delete $audio_file;
+				python("import s100.localprod.sound as snd");
+				python("snd.import_snd_deadline()")
+				//file -f -s ;
+
+				file -s -f;
+				
+				file -f -o $fileN ;
+
+			}else{
+				print ("\nskip : " + $listFolderClean[$i]+"\n" ) ;
+				}
+			}
+
+	}else{
+		warning "an error has occured, see the script editor for futher information";
+		}
+
+	}
+	
+	
+global proc load_good_sound_for_previz(){
+$sceneName = `file -q -sn`;
+
+
+}
+
+
+global proc s100EXPExpSelectedShots_deadline(){
+string $textF[] = `textScrollList -q -selectItem  s100EXPFormLayoutTSL`;
+
+s100FM_export_script($textF) ;
+}
+
+global proc s100FM_export_script_empty(){
+string $tmp[] = {""}; 
+s100FM_export_script($tmp);
+}
+
+
+global proc s100FM_export_script(string $args[]){
+
+string $fpath = "T:/Thinkbox/DeadlineRepository/temp/";
+python("import maya.cmds as cmds, time");
+float $time = eval("python(\"time.time()\")");
+
+//Scene information for export name
+string $sceneName = `file -q -sn`;
+
+$tmp = stringToStringArray($sceneName,"/");
+$sceneName = $tmp[size($tmp)-1];
+
+$tmp = stringToStringArray($sceneName,".");
+$sceneName = $tmp[0];
+
+$spath = $fpath+$sceneName+$time;
+
+string $to_write = "s100FMExportPrevizToLayoutWithList_deadline({\""+stringArrayToString($args, "\", \"")+"\"});";
+
+
+// We write the command to execute when file is open
+$file = `fopen ($spath+".mel") "w"`;
+fprint $file ( $to_write );
+fclose $file;
+print("\n");
+print($spath+".mel");
+print("\n");
+//we write the info job file to submit to deadline
+/*
+$file2 = `fopen ($spath+"_info.job") "w"`;
+
+fprint $file2 ( "Plugin=MayaBatch\n" );
+fprint $file2 ( "Name="+$sceneName+" (Script Job)\n" );
+fprint $file2 ( "Comment=\n" );
+fprint $file2 ( "Department=\n" );
+fprint $file2 ( "Pool=exportscript\n" );
+fprint $file2 ( "Group=none\n" );
+fprint $file2 ( "Priority=50\n" );
+fprint $file2 ( "TaskTimeoutMinutes=0\n" );
+fprint $file2 ( "EnableAutoTimeout=False\n" );
+fprint $file2 ( "ConcurrentTasks=1\n" );
+fprint $file2 ( "LimitConcurrentTasksToNumberOfCpus=True\n" );
+fprint $file2 ( "MachineLimit=0\n" );
+fprint $file2 ( "Whitelist=\n" );
+fprint $file2 ( "LimitGroups=\n" );
+fprint $file2 ( "JobDependencies=\n" );
+fprint $file2 ( "OnJobComplete=Nothing\n" );
+fprint $file2 ( "Frames=0-0\n" );
+fprint $file2 ( "ChunkSize=1\n" );
+
+
+//we write the plugin job file to submit to deadline
+
+
+$file3 = `fopen ($spath+"_plugin.job") "w"`;
+$sn = `file -q -sn`;
+$workspace = `workspace -q -act`;
+
+fprint $file3 ( "SceneFile="+$sn+"\n" );
+fprint $file3 ( "Version=2010\n" );
+fprint $file3 ( "Build=None\n" );
+fprint $file3 ( "ProjectPath="+$workspace+"\n" );
+fprint $file3 ( "StrictErrorChecking=True\n" );
+fprint $file3 ( "ScriptJob=True\n" );
+fprint $file3 ( "ScriptFilename="+($spath+".mel") +"\n" );
+
+
+fclose $file2;
+fclose $file3;
+string $deadlineCommandPath = "/Applications/Deadline/Resources/bin/deadlinecommand";
+system( "DeadlineCommand.exe "+$spath+"_info.job  "+$spath+"_info.job");
+//system( $deadlineCommandPath+" "+$spath+"_info.job  "+$spath+"_info.job");
+*/
+}
+
+global proc string[] s100FMEPTLRebuildPathName_deadline(string $pathName , string $sceneName)
+{
+//$pathName = $listFolderClean[0]
+//$sceneName = `file -q -shortName  -sn ` ;
+	print("Print de la proc de rename\n");
+	print($pathName);
+	print("\n");
+	print($sceneName);
+
+	$arrayN = stringToStringArray($sceneName,"_") ;
+	string $nameClean = "";
+	for($i = 0 ; $i < size($arrayN) ; $i++){
+		if($arrayN[$i] == "PREVIZ"){
+			break ;
+		}else{
+			$nameClean += $arrayN[$i] +"_" ;
+			}
+		}
+
+	$arrayN = stringToStringArray($pathName,"/") ;
+	int  $last = size($arrayN) - 1 ;
+	$nameClean += $arrayN[$last] +"_" ;
+	//getDeptFirstDep
+	string $folderInside[] = sort(`s1KeepOnlyFolderWhitoutFullPath(($pathName +"/") ) `);
+
+	string $value = "Animation ";
+	$r = 0 ;
+	for($i = 0 ; $i < size($folderInside) ; $i++){
+		if(`gmatch $folderInside[$i] ("*_"+ $value) `){
+			$r = $i ;
+			break ;
+			}
+		}
+	
+	$firstFolder = $folderInside[$r] ;
+	print($firstFolder);
+	string $depta[]  = stringToStringArray($firstFolder , "_" ) ;
+	string $dept = "";
+	if(size($depta) > 1 ){
+		$dept = $depta[1] ;
+	}else{
+		$dept = $firstFolder ;
+		}
+
+	$nameClean += $dept +"_Tk00.ma" ;
+
+	$pathClean = $pathName +"/" + $firstFolder  +"/"  ;
+	return{$pathClean , $nameClean } ;
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

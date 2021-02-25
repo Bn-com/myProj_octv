@@ -1,0 +1,121 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2009-3-10
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				外包用bake摄像机
+//////////////////////////////////////////////////////////
+
+
+global proc slBakeCamera()
+{
+
+	int $find = false;
+	string $unBaked[] = `ls -selection`;
+	if (size($unBaked) == 1)
+	{
+		string $buf[] = `listRelatives -fullPath -children $unBaked[0]`;
+		if (size($buf))
+		{
+			if (`nodeType $buf[0]` == "camera")
+			{
+				$find = true;
+			}
+		}
+	}
+	if (!$find)
+	{
+		error "请选择一个摄像机";
+	}
+
+	string $name = `match "[^|]+$" $unBaked[0]` + "_baked";
+	string $baked[] = `ls $name`;
+	if (size($baked))
+	{
+		string $rs = `confirmDialog -title "Bake Camera" -message ($name + " 已经存在，删除它吗？") -button "Delete" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($rs == "Delete")
+		{
+			delete $baked;
+		}
+		else
+		{
+			return;
+		}
+	}
+
+// duplicate
+	$baked = `duplicate -returnRootsOnly -inputConnections -name $name $unBaked[0]`;
+
+// unlock
+	$buf = `listRelatives -fullPath -children $baked[0]`;
+	$buf[size($buf)] = $baked[0];
+	string $node;
+	for ($node in $buf)
+	{
+		if (`match "|camclip$" $node` != "")
+		{
+			delete $node;
+		}
+		else
+		{
+			string $attrs[] = `listAttr -keyable -locked $node`;
+			for ($attr in $attrs)
+			{
+				setAttr -lock false ($node + "." + $attr);
+			}
+		}
+	}
+
+// parentConstraint
+	string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+	for ($attr in $attrs)
+	{
+		$buf = `listConnections -source true -destination false -connections true -plugs true ($baked[0] + "." + $attr)`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			disconnectAttr $buf[$i+1] $buf[$i];
+		}
+	}
+	$buf = `listRelatives -parent $baked[0]`;
+	if (size($buf))
+	{
+		$baked = `parent -world $baked[0]`;
+	}
+	string $constraint[] = `parentConstraint $unBaked[0] $baked[0]`;
+
+// timeLine
+	string $sceneName = `file -query -shortName -sceneName`;
+	float $startTime = `playbackOptions -query -min`;
+	float $endTime = `playbackOptions -query -max`;
+
+// bake
+	// View Selected		
+	select $baked[0];
+
+	string $scripts = "";
+	string $modelPanels[] = `getPanel -visiblePanels`;
+	for ($modelPanel in $modelPanels)
+	{
+		if (`getPanel -typeOf $modelPanel` == "modelPanel")
+		{
+			if (!`isolateSelect -query -state $modelPanel`);
+			{
+				isolateSelect -state true $modelPanel;
+				$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+			}
+		}
+	}
+
+	bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -shape true $baked[0];
+
+	delete $constraint;
+
+	if ($scripts != "")
+	{
+		eval $scripts;
+	}
+}

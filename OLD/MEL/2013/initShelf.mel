@@ -1,0 +1,527 @@
+// Copyright (C) 1997-2011 Autodesk, Inc., and/or its licensors.
+// All rights reserved.
+//
+// The coded instructions, statements, computer programs, and/or related
+// material (collectively the "Data") in these files contain unpublished
+// information proprietary to Autodesk, Inc. ("Autodesk") and/or its licensors,
+// which is protected by U.S. and Canadian federal copyright law and by
+// international treaties.
+//
+// The Data is provided for use exclusively by You. You have the right to use,
+// modify, and incorporate this Data into other products for purposes authorized 
+// by the Autodesk software license agreement, without fee.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AUTODESK
+// DOES NOT MAKE AND HEREBY DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTIES
+// INCLUDING, BUT NOT LIMITED TO, THE WARRANTIES OF NON-INFRINGEMENT,
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, OR ARISING FROM A COURSE 
+// OF DEALING, USAGE, OR TRADE PRACTICE. IN NO EVENT WILL AUTODESK AND/OR ITS
+// LICENSORS BE LIABLE FOR ANY LOST REVENUES, DATA, OR PROFITS, OR SPECIAL,
+// DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES, EVEN IF AUTODESK AND/OR ITS
+// LICENSORS HAS BEEN ADVISED OF THE POSSIBILITY OR PROBABILITY OF SUCH DAMAGES.
+
+//
+//
+//  Creation Date:  Aug 15 1996
+//
+//  Description:
+//      This script initializes the Shelf.  Initialization involves
+//		determining the initial Shelf preferences, creating the UI and
+//		setting the initial visibility.
+//
+{
+	//  Check Shelf tab preferences.
+	//
+	int    $i, $j, $k, $nShelves;
+	int    $usePrefs = false;
+	int	   $buildShelvesFromDisk = false;
+	string $name, $proc;
+	string $shelfDir, $sysReturn, $tmp;
+	string $unsortedFiles[];
+	string $diskFiles[]; // Will hold the list of files in the shelves directory
+	string $names[];
+
+	int $showClassicCloth = `licenseCheck -mode edit -type classicCloth`;
+	
+	//
+	//      get a list of files in the shelves directory
+	//
+	string $shelfDirs = `internalVar -userShelfDir`;
+	string $shelfArray[];
+	string $PATH_SEPARATOR = `about -win`? ";" : ":";
+	tokenize($shelfDirs, $PATH_SEPARATOR, $shelfArray);
+	for( $i = 0; $i < size($shelfArray); $i++ ) {
+		$shelfDir = $shelfArray[$i];
+		string $shelfDirFiles[] = `getFileList -folder $shelfDir -fs "shelf_*.mel"`;
+		int $nth = size($unsortedFiles);
+		for($j = 0; $j < size($shelfDirFiles); $j++) {
+			if (0 == $showClassicCloth) {
+				if ($shelfDirFiles[$j] == "shelf_Cloth.mel") {
+					continue;
+				}
+			}
+			
+			// Drop this file if the same name already appears earlier
+			int $foundMatch = 0;
+			for($k = 0; $k < size($unsortedFiles); $k++) {				
+				if( $unsortedFiles[$k] == $shelfDirFiles[$j] ) {
+					$foundMatch = 1;
+					break;
+				}
+			}
+			if( !$foundMatch ) {
+				$unsortedFiles[$nth] = $shelfDirFiles[$j];
+				$nth++;
+			}
+		}
+	}
+
+	$diskFiles = sort ($unsortedFiles);	
+	$nShelves = size($diskFiles);
+
+	if (0 == $nShelves) {
+	
+		//  No existing shelves, so use the default shelf setup.
+		createDefaultShelves($showClassicCloth);
+		
+	} else {
+		//
+		//  Check that shelves were built at some point, if not create default shelves.
+		if (!`optionVar -exists shelvesLastUpdated`) {
+				createDefaultShelves($showClassicCloth);
+		}
+		//
+		//  Compare existing prefs with what's in the directory.
+		//	It is preferable to use prefs as they contain order info also.
+		//
+		int $nArr = `optionVar -q numShelves`;
+		string $prefFiles[]; // Will hold list of shelf files in userPrefs.mel
+		string $combinedFiles[]; // Will hold list of all shelf files in userPrefs.mel and shelves directory
+		
+		//  build array of files from the previous shelf
+		//	
+		for ($i = 0; $i < $nArr; $i++) {
+			$prefFiles[$i] = (`optionVar -q ("shelfFile"+($i+1))` + ".mel");
+			$combinedFiles[$i] = $prefFiles[$i];
+		}
+		
+		//  build array of files that combines the files from the previous
+		//  shelf with any new files added to the prefs
+		//
+		for ($i = 0; $i < $nShelves; $i++) {
+			if (0 == stringArrayContains($diskFiles[$i], $prefFiles)) {
+				appendStringArray($combinedFiles, stringToStringArray($diskFiles[$i], " "), 1);
+			}
+		}
+	
+		int $nCombined = size($combinedFiles);
+		
+		//  Check that all the shelves in $combinedFiles exist
+		//
+		$usePrefs = true;
+		for($i = 0; $i < $nCombined; $i++) {
+			// Search in shelves folder
+			// If not found, search in default shelf scripts		
+			if(0 == stringArrayContains($combinedFiles[$i], $diskFiles)) {
+				// If not found or has been loaded but is not longer in prefs folder, remove shelf from the list
+				if( (!`exists $combinedFiles[$i]`) || (`optionVar -q ("shelfLoad"+($i+1))`) ) {
+					// Don't break on Custom shelf
+					if($combinedFiles[$i] == "shelf_Custom.mel") {
+						continue;
+					}
+					// Remove shelf from $combinedFiles
+					for($j = $i+1; $j < $nCombined; $j++) {
+						string $tempName = $combinedFiles[$j];
+						int $tempLoad = `optionVar -q ("shelfLoad"+($j+1))`;
+						
+						$combinedFiles[$j-1] = $tempName;
+						optionVar -intValue ("shelfLoad"+$j) $tempLoad;
+					}
+					// A shelf has been removed, adjust variables accordingly
+					stringArrayRemoveAtIndex( ($nCombined - 1), $combinedFiles );
+					optionVar -remove ("shelfLoad"+$nCombined)
+							  -remove ("shelfName"+$nCombined)
+							  -remove ("shelfFile"+$nCombined);
+					$nCombined--;
+					$i--;
+					// If no shelves exist, don't use prefs
+					if($nCombined < 1) {
+						$usePrefs = false;
+						break;
+					}
+				}
+			}
+		}
+		//
+		//	Check if there are any default shelves saved in the prefs folder, if not build the shelf straight from $diskFiles.
+		//  This allows users to overwrite all of our default shelves.
+		//  First make sure shelves exist and that default shelves were built at some point
+		if ( ($nCombined > 0) && `optionVar -exists shelvesLastUpdated` ) {
+			$buildShelvesFromDisk = true;
+			string $startupDir = ( getenv("MAYA_LOCATION") + "/scripts/startup/" );
+			string $defShelfFiles[] = `getFileList -folder $startupDir -fs "shelf_*.mel"`;
+			for ($i = 0; $i < $nShelves; $i++)
+			{
+				if ( stringArrayContains($diskFiles[$i], $defShelfFiles) || ($diskFiles[$i] == "shelf_Custom.mel") ) {
+					//  A default shelf has been found
+					$buildShelvesFromDisk = false;
+					break;
+				}
+			}
+		}
+
+		if ($buildShelvesFromDisk) {
+			//  Create shelves from shelves directory
+			// The double backslash is to prevent the '.' from being
+			// used as a wildcard.
+			//
+			for ($i = 1; $i <= $nShelves; $i++) {
+				$tmp = $diskFiles[$i-1];
+				$proc = `substitute "\\.mel" $tmp ""`;
+				$name = `substitute "shelf_" $proc ""`;
+
+				optionVar 
+					-stringValue ("shelfName"+$i) $name
+					-stringValue ("shelfFile"+$i) $proc
+					-intValue ("shelfLoad"+$i) true;
+			}
+
+			optionVar -intValue numShelves $nShelves;
+		}
+		else {
+			if ($usePrefs) {
+				for($i = 1; $i <= $nCombined; $i++) {
+					//  Since the files exist, create the shelves.
+					//  The double backslash is to prevent the '.' from being
+					//  used as a wildcard.
+					//			
+					$tmp = $combinedFiles[$i-1];
+					$proc = `substitute "\\.mel" $tmp ""`;
+					$name = `substitute "shelf_" $proc ""`;
+
+					optionVar 
+						-stringValue ("shelfName"+$i) $name
+						-stringValue ("shelfFile"+$i) $proc;
+						
+					//  The shelfLoad optionVar is only true for shelves being loaded from $diskFiles					
+					if ( 0 == stringArrayContains($combinedFiles[$i-1], $diskFiles) ) {
+						optionVar -intValue ("shelfLoad"+$i) false;
+					}
+					else {
+						optionVar -intValue ("shelfLoad"+$i) true;
+					}
+				}
+				//All the shelves in $combinedFiles have been created so reset numShelves
+				optionVar -intValue numShelves $nCombined;
+			}
+
+			else {
+				// Create the default shelves
+				createDefaultShelves($showClassicCloth);
+			}
+		}
+	}
+	
+	//  Create the Shelf.
+	// 
+	if (`exists shelf`) {
+		eval "source shelf";
+	}
+
+	//	Attach a callback so we know when the Shelf is made visible or 
+	//	invisible.
+	//
+	setUIComponentStateCallback("Shelf", "shelfVisibilityStateChange");
+
+	//	Set the Shelf's initial visibility.
+	//
+	setShelfVisible(`optionVar -q isShelfVisible`);
+
+	// Fix shelf items that have obsolete or incorrect commands
+	// associated with them.  Once the shelves have been fixed,
+	// turn on a variable so that they are not processed again
+	// in this version.
+	string $nowVer = `about -v`;
+	string $lastVer = "";
+	if( `optionVar -exists shelvesLastUpdated` ) {
+		$lastVer = `optionVar -q shelvesLastUpdated`;
+	}
+
+	if( $nowVer != $lastVer ) {
+		optionVar -sv shelvesLastUpdated $nowVer;
+		source updateShelves.mel;
+	}
+}
+
+global proc int shelfVisibilityStateChange(
+	int    $newState,
+	string $layout)
+//
+//	Description:
+//		This procedure is called whenever the visibility state of the 
+//		Shelf is changed.
+//
+//		Create the contents of the Shelf when it is shown for the first 
+//		time.
+//
+//	Arguments:
+//		newState - The new visibile state of the Shelf.
+//
+//		layout - The parent layout for the Shelf.
+//
+//	Returns:
+//		true - If the change of state is to be allowed.
+//
+//		false - If the state change is rejected.
+//
+{
+	global int    $gShelfCreated = false;
+
+	int    $result = true;
+
+	if ($newState) {
+
+		//	Load the contents of the Shelf right before it becomes visible
+		//	for the very first time.
+		//
+		if (!$gShelfCreated) {
+			zwShelf;	// added by huangzhongwei@idmt.org.cn, 20081217
+			buildShelves();
+			$gShelfCreated = true;
+		}
+
+	} else {
+	}
+
+	//	Defer these commands because this proc is called when the visibility
+	//	state is about to change. This proc must return true to accept 
+	//	the state change. After this proc returns then restore the
+	//	panel focus and update the pref menu.
+	//
+	evalDeferred("restoreLastPanelWithFocus(); updatePrefsMenu();");
+
+	return $result;
+}
+
+global proc createDefaultShelves(int $showClassicCloth)
+{
+	int $nShelves = 0;
+
+	//  
+	//  No existing shelves, so use the default shelf setup.
+	//
+
+	//
+	//	Create a new set of default shelves 
+	//
+
+	//	The following table defines the order of shelves 
+	//	available for each version of Maya.
+	//
+	//	All Versions	Complete		Unlimited
+	//	--------------------------------------------
+	//	General         General         General
+	//	Curves          Curves          Curves
+	//	Surfaces        Surfaces        Surfaces
+	//	Polygons        Polygons        Polygons
+	//	                Subdivs         Subdivs
+	//	Deformation     Deformation     Deformation
+	//	Animation       Animation       Animation
+	//	                Dynamics        Dynamics
+	//	Rendering       Rendering       Rendering
+	//	                PaintEffects    PaintEffects
+	//	                Toon		    Toon
+	//	                Muscle		    Muscle
+	//	                                Fluids
+	//	                                Fur
+	//	                                Hair
+	//	                                nCloth
+	//	                                Cloth
+	//
+	//	From the table above you will count that there
+	//	are:
+	//	
+	//	7 Shelves for all versions
+	//	12 Complete shelves
+	//	17 Unlimited shelves
+
+	//	The General, Curves, Surfaces, and Polygons shelves
+	//	are all available for all versions of Maya.
+	//
+	//	Note that each shelf may have individual items available 
+	//	only in certain versions. See each shelf script for these
+	//	items.
+	//
+	optionVar 
+		-stringValue  shelfName1      "General"
+		-stringValue  shelfFile1      "shelf_General" 
+		-intValue     shelfLoad1      false
+
+		-stringValue  shelfName2      "Curves"
+		-stringValue  shelfFile2      "shelf_Curves" 
+		-intValue     shelfLoad2      false
+
+		-stringValue  shelfName3      "Surfaces"
+		-stringValue  shelfFile3      "shelf_Surfaces" 
+		-intValue     shelfLoad3      false
+
+		-stringValue  shelfName4      "Polygons"
+		-stringValue  shelfFile4      "shelf_Polygons" 
+		-intValue     shelfLoad4      false
+		;
+
+	if (`licenseCheck -type complete`) {
+		//
+		//	--- Complete ---
+		//
+		//	Create the Subdivs, Deformation, Animation, Dynamics,
+		//	and Rendering shelves.
+		//
+		optionVar
+			-stringValue  shelfName5      "Subdivs"
+			-stringValue  shelfFile5      "shelf_Subdivs" 
+			-intValue     shelfLoad5      false
+
+			-stringValue  shelfName6      "Deformation"
+			-stringValue  shelfFile6      "shelf_Deformation" 
+			-intValue     shelfLoad6      false
+
+			-stringValue  shelfName7      "Animation"
+			-stringValue  shelfFile7      "shelf_Animation" 
+			-intValue     shelfLoad7      false
+
+			-stringValue  shelfName8      "Dynamics"
+			-stringValue  shelfFile8      "shelf_Dynamics" 
+			-intValue     shelfLoad8      false
+
+			-stringValue  shelfName9      "Rendering"
+			-stringValue  shelfFile9      "shelf_Rendering" 
+			-intValue     shelfLoad9      false
+
+			-stringValue  shelfName10      "PaintEffects"
+			-stringValue  shelfFile10      "shelf_PaintEffects" 
+			-intValue     shelfLoad10      false
+
+			-stringValue  shelfName11      "Toon"
+			-stringValue  shelfFile11      "shelf_Toon" 
+			-intValue     shelfLoad11      false
+
+			-stringValue  shelfName12     "Muscle"
+			-stringValue  shelfFile12     "shelf_Muscle" 
+			-intValue     shelfLoad12     false
+			;
+
+		if( fluidEditLicenseFound() ) {
+			//
+			// Add the unlimited shelves: fluids, fur, hair
+			//
+			optionVar
+				-stringValue  shelfName13     "Fluids"
+				-stringValue  shelfFile13     "shelf_Fluids" 
+				-intValue     shelfLoad13     false
+
+				-stringValue  shelfName14     "Fur"
+				-stringValue  shelfFile14     "shelf_Fur" 
+				-intValue     shelfLoad14     false
+
+				-stringValue  shelfName15     "Hair"
+				-stringValue  shelfFile15     "shelf_Hair" 
+				-intValue     shelfLoad15     false
+
+				-stringValue  shelfName16     "nCloth"
+				-stringValue  shelfFile16     "shelf_nCloth" 
+				-intValue     shelfLoad16     false
+				;
+
+			if( $showClassicCloth ) {
+				//
+				//	Add the Cloth shelf
+				//
+				optionVar
+					-stringValue  shelfName17     "Cloth"
+					-stringValue  shelfFile17     "shelf_Cloth" 
+					-intValue     shelfLoad17     false
+					;
+
+				//	Add empty shelf.
+				//
+				optionVar
+					-stringValue  shelfName18     "Custom"
+					-stringValue  shelfFile18     "shelf_Shelf1" 
+					-intValue     shelfLoad18     false
+					;
+				$nShelves = 18;
+			} else {
+				//	Add empty shelf.
+				//
+				optionVar
+					-stringValue  shelfName17     "Custom"
+					-stringValue  shelfFile17     "shelf_Shelf1" 
+					-intValue     shelfLoad17     false
+						;
+				$nShelves = 17;
+			}
+
+		} else {
+			//
+			//	--- Complete ---
+			//
+			//	Add empty shelf.
+			//
+			optionVar
+				-stringValue  shelfName12     "Custom"
+				-stringValue  shelfFile12     "shelf_Shelf1" 
+				-intValue     shelfLoad12     false
+				;
+
+			$nShelves = 12;
+		}
+
+	} else {
+		//
+		//	--- All Versions ---
+		//
+		//	Create the Deformation, Animation, and Rendering
+		//	shelves.
+		//
+		optionVar
+			-stringValue  shelfName5      "Deformation"
+			-stringValue  shelfFile5      "shelf_Deformation" 
+			-intValue     shelfLoad5      false
+
+			-stringValue  shelfName6      "Animation"
+			-stringValue  shelfFile6      "shelf_Animation" 
+			-intValue     shelfLoad6      false
+
+			-stringValue  shelfName7      "Rendering"
+			-stringValue  shelfFile7      "shelf_Rendering" 
+			-intValue     shelfLoad7      false
+
+			-stringValue  shelfName8      "Custom"
+			-stringValue  shelfFile8      "shelf_Shelf1" 
+			-intValue     shelfLoad8      false
+			;
+
+		$nShelves = 8;
+	}
+
+	optionVar 
+		-stringValue  shelfItemSize   "Small" 
+		-stringValue  shelfItemStyle  "iconOnly"
+
+		-intValue     isShelfVisible  true
+		-intValue     isShelfLoad     true
+		-intValue     numShelves      $nShelves;
+
+	
+	//	When the default shelves are loaded then we must rename
+	//	the option var for the Custom shelf 
+	//	to match the corresponding shelf labels.
+	//
+	//	If the file and label don't match then the shelves won't load 
+	//	from preferences and retain the user's order (they'll
+	//	come back in alphabetical order).
+	//
+	int $nShelves = `optionVar -q numShelves`;
+	optionVar -stringValue ("shelfFile" + $nShelves) "shelf_Custom";
+	
+}

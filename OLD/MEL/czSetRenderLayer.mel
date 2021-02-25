@@ -1,0 +1,973 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 陈仲
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+global proc HjcleanLinks()
+{
+	// Go through all the light links, and break the connections between
+	// defaultLightSet and hyperGraphLayout.
+	//
+	string $linkers[] =`ls -type lightLinker`;
+	int $numLinkers = size( $linkers );
+	int $indexLinkers = $numLinkers;
+	while( $indexLinkers-- > 0 ){
+		string $linker = $linkers[$indexLinkers];
+		if( `reference -isNodeReferenced $linker` ){
+			// Light linker node is from a reference, can't cleanup
+			//
+			continue;
+		}
+		string $linkerPrefix = ($linker + ".lnk[");
+		int $numLinks = `getAttr -size ($linker + ".lnk")`;
+		int $indexLink = $numLinks;
+		print $indexLink;
+		for($i=2;$i<$indexLink;$i++ ){
+			string $objectLink = ($linkerPrefix + $i + "].object");
+			string $lightLink = ($linkerPrefix + $i + "].light");
+			$hyperGraphLink = `connectionInfo -sourceFromDestination $objectLink`;
+			$defaultLightLink = `connectionInfo -sourceFromDestination $lightLink`;
+			disconnectAttr $hyperGraphLink $objectLink;
+			disconnectAttr $defaultLightLink $lightLink;
+			
+			
+		}
+	}
+}
+global proc HjcleanLightLinks()
+{
+	// Go through all the light links, and break the connections between
+	// defaultLightSet and hyperGraphLayout.
+	//
+	string $linkers[] =`ls -type lightLinker`;
+	int $numLinkers = size( $linkers );
+	int $indexLinkers = $numLinkers;
+	while( $indexLinkers-- > 0 )
+		{
+		string $linker = $linkers[$indexLinkers];
+		if( `reference -isNodeReferenced $linker` )
+			{
+			// Light linker node is from a reference, can't cleanup
+			//
+			continue;
+		}
+		string $linkerPrefix = ($linker + ".ignore[");
+		int $numLinks = `getAttr -size ($linker + ".ignore")`;
+		print $numLinks;
+		int $indexLink = $numLinks;
+		
+		for($i=0;$i<$indexLink;$i++){
+			string $objectLink = ($linkerPrefix + $i + "].objectIgnored");
+			string $lightLink = ($linkerPrefix + $i + "].lightIgnored");
+			$hyperGraphLink = `connectionInfo -sourceFromDestination $objectLink`;
+			$defaultLightLink = `connectionInfo -sourceFromDestination $lightLink`;
+			disconnectAttr $hyperGraphLink $objectLink;
+			disconnectAttr $defaultLightLink $lightLink;
+				
+		}
+	}
+}
+
+
+
+proc hjCBdeleteConnection( string $destName )
+//
+// If the specified name is the destination of a connection,
+// then delete that connection.
+//
+{
+	if ( `connectionInfo -isDestination $destName` ){
+		string $destination = `connectionInfo -getExactDestination $destName`;
+
+		// When deleting a src connection from a character, you must remove
+		// the item from the character set or the character will no longer
+		// work consistently: bug 127212
+		//
+		string $srcConn[] = `listConnections -s 1 -d 0 -type character $destination`;
+		if (size($srcConn)) {
+			string $warnMsg = ("Removed \'"+$destination+"\' from character \'"+$srcConn[0]+"\'.");
+			warning($warnMsg);
+			character -e -rm $srcConn[0] $destination;
+		}
+		
+		// delete -icn doesn't work if destination attr is readOnly 
+		// so use disconnectAttr in this case
+		//
+		string $sArr[1] = `ls -ro $destination`;
+		if (size($sArr)) {
+			string $src = `connectionInfo -sourceFromDestination $destination`;
+			disconnectAttr $src $destination;
+		} else {
+			delete -icn $destination;
+		}
+	}
+}
+
+
+proc  string[] hjmasterlook()
+{
+	string $hjmaster[]	=`ls "*group"`;
+	string $hjgroup;
+	string $hjmastgroup[];
+	int    $hjsizema=`size $hjmaster`;
+	for ($j=0;$j<$hjsizema;$j++ )
+	{
+		string $hjhairname[]=`listRelatives -fullPath -children $hjmaster[$j]`;	
+		int    $hjsize=`size $hjhairname`;
+		for ($i=0;$i<$hjsize;$i++)
+		{
+		if(`gmatch $hjhairname[$i] "*MASTER"`==1)
+		{
+		string $hjmasall=$hjmasall+$hjhairname[$i]+".";
+		$hjmasall+=$hjmasall;
+		string $jayenametrf[];
+		string $jayenametrtest=`tokenize $hjmasall "." $jayenametrf`;
+		return $jayenametrf;
+		}
+		}
+		}
+	return $hjmaster;
+}
+
+
+proc hjSmset(string $hjnames[])
+{
+		string $hjname[]=$hjnames;
+		string $hjhairname[]=`listRelatives -children $hjname`;
+		string $hjbody;
+		
+		for ($hjbody in $hjhairname)
+		{
+		if(`gmatch $hjbody "*Body"`==1&&`attributeExists "Smooth" $hjbody`==1)
+		{
+		//int $hjkey=`keyframe -query -keyframeCount ($hjbody+".Smooth")`;
+		
+		hjCBdeleteConnection ($hjbody+".Smooth");
+		setAttr ($hjbody+".Smooth") 1;	
+		
+		}
+		}
+	
+	
+}
+proc string[] hjmasterlookout()
+{
+	string $hjmaster[]	=`ls "*MASTER" "*:*MASTER" "*:*:*MASTER"`;
+	if (`size $hjmaster`!=0)
+	{
+		return $hjmaster;
+		
+	}
+	return $hjmaster;
+}
+global proc hjsmoothbody()
+{
+	hjSmset `hjmasterlook`;
+	hjSmset `hjmasterlookout`;
+	
+	
+}
+
+global proc hjSource()
+{
+	string $hjsel[]=`ls -sl`;
+	
+		if(`objExists HsourceSG`)
+		{
+		warning ("Material already exists");
+		}
+		else
+		{
+		shadingNode -asShader lambert -n Hsourceobj ;
+		sets -renderable true -noSurfaceShader true -empty -name HsourceSG;
+		connectAttr -f Hsourceobj.outColor HsourceSG.surfaceShader;
+		setAttr "Hsourceobj.hideSource" 1;
+		
+		}
+		if (size($hjsel))
+		{
+		select -r $hjsel;
+		hyperShade -assign Hsourceobj;
+		}
+	
+	
+	
+}
+
+
+
+
+global proc int hjhairofflayer()
+{
+	
+	string $hjhairsystema[] = `ls -long -type "hairSystem"`;
+	string $hjhairdisplay[] = `ls -type "displayLayer"`;
+	string $hjlayer;
+	for($hjlayer in $hjhairdisplay )
+	{
+		if(`gmatch $hjlayer "*HAIR*"`!=0)
+		{
+		layerEditorLayerButtonVisibilityChange $hjlayer;
+		}
+		
+	}
+	
+	for($i=0; $i<`size $hjhairsystema`; $i++)
+	{
+	int $hjgettr=`getAttr -lock ($hjhairsystema[$i]+".simulationMethod")`;
+	if ($hjgettr !=1)
+	{
+	int 	$hjhairsimulation=`setAttr ($hjhairsystema[$i]+".simulationMethod") 0`;
+	select $hjhairsystema[$i];
+	DeleteHairCache $hjhairsystema[$i];
+	}
+	}
+	
+	return 0;
+}
+
+
+
+
+
+global proc czSetRenderLayer()
+{
+	// --- 
+	// proc: czSetRenderLayer
+	// To create the UI interface for czSetRenderLayer.
+	// ---
+
+	if ( `window -exists setRenderLayerUI` ) 
+	deleteUI setRenderLayerUI;
+
+	window    -title "Set Render Layer" 
+			-wh 208 550
+			-maximizeButton 0 
+			-sizeable 1 
+			setRenderLayerUI;
+	
+	//window -q -wh setRenderLayerUI;
+	//window -e -wh 208 550 setRenderLayerUI;
+	//windowPref -remove setRenderLayerUI;
+
+	//menu's in main window
+	menuBarLayout;
+
+		menu -label "Help";
+			menuItem -l "Help..."  ;
+
+
+	//Create a form layout that holds the mainScroll and executeButton
+	//The rest of the UI are children of mainScroll > frameCol
+	// formLayout mainForm holds scrollLayout and a executeButton
+
+	// formLayout mainForm is the Root layout, containing:
+	// 1. buttons: assign buttons
+	// 2. scrollLayout: mainScroll
+	formLayout mainForm;	
+				
+		scrollLayout 
+			-horizontalScrollBarThickness  6 
+			-verticalScrollBarThickness  6 
+			-childResizable  1
+			 mainScroll;
+			 
+			//scrollLayout -q -scrollAreaHeight mainScroll;
+
+			// Inside mainScroll layout, we create a columnLayout: frameCol
+			// which holds the tow frameLayout:
+			// 1. setRenderLayer frame
+			// 2. assign material frame
+			columnLayout -adj 1 frameCol; 
+
+
+			//++++++++++++++++++++++++++++frameLayout: setRenderLayer frame++++++++++++++++++++++++++++++++++
+			frameLayout -l "Set Render Layers" 
+						-marginHeight 0
+						-collapsable 1
+						-collapse 0
+						-borderStyle "etchedIn" 
+						-marginWidth 5
+						selectFrame;
+
+			columnLayout -adjustableColumn true -rowSpacing 5;
+				button -height 25 -l "Color"		-c "colorLayer";
+				button -height 25 -l "Shadow"		-c "shadowLayer";	
+				button -height 25 -l "RGBA"		-c "zjSepRGBA";
+				button -height 25 -l "Zdepth"		-c "zdepthLayer";
+				button -height 25 -l "Hair"		-c "hairLayer";
+				button -height 25 -l "White Surface"	-c "whiteLayer false";
+				button -height 25 -l "White Surface with Contour" -c "whiteLayer true";
+
+			//++++++++++++++++++++++++++++frameLayout: setRenderLayer frame++++++++++++++++++++++++++++++
+
+			setParent frameCol;
+
+			//++++++++++++++++++++++++++++frameLayout: assign material frame++++++++++++++++++++++++++++++
+			frameLayout     -l "Assign Materials" 
+						-collapsable 1
+						-collapse 0 
+						-borderStyle "etchedIn" 
+						-marginWidth 5
+						randomColorFrame;
+
+
+			columnLayout -adjustableColumn true -rowSpacing 5;
+				button -height 25 -l "Assign Matte to Selection"	-c "assignMatteToSel";
+				button -height 25 -l "Assign Background to Selection"	-c "assignBgroudToSel";
+				button -height 25 -l "清理灯光连接节点"			-c "HjcleanLightLinks";
+				button -height 25 -l "多摄像机建立渲染层"		-c "Hjcalayer";
+						
+			//++++++++++++++++++++++++++++ frameLayout: assign material frame ++++++++++++++++++++++++++++++
+			
+			setParent frameCol;
+
+			//++++++++++++++++++++++++++++frameLayout: export character frame++++++++++++++++++++++++++++++
+			frameLayout     -l "Export Characters" 
+						-collapsable 1
+						-collapse 0 
+						-borderStyle "etchedIn" 
+						-marginWidth 5
+						exportCharFrame;
+
+
+			columnLayout -adjustableColumn true -rowSpacing 5;
+				button -height 25 -l "Export All Characters"	-c "czExportChar";
+				button -height 25 -l "隐藏并关闭头发动力学"	-c "hjhairofflayer";
+				button -height 25 -l "设置选择的物体不渲染"	-c "hjSource";
+				button -height 25 -l "设置角色光滑属性"		-c "hjsmoothbody";
+						
+			//++++++++++++++++++++++++++++ frameLayout: export character frame ++++++++++++++++++++++++++++++
+
+	// Back to mainForm and edit the position of the executeButton
+	formLayout -e 
+
+		  -af mainScroll "left" 0 
+		  -af mainScroll "right" 0 
+		  -af mainScroll "top" 0 
+		  -af mainScroll "bottom" 0    
+		  mainForm;
+
+	showWindow setRenderLayerUI;
+
+}
+
+
+// first all, get the character name
+global proc string getCharName()
+{
+	string $charName;
+	string $buffer[];
+
+	$buffer = `ls -assemblies`;
+
+	// loop to find character master group's name,
+	// which ends with "_MASTER"
+	for($each in $buffer)
+	{
+		if (endsWith($each, "_MASTER"))
+		{
+			$charName = $each;
+			break;
+		}
+	}
+
+	tokenize $charName "_" $buffer;
+
+	if (size($buffer)>1)
+	{
+		$charName = $buffer[0];
+		for ($i=1;$i<size($buffer)-1;$i++)
+		{
+			$charName += ("_"+$buffer[$i]);
+		}
+	}
+	else
+	{
+		$charName = $buffer[0];
+	}
+	
+	return $charName;
+}
+
+
+// first all, get the character name
+global proc string[] getCharNames()
+{
+	int $i = 0;
+	string $charNames[];
+	string $buffer;
+
+	string $allChar[] = `ls "*MASTER" "*:*MASTER" "*:*:*MASTER"`;
+	for ($each in $allChar)
+	{
+		$buffer = `substring $each 1 (size($each)-7)`;
+		if (`objExists ($buffer+"_Facial_Curve")`)
+		{
+			$charNames[$i++] = $buffer;
+		}
+	}
+	return $charNames;	
+}
+
+
+global proc colorLayer()
+{
+	// get character's name
+	string $charNames[] = getCharNames();
+
+	// set Smooth attributes
+	setCharSmooth;
+
+	// get all surface object list
+	string $allObjects[] = `ls -type surfaceShape`;
+
+	// create "Matte" if it do not exists
+	if(`objExists MatteSG`)
+	{
+		warning ("Material already exists");
+	}
+	else
+	{
+		shadingNode -asShader lambert -n Matte ;
+		sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+		connectAttr -f Matte.outColor MatteSG.surfaceShader;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr "Matte.diffuse" 0;
+		setAttr "Matte.translucenceFocus" 0;
+		setAttr Matte.matteOpacityMode 0;
+	}
+	for ($each in $charNames)
+	{
+		// get char objects list
+		string $charObjs[] = `ls -type surfaceShape ($each+"*")`;
+
+		// get non-char objects list
+		string $nonCharObjs[] = stringArrayRemove($charObjs, $allObjects);
+
+		// get geo's transform node
+		// $allObjects = `listRelatives -allParents $allObjects`;
+
+
+
+		if (size($allObjects)>0)
+		{
+			string $allLights[] = `ls -lights`;
+
+			// create new render layer
+			string $hairRL = `createRenderLayer -name ($each + "_color") -number 1 -makeCurrent -noRecurse $allObjects $allLights`;
+			
+			if (size($nonCharObjs))
+			{
+				select -r $nonCharObjs;
+				hyperShade -assign Matte;
+			}
+			setAttr "defaultRenderLayer.renderable" 0;
+			select -clear;
+		}
+	}
+
+ //hjPrv;
+
+}
+
+
+global proc shadowLayer()
+{
+	// get character's name
+	string $charName = getCharName();
+
+	// set Smooth attributes
+	setCharSmooth;
+
+	// get all surface object list
+	string $allObjects[] = `ls -dag -ni`;
+
+	// create "Matte" if it do not exists
+	if(`objExists MatteSG`)
+	{
+		warning ("Material already exists");
+	}
+	else
+	{
+		shadingNode -asShader lambert -n Matte ;
+		sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+		connectAttr -f Matte.outColor MatteSG.surfaceShader;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr "Matte.diffuse" 0;
+		setAttr "Matte.translucenceFocus" 0;
+		setAttr Matte.matteOpacityMode 0;
+	}
+
+	
+	if (size($allObjects))
+	{
+		// create new render layer
+		string $hairRL = `createRenderLayer -name ($charName + "_shadow") -number 1 -makeCurrent -noRecurse $allObjects`;
+
+		select -r $allObjects;
+		hyperShade -assign Matte;
+
+		setAttr "defaultRenderLayer.renderable" 0;
+		select -clear;
+	}
+
+}
+
+
+global proc rgbaLayer()
+{
+	// get character's name
+	string $charName = getCharName();
+
+	// set Smooth attributes
+	setCharSmooth;
+
+	// create "Matte" if it do not exists
+	if(`objExists MatteSG`)
+	{
+		warning ("Material already exists");
+	}
+	else
+	{
+		shadingNode -asShader lambert -n Matte ;
+		sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+		connectAttr -f Matte.outColor MatteSG.surfaceShader;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr "Matte.diffuse" 0;
+		setAttr "Matte.translucenceFocus" 0;
+		setAttr Matte.matteOpacityMode 0;
+	}
+
+	// get all surface object list
+	string $allObjects[] = `ls -type surfaceShape`;
+
+	// assign "Matte" to non-char objects
+	if (size($allObjects)>0)
+	{
+		string $hairStuff[] = `ls "*_HAIRSYSTEM" "*:*:*_HAIRSYSTEM"`;
+
+		if (size($hairStuff)>0)
+		{
+			string $allLights[] = `ls -lights`;
+
+			// create new render layer
+			string $hairRL = `createRenderLayer -name ($charName + "_hair") -number 1 -makeCurrent -noRecurse $allObjects $hairStuff $allLights`;
+			
+			if (size($allObjects))
+			{
+				select -r $allObjects;
+				hyperShade -assign Matte;
+			}
+
+			if (size($hairStuff))
+			{
+				select -r $hairStuff;
+				hyperShade -assign Matte;
+			}		
+			setAttr "defaultRenderLayer.renderable" 0;
+			select -clear;
+		}
+		else
+		{
+			warning ("Hair group does not exist!");
+		}
+
+	}
+}
+
+global proc hairLayer()
+{
+	// get hair light into current scene
+	string $hairLights = substituteAllString(`getenv "DEV_PATH"`, "/", "\\") + "\\Maya\\Import\\hair_light.mb";
+
+	// import hair_light
+	if (!`objExists "hair_light"`)
+	{
+		file -import -type "mayaBinary" -rpr "hair_light" -options "v=0" $hairLights;
+	}
+	
+     
+	// set Smooth attributes
+	setCharSmooth;
+
+	// create "Matte" if it do not exists
+	if(`objExists MatteSG`)
+	{
+		warning ("Material already exists");
+	}
+	else
+	{
+		shadingNode -asShader lambert -n Matte ;
+		sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+		connectAttr -f Matte.outColor MatteSG.surfaceShader;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr "Matte.diffuse" 0;
+		setAttr "Matte.translucenceFocus" 0;
+		setAttr Matte.matteOpacityMode 0;
+	}
+
+	// get all surface object list
+	string $allObjects[] = `ls -type surfaceShape`;
+	select -r $allObjects;
+	hyperShade -assign lambert1;
+
+	// get all the *_pfxHair node into this layer
+	// so hair could be rendered --------------- Modification 
+
+	// assign "Matte" to non-char objects
+	if (size($allObjects)>0)
+	{
+		string $hairStuff[] = `ls "*:*_HAIRSYSTEM" "*_HAIRSYSTEM"`;
+
+		if (size($hairStuff)>0)
+		{
+			for ($hair in $hairStuff)
+			{
+			   	string $name[];
+				string $namels=`tokenize $hair "_" $name`;
+				string $buffer = `substring $name[1] 1 (size($name[1])-11)`;
+				
+				string $allLights[] = `ls -lights`;
+				string $pfxHairStuff[] = `ls -l -type "pfxHair"`;
+
+				// create new render layer
+				string $hairRL = `createRenderLayer -name ($buffer + "_hair") -number 1 -makeCurrent -noRecurse $allObjects $hair $pfxHairStuff $allLights`;
+				
+				if (size($allObjects))
+				{
+					select -r $allObjects;
+					string $headwear[] = `ls -type surfaceShape "headwear*"`;
+					select -d $headwear;
+					string $tmpsel[] = `ls -ni -sl`;
+					select -r $tmpsel;
+					hyperShade -assign Matte;
+					select -r $tmpsel;
+					hyperShade -assign Matte;			
+				}
+
+				// add pfxHair in this layer
+				// ------------- Modification 
+
+				select -r $hair;				
+				select -add $pfxHairStuff;
+				hyperShade -assign Matte;
+				for ($pfxHair in $pfxHairStuff)
+				{
+					setAttr ($pfxHair + ".primaryVisibility") 1;
+				}
+						
+				setAttr "defaultRenderLayer.renderable" 0;
+				select -clear;
+			}
+
+		}
+		else
+		{
+			warning ("Hair group does not exist!");
+		}
+
+	}
+
+	// Render Settings -- August 10th, 2006
+	
+	//huojian add overriide
+	//hjPrv;
+	setAttr "defaultRenderGlobals.oversamplePaintEffects" 1;
+	setAttr "defaultRenderGlobals.oversamplePfxPostFilter" 1;
+}
+
+global proc whiteLayer(int $withContour)
+{
+	string $obj[] = `ls -sl`;
+	string $surfaceShader = `shadingNode -asShader surfaceShader`;
+	setAttr ($surfaceShader + ".outColor") -type double3 1 1 1 ;
+	string $SG = `sets -renderable true -noSurfaceShader true -empty -name ($surfaceShader + "SG")`;
+	connectAttr -f ($surfaceShader + ".outColor") ($SG + ".surfaceShader");
+	select $obj;
+	sets -e -forceElement $SG;
+	if ($withContour)
+	{
+		assignNewPfxToon;
+
+		setAttr ".borderLines" 3;
+		setAttr ".creaseLines" 0;
+		setAttr ".lineWidth" 0.21;
+		setAttr ".resampleProfile" 1;
+		setAttr ".resampleBorder" 1;
+	}
+}
+
+/* commented by huangzhongwei
+global proc assignMatteToSel()
+{
+	// create "Matte" if it do not exists
+	if(`objExists MatteSG`)
+	{
+	}
+	else
+	{
+		shadingNode -asShader lambert -n Matte ;
+		sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+		connectAttr -f Matte.outColor MatteSG.surfaceShader;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr "Matte.diffuse" 0;
+		setAttr "Matte.translucenceFocus" 0;
+		setAttr Matte.matteOpacityMode 0;
+	}
+
+	// get user selection list
+	string $sel[] = `ls -sl`;
+
+	if (size($sel)>0)
+	{
+		// assign Matte to selection
+		hyperShade -assign Matte;
+		sets -e -forceElement MatteSG;
+	}
+	else
+	{
+		warning ("Nothing selected!");
+	}
+}
+*/
+
+global proc assignMatteToSel()
+{
+	// get user selection list
+	string $sel[] = `ls -sl`;
+
+	if (size($sel)>0)
+	{
+
+		// create "Matte" if it do not exists
+		if(`objExists MatteSG`)
+		{
+		}
+		else
+		{
+			shadingNode -asShader lambert -n Matte ;
+			sets -renderable true -noSurfaceShader true -empty -name MatteSG;
+			connectAttr -f Matte.outColor MatteSG.surfaceShader;
+			setAttr "Matte.color" -type double3 0 0 0 ;
+			setAttr "Matte.diffuse" 0;
+			setAttr "Matte.translucenceFocus" 0;
+			setAttr Matte.matteOpacityMode 0;
+		}
+
+		// assign Matte to selection
+	//	hyperShade -assign Matte;
+		sets -e -forceElement MatteSG $sel;
+	}
+	else
+	{
+		warning ("Nothing selected!");
+	}
+}
+
+global proc assignBgroudToSel()
+{
+	// create "Background" if it do not exists
+	if(`objExists BackgroundSG`)
+	{
+	}
+	else
+	{
+		shadingNode -asShader useBackground -n Background ;
+		sets -renderable true -noSurfaceShader true -empty -name BackgroundSG;
+		connectAttr -f Background.outColor BackgroundSG.surfaceShader;
+		setAttr "Background.reflectivity" 0;
+		setAttr "Background.reflectionLimit" 0;
+	}
+
+	// get user selection list
+	string $sel[] = `ls -sl`;
+
+	if (size($sel)>0)
+	{
+		// assign Background to selection
+		hyperShade -assign Background;
+		sets -e -forceElement BackgroundSG;
+	}
+	else
+	{
+		warning ("Nothing selected!");
+	}
+}
+
+
+global proc zdepthLayer()
+{
+	// user selection
+	string $sel[] = `ls -sl`;
+	if (size($sel))
+	{
+		// get all the mesh,nurbsSurface&subdiv into
+		// this Depth renderLayer
+		string $depthRLayer = `createRenderLayer -name "Depth" -number 1 -makeCurrent -noRecurse $sel`;
+
+		// get the shader into current scene
+		if (!`objExists DepthShader`)
+		{
+			file -import -type "mayaBinary" (`getenv "DEV_PATH"` + "/Maya/shaders/lr_DepthShader.mb");
+
+		}
+		// go to the depth renderLayer
+		layerEditorLayerButtonSelect 0 $depthRLayer; 
+		
+		// and select all the surface objs
+		select -r $sel;
+		hyperShade -assign DepthShader;
+		sets -e -forceElement DepthShaderSG;
+		select -clear;
+	}
+	else
+	{
+		confirmDialog -title "提示" -message "请选择要添加进Depth层的对象!"
+                                       -button "OK" 
+                                       -defaultButton "OK";
+	}	
+	//hjPrv;
+}
+
+
+
+global proc string hjgetLayerRenderer(string $layer)
+{
+    string $renderer = "";
+    string $plug = hjgetLayerValuePlug($layer, "defaultRenderGlobals.currentRenderer");
+    print $plug;
+    if ($plug != "") 
+    {
+        $renderer = `getAttr $plug`;
+    }
+    return $renderer;
+}
+
+global proc string hjgetLayerValuePlug(string $layer, string $scenePlug)
+{
+    // Find the adjustment if it exists
+    string $plugs[] = `listConnections -p 1 $scenePlug`;
+    for ($plug in $plugs) 
+    {
+        if (plugNode($plug) == $layer) 
+	{
+            if (`editRenderLayerGlobals -q -currentRenderLayer` == $layer) 
+	    {
+                return $scenePlug;
+            }
+            else 
+	    {
+                return substitute("\\.plug$", $plug, ".value");
+            }
+        }
+    }
+    return "";
+}
+
+
+global proc hjsetLayerString(string $layer, string $scenePlug, string $value)
+{
+    editRenderLayerAdjustment -layer $layer $scenePlug;
+    string $plug = hjgetLayerValuePlug($layer, $scenePlug);
+    if ($plug != "")
+    {
+        setAttr -type "string" $plug $value;
+    }
+}
+
+global proc hjsetLayerInt(string $layer, string $scenePlug, int $value)
+{
+    editRenderLayerAdjustment -layer $layer $scenePlug;
+    string $plug = hjgetLayerValuePlug($layer, $scenePlug);
+    if ($plug != "") 
+    {
+        setAttr $plug $value;
+    }
+}
+
+//create Renderlayer depth
+global proc string hjdepehlay()	
+{		
+	string $hjlistamesh[] = `ls -type "mesh" `;
+	string $hjlglistnurber[] = `ls -type "nurbsSurface" `;
+	string $hjlglistsubdiv[] = `ls -type "subdiv" `;
+	string $hjcrelayer = `createRenderLayer -name "Depth" -number 1 -makeCurrent -noRecurse $hjlistamesh $hjlglistnurber $hjlglistsubdiv`;
+	
+	string $hjdplayer;	
+	for ($hjdplayer in $hjlglistnurber)
+	{
+		if (!`attributeExists "Oceanrender" $hjdplayer`)
+		{
+			editRenderLayerMembers $hjcrelayer $hjdplayer;
+		}
+	}
+	layerEditorLayerButtonSelect 0 $hjcrelayer; 
+	setAttr "defaultRenderLayer.renderable" 0;
+
+	return $hjcrelayer;
+}
+
+// ->> cz - June 23th, 2006
+global proc czModifyCameraMask(string $layerName)
+{
+	// go to zdepth render layer
+	layerEditorLayerButtonSelect 0 $layerName;
+	
+	string $allCam[] = `ls -cameras`;
+	string $targetCam;
+	for ($each in $allCam)
+	{
+		int $flag = `getAttr ($each+".renderable")`;
+		if ($flag)
+		{
+			$targetCam = $each;
+			break;
+		}
+	}
+	string $temp[] = `listRelatives -c $targetCam`;
+	if ($targetCam!="")
+	{
+		if (size($temp))
+		{	
+			string $camShapes[] = `listRelatives -path -shapes -type camera $targetCam`;
+			$targetCam = $camShapes[0];
+		}
+		setAttr ($targetCam + ".mask") 0;
+
+		// create layer override for current camare's mask
+		editRenderLayerAdjustment ($targetCam + ".mask");
+		refresh;
+	}
+	else
+	{
+		warning("Camera renderable does not exist!");
+	}
+}
+// <<- cz - June 23th, 2006
+
+// ->> cz - June 30th, 2006
+global proc setCharSmooth()
+{
+	// get all the characters in the current scene
+	string $charNames[] = `getCharNames`;
+
+	// loop to set Smooth attribute for each of them
+	for ($char in $charNames)
+	{
+		if (`objExists ($char+"_Upper_Body.Smooth")`)
+		{
+			setAttr ($char+"_Upper_Body.Smooth") 1;
+		}
+		if (`objExists ($char+"_MASTER")`)
+		{
+			setAttr ($char+"_MASTER.smooth") 1;
+		}		
+	}
+}
+// <<- cz - June 30th, 2006
+

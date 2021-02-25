@@ -1,0 +1,152 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc njExportCam()
+{
+	source "zwCameraImportExport.mel";
+	
+	string $filename = `file -q -sn`;
+	string $match = match("YODA",$filename);
+	if (!size($match))
+	{
+		$match = match("Ninjago",$filename);
+	}
+	
+	if (size($match))
+	{
+		string $filename = `file -q -sn -shn`;
+		string $buff[]=stringToStringArray($filename,"_");
+		string $dir = "//file-cluster/GDC/Projects/"+$match+"/"+$match+"_scratch/TD/NoDelete/CAM_Layout/"+$buff[0]+"/"+$buff[1];
+		sysFile -md $dir;
+		
+		
+		string $camer[]  =`ls -type camera "Q*_S*"`;
+		for ($cam in $camer)
+		{
+			string $trans[] = `listRelatives -f -p $cam`;
+			clear $buff;
+			$buff = stringToStringArray($trans[0],"|");
+			select -r $trans;
+			string $baked = zwBakeCamera();
+			print $baked;
+			select -r $baked;
+			file -force -options "v=0" -typ "mayaAscii" -pr -es ($dir+"/"+$baked);
+		}
+		select -cl;
+	}
+}
+
+global proc njImportCam()
+{
+	string $project, $episode, $sequence, $scene;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if ($project == "")
+	{
+		warning "未知项目";
+	}
+	else if (zwHasSeq($project))
+	{
+		string $str = `match "^[^_.]+_[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+		if ($str != "")
+		{
+			string $buf[];
+			tokenize $str "_" $buf;
+			$episode = $buf[1];
+			$sequence = $buf[2];
+			$scene = $buf[3];
+		}
+	}
+	else
+	{
+		string $str = `match "^[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+		if ($str != "")
+		{
+			string $buf[];
+			tokenize $str "_" $buf;
+			$episode = $buf[1];
+			$scene = $buf[2];
+		}
+	}
+
+	if (`window -exists zwGetCameraUI`)
+		deleteUI zwGetCameraUI;
+	window -title "Reference Camera" -resizeToFitChildren true zwGetCameraUI;
+		columnLayout -adjustableColumn true;
+			textFieldGrp -editable false -label "Project:" -text $project textFieldGrpProject;
+				popupMenu -button 3 -postMenuCommandOnce true -postMenuCommand "" popupMenuProjectR;
+					menuItem -label "YODA" -command ("textFieldGrp -edit -text \"YODA\" \"textFieldGrpProject\"; textFieldGrp -edit -visible 1 \"textFieldGrpSequence\";");
+					menuItem -label "Ninjago" -command ("textFieldGrp -edit -text \"Ninjago\" \"textFieldGrpProject\"; textFieldGrp -edit -visible 1 \"textFieldGrpSequence\";");
+			textFieldGrp -label "Episode:" -text $episode textFieldGrpEpisode;
+			textFieldGrp -visible 1 -label "Sequence:" -text $sequence textFieldGrpSequence;
+			textFieldGrp -label "Scene:" -text $scene textFieldGrpScene;
+			button -label "Reference" -command "njGetCameraFromUI";
+	showWindow zwGetCameraUI;
+}
+
+global proc njGetCameraFromUI()
+{
+	string $project = `textFieldGrp -query -text textFieldGrpProject`;
+	if ($project == "")
+	{
+		error "请选择Project";
+	}
+	string $episode = `textFieldGrp -query -text textFieldGrpEpisode`;
+	if ($episode == "")
+	{
+		error "请选择Episode";
+	}
+	string $sequence = "";
+	if (`textFieldGrp -query -visible textFieldGrpSequence`)
+	{
+		$sequence = `textFieldGrp -query -text textFieldGrpSequence`;
+		if ($sequence == "")
+		{
+			error "请选择Sequence";
+		}
+	};
+	string $scene = `textFieldGrp -query -text textFieldGrpScene`;
+	/*if ($scene == "")
+	{
+		error "请选择Scene";
+	};*/
+
+	string $CamPath = "//file-cluster/GDC/Projects/"+$project+"/"+$project+"_scratch/TD/NoDelete/CAM_Layout/"+$episode+"/"+$sequence+"/";
+
+	string $name = $sequence;
+
+	if (size($scene))
+	{
+		$name =$name+"_"+$scene;
+	}
+
+	string $camera[] = `getFileList -fld $CamPath -fs ($name+"*")`;
+
+	if (size($camera))
+	{
+		//print $camera;
+		if (!size($scene))
+		{
+			for ($cam in $camera)
+			{
+				string $camFile = $CamPath+$cam;
+				zwCameraReference $camFile;
+			}
+		}
+		else
+		{
+			string $camFile = $CamPath+$camera[0];
+			zwCameraReference $camFile;
+		}
+	}
+}

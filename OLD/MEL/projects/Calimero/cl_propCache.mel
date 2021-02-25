@@ -1,0 +1,243 @@
+
+
+
+
+global proc  cl_propCache()
+{
+	cl_Rnd_GeoCacheHighend_copyModel();
+	cl_Rnd_GeoCacheHighend_recordMaterial();
+	cl_Rnd_GeoCacheHighend_createCeoCache();
+	cl_Rnd_GeoCacheHighend_deleteCeoCache();
+	cl_Rnd_GeoCacheHighend_deleteParticles();
+	cl_Rnd_GeoCacheHighend_importCeoCache();
+	cl_Rnd_GeoCacheHighend_returnMaterial();
+	cl_Rnd_GeoCacheHighend_BakeFiles();
+//		共用cache；
+	zwOptimizeGeoCache;
+}
+
+//	1.记录选择的模型
+//	2.copy模型
+//	3.将copy出来的模型转换为柔体
+//	4.创建goal
+//	5.记录材质
+//	6.创建GeoCache
+//	7.删除柔体粒子
+//	8.恢复材质
+
+//float $startTime = `timerX`;
+
+global proc cl_Rnd_GeoCacheHighend_copyModel()
+{
+//	1.记录选择的模型
+	int $start_Frame = `playbackOptions -q -min`-1;
+	if (`currentTime -q`!= $start_Frame)	currentTime $start_Frame;
+	string $selectObjs[] = `ls -sl -l`;
+
+	
+	global string $cl_Rnd_GeoCacheHighend_geoGroup[];
+	clear $cl_Rnd_GeoCacheHighend_geoGroup;
+	global string $cl_Rnd_GeoCacheHighend_particleGroup[];
+	clear $cl_Rnd_GeoCacheHighend_particleGroup;
+	
+	int $indexOfFile =0;	
+	
+//	每次创建一个	2DLine_CACHE_OBJ*的空组
+
+	global string $cl_Rnd_GeoCacheHighend_geoGroupName;
+	$cl_Rnd_GeoCacheHighend_geoGroupName =`group -em -name GEO_CACHE_Prop`;	
+	
+//	2.copy模型
+	for ($obj in $selectObjs)
+	{
+	        
+		string $objTypes[]=`getShapes($obj)`;
+		if (`nodeType $objTypes[0]`!="mesh" && 
+		`nodeType $objTypes[0]`!="nurbsSurface"&& 
+		`nodeType $objTypes[0]`!="nurbsCurve")	continue;
+		
+		
+		select $obj;
+
+		
+		duplicate -rr;
+                
+		string $newObj[]=`ls -sl -l`;
+
+		
+
+                parent $newObj[0] $cl_Rnd_GeoCacheHighend_geoGroupName;
+
+		$newObj=`ls -sl -l`;
+		
+		string $softParticle[] = `soft -c $newObj[0]`;	
+		
+//		如果不是在起始帧复制的模型，这里加上了，反而到了起始帧，模型位置不对
+		setAttr ($softParticle[0]+".startFrame") $start_Frame;	
+
+		$cl_Rnd_GeoCacheHighend_geoGroup[$indexOfFile] = $newObj[0];	
+		$cl_Rnd_GeoCacheHighend_particleGroup[$indexOfFile] = $softParticle[0];	
+		$indexOfFile++;
+		goal -w 1 -utr 0   -g $obj $newObj[0];
+
+	}
+
+
+}
+
+
+//	string $totalTime = `timerX -startTime $startTime`;
+//	print ("\nTotal Time: "+$totalTime+"\n");	
+
+global proc cl_Rnd_GeoCacheHighend_recordMaterial()
+{
+//	5.记录材质
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjReturnMatList.mel";
+	zzjGetMatList;			
+}
+
+global proc cl_Rnd_GeoCacheHighend_createCeoCache()
+{
+//	6.创建GeoCache		
+	source "doCreateGeometryCache.mel";
+	global string $cl_Rnd_GeoCacheHighend_geoGroup[];
+	global string $cl_Rnd_GeoCacheHighend_geoGroupName;
+	select $cl_Rnd_GeoCacheHighend_geoGroup;
+
+	global string $cl_Rnd_GeoCacheHighend_xmls[];
+	clear $cl_Rnd_GeoCacheHighend_xmls;
+
+	print "=====================xxxxx=====================\n";
+	print $cl_Rnd_GeoCacheHighend_geoGroupName;
+	print "=====================xxxxx=====================\n";
+	
+	string $version = `about -version`;
+	$version = `substring  $version 1 4`;
+
+	if ($version == "2008")
+	{
+		$cl_Rnd_GeoCacheHighend_xmls=`doCreateGeometryCache 4 { "2", "1", "10", "OneFilePerFrame", "1", "","0",$cl_Rnd_GeoCacheHighend_geoGroupName,"0", "add", "0", "1", "1","0","1" } `;	
+	}
+	else
+	{
+		$cl_Rnd_GeoCacheHighend_xmls=`doCreateGeometryCache 5 { "2", "1", "10", "OneFilePerFrame", "1", "","0",$cl_Rnd_GeoCacheHighend_geoGroupName,"0", "add", "0", "1", "1","0","1","mcc" } `;
+	}
+	
+	string $cf = "";
+	string $objHis[]=`listHistory $cl_Rnd_GeoCacheHighend_geoGroup[0]`;
+	for ($o in $objHis)
+	{
+		if (`nodeType $o`=="cacheFile")
+		{
+			if (`getAttr ($o+".enable")`)
+			{
+				$cf = $o;
+				break;	
+			}
+		}
+	}
+	
+	string $cfs[]=`ls -type cacheFile $cf`;
+	clear $cl_Rnd_GeoCacheHighend_xmls;
+	$cl_Rnd_GeoCacheHighend_xmls=`cacheFile -q -f $cfs[0]`;
+}
+
+global proc cl_Rnd_GeoCacheHighend_deleteCeoCache()
+{				
+//	7.删除cache
+	global string $cl_Rnd_GeoCacheHighend_geoGroup[];
+	select $cl_Rnd_GeoCacheHighend_geoGroup;
+	source "deleteCacheFile.mel";
+	deleteCacheFile 3 { "keep", "", "geometry" } ;
+}
+
+//	8.删除柔体粒子
+global proc cl_Rnd_GeoCacheHighend_deleteParticles()
+{
+	global string $cl_Rnd_GeoCacheHighend_particleGroup[];
+	delete $cl_Rnd_GeoCacheHighend_particleGroup;
+}
+
+global proc cl_Rnd_GeoCacheHighend_importCeoCache()
+{
+//	9.导入缓存
+	global string $cl_Rnd_GeoCacheHighend_geoGroup[];
+	global string $cl_Rnd_GeoCacheHighend_xmls[];
+	select $cl_Rnd_GeoCacheHighend_geoGroup;
+	source "doImportCacheFile.mel";
+	doImportCacheFile $cl_Rnd_GeoCacheHighend_xmls[0] "xml" $cl_Rnd_GeoCacheHighend_geoGroup {};
+}
+		
+
+global proc cl_Rnd_GeoCacheHighend_returnMaterial()
+{
+//	10.恢复材质			
+		zzjSetMatList;
+}
+
+	
+global proc cl_Rnd_GeoCacheHighend_BakeFiles()
+{
+//	11.bake所有表情贴图
+	int $start_Frame = `playbackOptions -q -min`;
+	int $end_Frame = `playbackOptions -q -max`;
+	string $time_Range=string($start_Frame + ":"+$end_Frame);
+
+	string $files[]=`ls -type file`;
+	for ($f in $files)
+	{
+		string $cons[]=`listConnections ($f+".frameExtension")`;
+		if (`size $cons`)
+		{
+			bakeResults -t  $time_Range  -sb 1 ($f+".frameExtension");
+		}
+	}
+
+}
+
+global proc cl_Rnd_GeoCacheHighend_fixSelectCeoCache()
+{				
+//	12.修复cache
+	source "deleteCacheFile.mel";
+	source "doImportCacheFile.mel";
+	string $sl[]=`ls -sl -l`;
+	
+	for ($s in $sl)
+	{
+		string $cf = "";
+		string $objHis[]=`listHistory $s`;
+		for ($o in $objHis)
+		{
+			if (`nodeType $o`=="cacheFile")
+			{
+				if (`getAttr ($o+".enable")`)
+				{
+					$cf = $o;
+					break;	
+				}
+			}
+		}		
+		if ($cf!="")
+		{
+			string $cachePath[]=`cacheFile -q -f $cf`;
+			DeleteHistory;
+
+			doImportCacheFile $cachePath[0] "xml" $sl {};
+			
+		}
+		
+	}
+	
+	
+	
+	
+
+	
+
+	
+	
+	
+	
+	
+	
+}

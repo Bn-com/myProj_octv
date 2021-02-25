@@ -1,0 +1,789 @@
+
+global proc s100playblastToolsAddSub (){
+	if(`menuItem -ex s100playblastToolsMenuDiv `)
+		deleteUI  s100playblastToolsMenuDiv ;
+	if(`menuItem -ex s100playblastToolsMenu `)
+		deleteUI  s100playblastToolsMenu ;
+	if(`menuItem -ex s100playblastToolsMenuOB `)
+		deleteUI  s100playblastToolsMenuOB ;
+
+
+	menuItem -divider  true -parent TimeSliderMenu s100playblastToolsMenuDiv;
+	menuItem -parent TimeSliderMenu
+
+	-label "s100 playblast"
+	-command "s100playblastToolsCheck"
+	-annotation "playblast the scene"
+	-allowOptionBoxes 1
+	s100playblastToolsMenu;
+
+	menuItem
+		-command "s100playblastToolsOption"
+		-optionBox true  -parent TimeSliderMenu s100playblastToolsMenuOB;
+	}
+
+
+global proc s100playblastToolsOption(){
+
+	if(`window -ex s100playblastToolsOption` )
+		deleteUI  s100playblastToolsOption ;
+
+	window -width 200 s100playblastToolsOptionUI;
+		columnLayout -adj 1 ;
+			text -label "option for s100 playblast";
+	$chTextured = `checkBox -v 1 -ann "chek if off to ignore the viewport overide" -label "Textured" -changeCommand  s100PBTChTxCg  s100PBTChTx `;
+	$chConvert = `checkBox -v 1 -ann "this will convert all textured to low, process will be much more faster"  -label "convert Textured to low" -changeCommand  s100PBTChTxConvCg  s100PBTChTxConv `;
+	$chLighting = `checkBox -v 1 -ann "Active the light, shadow and hight quality"  -label "Active the light visibility" -changeCommand  s100PBTChLightingCg s100PBTChLighting `;
+	button -label "playblast" -c "s100playblastToolsCheck;if(`window -ex s100playblastToolsOptionUI` ) deleteUI s100playblastToolsOptionUI";
+
+	showWindow;
+	}
+
+global proc s100PBTChLightingCg()
+{
+    optionVar -iv   "s100playbackLighting" `checkBox -q -v s100PBTChLighting` ;
+}
+
+    
+global proc s100PBTChTxCg()
+{
+optionVar -iv   "s100playbackMaxTextured" `checkBox -q -v s100PBTChTx` ;
+
+	if(  `checkBox -q -v s100PBTChTx` )
+	{
+	checkBox -e -en 1 s100PBTChTxConv ;
+
+	}else{
+	checkBox -e -en 0 s100PBTChTxConv ;
+
+    }
+  	  if(`checkBox -q -ex s100EXPChTx`)
+		{
+		checkBox -e -v `checkBox -q -v s100PBTChTx` s100EXPChTx ;
+        }
+
+}
+global proc s100PBTChTxConvCg()
+{
+optionVar -iv   "s100playbackMaxTexturedForceConvertion" `checkBox -q -v s100EXPChTxConv` ;
+
+  	  if(`checkBox -q -ex s100EXPChTxConv`)
+		{
+		checkBox -e -v `checkBox -q -v s100PBTChTxConv` s100EXPChTxConv;
+        }
+
+
+}
+
+
+
+global proc s100playblastToolsCheck (){
+	$fileN = `file -q -sn -shortName  `;
+	$file = `file -q -sn  `;
+
+	if($fileN != ""){
+		$rootP = `s100findRootFolderForShoot`;
+		if(($file +"/") != $rootP){
+			$folder = "" ;
+			$fileN = `file -q -sn -shortName  `;
+			$rootP = `s100findRootFolderForShoot`;
+			$ch = `s100askIfSceneIsWip`;
+			$path = $rootP + $folder  +"/" ;
+			$name = `s100PTBuildNameForPlayblast($fileN) `;
+			$pathName = $path + $name ;
+
+			if(`filetest -e $pathName `){
+				$msg = "playblast already exist, continues?";
+				$chk = `confirmDialog -title "Override? " -message $msg
+					-button "Yes" -button "No" -defaultButton "Yes"
+					-cancelButton "No" -dismissString "No"`;
+
+				if($chk == "Yes"){
+				sysFile -delete $pathName ;
+				s100playblastTools ;
+					}
+
+			}else{
+			s100playblastTools ;
+				}
+
+		}else{
+			warning "file does not look in the pip" ;
+			}
+	}else{
+		warning "save file before using this tools" ;
+		}
+	}
+
+global proc int[] s100PBTreturnRes(string $name )
+{
+int $w = 960  ;
+int $h = 540 ;
+
+
+	if($name == "MA")
+	{
+	$w = 960  ;
+	$h = 540 ;
+    }
+
+
+return {$w, $h} ;
+
+}
+
+global proc string s100PBTreturnName(string $suff )
+{
+string $name = "unknow" ;
+
+	if($suff == "MA")
+	{
+	$name = "Maya The Bee" ;
+    }
+return $name ;
+}
+
+global proc s100playblastTools(){
+	global string $s100PBTEAddSufToShot;
+	$s100PBTEAddSufToShot ="";
+	$cam = `s100PTGetCam` ;
+	int $start  = `playbackOptions -q -minTime `;
+	int $end  = `playbackOptions -q -maxTime `;
+	$fileN = `file -q -sn -shortName  `;
+	$rootP = `s100findRootFolderForShoot`;
+	$folder = "" ;
+	$ch = `s100askIfSceneIsWip`;
+	$path = $rootP + $folder  +"/" ;
+	if($ch == 1 ){
+		$path += "_wip/";
+		}
+	$name = `s100PTBuildNameForPlayblast($fileN) `;
+	$pathName = $path + $name ;
+	s100playblastToolsWithCamName($cam,$start , $end, $pathName ) ;
+	}
+
+global proc s100playblastToolsWithCamName(string $cam, string $startTime , string $endTime, string $pathToSave)
+{
+
+	global int $s100pbtvarForLoad ;
+
+	$ch = 1;
+		if(`filetest -e $pathToSave`)
+		{
+		$ch = `sysFile -delete $pathToSave `;
+	    }
+	global string $s100PBTcamToFocal ;
+
+	$s100PBTcamToFocal = $cam ;
+		string $folderTmp = dirname( $pathToSave ) ;
+		string $files[] = `getFileList -folder ($folderTmp +"/")  ` ;
+			for($tmp in $files)
+			{
+			//print ($folderTmp +"/" + $tmp) ;
+				if(($folderTmp+"/" + $tmp) == $pathToSave)
+				{
+					$ch = 0 ;
+					break ;
+		    	}
+			}
+
+		if($ch)
+		{
+
+			int $chLockCam ;
+			//GD addendum :
+				if(`referenceQuery -isNodeReferenced $cam `)
+				{
+				$ref = s100getRefNodeForObject ({$cam}) ;
+					if(`getAttr ($ref[0]+".locked") `)
+					{
+					print "ici" ;
+					$chLockCam = 1 ;
+					file  -unloadReference  $ref[0] ;
+					setAttr ($ref[0]+".locked") 0 ;
+					file -loadReference $ref[0] ;
+                    }
+                }
+
+			select -cl ;
+			s100PBTRemHeadUp ;
+			$getA = `s100getListForAllPanel`;
+			$folder = "" ;
+			$fileN = `file -q -sn -shortName  `;
+			$rootP = `s100findRootFolderForShoot`;
+			$ch = `s100askIfSceneIsWip`;
+
+
+			$head = `s100getHeadUp`;
+			s100HiddeForAllPanel ;
+			s100HiddeHeapUp ;
+
+			$fileN = `file -q -sn -shortName  `;
+			$name = `s100PTBuildNameForPlayblast($fileN) `;
+
+			$suffGGG = stringToStringArray($name,"_" ) ;
+
+
+			string $suf = $suffGGG[0] ;
+
+			int $resolution[] = `s100PBTreturnRes($suf ) ` ;
+			s100PTcreateModelPanelWithCam($cam)  ;
+			$ch = `optionVar -q collapseIconBarsInPanels `;
+
+			toggleModelEditorBarsInAllPanels 1;
+
+			global string $gPlayBackSlider;
+			string $folder = dirname( $pathToSave ) ;
+
+			if(`filetest -e $folder`)
+			{
+
+			}else{
+			sysFile -md $folder ;
+			}
+
+
+			$s = $startTime;
+			$e = $endTime;
+			s100PBTAddHeadUp ;
+			//$cam = "Ep004_Sq001A_Sc001_Cam:camera_cam";
+			//print $cam ;
+
+
+			string $arrTmpS[] = stringToStringArray( $cam, ":" ) ;
+			$tmpSound = substituteAllString($arrTmpS[0]  , "_Cam" ,"");
+
+			// QA addendum :
+			s100PBTfixSoundNamesInScene();
+
+
+			string $lsSounds[] = `ls -type audio ("*" + $tmpSound +"*" ) ` ;
+			// QA addendum :
+			/*
+				print ("// $cam : \""+$cam+"\" \n");
+				print ("// $arrTmpS : \n");
+				print $arrTmpS;
+				print ("// $tmpSound : \n");
+				print $tmpSound;
+				print ("// $lsSounds : \n");
+				print $lsSounds;
+				print "\n";
+			*/
+
+
+		//setSoundDisplay MA_Ep004_Sq001A_Sc002_sound 1;
+
+		string $sound ;
+
+			if( size($lsSounds) > 0)
+			{
+				$sound	 = $lsSounds[0];
+			}
+		$pathName = $pathToSave ;
+
+
+		//get Time value
+		int $cu = `currentTime -q `;
+
+		//get smooth value
+		string $allMesh[] = `s100PCselectAllMesh` ;
+		string $sel[] = `s100PCselectCharacters`;
+		string $sel2[] = `s100PCselectGround`;
+		$sel = stringArrayCatenate($sel,$sel2) ;
+/*    old for smooth auto
+		$value = `s100SPgetSmoothPreviewValueForSelection($sel) `;
+		$value2 = `s100SPgetSmoothPreviewValueForSelection($allMesh) `;
+
+		//smooth character
+		s100SPUnSmoothAll ;
+		s100SPsmoothCharacterTo1 ;
+		s100SPsmoothPropsTo1 ;
+*/
+		//getCameraParam
+		s100GetValueForCamera($cam);
+
+		//normalize $value
+		s100SetValueForCamera( $cam);
+		string $add = "" ;
+			if(` checkBox  -ex s100EXPDisplayLight `)
+			{
+				if (`checkBox -q -v s100EXPDisplayLight`)
+				{
+					DisplayLight;
+				}
+			}
+
+			// QA addendum :
+			print ("// sound : \""+$sound+"\" \n");
+
+
+
+	//$cam = "Ep011_Sq001A_Sc001_Cam:camera_cam"
+
+			if($s100pbtvarForLoad == 2)
+			{
+
+				if($sound != "")
+				{
+				playblast -viewer 0  -sound  $sound  -format movie -forceOverwrite -compression none   -clearCache 1  -showOrnaments 1  -percent 100  -w  $resolution[0]  -h  $resolution[1]     -filename $pathName -startTime $s  -endTime  $e   ;
+				}else{
+				playblast -viewer 0  -format movie -forceOverwrite -compression none   -clearCache 1  -showOrnaments 1  -percent 100  -w  $resolution[0]  -h  $resolution[1]     -filename $pathName -startTime $s  -endTime  $e   ;
+				}
+			}else
+			{
+				if($sound != "")
+				{
+				playblast -viewer 1  -sound  $sound  -format movie -forceOverwrite -compression none   -clearCache 1  -showOrnaments 1  -percent 100  -w  $resolution[0]  -h  $resolution[1]     -filename $pathName -startTime $s  -endTime  $e   ;
+
+				}else{
+				playblast -viewer 1    -format movie -forceOverwrite -compression none   -clearCache 1  -showOrnaments 1  -percent 100  -w  $resolution[0]  -h  $resolution[1]     -filename $pathName -startTime $s  -endTime  $e   ;
+
+				}
+			}
+
+
+		//set back smooth valu e
+
+
+/*old for smooth auto
+		s100SPSmoothSelectionWithValue($sel, $value) ;
+		s100SPSmoothSelectionWithValue($allMesh, $value2) ;
+		s100enableEnvTexureForAllExceptChar ;
+*/
+		//set time back
+		currentTime -e $cu ;
+		//set back Camera value
+		s100SetBackOriginalValueForCamera( $cam);
+
+
+			if ($ch == 0 )
+			{
+			toggleModelEditorBarsInAllPanels 0;
+			}
+
+
+			if(`window -ex s100PTcreateModelPanelWithCamUI`)
+			{
+				deleteUI s100PTcreateModelPanelWithCamUI ;
+			}
+			if(`modelPanel -ex s100PTcreateModelPanelWithCamMP `)
+			{
+				deleteUI -panel s100PTcreateModelPanelWithCamMP  ;
+			}
+		s100RestoreForAllPanel($getA ) ;
+
+
+		s100PBTRemHeadUp;
+
+		s100restoreHeadUp($head) ;
+			if($chLockCam)
+			{
+			$ref = s100getRefNodeForObject ({$cam}) ;
+						file  -unloadReference  $ref[0] ;
+
+			setAttr ($ref[0]+".locked") 1 ;
+			file -loadReference $ref[0] ;
+
+
+            }
+
+		//system ("load"+ $pathName ) ;
+		}else{
+		warning ("file is not writable") ;
+		}
+	}
+
+global proc string s100PTGetCam()
+{
+$var = `s100getExtraCameras `;
+string $return ;
+$ch = 1 ;
+
+	for($tmp in $var)
+	{
+		if(`gmatch $tmp "master_camera*"`)
+		{
+		$return = $tmp ;
+		$ch = 0 ;
+
+		break ;
+        }
+
+    }
+
+	if($ch)
+	{
+		for($tmp in $var)
+		{
+
+
+
+			if(`gmatch $tmp "Cam_*"`|| `gmatch $tmp "*_cam*" `||`gmatch $tmp "*_Cam*"`)
+			{
+			$return = $tmp ;
+			break ;
+        	}
+
+
+
+    	}
+
+    }
+
+return $return ;
+
+
+}
+
+global proc string s100PTGetCamMatchName(string $name) // string $name = $textF[$i]  = "Sc014"
+{
+	string $var[] = sort(`s100getExtraCameras `);
+	string $return ="empty" ;
+	$ch = 1 ;
+	for($tmp in $var)
+	{
+		if(`gmatch $tmp ("*" + $name + "*")`)
+		{
+			$return = $tmp ;
+			$ch = 0 ;
+			break ;
+        }
+    }
+	return $return ;
+}
+
+global proc s100PTcreateModelPanelWithCam(string $cam)
+{
+
+	if(`window -ex s100PTcreateModelPanelWithCamUI`)
+	{
+	deleteUI s100PTcreateModelPanelWithCamUI ;
+    }
+
+string $window = `window -title  "capturing playblast" -topEdge 1 -leftEdge 1 -sizeable 1  -w 1294  -height 762 s100PTcreateModelPanelWithCamUI`;
+$pan = `paneLayout `;
+	if(`modelPanel -ex s100PTcreateModelPanelWithCamMP`)
+		deleteUI -panel s100PTcreateModelPanelWithCamMP ;
+
+modelPanel -p $pan  -menuBarVisible 0  -camera $cam   s100PTcreateModelPanelWithCamMP;
+$ed = `modelPanel -q -modelEditor s100PTcreateModelPanelWithCamMP`;
+
+int $text =  `optionVar -q s100playbackMaxTextured` ;
+
+
+
+
+modelEditor -e  -textures $text -displayAppearance "smoothShaded"  -pm 0 -m 1 -hud 1  -grid 0 s100PTcreateModelPanelWithCamMP ;
+modelEditor -e -allObjects 0 -polymeshes 1  -nurbsSurfaces 1  s100PTcreateModelPanelWithCamMP ;
+
+
+
+showWindow $window;
+
+window -e -topEdge 1 -leftEdge 1  -w 1294 -h 762  s100PTcreateModelPanelWithCamUI;
+
+
+
+	if( `optionVar -q s100playbackMaxTextured` )
+	{
+	DisplayShadedAndTextured;
+
+    }else{
+	DisplayShaded ;
+    }
+    if( `optionVar -q s100playbackLighting`)
+    {
+    modelEditor -e -dl "all" -sdw 1 s100PTcreateModelPanelWithCamMP;
+    setRendererInModelPanel "hwRender_OpenGL_Renderer" s100PTcreateModelPanelWithCamMP;
+    }
+    else
+    {
+     modelEditor -e -dl "default" -sdw 0 s100PTcreateModelPanelWithCamMP;
+    setRendererInModelPanel "base_OpenGL_Renderer" s100PTcreateModelPanelWithCamMP;   
+    }
+
+}
+
+global proc s100PBTAddHeadUp()
+{
+headsUpDisplay -section 5
+	-block 2
+	-blockSize "medium"
+	-command s100PBTGETProd
+	-label ("")
+	-labelFontSize "large"
+	-dataFontSize "large"
+
+	s100PBTProdHUp;
+
+headsUpDisplay -section 5
+	-block 1
+	-blockSize "medium"
+	-label ""
+	-command s100PBTGETEp
+	-labelFontSize "large"
+	-dataFontSize "large"
+
+	s100PBTepHUp;
+
+headsUpDisplay -section 7
+	-block 2
+	-blockSize "medium"
+	-label ""
+	-command s100PBTGETStep
+	-blockAlignment "center"
+	-labelFontSize "large"
+	-dataFontSize "large"
+
+	s100PBTstepHUp;
+
+headsUpDisplay -section 7
+	-block 1
+	-blockSize "medium"
+	-label ""
+	-command s100PBTGETShot
+	-labelFontSize "large"
+	-dataFontSize "large"
+
+	s100PBTSqHUp;
+
+
+headsUpDisplay -section 8
+	-block 1
+	-blockSize "medium"
+	-label ""
+	-command s100getFrameNumber
+	-labelFontSize "large"
+	-dataFontSize "large"
+	-attachToRefresh
+
+	s100PBTFrame;
+
+
+headsUpDisplay -section 8
+	-block 0
+	-blockSize "medium"
+	-label ""
+	-command s100PBTGETFocal
+	-labelFontSize "large"
+	-dataFontSize "large"
+	-attachToRefresh
+
+	s100PBTFocal;
+}
+
+global proc string s100getFrameNumber()
+{
+	string $frame = `currentTime -q`;
+	return ("frame : "+ $frame);
+}
+
+global proc string s100PBTGETFocal()
+{
+
+global string $s100PBTcamToFocal ;
+$cam = $s100PBTcamToFocal ;
+$ch = 0 ;
+	if(`objExists $s100PBTcamToFocal`)
+	{
+		if(`nodeType $s100PBTcamToFocal` == "transform")
+		{
+		string $list[] = `listRelatives -type "camera" -s $s100PBTcamToFocal`;
+
+			if(size($list) >0)
+			{
+			$ch = 1 ;
+			$cam = $list[0] ;
+            }
+
+        }else if(`nodeType $s100PBTcamToFocal` == "camera")
+		{
+		$ch = 1 ;
+        }else{
+		$ch = 0 ;
+        }
+	}
+	string $return ="" ;
+	if($ch)
+	{
+	int $focal = `getAttr ($cam +".focalLength ")`;
+	$return = ("Focal Length: " + $focal) ;
+    }
+
+return $return;
+}
+
+global proc string s100PBTGETEp()
+{
+$fileN = `file -q -sn -shortName  `;
+
+
+$suffGGG = stringToStringArray($fileN,"_" ) ;
+
+string $suf = $suffGGG[0] ;
+string $ep = substituteAllString( $suffGGG[1], "Ep","Episode : ") ;
+
+
+
+return ($ep);
+}
+
+global proc string s100PBTGETProd()
+{
+$fileN = `file -q -sn -shortName  `;
+
+
+$suffGGG = stringToStringArray($fileN,"_" ) ;
+
+string $suf = $suffGGG[0] ;
+$name = `s100PBTreturnName($suf)` ;
+
+
+	return ("Project: " + $name);
+}
+
+global proc string s100PBTGETShot()
+{
+global string $s100PBTEAddSufToShot;
+
+$fileN = `file -q -sn -shortName  `;
+
+
+
+$suffGGG = stringToStringArray($fileN,"_" ) ;
+$to = ($suffGGG[3] + " " +$suffGGG[4] + " " +$suffGGG[5]) ;
+$sub = substituteAllString($to , ".ma","") ;
+
+	if($s100PBTEAddSufToShot !="")
+	{
+		$sub += $s100PBTEAddSufToShot ;
+    }
+
+
+return $sub;
+}
+
+global proc string s100PBTGETStep()
+{
+$fileN = `file -q -sn -shortName  `;
+
+
+$suffGGG = stringToStringArray($fileN,"_" ) ;
+
+
+
+	return $suffGGG[2] ;
+}
+
+global proc s100PBTRemHeadUp()
+{
+string $heads[] = {"s100PBTProdHUp",
+					"s100PBTepHUp",
+					"s100PBTstepHUp",
+					"s100PBTSqHUp",
+					"s100PBTFrame",
+					"s100PBTFocal"
+					};
+
+	for($tmp in $heads)
+	{
+		if(`headsUpDisplay -ex $tmp`)
+			headsUpDisplay -remove $tmp;
+
+    }
+
+}
+
+global proc string s100PTBuildNameForPlayblast(string $name )
+{
+//$name = $fileN ;
+
+string $arr[] = stringToStringArray( $name , ".") ;
+$name   = $arr[0]  +".avi" ;
+return $name ;
+
+
+
+
+
+
+
+}
+
+global proc int s100askIfSceneIsWip()
+{
+$file = `file -q -sn `;
+string $fileA[] = stringToStringArray($file ,"/" );
+$ch = 0 ;
+	for($i = 0; $i < size($fileA) ; $i++)
+	{
+
+		if(`gmatch $fileA[$i] "_wip"`)
+		{
+		$ch = 1 ;
+		break ;
+
+        }
+
+
+
+    }
+
+	return $ch ;
+}
+
+global proc string  s100findRootFolderForShoot()
+{
+	$file = `file -q -sn `;
+	string $fileA[] = stringToStringArray($file ,"/" );
+	string $path = "";
+
+		for($i = 0; $i < size($fileA) -1 ; $i++)
+		{
+			$path += $fileA[$i]  ;
+			$path += "/" ;
+		}
+
+	return $path ;
+}
+
+
+global proc s100PBTswitchToLow()
+{
+	python("import s100_switchTexture");
+	python("s100_switchTexture.s100_switchTexture().computeConvertToLow()");
+}
+
+
+// QA addendum :
+
+
+// to fix name of sounds in file (acc.to their filename path):
+//
+global proc s100PBTfixSoundNamesInScene()
+{
+	print "\n// Fixing sound names if needed:\n";
+	string $sounds[] = `ls -type audio`;
+	for ($audio in $sounds) // string $audio = $sounds[0]
+	{
+		string $file = `getAttr ($audio+".filename")`;
+		if (size($file))
+		{
+			string $filepart = `match "[^/\\]*$" $file`;
+			string $name = `substitute ".wav" $filepart ""`;
+			if (isValidObjectName($name) && $name!=$audio)
+			{
+				print ("// Renaming sound \""+$audio+"\" into \""+$name+"\"...");
+				int $ok = !catch(`rename $audio $name`);
+				if ($ok) print " Done.\n";
+				else error "cannot rename!";
+			}
+			else if ($name==$audio)
+				print ("// Sound \""+$audio+"\" already has a valid name.\n");
+			else
+				error ("no valid name found for sound file \""+$audio+"\"!");
+		}
+		else
+			catch(`error ("no valid sound file found for node \""+$audio+"\"")`);
+	}
+}

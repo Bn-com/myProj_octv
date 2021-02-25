@@ -1,0 +1,325 @@
+global proc HhRenderProxyTools()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyTools.mel";
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyDelight.mel";
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyArnold.mel";
+	if (`window -exists RenderProxyWin`) deleteUI RenderProxyWin;
+	string $window=`loadUI -uiFile "//file-cluster/gdc/Resource/Support/Maya/projects/HolyP5/P5HhRenderProxy.ui"`;
+
+	/*if (`window -q -topEdge $window` < 0 || `window -q -leftEdge $window` < 0)
+	{
+		window -e -topLeftCorner 100 80 $window;
+	}*/
+	/*
+	window -title "P5RenderProxyTools"  -menuBar true  -mxb false -s true  -resizeToFitChildren true RenderProxyWin;
+	menu -label "Help";
+		menuItem -label "User Manual" -command "HhRenderProxyHelp()";
+		string $manColumnLayeout=`columnLayout -adjustableColumn true  RenderProxyWin_main`;
+		string $Tools = `frameLayout -label "RenderProyxy Create" -labelAlign "top" -cl true  -cll true  -borderStyle "etchedIn" `;
+		rowColumnLayout	 -numberOfColumns 3  ;
+		button -h 25 -l "mentalray"		-c "HhProxySetToolsMR()";
+		button -h 25 -l "3Delight"		-c "HhProxySetToolsMR()";
+		button -h 25 -l "Arnold"		-c "HhProxySetToolsMR()";
+
+
+
+
+	showWindow RenderProxyWin;
+	*/
+	showWindow $window;
+
+}
+global proc HhRenderProxyHelp()
+{
+	string $helpname="Z:/Resource/Support/Maya/projects/HolyP5/help/Help_P5RenderProxyTools.mht";
+	system("load"+$helpname);
+}
+global proc HhProxySetToolsMR()
+{
+	HhcurveRecord();
+	HhDelectProxy();
+	HMrSet();
+	//HhselectHProxyMR();
+	HhselectPProxyMR();
+	HhproxyCreatMR();
+	HhProxyRender();
+	HhProxySetMr();
+	HhProxyExportMr();
+
+
+}
+global proc HMrSet()
+{
+	
+	if (!`pluginInfo -query -loaded "Mayatomr.mll"`) loadPlugin "Mayatomr.mll";
+	setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("HHRenderProxySet");
+	string $file=`file -q -sn`;
+	string $buf[];
+	tokenize $file "/" $buf;
+	int $m=size($buf)-2;
+	global string $filepath;
+	$filepath="//file-cluster/GDC/Projects/DomesticProject/Library/MoTX/proxy/ProxyFiles/"+$buf[$m]+"/";
+	clear $buf;
+}
+global proc HhselectHProxyMR()
+{
+
+	string $objs[]=stringArrayCatenate(`ls -type "mesh"`,`ls -type "nurbsSurface"`);
+	select -cl;
+	for($obj in $objs)
+	{
+		string $obp[]=`listRelatives -p $obj`;
+		string $buff[];
+		tokenize $obp[0] "_" $buff;
+		if(size($buff)!=0)
+		{
+			int $i=size($buff)-1;
+			if($buff[$i]=="h")
+			{
+				select -add $obp[0];
+				
+			}
+    		}
+    		clear $buff;
+	}
+
+}
+
+global proc HhselectPProxyMR()
+{
+
+	string $objs[]=stringArrayCatenate(`ls -type "mesh"`,`ls -type "nurbsSurface"`);
+	select -cl;
+	for($obj in $objs)
+	{
+		string $obp[]=`listRelatives -p $obj`;
+		string $buff[];
+		tokenize $obp[0] "_" $buff;
+		if(size($buff)!=0)
+		{
+			int $i=size($buff)-1;
+			if($buff[$i]=="p")
+			{
+				select -add $obp[0];
+				
+			}
+    		}
+    		clear $buff;
+	}
+	
+}
+
+
+
+global proc HhproxyCreatMR()
+{
+   
+	global string $filepath;
+	string $objselect[]=`ls -sl -l`;
+	for($objse in $objselect)
+	{
+		
+		string $short=`match "[^|]+$" $objse`;
+		string $name=`substitute "_p" $short ""`;
+		string $hname=`substitute "_p" $short "_h"`;
+		string $mip= "mip_binaryproxy_"+$name;
+		if(`objExists $mip`)
+		{
+			delete $mip;
+		}
+		createNode "mip_binaryproxy" -n $mip;
+		string $path=$filepath+$name+".mi";
+		setAttr -type "string" ($mip+".object_filename") $path;
+		setAttr ($mip+".write_geometry") 1;
+		setAttr ($objse+".miExportGeoShader") 1;
+		string $miNode=$objse+".miGeoShader";
+		if(`objExists $miNode`)
+		{
+			string $cons[]=`listConnections -plugs true -connections true  ($objse+".miGeoShader")`;
+			if(size($cons)!=0)
+			{
+				disconnectAttr $cons[1] $cons[0];
+			}
+		
+			connectAttr -force ($mip+".outValue") ($objse+".miGeoShader");
+		}
+		string $GeoNode=$mip+".geometry";
+		if(`objExists $GeoNode`)
+		{
+			string $conG[]=`listConnections -plugs true -connections true $GeoNode`;
+			if(size($conG)!=0)
+			{
+				disconnectAttr $conG[1] $conG[0];
+			}
+			connectAttr -force   ($hname+".message") $GeoNode;
+		}
+		
+	}
+
+}
+
+
+global proc HhProxySetMr()
+{
+	string $mips[]=`ls -type mip_binaryproxy`;
+	for($mip in $mips)
+	{
+		string $wg=$mip+".write_geometry";
+		if(`objExists $wg`)
+		{
+			setAttr $wg 0;
+		}
+		string $mipg=$mip+".geometry";
+		if(`objExists $mipg`)
+		{
+			string $conG[]=`listConnections -plugs true -connections true $mipg`;
+			if(size($conG)!=0)
+			{
+				disconnectAttr $conG[1] $conG[0];
+			}
+		}
+	}
+}
+
+global proc HhProxyRender()
+{
+
+	source "renderWindowPanel.mel";
+	renderWindowRenderCamera "render" "renderView" "persp";
+}
+global proc HhcurveRecord()
+{
+	global string $curve;
+	string $objselect[]=`ls -sl`;
+	if(size($objselect)!=0)
+	{
+		for($obj in $objselect)
+		{
+			if(`match "_h" $obj`!="")
+			{
+				string $f[]=`listRelatives -ap $obj`;
+				if(size($f)!=0)
+				{
+					$curve=$f[0];
+				}
+				else
+				{
+					$curve="";
+				}
+			}
+		}
+	}
+	else
+	{
+		error "请选择高模模型_h和低棤模型_p";
+	}
+
+}
+
+
+global proc HhProxyExportMr()
+{
+	global string $curve;
+	global string $filepath;
+	string $fileName=`file -q -sn -shn`;
+	string $MrName=`match "[^.]+" $fileName`+"_mr"+".ma";
+	string $pgroup=$curve+"_p_mr";
+	if(!`objExists $pgroup`)
+	{
+		rename $curve $pgroup;
+	}
+
+	select -cl;
+	HhProxyShaderSwichMR();
+	select -cl;
+	HhselectPProxyMR();
+	string $objs[]=`ls -sl -l`;
+	for($obj in $objs)
+	{
+		string $p[]=`listRelatives -p $obj`;
+		if($p[0]!= $pgroup)
+		{
+			parent $obj $pgroup;
+		}
+	}
+	select $pgroup;
+	file -force -options "v=0" -typ "mayaAscii" -pr -es ($filepath+$MrName);
+	
+}
+
+global proc HhDelectProxy()
+{
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/Hh3DelightTools.mel";
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhRenderProxyArnold.mel";
+	string $version = `about -v`;
+	string $v = `match "[^ ]+"$version`;
+	int $vs=$v;
+	if($vs>=2012)
+	{
+		//string $mips[]=`ls -type mip_binaryproxy`||`ls -type "aiStandIn"`||`ls -type "delightRibArchive"`;
+		HMrSet();
+		HhedlightLoad();
+		HhArnoldLoad();
+		string $mips[]=`ls -type "mip_binaryproxy"`;
+		string $aiStand[]=`ls -type "aiStandIn"`;
+		string $delightRib[]=`ls -type "delightRibArchive"`;
+		if(size($mips)!=0)
+		{
+			delete $mips;
+		}
+		if(size($aiStand)!=0)
+		{
+			for($aiS in  $aiStand)
+			{
+				string $aiTr[]=`listRelatives -p $aiS `;
+				delete $aiTr[0];
+			}
+		}
+		if(size($delightRib)!=0)
+		{
+			for($del in  $delightRib)
+			{
+				string $delTr[]=`listRelatives -p $del `;
+				delete $delTr[0];
+			}
+		}
+	}
+	else
+	{
+		HMrSet();
+		HhedlightLoad();
+		string $mips[]=`ls -type "mip_binaryproxy"`;
+		string $delightRib[]=`ls -type "delightRibArchive"`;
+		if(size($mips)!=0)
+		{
+			delete $mips;
+		}
+		if(size($delightRib)!=0)
+		{
+			for($del in  $delightRib)
+			{
+				string $delTr[]=`listRelatives -p $del `;
+				delete $delTr[0];
+			}
+		}
+	}
+}
+
+global proc HhProxyShaderSwichMR()
+{
+	HhselectHProxyMR();
+	string $objselect[]=`ls -sl`;
+	if(size($objselect)!=0)
+	{
+		string $Shape[]=`listRelatives -fullPath -shapes $objselect[0]`;
+		string $SG[]=`listConnections -t "shadingEngine" $Shape[0]`;
+		select -cl;
+		HhselectPProxyMR();
+		catch(`sets -e -forceElement $SG[0]`);
+	}
+}
+
+

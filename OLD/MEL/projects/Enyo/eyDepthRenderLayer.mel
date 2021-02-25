@@ -1,0 +1,102 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+// Create Ambient depth render layer 
+global proc eyDepthRenderLayer()
+{
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $depthLayer = `createRenderLayer -name "depth"`;
+	// Put All geometry into render layers
+	string $allLayers[] = `ls -type renderLayer`;
+	string $defaultLayer[] = {"defaultRenderLayer"};
+	string $layers[] = stringArrayRemove($defaultLayer, $allLayers);
+	string $objShape[] = `ls -geometry`;
+	
+	int $i = 0;
+	int $layerCount = size($layers);
+	for($i; $i<$layerCount; $i++)
+	{
+		editRenderLayerMembers -noRecurse $layers[$i] $objShape;
+	}
+	editRenderLayerGlobals -currentRenderLayer $depthLayer;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	setAttr -type "string" "defaultRenderGlobals.currentRenderer" "mayaSoftware";
+	setAttr defaultRenderGlobals.imageFormat 10;
+	editRenderLayerAdjustment "defaultRenderGlobals.imageFormat";
+	
+	
+	// depth shader
+	/*source ezRenderMainLayoutMaterial.mel;
+	ezRenderMainLayoutMaterial_Assign("depth");	
+	editRenderLayerAdjustment "ez_depth.depth";
+	setAttr "ez_depth.depth" 200;
+	editRenderLayerAdjustment "ez_depth.near";
+	
+	source slRenderAllTools.mel;
+	slRenderAllToolsHookShaderOverride("depth","ez_depth");*/
+
+	//depth shader 
+	string $ifo = `shadingNode -asUtility samplerInfo`;
+	string $mul = `shadingNode -asUtility multiplyDivide`;
+	string $rng = `shadingNode -asUtility setRange`;
+	string $dep = `shadingNode -asShader surfaceShader -name "Depth_surfaceShader"`;
+	string $set = `sets -renderable true -noSurfaceShader true -empty -name "DepthSet"`;
+	//connections
+	addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+	addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+	connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+	setAttr ($mul+".input2X") -1.0;
+	connectAttr ($mul+".outputX") ($rng+".valueX");
+	connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+	connectAttr ($ifo+".cameraFarClipPlane") ($rng+".oldMaxX");
+	//setAttr ($rng+".minX") 0; 
+	//setAttr ($rng+".maxX") 1.0;
+	connectAttr ($rng+".outValueX") ($dep+".outColorR");
+	connectAttr ($rng+".outValueX") ($dep+".outColorG");
+	connectAttr ($rng+".outValueX") ($dep+".outColorB");
+	connectAttr ($dep+".outColor") ($set+".surfaceShader");
+	//参数调整
+	addAttr -longName "black" -attributeType "float" $dep;
+	addAttr -longName "white" -attributeType "float" $dep;
+	connectAttr ($dep+".black") ($rng+".minX");
+	connectAttr ($dep+".white") ($rng+".maxX");
+	setAttr ($dep+".black") 0;
+	setAttr ($dep+".white") 1;
+
+    
+	connectAttr -f ($set+".message") ($depthLayer+".shadingGroupOverride");
+
+	select -cl;
+
+	string $cameras[] = `listCameras`;
+	string $attrs[] = {"nearClipPlane","farClipPlane"};
+	for ($cam in $cameras)
+	{
+		for ($attr in $attrs)
+		{
+			string $connects[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($cam+"."+$attr)`;
+			if (size($connects)>1)
+			{
+				for ($i=0;$i<size($connects);$i=$i+2 )
+				{
+					disconnectAttr $connects[$i+1]  $connects[$i];
+				}
+			}
+		}
+	}
+}

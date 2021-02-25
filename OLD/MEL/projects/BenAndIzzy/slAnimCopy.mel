@@ -1,0 +1,143 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/05/06
+///
+/// Description: 针对目前的动画关键帧全部在set和facial_set里的角色
+///		主要功能：将首先选择的角色的动画导给后选择的角色
+///			目前功能支持多层嵌套（层数取决与*:*:*:*MASTER*）及parent，约束关系。
+///		
+///
+
+
+global proc slAnimCopy()
+{
+	currentTime -31;
+	
+	string $master[]= `ls -sl "*MASTER*" "*:*MASTER*" "*:*:*MASTER*" "*:*:*:*MASTER*"`;
+	if (size($master) != 2)
+		error "请选择需要重导动画角色的master！";
+	
+	string $buffer1[],$buffer2[];
+	tokenize $master[0] ":" $buffer1;
+	tokenize $master[1] ":" $buffer2;
+	if (size($buffer1) == 1 && size($buffer2) == 1)
+		error "必需有一个为reference的角色！";
+
+	string $pref = `substitute "_MASTER*" $master[0] ""`;
+	string $prefR = `substitute "_MASTER*" $master[1] ""`;
+
+	
+	string $masterR = `substitute $pref $master[0] $prefR`;
+
+	string $geo = `substitute  "_MASTER" $master[0] "_GEO"` ;
+
+//------------------------------导动画-------------------------------------------------------------------
+
+	string $set = `substitute "_MASTER$" $master[0] "_set"`;
+	string $facialSet = `substitute "_set" $set "_facial_set"`;
+	string $anim[] = `sets -query $set $facialSet`;
+	for ($sourceObj in $anim)
+	{
+		string $destObj = `substitute $pref $sourceObj $prefR`;
+		if (`objExists $destObj`)
+		{
+			if (`copyKey $sourceObj`)
+			{
+				pasteKey -o replaceCompletely $destObj;
+			}
+		}
+	}
+
+
+//---------------------------------替换parent关系--------------------------------------------------------------
+	string $parent[] = `listRelatives -p $master[0]`;
+	if (`objExists $parent[0]` && !startsWith($parent[0],$buffer1[0]))
+	{
+		 parent $masterR $parent[0];
+	}
+	
+	select -hi $master[0] $geo;
+	string $allObj[] = `ls -sl`;
+	string $parentR;
+	for ($obj in $allObj)
+	{
+		if (startsWith($obj, $buffer1[0]))
+		{
+			string $allChild[] = `listRelatives -c $obj`;
+			for ($child in $allChild)
+			{
+				if (!startsWith($child, $buffer1[0]))
+				{
+					$parentR = `substitute $pref $obj $prefR` ;
+					parent -w $child;
+					parent $child $parentR;
+				}
+			}
+		}
+	}
+	select -cl;
+
+//-------------------------------------替换约束--------------------------------------------------------------------------
+	string $sourCon;
+	string $destCon;
+	string $conType;
+	int $adj;
+	string $cons[]= `ls -type constraint`;
+	for ($con in $cons )
+	{
+		if ((startsWith($con,$buffer1[0]) && !`reference -isNodeReferenced $con`) || !(startsWith($con,$buffer1[0])))
+		{
+			string $obj[] = `listConnections $con`;
+			for ($tem in $obj)
+			{
+				if (startsWith($tem,$buffer1[0]))
+				{
+					$adj = 1;
+					break;
+				}
+				$adj = 0;
+			}
+			if ($adj)
+			{
+				$conType =  `nodeType $con`;
+				
+				clear $obj;
+				$obj = `listConnections -s false -d true $con`;
+				for ($tem in $obj )
+				{
+					if ($tem != $con)	
+					{
+						$destCon = $tem;
+						break;
+					}
+				}
+
+				clear $obj;
+				$obj = `listConnections -s true -d false $con`;
+				for ($tem in $obj)
+				{
+					if ($tem != $con && $tem != $destCon)
+					{
+						$sourCon = $tem;
+						break;
+					}
+				}
+			}
+			if (startsWith($sourCon,$buffer1[0]))
+			{
+				delete $con;
+				$sourCon = `substitute $pref $sourCon $prefR` ;
+				eval($conType + " " + $sourCon + " " + $destCon);
+			}
+			else if (startsWith($destCon,$buffer1[0]))
+			{
+				delete $con;
+				$destCon = `substitute $pref $destCon $prefR` ;
+				eval($conType + " " + $sourCon + " " + $destCon);
+			}
+		}
+	}
+
+}

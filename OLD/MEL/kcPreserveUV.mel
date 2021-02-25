@@ -1,0 +1,265 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc float[] kcPUVGetUVRange(string $shape)
+{
+	int $uvSize = `getAttr -size ($shape + ".uvpt")`;
+
+	float $uMin =  10000;
+	float $uMax = -10000;
+	float $vMin =  10000;
+	float $vMax = -10000;
+
+	for ($i = 0; $i < $uvSize; $i++)
+	{
+		float $uv[] = `getAttr ($shape + ".uvpt[" + $i + "]")`;
+
+		if ($uMin > $uv[0])
+			$uMin = $uv[0];
+		if ($uMax < $uv[0])
+			$uMax = $uv[0];
+
+		if ($vMin > $uv[1])
+			$vMin = $uv[1];
+		if ($vMax < $uv[1])
+			$vMax = $uv[1];
+	}
+
+	float $result[4];
+
+	$result[0] = $uMin;
+	$result[1] = $uMax;
+	$result[2] = $vMin;
+	$result[3] = $vMax;
+
+	return $result;
+}
+
+proc kcPUVAddAttr(string $obj, float $uv[])
+{
+	// uMin
+
+	string $attr = "uMin";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType double $obj;
+
+	setAttr ($obj + "." + $attr) $uv[0];
+
+	// uMax
+
+	string $attr = "uMax";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType double $obj;
+
+	setAttr ($obj + "." + $attr) $uv[1];
+
+	// vMin
+
+	string $attr = "vMin";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType double $obj;
+
+	setAttr ($obj + "." + $attr) $uv[2];
+
+	// vMax
+
+	string $attr = "vMax";
+
+	if (!attributeExists($attr, $obj))
+		addAttr -keyable true -longName $attr -attributeType double $obj;
+
+	setAttr ($obj + "." + $attr) $uv[3];
+}
+
+//	float $uMin = xxx;
+//	float $uMax = xxx;
+//	float $vMin = xxx;
+//	float $vMax = xxx;
+//	
+//	$polyPlanarProj.imageCenterX = ($uMin + $uMax) / 2.0;
+//	$polyPlanarProj.imageCenterY = ($vMin + $vMax) / 2.0;
+//	$polyPlanarProj.projectionWidth = $uMax - $uMin;
+//	$polyPlanarProj.projectionHeight = $vMax - $vMin;
+//	$polyPlanarProj.imageScaleU = $uMax - $uMin;
+//	$polyPlanarProj.imageScaleV = $vMax - $vMin;
+
+proc kcPUVCreateExp(string $polyPlanarProj)
+{
+	string $exp;
+
+	$exp += "float $uMin = " + $polyPlanarProj + ".uMin;\n";
+	$exp += "float $uMax = " + $polyPlanarProj + ".uMax;\n";
+	$exp += "float $vMin = " + $polyPlanarProj + ".vMin;\n";
+	$exp += "float $vMax = " + $polyPlanarProj + ".vMax;\n";
+	$exp += "\n";
+	$exp += $polyPlanarProj + ".imageCenterX = ($uMin + $uMax) / 2.0;\n";
+	$exp += $polyPlanarProj + ".imageCenterY = ($vMin + $vMax) / 2.0;\n";
+	$exp += $polyPlanarProj + ".projectionWidth = $uMax - $uMin;\n";
+	$exp += $polyPlanarProj + ".projectionHeight = $vMax - $vMin;\n";
+	$exp += $polyPlanarProj + ".imageScaleU = $uMax - $uMin;\n";
+	$exp += $polyPlanarProj + ".imageScaleV = $vMax - $vMin;\n";
+
+	expression -string $exp -name ("PUVexp_" + $polyPlanarProj);
+}
+
+// Original flow:
+// 
+//		polyTransfer -> polySmoothFace -> mesh
+// 
+// 
+// New flow:
+//
+//		polyTransfer ----------------> polySmoothFace ------------> polyTransfer -> mesh
+//				|														 ^
+//				-->	xyPolyTransferUV -> polySmoothFace -> polyPlanarProj | 
+// 
+
+proc kcPUVCreateNode(string $origShape, string $origPolySmoothFace)
+{
+	string $inputs[] = `listConnections -source true -destination false -plugs true ($origPolySmoothFace + ".inputPolymesh")`;
+	string $outputs[] = `listConnections -source false -destination true -plugs true ($origPolySmoothFace + ".output")`;
+
+	if ((size($inputs) > 0) && (size($outputs) > 0))
+	{
+		// create xyPolyTransferUV node
+
+		string $xyPolyTransferUV = `createNode -name "xyPolyTransferUV_PUV" xyPolyTransferUV`;
+
+		setAttr ($xyPolyTransferUV + ".mode") 0;		// UVto3D mode
+
+		connectAttr -force $inputs[0] ($xyPolyTransferUV + ".inMesh");
+		connectAttr -force $inputs[0] ($xyPolyTransferUV + ".inMeshUV");
+		
+
+		// create temporary mesh node
+
+		string $mesh = `createNode mesh`;
+
+		connectAttr -force ($xyPolyTransferUV + ".outMesh") ($mesh + ".inMesh");
+
+
+		// create polySmoothFace node
+
+		string $numFace = `getAttr -size ($mesh + ".face")`;
+
+		string $result[] = `polySmooth ($mesh + ".f[0:" + $numFace + "]")`;
+		string $polySmoothFace = `rename $result[0] "polySmooth_PUV"`;
+
+
+		// create polyPlanarProj node
+
+		string $numFace = `getAttr -size ($mesh + ".face")`;
+
+		string $result[] = `polyProjection -constructionHistory 1 -type Planar -insertBeforeDeformers on -imageCenterX 0.5 -imageCenterY 0.5 -rotationAngle 0 -mapDirection y ($mesh + ".f[0:" + $numFace + "]")`;
+		string $polyPlanarProj = `rename $result[0] "polyPlanarProj_PUV"`;
+
+		setAttr ($polyPlanarProj + ".rotateX") 90;
+
+		float $uv[] = kcPUVGetUVRange($origShape);
+		kcPUVAddAttr($polyPlanarProj, $uv);
+
+		// create polyTransfer node
+
+		string $polyTransfer = `createNode -name "polyTransfer_PUV" polyTransfer`;
+
+		connectAttr -force ($polyPlanarProj + ".output") ($polyTransfer + ".otherPoly");
+		connectAttr -force ($origPolySmoothFace + ".output") ($polyTransfer + ".inputPolymesh");
+		connectAttr -force ($polyTransfer + ".output") $outputs[0];
+
+
+		// link up the smooth nodes
+
+		connectAttr -force ($origPolySmoothFace + ".continuity") ($polySmoothFace + ".continuity");
+		connectAttr -force ($origPolySmoothFace + ".divisions") ($polySmoothFace + ".divisions");
+		connectAttr -force ($origPolySmoothFace + ".keepBorder") ($polySmoothFace + ".keepBorder");
+		connectAttr -force ($origPolySmoothFace + ".keepSelectionBorder") ($polySmoothFace + ".keepSelectionBorder");
+		connectAttr -force ($origPolySmoothFace + ".keepTessellation") ($polySmoothFace + ".keepTessellation");
+
+
+		// create expression for planar projection
+
+		kcPUVCreateExp($polyPlanarProj);
+
+
+		// delete mesh node
+
+		delete $mesh;
+	}
+	else
+		warning("There is no input to \"" + $origPolySmoothFace + ".inputPolymesh\" or output from \"" + $origPolySmoothFace + ".output\"");
+}
+
+global proc kcPreserveUV()
+{
+	if (!`pluginInfo -q -loaded xyPolyTransferUV`)
+		loadPlugin xyPolyTransferUV;
+
+
+	// must select mesh with history containing a smooth node
+
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) == 0)
+		error("Select at least a mesh with history containing a smooth node.");
+
+	for ($item in $selected)
+	{
+		string $children[] = `listRelatives -shapes $item`;
+		
+		// check whether is a mesh object
+
+		if ((size($children) > 0) && (`nodeType $children[0]` == "mesh"))
+		{
+			// check whether mesh object has "smooth" node in history
+
+			string $history[] = `listHistory -breadthFirst -interestLevel 1 $children[0]`;
+
+			string $polySmoothNode = "";
+
+			for ($node in $history)
+				if (`nodeType $node` == "polySmoothFace")
+				{
+					$polySmoothNode = $node;
+					break;
+				}
+
+			if ($polySmoothNode == "")
+			{
+				warning("Please apply a smooth node to mesh before using this tool: " + $children[0]);
+				continue;
+			}
+
+
+			// check whether this tool is already applied previously
+
+			int $alreadyApplied = false;
+
+			for ($node in $history)
+				if (`gmatch $node "*_PUV*"`)
+				{
+					$alreadyApplied = true;
+					break;
+				}
+
+			if ($alreadyApplied)
+			{
+				warning("Tool already applied to mesh previously: " + $children[0]);
+				continue;
+			}
+
+			kcPUVCreateNode($children[0], $polySmoothNode);
+		}
+		else
+			warning("Cannot work on non-mesh object: " + $item);
+	}
+}

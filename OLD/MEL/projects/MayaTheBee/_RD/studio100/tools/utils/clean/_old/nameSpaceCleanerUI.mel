@@ -1,0 +1,143 @@
+global proc nscNameSpaceCleanerUI()
+{
+	 if(`window -ex nameSpaceCleanerUI`)
+		deleteUI nameSpaceCleanerUI ;
+
+	window -title "nameSpace Cleaner"  -h 400  nameSpaceCleanerUI;
+	columnLayout  -adj 1 nameSpaceCleanerColL;
+	button -l "refresh" -c nscRefreshNameSp nameSpaceCleanerRefreshBut ;
+	textScrollList -allowMultiSelection 1 -h 300 nameSpaceCleanerTScrol;
+
+	button -l "remove" -c nscDeleteNameSpace nameSpaceCleanerRemoveBut ;
+	button -l "remove and delete all inside" -c nscDeleteNameSpaceAndAllInsideConf nameSpaceCleanerRemoveAndDelBut ;
+
+	nscRefreshNameSp ;
+	window -e -rtf 1 nameSpaceCleanerUI;
+	window -e -width 200 -h 400 nameSpaceCleanerUI;
+	showWindow;
+}
+
+global proc  OLDnscRefreshNameSp()
+{
+	namespace -setNamespace ":" ;
+
+	$nameS = `namespaceInfo -lon `;
+	$nameS = stringArrayRemove({"UI","shared"},$nameS ) ;
+	string $nameSinR[] ;
+	$j = 0 ;
+	namespace -setNamespace ":" ;
+	for($i = 0 ; $i < size($nameS) ; $i++)
+	{
+		namespace -setNamespace $nameS[$i] ;
+		$ntmp = `namespaceInfo -listOnlyDependencyNodes  ` ;
+		if(size($ntmp) > 0 )
+		{
+			$charIsNode[$i] = `referenceQuery -isNodeReferenced $ntmp[0]`;
+			if(	$charIsNode[$i] ==1 )
+			{
+				$nameSinR[$j] =  $nameS[$i] ;
+				$j++ ;
+			}
+        }
+		namespace -setNamespace ":" ;
+    }
+
+	$nameS = stringArrayRemove($nameSinR,$nameS ) ;
+	$numb = size($nameS) ;
+	textScrollList -e -removeAll nameSpaceCleanerTScrol ;
+	for($nameStmp in $nameS)
+	{
+		textScrollList -e -append $nameStmp nameSpaceCleanerTScrol ;
+    }
+}
+
+// QA retake :
+// lists all namespaces, and keep only those that are empty of reference nodes to print into UI
+//
+global proc  nscRefreshNameSp()
+{
+	namespace -setNamespace ":" ;
+	$nameS = `namespaceInfo -lon `;
+	$nameS = stringArrayRemove({"UI","shared"},$nameS ) ;
+	string $nameSinR[] ;
+
+	for($i = 0 ; $i < size($nameS) ; $i++)
+	{
+		namespace -setNamespace $nameS[$i] ;
+		$ntmp = `namespaceInfo -listOnlyDependencyNodes  ` ;
+		string $RNs[] = `ls -type "reference" $ntmp`;
+		if(size($ntmp) > 0 )
+		{
+			for ($node in $ntmp)
+			{
+				$charIsNode[$i] = `referenceQuery -isNodeReferenced $node`;
+				// if current node found in namespace is referenced : this namespace is not empty
+				if(	$charIsNode[$i] )
+				{
+					$nameSinR[size($nameSinR)] =  $nameS[$i] ;
+					print ("// this namespace '"+$nameS[$i]+"' at least has a reference node (found '"+$node+"') - skipped.\n");
+					break;
+				}
+            }
+        }
+		else
+			warning ("This namespace '"+$nameS[$i]+"' seems empty !");
+
+		namespace -setNamespace ":" ;
+    }
+
+	$nameS = stringArrayRemove($nameSinR,$nameS ) ;
+	//$numb = size($nameS) ;
+	textScrollList -e -removeAll nameSpaceCleanerTScrol ;
+	for($nameStmp in $nameS)
+	{
+		textScrollList -e -append $nameStmp nameSpaceCleanerTScrol ;
+    }
+}
+
+
+global proc nscDeleteNameSpace()
+{
+	string $nameStoD[] = `textScrollList -q -selectItem  nameSpaceCleanerTScrol`;
+	s100DeleteNameSpace($nameStoD);
+	nscRefreshNameSp ;
+}
+
+
+global proc nscDeleteNameSpaceAndAllInsideConf()
+{
+	string $nameStoD[] =  `textScrollList -q -selectItem  nameSpaceCleanerTScrol`;
+
+	if(size($nameStoD) > 0)
+	{
+		$test = `confirmDialog -title "remove and delete All inside NameSpace " -message  ("you will delete all object inside "+ $nameStoD[0] )
+		-button "Yes" -button "No" -defaultButton "Yes"
+		-cancelButton "No" -dismissString "No"`;
+
+		if ( $test == "Yes"){
+			nscDeleteNameSpaceAndAllInside($nameStoD) ;}
+    }
+	else
+	{
+		warning "select an item !" ;
+    }
+}
+
+
+global proc nscDeleteNameSpaceAndAllInside(string $nameStoD[])
+{
+	for($i = 0 ; $i < size($nameStoD) ; $i++)
+	{
+		namespace -setNamespace  ":" ;
+		namespace -setNamespace $nameStoD[$i] ;
+		$sel = `namespaceInfo -listOnlyDependencyNodes ` ;
+		if(size($sel) > 0)
+			delete $sel ;
+		namespace -setNamespace  ":" ;
+		namespace -f -removeNamespace $nameStoD[$i] ;
+    }
+	nscRefreshNameSp ;
+}
+
+
+//nscNameSpaceCleanerUI;

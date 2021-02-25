@@ -1,0 +1,793 @@
+// PreLayout.mel (c) 2004 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	This script is called by Insight before Layout begins on a shot group
+Use:
+	PreLayout argList
+Options:
+	argList (string)- A semicolon delimited string containing all the arguments
+	
+	argList construction	- someVar=someValue;nextVar=nextValue
+	
+	arguments:
+		- sequence	(string) 	The sequence the shot group belongs to, e.g. "009"
+		- shotgroup	(string) 	The shot group letter
+		- sequenceid	(int)	 	The insight sequence id number
+		- host		(string)	Who is calling this process? "insight" or "maya"
+		- returnpath	(string)	The callback to execute when done
+		- arguments	(string)	The argument list to send to the callback
+		- seqxml	(string)	If specified, the script will read this xml file for the seq info, rather than asking insight
+	
+Documentation:
+	1. derive the path from the seq and shot group args
+	2. Build directories
+	3. get asset and shot list from insight (or the seq xml file if specified)
+	4. Validate the shot list from Insight - make sure shots are sequential (no gaps, no overlapping)
+	5. Populate the scene with assets, and cameras
+	6. Create the audio
+	7. Add a scene open script node to check for required mel scripts
+	8. Back up the older version of the layout file if one is found
+	9. Set fileInfo and save the file
+	
+	Note, no file is expected to be open...it builds the file from scratch
+	
+	
+	
+Examples:
+
+Notes:
+	Tested on Maya5 Win2000 and Linux
+	
+Bugs:
+
+Original:	08/22/04
+Revisions:	08/26/04	Rev 1.0
+		- Set default resolution
+		- Updated camera default camera settings to the latest and greatest (in BuildScene).
+		
+		08/27/04	Rev 1.1
+		- Fixed it so we save as mayaAscii
+		
+		08/29/04	Rev 1.2
+		- Add output to html of args passed
+		- Add scene open script node to check for existence of required scripts
+		
+		08/30/04	Rev 1.3
+		- Set file type before reading assets...if one of them contains unknown nodes we won't be able to change it later
+		
+		08/31/04	Rev 1.4
+		- Added call to create asset pack if in insight mode
+		- Insert audio into the layout file
+		
+		09/01/04	Rev 1.5
+		- Validate the shot lengths from the sequence xml
+		
+		09/03/04	Rev 1.6
+		- Take into account shots that have been omitted in the sequence xml...don't make them.	
+		
+		09/06/04	Rev 1.7
+		- Added fix to unlock these attributes
+			defaultRenderGlobals.byFrameStep defaultRenderGlobals.motionBlur time1.outTime  
+			
+		12/05/05	Rev 1.8
+		- Custom version for Yankee Irving.
+		
+		01/20/06	Rev 1.9
+		- Offset audio depending on start frame rec'd from Insight, rather than always frame 1
+		
+		01/21/06	Rev 2.0
+		- Connect lensSqueezeRatio from DKP camera main to RFX cameraMain.
+		
+		02/06/06	Rev 2.1
+		- Replaced direct call to sequence xml with a call to insightGetSequenceXML
+		- Made insight completion callback os insensitive
+		
+To-do's:
+		
+		- Fix validate shot lengths so it can deal with shots that are given to it out of order
+		
+		
+		
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+
+
+
+
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+// ---------------------------------------------------------------------------------------------------
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+	if (!`pluginInfo -q -l "timeQuery"`)
+		loadPlugin "timeQuery";
+}
+// ---------------------------------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------------------------------
+// find the globals file, depending on task type 
+// ---------------------------------------------------------------------------------------------------
+proc string getConfig ()
+{
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	global string $gTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	
+	// look in shotGroupInfo first. 
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gTaskType+".xml";
+	if (`filetest -f $file`)
+		return $file;
+	// look in projectGlobals next
+	$file = getPath ("ProjectGlobals",{})+"/"+$gTaskType+".xml";
+
+	if (`filetest -f $file`)
+		return $file;
+	
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+// get assets and frame range
+// -----------------------------------------------------------------------------------------------
+proc getAssetsAndFrameRange (string $xml, string $assets[], int $frameRange[])
+{
+	global string 	$gTaskType;				// Always "PreLayout" for now - though this task might become general purpose for PreLighting as well 
+
+	string $node[] = xml_getTag ($xml,"ShotGroup");
+	string $frameStart = xml_getVar ($node[0],"FrameRangeStart");
+	string $frameEnd = xml_getVar ($node[0],"FrameRangeEnd");
+
+	$node = xml_getTag ($xml,"Asset");
+	for ($i=0;$i<size($node);$i++)
+	{
+		string $name = xml_getVar ($node[$i],"Name");
+		string $path = xml_getVar ($node[$i],"Path");
+		$path = getPath ("ConformPath",{$path})+"/"+$name;
+		if ($gTaskType == "PreLayout")
+		{
+			$path += "_layoutRig.ma";	
+		}
+		else
+		{
+			global int $gCompareDirnamesOnly;
+			$gCompareDirnamesOnly = true;
+			if (isPointCachingAsset($path))
+				$path += "_cachingProxy.ma";
+			else
+				$path +=  "_live.ma";
+		}
+		$assets[$i] = $path;
+	}
+
+	$frameRange[0] = (int)$frameStart;
+	$frameRange[1] = (int)$frameEnd;
+
+}
+// ---------------------------------------------------------------------------------------------------
+// read project globals to set things like resolution, time units and so on
+// -----------------------------------------------------------------------------------------------
+proc setSceneGlobals()
+{
+	global string 	$gTaskType;				// Always "PreLayout" for now - those this task might become general purpose for PreLighting as well 
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+
+	// set resolution
+	int $w[],$h[];
+	float $asp[];
+
+	//getProjectResolution (($gTaskType=="PreLayout"?"layout":"lighting"),{},$w,$h,$asp,{});
+	getProjectResolutionBySeqShot ($gSequence,$gShot,($gTaskType=="PreLayout"?"layout":"lighting"),{},$w,$h,$asp,{});
+	
+
+	// get units
+	string $globals = getPath ("ShotBase",{$gSequence,$gShot})+"/projectGlobals/project.xml";
+	if (!`filetest -f $globals`)
+	{
+		$globals = getPath ("SeqBase",{$gSequence})+"/projectGlobals/project.xml";
+	}
+	if (!`filetest -f $globals`)
+	{
+		$globals = getPath ("ProjectGlobals",{})+"/project.xml";
+	} 
+	
+	string $xml = readXML ($globals,0);
+
+	string $node[] = xml_getTag ($xml,"frameRate");
+	string $frameRate = xml_getVar ($node[0],"name");
+
+	$node = xml_getTag ($xml,"linearUnit");
+	string $linearUnit = xml_getVar ($node[0],"name");
+
+	$node = xml_getTag ($xml,"angularUnit");
+	string $angularUnit = xml_getVar ($node[0],"name");
+
+	// Set everything
+	// resolution
+	setAttr -l false "defaultResolution.width";
+	setAttr "defaultResolution.width" $w[0];
+
+	setAttr -l false "defaultResolution.height";
+	setAttr "defaultResolution.height" $h[0];
+
+	setAttr -l false "defaultResolution.aspectLock";
+	setAttr "defaultResolution.aspectLock" true;
+
+	setAttr -l false "defaultResolution.deviceAspectRatio";
+	setAttr "defaultResolution.deviceAspectRatio" $asp[0];
+
+	// units
+	currentUnit -a $angularUnit -l $linearUnit -t $frameRate;
+
+	// misc
+	fileInfo "sceneType" "layout";
+	fileInfo "sequence" $gSequence;
+	fileInfo "shot" $gShot;
+
+	// output to log
+	html_log_output ("Setting resolution to "+$w[0]+" x "+$h[0]+" ("+$asp[0]+")\n");
+	html_log_output ("Setting time units to "+$frameRate+"\n");
+	html_log_output ("Setting linear units to "+$linearUnit+"\n");
+	html_log_output ("Setting angular units to "+$angularUnit+"\n");
+	
+/*
+<project>
+        <frameRate name="film" />
+        <renderer name="mentalray" />
+        <outputFormat name="sgi" />
+        <jobPrefix name="Maya" />
+        <linearUnit name="cm" />
+        <angularUnit name="degree" />
+</project>
+*/
+}
+// ---------------------------------------------------------------------------------------------------
+// getAudioPath - get path to audio file - try a series of possible extensions
+// -----------------------------------------------------------------------------------------------
+proc string getAudioPath ()
+{
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+
+	string $exts[] = {
+		"aiff",
+		"aif",
+		"wav"
+	};
+
+	string $base = getPath ("AudioDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot;
+	for ($i=0;$i<size($exts);$i++)
+	{
+		string $path = $base+"."+$exts[$i];
+		if (`filetest -f $path`)
+			return $path;
+	}
+	return "";
+}
+// -----------------------------------------------------------------------------------------------
+proc string getArchiveFile ()
+{
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+	global string 	$gTaskType;				// Always "PreLayout" for now - those this task might become general purpose for PreLighting as well 
+
+	string $shotBase = getPath ("ShotBase",{$gSequence,$gShot});
+	string $archive_dir = $shotBase+"/archive";
+	string $suffix = $gTaskType=="PreLayout"?"lay":"lit";
+
+	int $c = 1;
+	string $filename = $archive_dir+"/"+$gSequence + "_" + $gShot + "_"+$suffix+"."+$c+".ma";
+
+	while (`filetest -f $filename`)
+	{
+		$c ++;
+		$filename = $archive_dir+"/"+$gSequence + "_" + $gShot + "_"+$suffix+"."+$c+".ma";
+	}
+
+	return $filename;
+}
+// ---------------------------------------------------------------------------------------------------
+// do_preLayout - the main proc
+// -----------------------------------------------------------------------------------------------
+proc int do_preLayout(string $args)
+{
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+	global string 	$gHost;					// Who is calling this process? "insight" or "maya"
+	global int	$gUseStructureFile;			// Use the structure file to find out asset membership
+	global int 	$gUpdateInsightAssetLinking;		// Update Insight asset linking with new contents of scene
+	global int 	$gPerformInsightCallback;		// Whether or not to call back to Insight
+	global string 	$gInsightCallbackPath;			// Path to web service to perform a callback to Insight through
+	global string 	$gInsightCallbackArgs;			// Args to send to web service
+	global string 	$gEmailNotify;				// Who to email when things go wrong
+	global int	$gImportAudio;				// Import audio
+	global int	$gAllowNoAssets;			// Do not error if no assets are linked
+	global int 	$gAllowNoAudio;				// Do not error if no audio is found
+	global string 	$gQubeJobName;				// Job name passed from calling process
+	global string 	$gTaskType;				// Always "PreLayout" for now - those this task might become general purpose for PreLighting as well 
+	
+	global string 	$gTaskConfig;				// Config file for this task	
+
+	// globals set here
+	global string $gPreLayoutLog;
+
+	// build up a list of paths
+	string $shotBase = getPath ("ShotBase",{$gSequence,$gShot});
+	string $archive_dir = $shotBase+"/archive";
+	string $shotInfo = getPath ("ShotInfoDir",{$gSequence,$gShot});
+	string $TD_dir = $shotBase+"/TD";
+	string $tgt =  $shotBase + "/" + $gSequence + "_" + $gShot + "_" + ($gTaskType == "PreLayout"?"lay":"lit")+".ma";
+	$gPreLayoutLog = $shotInfo + "/"+$gTaskType+"_log.html";
+
+	// Create the directories we will need
+	if (!`filetest -d $shotInfo`)
+		sysFile -md $shotInfo;
+	if (!`filetest -d $TD_dir`)
+		sysFile -md $TD_dir;
+	if (!`filetest -d $archive_dir`)
+		sysFile -md $archive_dir;
+	
+
+	// --------------------------------------------------------
+	// Get Qube Job ID, and update qubeJobHistory.xml
+	// --------------------------------------------------------
+	// we need to know what cluster to look on
+	string $clusters[];
+	getFarmClusters ($clusters,{});
+	int $qubeJobId;
+	if ($gQubeJobName == "")
+	{
+		string $searchName = $gTaskType+"*"+$gSequence+"*"+$gShot;
+		$qubeJobId = getQubeJobIdFromName($searchName,$clusters[0],"--running",0);
+	}
+	else
+	{
+		$qubeJobId = getQubeJobIdFromName($gQubeJobName,$clusters[0],"--running",1);
+	}
+	// update qubeJobHistory.xml
+	updateQubeJobHistory ($gSequence, $gShot, $gTaskType, $qubeJobId,1, {}, {}, {});
+
+	// --------------------------------------------------------
+	// start the log
+	// --------------------------------------------------------
+	html_log_init ($gTaskType+" Log",$gPreLayoutLog);
+	html_log_bold_output ($gTaskType+"\n\n");
+	html_log_bold_output ("Date: ");
+	html_log_output (eval ("systemTime")+"\n");
+	html_log_output ("Qube Job ID: "+$qubeJobId+"\n");
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Print arguments to the log
+	// --------------------------------------------------------
+	html_log_output (argListDump ($args));
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	// --------------------------------------------------------
+	// Check the hold status
+	// --------------------------------------------------------
+	int $hold = queryHoldStatus ($gTaskType,$gSequence,$gShot,{});
+	
+	if ($hold)
+	{	
+		html_log_bold_output ($gTaskType+": The Technical Supervisor has placed this shot on hold. Exiting...\n\n");
+		html_log_write ();
+		return false;
+	}
+	// --------------------------------------------------------
+	// Get the xml, either from insight or the structure file if $gUseStructureFile is set
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Gathering data needed to build the shot...\n\n");
+	html_log_write ();
+
+	string $xml;
+
+	if ($gUseStructureFile)
+	{
+		string $struc = $shotInfo+"/"+$gSequence+"_"+$gShot+"_structure.xml";
+		if (!`filetest -f $struc`)
+		{
+			html_log_bold_output ($gTaskType+": Use Structure File specified but no structure file exists. Exiting...\n\n");
+			html_log_write ();
+			return false;
+		}
+		$xml = readXML ($struc,0);
+	}
+	else
+	{
+		$xml = insightGetShotXML ($gSequence,$gShot);
+	}
+
+	// --------------------------------------------------------
+	// Get the vital stats from the xml - an asset list, and the frame range
+	// --------------------------------------------------------
+	string $assets[];
+	int $data[];
+	getAssetsAndFrameRange ($xml,$assets,$data);
+	int $frameStart = $data[0];
+	int $frameEnd = $data[1];
+
+	if ($frameStart == 0 && $frameEnd == 0)
+	{
+		html_log_bold_output ($gTaskType+": Error: Couldn't get frame range. Exiting...\n\n");
+		html_log_write ();
+		return false;
+	}
+
+	html_log_bold_output ($gTaskType+": Shot Vital Stats:\n\n");
+	html_log_output ("Assets:\n\n");
+	for ($i=0;$i<size($assets);$i++)
+	{
+		string $name = getPath ("AssetNameFromFilename",{$assets[$i]});
+		string $type = getPath ("AssetTypeFromFilename",{$assets[$i]});
+
+		string $out = $name + " ("+$type+")";
+		html_log_output ($out+"\n");
+	}
+	html_log_output ("\nFrame Range: \n\n");
+	html_log_output ("Start: "+$frameStart+"\n");
+	html_log_output ("End: "+$frameEnd+"\n");
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Make sure at least one asset is linked (unless allownoassets is set to true)
+	// --------------------------------------------------------
+	if (!$gAllowNoAssets && !size($assets))
+	{
+		html_log_bold_output ($gTaskType+": No assets are linked. Aborting.\n\n");
+		html_log_write ();
+		return false;
+	}
+
+	// --------------------------------------------------------
+	// Make sure we've got all the assets
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Checking assets...\n\n");
+	html_log_write ();
+
+	string $assets_missing[];
+	for ($i=0;$i<size($assets);$i++)
+	{
+		if (!`filetest -f $assets[$i]`)
+			$assets_missing[size($assets_missing)] = $assets[$i];
+	}
+
+	if (size($assets_missing))
+	{
+		html_log_bold_output ($gTaskType+": Couldn't build the scene because the following assets are missing...\n\n");
+		for ($i=0;$i<size($assets_missing);$i++)
+		{
+			html_log_output($assets_missing[$i]+"\n");
+		}
+		html_log_write ();
+		return false;
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+
+	// --------------------------------------------------------
+	// Export Scene Builder xml - needed by performAssetSync
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Exporting Shot Builder data...\n\n");
+	html_log_write ();
+
+	string $shot_builder_xml = structureToSceneBuilder ($xml,$gSequence,($gTaskType=="PreLayout"?"Layout":"Lighting"));
+	
+	string $shot_builder = $shotInfo+"/"+$gSequence+"_"+$gShot+"_"+($gTaskType=="PreLayout"?"preLayout":"preLighting")+".xml";
+
+	writeFile ($shot_builder, $shot_builder_xml);
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Populate the scene
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Populating the scene...\n\n");
+	html_log_write ();
+
+	performAssetSync ($shot_builder);
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Set Scene Globals
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Setting scene globals...\n\n");
+	html_log_write ();
+
+	setSceneGlobals();	// ### to-do: Do some checking in here to make sure project globals exist.
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Set up timeline
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Setting up timeline...\n\n");
+	html_log_write ();
+
+	playbackOptions -min $frameStart;
+	playbackOptions -ast $frameStart;
+	playbackOptions -max $frameEnd;
+	playbackOptions -aet $frameEnd;
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Import the audio - options: $gImportAudio - controls whether to import audio or not, $gAllowNoAudio - controls whether to throw an error or a warning
+	// if no audio is found.
+	// --------------------------------------------------------
+	if ($gImportAudio)
+	{
+		html_log_bold_output ($gTaskType+": Importing audio...\n\n");
+		
+		string $audioPath = getAudioPath();
+		if ($audioPath == "")
+		{
+			if ($gAllowNoAudio)
+			{
+				html_log_bold_output ($gTaskType+": Warning. No audio file found.\n\n");
+			}
+			else
+			{
+				html_log_bold_output ($gTaskType+": Couldn't build the scene because the audio file is missing...\n\n");
+				html_log_write ();
+				return false;
+			}
+		}
+		else
+		{
+			string $audioNode = "seq"+$gSequence+"_"+$gShot+"_audio";
+			$audioNode = `createNode audio -n $audioNode`;
+			setAttr -type "string" ($audioNode+".f") $audioPath;
+			
+			setAttr ($audioNode+".offset") $frameStart;
+			
+			string $setCmd = "setSoundDisplay "+$audioNode+" 1";
+		}
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+": Audio Import turned off for scene creation.\n\n");
+	}
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Export the structure file.
+	// --------------------------------------------------------
+	if (!$gUseStructureFile)
+	{
+		html_log_bold_output ($gTaskType+": Exporting Structure File...\n\n");
+		html_log_write ();
+	
+		exportStructure ($gSequence,$gShot,"");
+
+		html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	}
+
+	// --------------------------------------------------------
+	// Tell Insight about the assets in the scene
+	// --------------------------------------------------------
+	if ($gUpdateInsightAssetLinking)
+	{
+		html_log_bold_output ($gTaskType+": Updating Insight asset linking...\n\n");
+		html_log_write ();
+	
+		insightUpdateAssetLinking ($gSequence,$gShot,"");
+		
+		html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+		
+	}
+
+	// --------------------------------------------------------
+	// Save the scene, but not before making a backup copy of any existing layout file.
+	// --------------------------------------------------------
+	// set the file type
+	file -type "mayaAscii";
+
+	// do we need to archive
+	if (`filetest -f $tgt`)
+	{
+		string $archiveTgt = getArchiveFile();
+		html_log_bold_output ($gTaskType+": Archiving existing layout file to "+$archiveTgt+"...\n\n");
+		html_log_write ();
+
+		sysFile -cp $archiveTgt $tgt;
+		
+	}
+
+	// get timestamp before save
+	int $stamp_before_save = 0;
+	
+	if (`filetest -f $tgt`)
+	{
+		$stamp_before_save = getFileMTime ($tgt);
+	}
+	
+	html_log_bold_output ($gTaskType+": Saving file...\n\n");
+	html_log_write ();
+
+	file -rename $tgt;
+	file -f -save;
+	
+
+	// check that the file made it
+	html_log_bold_output ($gTaskType+": Verifying file save...\n\n");
+	html_log_write ();
+
+	int $success = true;
+	if (!`filetest -f $tgt`)
+		$success = false;
+	else
+	{
+		// check with previous time stamp
+		int $stamp_after_save = getFileMTime ($tgt);
+		if ($stamp_after_save <= $stamp_before_save)
+			$success = false;
+			
+	}
+	
+	if (!$success)
+	{
+		html_log_bold_output ($gTaskType+": Error: File save was unsuccessful.\n\n");
+		html_log_write ();
+		return false;
+	}	
+	else
+	{
+		html_log_output ($gTaskType+": File Save was successful.\n\n");
+	}
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+
+	// --------------------------------------------------------
+	// Update shot database
+	// --------------------------------------------------------
+	html_log_bold_output ($gTaskType+": Updating shot database...\n\n");
+	html_log_write ();
+
+	buildShotdb($gSequence,$gShot);
+
+	html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+	html_log_write ();
+
+	// --------------------------------------------------------
+	// Perform Insight callback
+	// --------------------------------------------------------
+	if ($gHost == "insight" && $gPerformInsightCallback)
+	{
+		html_log_bold_output ($gTaskType+": Calling back to Insight...\n\n");
+		html_log_write ();
+
+		string $res = insightCallWebservice ($gInsightCallbackPath,$gInsightCallbackArgs);
+		html_log_output ($res);
+		html_log_output ("\n");
+
+		html_log_bold_output ("_______________________________________________________________________________________________________________\n\n");
+		html_log_write ();
+	}
+	
+	return true;
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// 
+// -----------------------------------------------------------------------------------------------
+global proc PreLayout (string $args)
+{
+	// load plugins and source scripts
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"html_log.mel\"");
+	eval ("source \"fileIO.mel\"");
+	loadPlugins;
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string 	$gSequence;				// The sequence
+	global string 	$gShot;					// The shot
+	global string 	$gHost;					// Who is calling this process? "insight" or "maya"
+	global int	$gUseStructureFile;			// Use the structure file to find out asset membership
+	global int 	$gUpdateInsightAssetLinking;		// Update Insight asset linking with new contents of scene
+	global int 	$gPerformInsightCallback;		// Whether or not to call back to Insight
+	global string 	$gInsightCallbackPath;			// Path to web service to perform a callback to Insight through
+	global string 	$gInsightCallbackArgs;			// Args to send to web service
+	global string 	$gEmailNotify;				// Who to email when things go wrong
+	global int	$gImportAudio;				// Import audio
+	global int 	$gAllowNoAudio;				// Do not error if no audio is found
+	global int	$gAllowNoAssets;			// Do not error if no assets are linked
+	global string 	$gQubeJobName;				// Job name passed from calling process
+	global string 	$gTaskType;				// Always "PreLayout" for now - those this task might become general purpose for PreLighting as well 
+	
+	global string 	$gTaskConfig;				// Config file for this task	
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gTaskType = getArgValueDefault ($args,"taskType","PreLayout");
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gTaskConfig = getArgValueDefault ($args,"taskConfig",getConfig());
+
+	$args = argListMergeWithConfig ($args,$gTaskConfig);	// embed default arg values in config into args
+
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gEmailNotify = getArgValue ($args,"emailNotify");
+	$gUpdateInsightAssetLinking = (int)getArgValue ($args,"updateInsightAssetLinking");
+	$gPerformInsightCallback = (int)getArgValue ($args,"performInsightCallback");
+	$gInsightCallbackPath = getArgValue ($args,"returnpath");
+	$gInsightCallbackArgs = getArgValue ($args,"arguments");
+	$gQubeJobName = getArgValue ($args,"qubeJobName");
+	$gUseStructureFile = (int)getArgValue ($args,"useStructure");
+	$gImportAudio = (int)getArgValue ($args,"importAudio");
+	$gAllowNoAudio = (int)getArgValue ($args,"allownoaudio");
+	$gAllowNoAssets = (int)getArgValue ($args,"allownoassets");
+
+
+	// ------------------------------------------------------
+	// Call the main proc
+	// ------------------------------------------------------
+	int $result = do_preLayout($args);
+
+	if (!$result)
+	{
+		html_log_bold_output ($gTaskType+" FAILED.\n\n"); 
+	}
+	else
+	{
+		html_log_bold_output ($gTaskType+" DONE.\n\n"); 
+	}
+	html_log_write();
+
+	// ------------------------------------------------------
+	// Email notification if something went wrong
+	// ------------------------------------------------------
+	if (!$result && $gEmailNotify != "")
+	{
+		string $subj = $gTaskType+" Failure Notification: "+$gSequence+"_"+$gShot;
+		string $body = $gTaskType+" failed on Sequence "+$gSequence+" Shot "+$gShot+"\n";
+		
+		string $mailCmd = php()+" "+getPath ("GlobalPHPDir",{})+"/mail.php "+$gEmailNotify+" \""+$subj+"\" \""+$body+"\" "+$gTaskType;
+		system ($mailCmd);	
+	}
+
+	
+	
+}
+// -----------------------------------------------------------------------------------------------
+/*
+	// Confirm with Ross that this is not needed anymore.
+
+
+	// perform a callback to Insight
+	if (tolower($PL_host) == "insight" && $pass)
+	{
+		string $webServicePhp = (`about -nt`)?"X:/film/appdev/webService_win.php":"/diskx/film/appdev/webService.php";
+		string $assetPackCall = php() + " -q "+$webServicePhp + " -hinsight.reelfx.com -p/insight/scripts/shotUtility.php ShotGroupID="+$shotGroupID+" PageMode=LayoutZip";
+		//string $assetPackCall = "php -q /diskx/film/appdev/webService.php -hinsight.reelfx.com -p/insight/scripts/shotUtility.php ShotGroupID="+$shotGroupID+" PageMode=LayoutZip";
+		print ("PreLayout: Call to Asset Pack Creation Service: \n"+$assetPackCall+"\n");
+		string $assetPackCallResult = system ($assetPackCall);
+		string $tokens[];
+		 	tokenize ($assetPackCallResult,"\r\n",$tokens);
+		 	print ("PreLayout: Result from asset Pack Creation Call: \n");
+		 	for ($token in $tokens) print ($token+"\n");
+		
+		
+	
+*/	
+

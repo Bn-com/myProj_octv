@@ -1,0 +1,124 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwIffTga2Jpg()
+{
+	if(`window -exists zwIffTga2Jpg`)
+		deleteUI zwIffTga2Jpg;
+
+	window -title "Iff, Tga => Jpg" -resizeToFitChildren true zwIffTga2Jpg;
+		string $formLayout = `formLayout`;
+			string $text1 = `text -label "将目录里面所有的render 文件夹里面的iff、tga 图片转换成jpg 格式，不覆盖"`;
+			string $text2 = `text -label "Folder"`;
+			string $textField = `textField`;
+			string $checkBox = `checkBox -visible false -label "Resize to 100x100"`;
+			string $symbolButton1 = `symbolButton -image "navButtonBrowse.xpm" -command ("zwIffTga2JpgBrowse \"" + $textField + "\"")`;
+			string $symbolButton2 = `symbolButton -image "timeplay.xpm" -command ("zwIffTga2JpgOK \"" + $textField + "\" \"" + $checkBox + "\"")`;
+
+	formLayout -edit
+		-attachForm		$text1		"top"		10
+		-attachForm		$text1		"left"		50
+
+		-attachOppositeControl	$text2		"bottom"	0	$symbolButton1
+		-attachControl		$text2		"right"		5	$textField
+
+		-attachOppositeControl	$textField	"top"		0	$symbolButton1
+		-attachForm		$textField	"left"		50
+		-attachOppositeControl	$textField	"bottom"	0	$symbolButton1
+		-attachControl		$textField	"right"		0	$symbolButton1
+
+		-attachControl		$symbolButton1	"top"		10	$text1
+		-attachForm		$symbolButton1	"right"		50
+
+		-attachOppositeControl	$symbolButton2	"top"		0	$symbolButton1
+		-attachControl		$symbolButton2	"left"		0	$symbolButton1
+		-attachOppositeControl	$symbolButton2	"bottom"	0	$symbolButton1
+
+		-attachControl		$checkBox	"top"		10	$symbolButton1
+		-attachForm		$checkBox	"left"		50
+	$formLayout;
+
+	showWindow zwIffTga2Jpg;
+}
+
+global proc zwIffTga2JpgBrowse(string $textField)
+{
+	string $folder = `textField -query -fileName $textField`;
+	if (!`filetest -d $folder`)
+		$folder = "//file-cluster/GDC/Projects/Thru_The_Moebius_Strip/Production/WORKING";
+	$folder = `idmtFolderDialog -initialDir $folder`;
+	$folder = `substituteAllString $folder "\\" "/"`;
+	if($folder != "")
+	{
+		string $annotation = `substituteAllString $folder "/" "\\"`;
+		textField -edit -fileName $folder -annotation $annotation $textField;
+	}
+}
+
+global proc zwIffTga2JpgOK(string $textField, string $checkBox)
+{
+	string $folder = `textField -query -fileName $textField`;
+	int $resize = `checkBox -query -value $checkBox`;
+	if (`filetest -d $folder`)
+		zwIffTga2JpgProc $folder $resize;
+}
+
+global proc zwIffTga2JpgProc(string $folder, int $resize)
+{
+	string $buf[] = `getFileList -folder ($folder + "/")`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		string $subFolder = $folder + "/" + $buf[$i];
+		if (`filetest -d $subFolder`)
+		{
+			if (`tolower $buf[$i]` == "render")
+			{
+				string $buf1[] = `getFileList -filespec ($subFolder + "/*.*")`;
+				for ($file in $buf1)
+				{
+					string $buf2[];
+					tokenize $file "." $buf2;
+					string $ext = `tolower $buf2[size($buf2)-1]`;
+					if ($ext == "tga" || $ext == "iff")
+					{
+						string $from = $subFolder + "/" + $file;
+						string $jpg = `substring $from 1 (size($from)-3)` + "jpg";
+						if (!`filetest -f $jpg`)
+						{
+							string $temp = `internalVar -userTmpDir` + "temp.jpg";
+							sysFile -delete $temp;
+							string $cmd, $rs;
+							if ($resize)
+							{
+								idmtImage -resize 100 100 $from $temp;
+								$rs = "";
+							}
+							else
+							{
+								$cmd = "imgcvt -f " + $ext + " -t jpg \"" + `substituteAllString $from "/" "\\"` + "\" \"" + `substituteAllString $temp "/" "\\"` + "\"";
+								chdir "C:";
+								$rs = `system $cmd`;
+							}
+							if ($rs == "")
+							{
+								$cmd = "zwSysFile \"move\" \"" + $temp + "\" \"" + $jpg + "\" true";
+								$rs = `zwSysFile "move" $temp $jpg true`;
+							}
+							if ($rs != "")
+								error ($rs + "\nCMD: " + $cmd);
+							print ($jpg + "\n");
+						}
+					}
+				}
+			}
+			zwIffTga2JpgProc $subFolder $resize;
+		}
+	}
+}

@@ -1,0 +1,157 @@
+/// Copyright (C) 2000-2009 IDMT. All rights reserved.
+///
+/// Author: 黄璧（重庆）
+///
+/// Creation Date: 2009/07/18
+///
+/// Description: 批处理特效70几个镜头用
+global proc hidePolyHair()
+{
+	string $allBodycon[] = `ls "*:*upperBodyCon"`;
+	for($eachBodycon in $allBodycon)
+	{
+		string $buffer02[];
+		$num03 = `tokenize $eachBodycon ":" $buffer02`;
+		if ($buffer02[0] != "lv_ci019001harvey" && $buffer02[0] != "lv_ci019001harvey_1")
+		{
+			$allAttr = `listAttr -keyable $eachBodycon`;
+			for ($eachattr in $allAttr)
+			{
+				if( $eachattr == "Poly_hair_vis")
+				{
+					if(`getAttr ($eachBodycon + ".Poly_hair_vis")`)
+					{
+						cutKey  -clear -attribute "Poly_hair_vis" $eachBodycon;
+						setAttr ($eachBodycon + ".Poly_hair_vis" ) 0;
+					}
+				}
+				if( $eachattr == "Hair_vis")
+				{
+					if(`getAttr ($eachBodycon + ".Hair_vis")`)
+					{
+						cutKey  -clear -attribute "Hair_vis" $eachBodycon;
+						setAttr ($eachBodycon + ".Hair_vis" ) 0;
+					}
+				}
+			}
+		}
+
+	}
+}
+
+
+global proc autoSmooth()
+{
+	hidePolyHair;
+	string $allBodycon[] = `ls "*:*upperBodyCon"`;
+	for($eachBodycon in $allBodycon)
+	{
+		string $buffer01[];
+		$num01 = `tokenize $eachBodycon ":" $buffer01`;
+		string $alltransfrom[] =`ls  -tr ($buffer01[0] + ":*")`;
+		select $alltransfrom;
+		string $allpoly[] =`filterExpand -ex true -sm 12`;
+		select $allpoly;
+		for ($eachpoly in $allpoly)
+		{
+			if (!`getAttr ($eachpoly + ".visibility")`)
+			{
+				string $Quest=`match "DYN" $eachpoly `;
+				if($Quest!="DYN")
+				{
+				select -d $eachpoly;
+				}
+			}
+		}
+
+		SmoothPolygon;	
+	}
+	select -d;
+	print "\n\n\n\nTHANKS YEJUN\n\n\n\n";
+}
+global proc HbHookShaderOverride(string $layer, string $shader) 
+{
+
+	string $shadingGroupArray[] = `listConnections -source false -destination true -type "shadingEngine" $shader`;
+	string $sg;
+	if (size($shadingGroupArray) < 1) 
+	{
+		$sg = `sets -renderable true -noSurfaceShader true -empty -name ($shader+"SG")`;
+		defaultNavigation -connectToExisting -source $shader -destination $sg;
+	} 
+	else 
+	{
+		$sg = $shadingGroupArray[0];
+	}
+	connectAttr -f ($sg+".message") ($layer+".shadingGroupOverride");
+
+}
+
+global proc  HBFXtest()
+{
+	file -import -type "mayaBinary" -ra true -namespace "hBEF"  -pr -loadReferenceDepth "all" "Z:/Resource/Support/Maya/projects/Lionelville/Import/Worldcruiser Vortex Explosion FX_01_light.mb";
+	string $GetSetLightGrp[]=`ls "*:s004001intgreatcentralterminal_c_hi_env_light"`;
+	if ($GetSetLightGrp[0]=="")
+		{
+		string $GetReferenceFileName=`referenceQuery -referenceNode "//file-cluster/GDC/Projects/Lionelville/Project/scenes/sets/s004001intgreatcentralterminal/master/lv_s004001intgreatcentralterminal_h_ms_tex.mb"`;
+		if ($GetReferenceFileName!="")
+			{
+			file -loadReference $GetReferenceFileName;
+			}
+		}
+	string $GetAllPaticleName[]=`ls "*:curve*Particle"`;
+	print $GetAllPaticleName;
+	for ($aa in $GetAllPaticleName)
+		{
+		setAttr ($aa+".startFrame") 1001;
+		}
+	string $GetSetLightGrp[]=`ls "*:s004001intgreatcentralterminal_c_hi_env_light"`;
+		if ($GetSetLightGrp[0]!="")
+		{
+		setAttr ($GetSetLightGrp[0]+".visibility") 0;
+		}
+	select -all;
+	createRenderLayer -name "fx_light" -number 1 -noRecurse `ls -selection`;
+	editRenderLayerGlobals -currentRenderLayer "fx_light";
+	select -cl;
+	string $GetLayerLights[]=`ls -shapes "*:HBLight*"`;
+	for($i=0;$i<size($GetLayerLights)-1;$i++)
+		{
+		editRenderLayerAdjustment ($GetLayerLights[$i]+".useDepthMapShadows");
+		setAttr ($GetLayerLights[$i]+".useDepthMapShadows") 0;
+		}
+	string $CreatNewLam=`shadingNode -asShader lambert`;
+	HbHookShaderOverride("fx_light",$CreatNewLam);
+	string $GetSgNode=$CreatNewLam+"SG";
+	connectNodeToNodeOverride($CreatNewLam, $GetSgNode);
+	print "\n\n\n\nfx_light OK!\n\n\n\n\n";
+	select -all;
+	createRenderLayer -name "shadow" -number 1 -noRecurse `ls -selection`;
+	editRenderLayerGlobals -currentRenderLayer "shadow";
+	select -cl;
+	string $GetLayerLights[]=`ls -shapes "*:HBLight*"`;
+	for($i=0;$i<size($GetLayerLights)-1;$i++)
+		{
+		setAttr ($GetLayerLights[$i]+".useDepthMapShadows") 1;
+		setAttr ($GetLayerLights[$i]+".dmapResolution") 1024;
+		}
+	source ezRenderMainLayoutMaterial.mel;
+	ezRenderMainLayoutMaterial_Assign("shadow");
+	HbHookShaderOverride("shadow","ez_shadow");
+	connectNodeToNodeOverride("shadow", "shadowSG");
+	setAttr "defaultRenderLayer.renderable" 0;
+	print "\n\n\nshadow OK!\n\n\n\n\n";
+	autoSmooth;
+	file -save;
+		string $GetReferenctFileId=`referenceQuery -filename faceRN`;
+		if ($GetReferenctFileId!="")
+		{
+			file -rr $GetReferenctFileId;
+		}
+	print "\n\n\n REMOVE FACE!\n\n\n";
+	file -save;
+	print "\n\n\n<<<<CREAT BY HUANG BI>>>>\n\n\n";
+
+
+	
+}

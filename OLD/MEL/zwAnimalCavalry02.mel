@@ -1,0 +1,77 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwAnimalCavalry02()
+{
+	string $buf[] = `ls -long -sl`;
+	if (size($buf) != 1)
+		error "请选择一个animalcavalry02_MASTER";
+	
+	string $master = $buf[0];
+	tokenize $master "|" $buf;
+	if (!`gmatch $buf[size($buf)-1] "animalcavalry02_MASTER*"`)
+		error "请选择一个animalcavalry02_MASTER";
+
+	fileBrowserDialog -mode 0 -fileCommand ("zwAnimalCavalry02Proc \"" + $master + "\"") -fileType "mayaBinary" -actionName "OK";
+}
+
+global proc zwAnimalCavalry02Proc(string $master, string $filename, string $fileType)
+{
+	file -reference -type "mayaBinary" -namespace "CopyAnim" $filename;
+
+	catch (`zwAnimalCavalry02OK $master`);
+
+	cycleCheck -evaluation off;
+
+	file -removeReference $filename;
+}
+
+global proc zwAnimalCavalry02OK(string $master)
+{
+	if (!`pluginInfo -query -loaded "animImportExport.mll"`)
+		loadPlugin -quiet "animImportExport.mll";
+
+	string $buf[] = {"animalcavalry02_footCon_l", "animalcavalry02_footCon_r", "animalcavalry02_footCon_l1", "animalcavalry02_footCon_r1", "animalcavalry02_torso", "wsoldierref01_MASTER"};
+	for ($node in $buf)
+	{
+		string $source = "CopyAnim:" + $node;
+		if (!`objExists $source`)
+		{
+			warning ("动画文件没有" + $node);
+			continue;
+		}
+
+		string $dest = "";
+		string $buf1[] = `ls -long $node`;
+		for ($i=0; $i<size($buf1); $i++)
+		{
+			if (`gmatch $buf1[$i] ($master + "|*" + $node)`)
+			{
+				$dest = $buf1[$i];
+				break;
+			}
+		}
+		if (!`objExists $dest`)
+		{
+			warning ("中精度模型没有" + $node);
+			continue;
+		}
+
+		string $filename = `internalVar -userTmpDir` + $node + ".anim";
+		sysFile -delete $filename;
+		select $source;
+		if (!catch(`file -exportSelected -type "animExport" $filename`))
+		{
+			select $dest;
+			file -import -type "animImport" -options ";targetTime=4;copies=1;option=replaceCompletely;pictures=0;connect=0;" $filename;
+		}
+		sysFile -delete $filename;
+	}
+}

@@ -1,0 +1,323 @@
+//===============================================================================
+// Script: syRemoveCache.mel
+// Author: Sean Nolan
+// Email : seanwnolan@gmail.com
+// Created on : Decemeber 14, 2004
+//
+// Usage: Used with Syflex to remove cached files in the scene
+//		  either all the frames or specific ones.
+//		  
+//
+// Instructions: Script calls up a window that will list all the clothing items
+//				 in the list box.
+//
+// Added: Works now with blendCache
+//
+// Works on versions 2.1 and 3.0
+//===============================================================================
+
+//===============================================================================
+// Main proc
+//===============================================================================
+global proc syRemoveCache()
+{
+		
+		string $syClothWindow = "syClothWin";
+		string $winTitle = "syRemoveCache";
+		int $winHieght = 275;
+		int $winWidth = 725;
+		
+
+		if ( `window -exists $syClothWindow` )
+			deleteUI $syClothWindow;
+
+			window -title $winTitle
+				   -widthHeight $winWidth $winHieght
+				   -mnb true
+				   -mxb false
+				   -s false
+				   $syClothWindow;
+
+			columnLayout -w 200 -h 100;
+			text -label "Cloth Nodes:";
+			
+			rowColumnLayout -nc 2 -cw 1 200 -cw 2 200;
+				button -label "Load Cloth List"
+				   	   -width 200
+				   	   -height 20
+				   	   -command wvsLoadClothList
+				   	   btnLoadClothList;
+			
+				button -label "Load Blend Cache Cloth"
+				   	   -width 200
+				   	   -height 20
+				   	   -command wvsLoadBlendList
+				   	   btnLoadBlendList;
+			setParent..;
+			
+			rowColumnLayout -nc 2 -cw 1 200 -cw 2 200;
+			
+			//build the scrollList
+			textScrollList -numberOfRows 4
+						   -height 100
+						   -width 200
+						   -allowMultiSelection false
+						   -selectCommand "getCacheNameForLabel(1);"
+						   clothNodeList;
+	   
+	   		textScrollList -numberOfRows 4
+						   -height 100
+						   -width 200
+						   -allowMultiSelection false
+						   -selectCommand "getCacheNameForLabel(2);"
+						   blendCacheList;
+			setParent..;
+
+		rowColumnLayout -nc 2 -cw 1 75 -cw 2 $winWidth;
+			text -l "CacheName:" -al "left";
+			text -l "" -al "left" txtDisplayPath;
+			text -l "";
+
+		setParent..;
+	
+	
+		rowColumnLayout -nc 2 -cw 1 200 -cw 2 150;
+			radioCollection;
+				radioButton -label "Clear Cache"
+						   -select
+						   -al "left"
+						   -onCommand "textField -edit -enable false txtFrameRange; textField -edit -enable false txtSingleFrame; button -edit -enable false btnRemoveFrames; 	button -edit -enable true btnClearCache;";
+
+			    radioButton -label "Remove Frames"
+			    			-al "left"
+			    			-onCommand "textField -edit -enable true txtFrameRange; textField -edit -enable true txtSingleFrame; 	button -edit -enable true btnRemoveFrames; button -edit -enable false btnClearCache;";
+
+		    setParent..;
+
+	//create clear cache button and textfield for range
+
+		 rowColumnLayout -nc 4 -cw 1 100 -cw 2 100 -cw 3 200 -cw 4 100;
+
+		    button -label "Clear All Cache"
+		    	        -command wvsClearAllCache
+		    	       btnClearCache;
+
+		    text -l "";
+
+		    string $txtFrameRange = `textField txtFrameRange`;
+
+		    textField -edit -enable false txtFrameRange;
+		    text -l "Range (ex 5:10)" -al "left";
+
+		 setParent..;
+
+	//create textfield for single frame
+
+		 rowColumnLayout -nc 4 -cw 1 100 -cw 2 100 -cw 3 200 -cw 4 200;
+
+			 text -l "";
+			 text -l "";
+
+			 string $txtSingleFrames = `textField txtSingleFrame`;
+
+			 textField -edit
+			 		-enable false
+			 		txtSingleFrame;
+
+			 text -l "SingleFrames (ex. 2 4 6 50)" -al "left";
+
+		 setParent..;
+
+	//create button for remove frames
+		 rowColumnLayout -nc 3 -cw 1 100 -cw 2 100 -cw 3 100;
+
+			 text -l "";
+			 text -l "";
+
+			 button -l "Remove Frames" btnRemoveFrames;
+
+			 button -edit
+			 		-enable false
+			 		//-command removeCacheFrames
+			 		btnRemoveFrames;
+
+	//force window size
+	window -edit -wh $winWidth $winHieght $syClothWindow;
+	showWindow $syClothWindow;
+}
+
+//===============================================================================
+// clears all cache from the selected cloth node
+//===============================================================================
+global proc wvsClearAllCache()
+{
+		string $path = `text -query -label txtDisplayPath`;
+		string $frames = `syCacheGetFrames $path`;
+
+		if(size($frames) == 0)
+			{
+				error ("No cache files to delete");
+
+			}
+
+		syCacheDelFrames $path $frames;
+		print("Deletion SuccessFull");
+
+
+}
+
+//===============================================================================
+// builds the textScrollList from the cloth nodes in the scene
+//===============================================================================
+global proc wvsLoadClothList()
+{
+	//query the scene to find the cloth nodes and how many there are
+	string $clothNodes[] = `ls -type "syCloth"`;
+	int $numOfNodes = size($clothNodes);
+	int $i;
+	
+	if ($numOfNodes == 0)
+		error ("No cloth nodes to load");
+	
+	//clear the list first
+	textScrollList -edit -removeAll clothNodeList;
+
+	//then build list
+
+	for ($i = 0; $i < $numOfNodes; $i++)
+	{
+		textScrollList -edit -append $clothNodes[$i] clothNodeList;
+	}
+	textScrollList -edit -showIndexedItem 1 clothNodeList;
+
+}
+
+//===============================================================================
+// builds the textScrollList from the cloth nodes in the scene
+//===============================================================================
+global proc wvsLoadBlendList()
+{
+	//query the scene to find the cloth nodes and how many there are
+	string $cacheNodes[] = `ls -type "syCache"`;
+	int $numOfNodes = size($cacheNodes);
+	int $i;
+	
+	if ($numOfNodes == 0)
+		error ("No cache nodes to load");
+	
+	//clear the list first
+	textScrollList -edit -removeAll blendCacheList;
+
+	//then build list
+
+	for ($i = 0; $i < $numOfNodes; $i++)
+	{
+		textScrollList -edit -append $cacheNodes[$i] blendCacheList;
+	}
+	textScrollList -edit -showIndexedItem 1 blendCacheList;
+
+}
+//===============================================================================
+// gets the cacheName from the selection list
+//===============================================================================
+global proc getCacheNameForLabel(int $buttonState)
+{
+	string $clothList[]  = `textScrollList -query -selectItem clothNodeList`;
+	string $blendList[] = `textScrollList -query -selectItem blendCacheList`;
+	string $path = `text -query -label txtDisplayPath`;
+	
+	if ($buttonState == 1) // cloth node
+	{
+		//select the node
+		select -r $clothList;
+		string $clothSel[] = `ls -sl`;
+		select -cl;
+	
+		//get the cacheName attribute
+		string $cacheNameAttr = `getAttr ($clothSel[0]  + ".cacheName")`;
+		
+		//display the path in the window
+		text -edit -l $cacheNameAttr txtDisplayPath;
+		
+		//change the command of the remove frames button
+		button -edit -command wvsRemoveCacheFrames btnRemoveFrames;
+		
+	}
+	else if ($buttonState ==2)
+	{
+		select -r $blendList;
+		string $blendList[] = `ls -sl`;
+		select -cl;
+		
+		//get the cacheName attribute
+		string $saveNameAttr = `getAttr ($blendList[0]  + ".saveName")`;
+		
+		//display the path in the window
+		text -edit -l $saveNameAttr txtDisplayPath;
+		
+		//change the command of the remove frames button
+		button -edit -command wvsRemoveBlendCacheFrames btnRemoveFrames;
+	}
+	
+
+}
+
+//===============================================================================
+// removes certain frames
+//===============================================================================
+global proc wvsRemoveCacheFrames()
+{
+	string $selItem[]  = `textScrollList -query -selectItem clothNodeList`;
+	select -r $selItem;
+	string $sel[] = `ls -sl`;
+	select -cl;
+	string $path = `getAttr ($sel[0]  + ".cacheName")`;
+	string $range = `textField -q -text txtFrameRange`;
+	string $singleFrames = `textField -q -text txtSingleFrame`;
+	string $frames = `syCacheGetFrames $path`;
+	string $totalFrames = $range + " " + $singleFrames;
+	if(size($frames) == 0)
+		{
+			error ("No cache files to delete");
+		}
+
+	syCacheDelFrames $path $totalFrames;
+	print("Deletion SuccessFull");
+
+}
+
+//===============================================================================
+// removes certain blend cache frames
+//===============================================================================
+global proc wvsRemoveBlendCacheFrames()
+{
+	string $selItem[]  = `textScrollList -query -selectItem blendCacheList`;
+	select -r $selItem;
+	string $sel[] = `ls -sl`;
+	select -cl;
+	string $path = `getAttr ($sel[0]  + ".saveName")`;
+	string $range = `textField -q -text txtFrameRange`;
+	string $singleFrames = `textField -q -text txtSingleFrame`;
+	string $frames = `syCacheGetFrames $path`;
+	string $totalFrames = $range + " " + $singleFrames;
+	if(size($frames) == 0)
+		{
+			error ("No cache files to delete");
+		}
+
+	syCacheDelFrames $path $totalFrames;
+	print("Deletion SuccessFull");
+
+}
+
+
+
+
+
+
+
+
+
+
+
+

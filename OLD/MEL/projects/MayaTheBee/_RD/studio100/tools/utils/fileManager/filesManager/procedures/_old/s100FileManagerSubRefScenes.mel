@@ -1,0 +1,147 @@
+
+// Procedures to deal with "subRef" scenes topnode (|full_grp) tagging : ANIM, ANIMCACHE, RENDER, LAYOUT scenes, made after the "master" one (ref:)
+// "|full_grp" object, when created, or opened, is tagged (string attribute s100_subRefType fille with type cited earlier)
+//
+
+global string $gS100_subRefAttr =  "s100_subRefType";
+global string $gS100_MTB_topNode = "|full_grp";
+global string $gS100_MTB_topNodeShName = "full_grp";
+
+global proc s100FMAStagSubRefSceneTopNodeFromCurrentFileName()
+{
+	string $fileName = `file -q -sn -shortName`;
+	string $type = s100FMAgetSubRefTypeFromName($fileName);
+
+	s100FMAStagSubRefSceneTopNode($type);
+}
+
+//addguillaume
+global proc int s100FMASGetIfThereIsAtagSubRefSceneTopNode()
+{
+	global string $gS100_subRefAttr ;
+	string $attr = $gS100_subRefAttr;
+	global string $gS100_MTB_topNode;
+
+	$ch = 0 ;
+	string $fgrps[] = `ls -tr $gS100_MTB_topNode`;
+	if (size($fgrps)==1)
+	{
+		string $fg = $fgrps[0];
+		if (`attributeExists $attr $fg`)
+		{
+		$ch =1;
+        }
+    }
+
+	return $ch ;
+}
+
+global proc string s100FMASGetSubRefPathForType(string $path, string $type)
+{
+	string $dirN = dirname($path) ;
+	string $sub = substituteAllString($path , $dirN+ "/" ,"") ;
+	string $subN = substituteAllString($sub , ".ma", "_" + $type +".ma");
+	string $dirR = `s100returnAssetRootFolder($path) `;
+	$dirR += "00_subRefs/";
+
+	string $return = $dirR + $subN ;
+
+	return $return ;
+}
+
+
+
+global proc s100FMAStagSubRefSceneTopNode(string $type)
+{
+	global string $gS100_subRefAttr ;
+	global string $gS100_MTB_topNode;
+
+	string $attr = $gS100_subRefAttr;
+	string $fgrps[] = `ls -tr $gS100_MTB_topNode`;
+	if (size($fgrps)==1)
+	{
+		string $fg = $fgrps[0];
+		if (!`attributeExists $attr $fg`)
+		{
+			print ("// Adding '"+$attr+"' attribute (value: \""+$type+"\") on '"+$gS100_MTB_topNode+"' topNode.\n");
+			addAttr -ln $attr -dt "string"  $fg;
+        }
+		else
+			warning ("// Attribute '"+$attr+"' ALREADY exists on '"+$gS100_MTB_topNode+"' topNode!!");
+
+		if (`attributeExists $attr $fg`)
+		{
+			int $lock = `getAttr -l ($fg+"."+$attr)`;
+			string $value = `getAttr ($fg+"."+$attr)`;
+			if ($value==$type)
+				warning ("// Attribute '"+$gS100_MTB_topNode+"."+$attr+"' ALREADY is \""+$value+"\".");
+			else if ($lock==true)
+				$lock = catch(`setAttr -lock false ($fg+"."+$attr)`);
+
+			if ($lock==false)
+				setAttr -lock true -type "string" ($fg+"."+$attr) $type;
+        }
+    }
+	else
+		warning (" More or less than ONE '"+$gS100_MTB_topNode+"' topNode found. No '"+$attr+"' created on it.");
+}
+
+
+global proc string s100FMASgetTagSubRefSceneFromTopNode()
+{
+	global string $gS100_subRefAttr ;
+	global string $gS100_MTB_topNode;
+
+	string $attr = $gS100_subRefAttr;
+	string $fgrps[] = `ls -tr $gS100_MTB_topNode`;
+	if (size($fgrps)==1)
+	{
+		string $fg = $fgrps[0];
+		if (!`attributeExists $attr $fg`)
+		{
+			print ("// No attribute '"+$attr+"' found on '"+$gS100_MTB_topNode+"' topNode.\n");
+			return "";
+        }
+		else
+		{
+			string $value = `getAttr ($fg+"."+$attr)`;
+			print ("// Attribute '"+$attr+"' exists on '"+$gS100_MTB_topNode+"' topNode : value = \""+$value+"\".\n");
+			return $value;
+        }
+    }
+	else
+	{
+		warning (" More or less than ONE '"+$gS100_MTB_topNode+"' topNode found! Aborted.");
+		return "";
+    }
+}
+
+
+
+global proc string s100FMAgetSubRefTypeFromName(string $fileName)
+{
+	if ( endsWith($fileName,".ma") || endsWith($fileName,".mb") )
+		$fileName = substring($fileName, 1, size($fileName)-3 );
+
+	string $buf[]={};
+	string $sufx="";
+	int $nb = `tokenize $fileName "_" $buf`;
+	if ($nb)
+    	$sufx = $buf[$nb-1];
+
+	return(s100FMAcheckSubRefTypeSuffixValidity($sufx));
+}
+
+
+global proc string s100FMAcheckSubRefTypeSuffixValidity(string $sufx)
+{
+	string $okSuffixes[]= {"RENDER", "ANIM", "ANIMCACHE", "LAYOUT"};
+	if (stringArrayContains( $sufx, $okSuffixes ) )
+		return $sufx;
+	else
+	{
+		warning ("Suffix \""+$sufx+"\" is not a valid one (among '"+stringArrayToString($okSuffixes,", ")+"')");
+		return "";
+	}
+}
+

@@ -1,0 +1,162 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slModelCameraPlane()
+{
+	string $cams[] = `ls -sl`;
+
+	select -cl;
+
+	string $images[] = `idmtFileDialog -filter "Image File(*.iff;*.tga;*.jpg;*.bmp)|*.iff;*.tga;*.jpg;*.bmp|All File|*.*||" -m`;
+	for ($image in $images)
+	{
+		slModelCameraPlaneCreate($image,$cams[0]);
+	}
+	slModelCameraPlaneCombineExp();
+	slModelCameraPlaneCombineGroup();
+}
+
+global proc slModelCameraPlaneCreate(string $image,string $cam)
+{
+	string $exist = slModelCameraPlaneReuseTex($image);
+	
+	string $buff[],$buff1[];
+	int $num = `tokenize $image "\\/" $buff`;
+	$num = `tokenize $buff[$num-1] "_" $buff1`;
+	string $msh = "MSH_"+$buff1[2]+"_"+$exist;
+	
+	//create plane
+	string $planes[] = `polyPlane -w 0.1 -h 0.1 -sx 10 -sy 10 -ax 0 1 0 -cuv 2 -ch 1 -n $msh`;
+	string $group = `group -n ($msh+"Group_")`;
+	
+	//assign material
+	string $mat = `shadingNode -asShader lambert`;
+	string $sg = `sets -renderable true -noSurfaceShader true -empty -name ($mat+"SG")`;
+	connectAttr -f ($mat+".outColor") ($sg+".surfaceShader");
+	setAttr ($mat+".ambientColor") -type double3 1 1 1 ;
+	setAttr ($mat+".diffuse") 0;
+	string $file = `shadingNode -asTexture file`;
+	string $tex = `shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($tex+".coverage")			($file+".coverage");
+	connectAttr -f ($tex+".translateFrame")		($file+".translateFrame");
+	connectAttr -f ($tex+".rotateFrame")		($file+".rotateFrame");
+	connectAttr -f ($tex+".mirrorU")			($file+".mirrorU");
+	connectAttr -f ($tex+".mirrorV")			($file+".mirrorV");
+	connectAttr -f ($tex+".stagger")			($file+".stagger");
+	connectAttr -f ($tex+".wrapU")				($file+".wrapU");
+	connectAttr -f ($tex+".wrapV")				($file+".wrapV");
+	connectAttr -f ($tex+".repeatUV")			($file+".repeatUV");
+	connectAttr -f ($tex+".offset")				($file+".offset");
+	connectAttr -f ($tex+".rotateUV")			($file+".rotateUV");
+	connectAttr -f ($tex+".noiseUV")			($file+".noiseUV");
+	connectAttr -f ($tex+".vertexUvOne")		($file+".vertexUvOne");
+	connectAttr -f ($tex+".vertexUvTwo")		($file+".vertexUvTwo");
+	connectAttr -f ($tex+".vertexUvThree")		($file+".vertexUvThree");
+	connectAttr -f ($tex+".vertexCameraOne")	($file+".vertexCameraOne");
+	connectAttr ($tex+".outUV")				($file+".uv");
+	connectAttr ($tex+".outUvFilterSize")		($file+".uvFilterSize");
+	connectAttr -f ($file+".outColor") ($mat+".color");
+	connectAttr -f ($file+".outTransparency") ($mat+".transparency");
+	setAttr -type "string" ($file+".fileTextureName") $image;
+	sets -e -forceElement $sg ($group+"|"+$planes[0]);
+
+	
+	//plane initializtion
+	string $constraint[] = `parentConstraint -weight 1 $cam $group`;
+	delete $constraint;
+	rotate -r -os 90 0 0 $group;
+	//move -r -os -wd 0 -100 0 $group;
+	setAttr ($group+"|"+$planes[0]+".ty") -100;
+		
+	
+	string $camShape[] = `listRelatives -c -type camera $cam`;
+	string $cmd = "";
+	$cmd += "float $fov = (0.5*"+$camShape[0]+".horizontalFilmAperture)/(0.03937*"+$camShape[0]+".focalLength);\n";
+	$cmd += "$fov = 2.0 * atan ($fov);\n";
+	$cmd += "$fov = 57.29578 * $fov;\n";
+	$cmd += "float $scale =-20.0*tand($fov/2.0);\n";
+	$cmd += "float $sz = (float)defaultResolution.height/defaultResolution.width;\n";
+
+	$cmd += $group+".sx = $scale*"+$group+"|"+$planes[0]+".ty;\n";
+	$cmd += $group+".sz = $scale*"+$group+"|"+$planes[0]+".ty*$sz;\n";
+
+	string $exps[] = `ls -type expression "*CameraPlane_Exp"`;
+	expression -s $cmd -o "" -ae 1 -uc all -n "CameraPlane_Exp";
+
+}
+
+global proc slModelCameraPlaneCombineExp()
+{
+	string $expression[] = `ls -type expression "CameraPlane_Exp*"`;
+
+	string $combineCmd = `expression -q -s "CameraPlane_Exp"`;
+	for ($exp in $expression)
+	{
+		if ($exp != "CameraPlane_Exp")
+		{
+			string $cmd = `expression -q -s $exp`;
+			string $buff[];
+			int $num = `tokenize $cmd "\n" $buff`;
+
+			$combineCmd += "\n"+$buff[$num-2];
+			$combineCmd += "\n"+$buff[$num-1];
+		}
+		delete $exp;
+	}
+
+	expression -s $combineCmd -o "" -ae 1 -uc all -n "CameraPlane_Exp";
+}
+
+global proc slModelCameraPlaneCombineGroup()
+{
+	string $groups[] = `ls "MSH_*_Group_"`;
+	string $name = `group -n "MSH_Group_" $groups`;
+	if ($name != "MSH_Group_")
+	{
+		delete "MSH_Group_";
+		rename $name "MSH_Group_";
+	}
+	for ($group in $groups)
+	{
+		setAttr -lock true -keyable false -channelBox false ($group+".tx");
+		setAttr -lock true -keyable false -channelBox false ($group+".ty");
+		setAttr -lock true -keyable false -channelBox false ($group+".tz");
+		setAttr -lock true -keyable false -channelBox false ($group+".rx");
+		setAttr -lock true -keyable false -channelBox false ($group+".ry");
+		setAttr -lock true -keyable false -channelBox false ($group+".rz");
+		setAttr		   -keyable false -channelBox false ($group+".sx");
+		setAttr -lock true -keyable false -channelBox false ($group+".sy");
+		setAttr		   -keyable false -channelBox false ($group+".sz");
+		setAttr -lock true ($group+".v");
+	}
+}
+
+global proc string slModelCameraPlaneReuseTex(string $image)
+{
+	string $exist = "";
+	
+	string $files[] = `ls -type file`;
+	int $num;
+	for ($file in $files)
+	{
+		string $exist = `getAttr ($file+".fileTextureName")`;
+		if (`match "[^\\-\/]*$" $image` == `match "[^\\-\/]*$" $exist`)
+		{
+			$num += 1;
+		}
+	}
+	if ($num)
+	{
+		$exist = $num+"_";
+	}
+	return $exist;
+}

@@ -1,0 +1,597 @@
+//-------------------------------------Create curves and arrange-----------------------------------------
+
+//proc particle to curves...
+
+global proc particleToLines()
+{
+	playbackOptions -loop "once";
+	global string $particle[];
+	$particle=`pickWalk -d down`;
+	global string $a;
+	$a= `dynExpression -q -c $particle[0]`;
+	global string $b;
+	$b= `dynExpression -q -rbd $particle[0]`;
+
+	dynExpression -e -s ($a+"vector $pos="+($particle[0])+".position;\ncurve -d 3 -p ($pos.x) ($pos.y) ($pos.z) -k 0 -k 0 -k 0;") -c $particle[0];
+	dynExpression -e -s ($b+"vector $pos="+($particle[0])+".position;\ncurve -a -p ($pos.x) ($pos.y) ($pos.z) (\"curve\"+("+($particle[0])+".particleId+1));") -rbd $particle[0];
+}
+
+//proc group and arrange expression...
+global proc arrange()
+{
+
+	global string $particle[];
+	global string $a;
+	global string $b;
+	
+	dynExpression -e -s ($a) -c $particle[0];
+	dynExpression -e -s ($b) -rbd $particle[0];
+	
+	global string $sel[];
+	$sel=`ls ("curve*")`;
+	
+	group -em -n ("fr"+$particle[0]+"Group"); 
+	for($i=0;$i<size($sel)/2;$i++)
+	{
+	 rename ("curve"+($i+1))  ("fr"+$particle[0]+"_"+($i+1));
+	  parent ("fr"+$particle[0]+"_"+($i+1)) ("fr"+$particle[0]+"Group") ; 
+	    }
+
+}
+
+//-------------------------------------Create dynamic curves-----------------------------------------
+
+//proc curves dynamic curves...
+global proc createCurvesDynamic()
+{
+	global string $particle[];
+	global string $sel[];
+	
+	select ("fr"+$particle[0]+"_"+"*");
+	// nhair makeCurvesDynamic 2 { "1", "0", "1", "1", "0"};
+	makeCurvesDynamicHairs 1 0 1;
+	
+	for($r=0;$r<size($sel);$r++)
+	{
+	rename ("curve"+($r+1)) ("dynamicCurve"+($r+1));
+	}
+	
+	}
+	//proc select all follicles...
+	global proc selectAllFollicles()
+	{
+	select "follicle*";      
+}
+
+
+//proc delete all dynamics...
+global proc deleteAllDynamics()
+{
+	global string $sel[];
+	
+	delete hairSystem1;
+	delete nucleus1;
+	delete hairSystem1OutputCurves;
+	
+	for($k=0;$k<size($sel);$k++)
+	{
+	parent ("frparticleShape1_"+($k+1)+"")  frparticleShape1Group;  
+	}
+	
+	delete "follicle*";
+}
+
+//choose parent constraint object...
+global proc chooseObj()
+{
+    global string $Obj[];
+    $Obj=`ls -sl`;
+
+}
+
+//create constraint...
+global proc createConstr()
+{
+   global string $Obj[]; 
+   global string $sel[]; 
+    
+   group -em -n dynamicConstraintGroup;
+    for($i=0;$i<size($sel);$i++)
+    {   
+        select -r ("dynamicCurve"+($i+1)+".cv[0]") ;
+        select -tgl pSphere1 ;
+        createNConstraint pointToSurface 0;   
+    
+    parent ("dynamicConstraint"+($i+1)) dynamicConstraintGroup;
+    }    
+    
+    
+    
+}
+
+
+//delete constraint...
+global proc deleteConstr()
+{
+	delete dynamicConstraintGroup nRigid1;
+}
+
+//-------------------------------------proc curves to nurbs-----------------------------------------
+
+
+global proc curvesToNurbs(float $radiusMin,float $radiusMax,int $noDynamic,int $nDynamic)
+{
+	global string $sel[];
+	global string $particle[];
+	//string $lines[]=`ls ("curve*")`;    
+	string $selBase[]=`ls -sl`;
+	
+	for($j=0;$j<(size($sel))/2;$j++)
+	{
+	
+		 string $name[]=`duplicate -rr  $selBase[0]`;
+		 
+		 rename $name[0] ("baseCurve"+($j+1)) ;
+		 
+		 float $rand=rand($radiusMin,$radiusMax);
+		 
+		 setAttr ("baseCurve"+($j+1)+".sx") ($rand);
+		 setAttr ("baseCurve"+($j+1)+".sy") ($rand);
+		 setAttr ("baseCurve"+($j+1)+".sz") ($rand);
+		
+		
+		//string $baseCurve[]=`circle -c 0 0 0 -nr 0 1 0 -sw 360
+		//     -r (rand($radiusMin,$radiusMax))
+		//     -d 3 -ut 0 -tol 0.01 -s 8 -ch 1`;
+		     
+		     
+		if( $noDynamic==1 ) 
+		{
+		
+		 	extrude -ch true -rn true -po 0 -et 2 -ucp 1 -fpt 1 -upn 1
+		    -rotation 0 -scale 1 -rsp 1 ("baseCurve"+($j+1)) ("fr"+$particle[0]+"_"+($j+1)) ;  
+		
+		 }   
+		 
+		 if($nDynamic==1) 
+		{
+		   
+			extrude -ch true -rn true -po 0 -et 2 -ucp 1 -fpt 1 -upn 1
+		    -rotation 0 -scale 1 -rsp 1 ("baseCurve"+($j+1)) ("dynamicCurve"+($j+1)) ;  
+		 
+		}
+	
+	 }
+	
+	select ("extrudedSurface*");
+	string $groupName=`group`; 
+	rename $groupName frNurbsGroup;
+	
+	
+	select ("baseCurve*");
+	string $groupBaseName=`group`; 
+	rename $groupBaseName frBaseCurvesGroup;
+}
+
+
+//-------------------------------------proc curves to nurbs Link-----------------------------------------
+
+
+
+
+
+
+global proc abcd()
+{
+	float $radiusMin =`floatField -q -v rminNum`;	   
+	float $radiusMax =`floatField -q -v rmaxNum`;	   
+	int $noDynamic=`checkBox -q -v mn`;  
+	int $nDynamic=`checkBox -q -v nm`;
+	curvesToNurbs($radiusMin,$radiusMax,$noDynamic,$nDynamic);   
+}
+     
+
+
+
+
+
+//-------------------------------------proc select all nurbs-----------------------------------------
+
+
+global proc selectAllNurbs()
+{
+
+	if(`objExists "extrudedSurface*"`)
+	{
+		select "extrudedSurface*";
+	}
+	else
+	{
+	    warning("The nurbs have not been created");     
+	}
+
+
+
+}
+
+
+
+/*
+//-------------------------------------proc add animation attributes-----------------------------------------
+
+global proc animation1(float $bmin)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+setAttr ("subCurve"+(($i+1)*2)+".minValue") $bmin;
+
+setKeyframe ("subCurve"+(($i+1)*2)+".minValue");
+
+}
+
+}
+
+
+
+global proc animation2(float $bmax)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+
+setAttr ("subCurve"+(($i+1)*2)+".maxValue") $bmax;
+
+setKeyframe ("subCurve"+(($i+1)*2)+".maxValue");
+}
+
+}
+
+
+
+
+global proc animation3(float $amin)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+setAttr ("subCurve"+(($i+1)*2-1)+".minValue") $amin;
+
+setKeyframe ("subCurve"+(($i+1)*2-1)+".minValue");
+
+}
+
+}
+
+
+
+
+global proc animation4(float $amax)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+
+setAttr ("subCurve"+(($i+1)*2-1)+".maxValue") $amax;
+
+setKeyframe ("subCurve"+(($i+1)*2-1)+".maxValue");
+}
+
+}
+
+
+global proc animation5(float $rotationNum)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+
+setAttr ("extrude"+($i+1)+".rotation") $rotationNum;
+
+setKeyframe ("extrude"+($i+1)+".rotation");
+}
+
+}
+
+
+
+global proc animation6(float $scaleNum)
+
+{
+string $sel[]=`ls -sl`;
+for($i=0;$i<size($sel);$i++)
+{
+
+setAttr ("extrude"+($i+1)+".scale") $scaleNum;
+
+setKeyframe ("extrude"+($i+1)+".scale");
+}
+
+}
+
+
+
+
+//-------------------------------------proc setKeyframe-----------------------------------------
+
+global proc setKeyframe1()
+{
+
+float $bmin=`floatField -q -v bminNum`;
+
+animation1 $bmin;
+}
+
+
+
+global proc setKeyframe2()
+{
+
+float $bmax=`floatField -q -v bmaxNum`;
+
+animation2 $bmax;
+}
+
+
+
+global proc setKeyframe3()
+{
+
+float $amin=`floatField -q -v aminNum`;
+
+animation3 $amin;
+}
+
+
+
+global proc setKeyframe4()
+{
+
+float $amax=`floatField -q -v amaxNum`;
+
+animation4 $amax;
+}
+
+
+
+global proc setKeyframe5()
+{
+
+float $rotationNum=`floatField -q -v rotationNum`;
+
+animation5 $rotationNum;
+}
+
+
+
+global proc setKeyframe6()
+{
+
+float $scaleNum=`floatField -q -v scaleNum`;
+
+animation6 $scaleNum;
+}
+      
+*/
+
+//-------------------------------------proc delete groups-----------------------------------------
+
+global proc deleteCurves()
+{
+ 	global string $particle[];
+ 	delete ("fr"+$particle[0]+"Group");
+}
+
+
+
+
+
+global proc deleteNurbs()
+{
+ 	delete frNurbsGroup;   
+}
+
+
+global proc deleteBaseCurve()
+{
+ 	delete frBaseCurvesGroup;     
+}
+
+
+
+
+// ---------------------------reset values menu-----------------------------------
+
+global proc resetValues()
+{
+    checkBox -e -v off -label "curves"  mn;
+    checkBox -e -v off -label "nDynamic curves"   -align "left" nm;
+   
+   
+    floatField -e -v 0.5  rminNum;
+    floatField -e -v 0.5  rmaxNum;    
+   
+    floatField -e -v 0 -min 0 -max 1  aminNum ;
+    floatField -e -v 1 -max 1 -min 0 amaxNum ;
+    floatField -e -v 0 -min 0 -max 1  bminNum ;
+    floatField -e -v 1 -max 1 -min 0 bmaxNum;
+
+    floatField -e -v 0  rotationNum ;
+    floatField -e -v 1  scaleNum ;
+}
+
+
+
+
+
+
+
+//-------------------------------------window edit-----------------------------------------
+
+ global proc explain()
+{
+ 	confirmDialog -title "粒子运动转化曲线工具_v1.0"   
+ 	-message "1、首先场景里需要有一套运动的粒子，粒子名称为任意名字,然后选择粒子，退回播放轴的第一帧，执行<ParticleToCurves>按钮，当前时间轴的时间段为粒子生成曲线的时间，然后播放动画，就会生成curves曲线，播放动画时中途可随时暂停...\n\n2、当生成曲线后，会发现大纲里排列很多，还有就是牵扯到一些粒子表达式只执行一次的问题，还有就是为了中途可以随时暂停这个效果，所以我优化整理了一下场景，多添加了一个命令，这时，我们在执行完生成曲线的命令后，执行<Arrange>就能把场景整理优化...\n\n3、至于nDynamic部分，自己需要就可以建立动力学曲线...\n\n4、现在已经有了曲线做准备，接着我们来生成曲面nurbs；勾选curves，则是以基本曲线来挤压nurbs；勾选nDynamic curves，则是以动力学曲线来挤压nurbs；两个都勾选，则两套曲线都生成nurbs；首先选择一个你所想挤压的curve曲线形状，比如圆圈、星星状等各种形状，然后修改一下最小半径和最大半径，默认是都为0.5，就是说明挤压出的nurbs一样粗细，如果想随机挤压，那就修改最小半径和最大半径，然后执行<CurvesToNurbs>，就会生成曲面...\n\n5、接着是动画部分，先执行<selectAllNurbs>选中所有曲面，然后调节下面的参数，key动画...\n\n6、最下面的三个按钮，作用不是很大，就是删除场景里的曲线、曲面的，直接点击就可以使用..."
+ 	-button "确定";  
+}
+      
+
+
+global proc  particleToLinesToolsWin()
+{
+	 if(`window -ex particleToLinesWin`)
+	 {deleteUI particleToLinesWin;}
+	 
+	 window -title "粒子运动转化曲线工具_v1.0" 
+	 -menuBar true
+	  particleToLinesWin;
+	
+	 menu -label "Edit" -tearOff true ;
+	     menuItem -label "Reset Setting" -command "resetValues";
+	   
+	  
+	 setParent ..;
+	    columnLayout -adjustableColumn true;
+	
+	    separator -style "in";
+	    separator -style "in";  
+	    
+	    menu -label "Help" -tearOff true ;
+	     menuItem -label "Usage Help" -command "explain" ;
+	     
+	
+	  
+	 
+	 
+	 columnLayout -adjustableColumn true;
+	  
+	 
+	  text -label "Create curves and arrange..." -align "left"  -bgc 0.1 0.2 0.3;     
+	  
+	 
+	 rowLayout -numberOfColumns 3;
+	    
+	 button -label "Particle To Curves" -w 120 -h 40 -command "particleToLines" ;
+	 text -label "                                      ";
+	 button -label "Arrange" -w 120 -h 40 -command "arrange" ;
+	
+	
+	setParent ..;
+	  separator -style "in";
+	  separator -style "in";
+	
+	setParent ..;
+	        text -label "nDynamic ..." -align "left" -bgc 0.1 0.2 0.3; 
+	        rowLayout -numberOfColumns 3;
+	             button -label "Create Dynamic Curves" -w 120 -h 40 -command "createCurvesDynamic";
+	             button -label "Select All Follicles" -w 120 -h 40 -command "selectAllFollicles";
+	             button -label "Delete All Dynamics" -w 120 -h 40 -command "deleteAllDynamics";
+	setParent ..;
+	        
+	        rowLayout -numberOfColumns 3;
+	             button -label "Choose Object" -w 120 -h 40 -command "chooseObj";
+	             button -label "Create Constraint" -w 120 -h 40 -command "createConstr";
+	             button -label "Delete Constraint" -w 120 -h 40 -command "deleteConstr";
+	
+	setParent ..;
+	      columnLayout -adjustableColumn true;
+	  separator -style "in";
+	  separator -style "in";
+	
+	setParent ..;
+	        text -label "Create nurbs..." -align "left" -bgc 0.1 0.2 0.3; 
+	        
+	        columnLayout -adjustableColumn true;
+	 		checkBox -v off -label "curves"  mn;
+	 		checkBox -v off -label "nDynamic curves"   -align "left" nm;
+	       
+	        rowLayout -numberOfColumns 5;
+	
+	              text -label " RadiusMin  "; 
+	              floatField  -v 0.5   rminNum;
+	              text -label " RadiusMax"; 
+	              floatField  -v 0.5  rmaxNum;
+	              button -label "Curves To Nurbs" -w 120 -h 40 -command "abcd";
+	
+	setParent ..;
+	    columnLayout -adjustableColumn true;
+	
+	    separator -style "in"; 
+	    separator -style "in"; 
+	
+	/*
+	setParent ..;
+	
+	  text -label "Animation..." -align "left" -bgc 0.1 0.2 0.3;  
+	  button -label "selectAllNurbs" -command "selectAllNurbs";
+	  rowLayout -numberOfColumns 6;
+	  text -label "                     up   Min Value     "; 
+	  floatField -v 0 -min 0 -max 1  aminNum ;
+	  button -label "Keyframe" -command "setKeyframe3" ;
+	
+	
+	
+	setParent ..;
+	
+	  rowLayout -numberOfColumns 3;
+	   
+	  text -label "                  up  Max  Value      "; 
+	  floatField  -v 1 -max 1 -min 0 amaxNum ;
+	  button -label "Keyframe" -command "setKeyframe4" ;  
+	
+	
+	setParent ..;
+	  rowLayout -numberOfColumns 3;
+	  text -label "                  down Min Value     "; 
+	  floatField -v 0 -min 0 -max 1  bminNum ;
+	  button -label "Keyframe" -command "setKeyframe1" ;
+	  
+	  
+	setParent ..;
+	  rowLayout -numberOfColumns 3;
+	  text -label "                  down Max Value    "; 
+	  floatField  -v 1 -max 1 -min 0 bmaxNum;
+	  button -label "Keyframe" -command "setKeyframe2" ;
+	  
+	setParent ..;
+	  rowLayout -numberOfColumns 3;
+	  text -label "                  Extrude Rotation  "; 
+	  floatField -v 0  rotationNum ;
+	  button -label "Keyframe" -command "setKeyframe5" ;
+	  
+	  
+	  setParent ..;
+	  rowLayout -numberOfColumns 3;
+	  text -label "                  Extrude   Scale     "; 
+	  floatField -v 1  scaleNum ;
+	  button -label "Keyframe" -command "setKeyframe6" ;
+	
+	
+	setParent ..;
+	
+	    columnLayout -adjustableColumn true;
+	
+	    separator -style "in"; 
+	    separator -style "in"; 
+	
+	 
+	 
+	 setParent ..;
+	  */
+	
+	        text -label "Delete unwanted curves or Nurbs..." -align "left" -bgc 0.1 0.2 0.3; 
+	        rowLayout -numberOfColumns 3;
+	             button -label "Delete Curves" -w 120 -h 30 -command "deleteCurves";
+	             button -label "Delete Nurbs" -w 120 -h 30 -command "deleteNurbs";
+	             button -label "Delete BaseCurve" -w 120 -h 30 -command "deleteBaseCurve";
+	
+	
+	 window -e -wh 370 535  -s 0 particleToLinesWin ;
+	
+	 showWindow particleToLinesWin;
+}

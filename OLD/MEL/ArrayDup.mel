@@ -1,0 +1,313 @@
+
+//duplicate
+global proc array_ok()
+{
+	string $object[] = `ls -selection -tr`;
+	if (size($object) > 0)
+	{
+		int $v1=`radioButtonGrp -q -select total_geo`;
+
+		int $v2=`radioButtonGrp -q -select total_group`;
+		
+		int $v3=`checkBox -q -v total_dupup`;
+		
+		int $v4=`checkBox -q -v total_dupin`;
+		
+		int $v5=`checkBox -q -v total_leaf`;
+
+		
+		int $count = `intSliderGrp -q -v total_count`;
+		float $tx = `floatFieldGrp -q -v1 total_tr`;
+		float $ty = `floatFieldGrp -q -v2 total_tr`;
+		float $tz = `floatFieldGrp -q -v3 total_tr`;
+		
+		float $rx = `floatFieldGrp -q -v1 total_rt`;
+		float $ry = `floatFieldGrp -q -v2 total_rt`;
+		float $rz = `floatFieldGrp -q -v3 total_rt`;
+
+		float $sx = `floatFieldGrp -q -v1 total_sc`;
+		float $sy = `floatFieldGrp -q -v2 total_sc`;
+		float $sz = `floatFieldGrp -q -v3 total_sc`;
+		
+		float $increment_tx = $tx/$count;
+		float $increment_ty = $ty/$count;
+		float $increment_tz = $tz/$count;
+
+		float $increment_rx = $rx/$count;
+		float $increment_ry = $ry/$count;
+		float $increment_rz = $rz/$count;
+
+		float $increment_sx = pow($sx,1.0/$count);
+		float $increment_sy = pow($sy,1.0/$count);
+		float $increment_sz = pow($sz,1.0/$count);
+
+		for ($i=1;$i<$count;$i++)
+		{
+			for ($obj in $object)
+			{
+				//get object's translate
+				float $pos[] = `getAttr ($obj+".translate")`;
+				float $rot[] = `getAttr ($obj+".rotate")`;
+				float $scl[] = `getAttr ($obj+".scale")`;
+
+				string $dup[];
+				string $belong[];
+				$belong = `listRelatives -p -typ "transform" $obj`;
+
+				if ($v3 == 1)
+				{
+					$dup = `duplicate -upstreamNodes $obj`;
+				}
+				else if ($v4 == 1)
+				{
+					$dup = `duplicate -inputConnections $obj`;
+				}
+				else if ($v1 == 1)
+				{
+					$dup = `duplicate $obj`;
+				}
+				else if ($v1 == 2)
+				{
+					if ($v5 == 1)
+						$dup = `instance -leaf $obj`;
+					else
+						$dup = `instance $obj`;
+				}
+				xform -ws -translation  ($pos[0]+($i*$increment_tx)) ($pos[1]+($i*$increment_ty)) ($pos[2]+($i*$increment_tz))
+					-rotation ($rot[0]+$i*$increment_rx) ($rot[1]+$i*$increment_ry) ($rot[2]+$i*$increment_rz)
+					-scale ($scl[0]*pow($increment_sx,$i)) ($scl[1]*pow($increment_sy,$i)) ($scl[2]*pow($increment_sz,$i))
+				$dup[0];
+				if ($v2 == 2)
+				{
+					if (size($belong)>0)
+						parent -world $dup[0];
+				}
+				if ($v2 == 3)
+				{
+					group $dup[0];
+				}
+			}
+		}
+	}
+	else error "No objects to duplicate";
+
+}
+
+
+global proc total_dim_more()
+{
+	int $v = `checkBox -q -v total_dupup`;
+	if ($v == 1)
+	{
+		floatFieldGrp -e -enable false total_tr;	
+		floatFieldGrp -e -enable false total_rt;	
+		floatFieldGrp -e -enable false total_sc;	
+		checkBox -e -enable false total_dupin;
+		radioButtonGrp -e -enable false total_geo;	
+	}
+	else 
+	{
+		floatFieldGrp -e -enable true total_tr;	
+		floatFieldGrp -e -enable true total_rt;	
+		floatFieldGrp -e -enable true total_sc;	
+		checkBox -e -enable true  total_dupin;
+		radioButtonGrp -e -enable true total_geo;	
+	}
+}
+global proc total_dim_most()
+{
+	int $v = `checkBox -q -v total_dupin`;
+	if ($v == 1)
+	{
+		floatFieldGrp -e -enable false total_tr;	
+		floatFieldGrp -e -enable false total_rt;	
+		floatFieldGrp -e -enable false total_sc;	
+		radioButtonGrp -e -enable false total_geo;	
+		checkBox -e -enable false total_dupup;
+	}
+	else 
+	{
+		floatFieldGrp -e -enable true total_tr;	
+		floatFieldGrp -e -enable true total_rt;	
+		floatFieldGrp -e -enable true total_sc;	
+		radioButtonGrp -e -enable true total_geo;	
+		checkBox -e -enable true  total_dupup;
+	}
+}
+
+//interface
+global proc ArrayDup()
+{
+	string $child[];
+
+	if (`window -q -exists TotalWin`)
+		return;
+	
+	global float $total_translate[] = {0.0000,0.0000,0.0000};
+	global float $total_rotate[] = {0.0000,0.0000,0.0000};
+	global float $total_scale[] = {1.0000,1.0000,1.0000};
+	global int $total_geosel;
+	global int $total_grpsel;
+	global int $total_upsteam;
+	global int $total_input;
+	global int $total_leaf;
+	
+	if (`optionVar -ex "total_dup_geo"`)
+		$total_geosel = `optionVar -q "total_dup_geo"`; 
+	else 
+		$total_geosel = 1; 
+
+	if (`optionVar -ex "total_dup_grp"`)
+		$total_grpsel = `optionVar -q "total_dup_grp"`; 
+	else 
+		$total_grpsel = 1; 
+
+	if (`optionVar -ex "total_dup_up"`)
+		$total_upsteam = `optionVar -q "total_dup_up"`; 
+	else 
+		$total_upsteam = 0; 
+
+	if (`optionVar -ex "total_dup_in"`)
+		$total_input = `optionVar -q "total_dup_in"`; 
+	else 
+		$total_input = 0; 
+
+	if (`optionVar -ex "total_dup_lf"`)
+		$total_leaf = `optionVar -q "total_dup_lf"`; 
+	else 
+		$total_leaf = 0; 
+
+	window -title "Duplicate Options2" -menuBar true -resizeToFitChildren true TotalWin;
+		menu -label "Edit";
+			menuItem -label "Save Settings"  -c "array_saveset";
+			menuItem -label "Reset Settings" -c "array_reset";
+		menu -label "Help" -helpMenu true;
+			menuItem -label "Help on Duplicate Options2..." -command "DupHelp";
+	
+
+			$i = 0;
+		
+			string $formLayout = `formLayout`;
+				$child[$i++] = `floatFieldGrp -numberOfFields 3 -l "Translate" -v1 $total_translate[0] -v2 $total_translate[1] -v3 $total_translate[2] -pre 4
+						total_tr`;
+				$child[$i++] = `floatFieldGrp -numberOfFields 3 -l "Rotate" -v1 $total_rotate[0] -v2 $total_rotate[1] -v3 $total_rotate[2] -pre 4
+						total_rt`;
+				$child[$i++] = `floatFieldGrp -numberOfFields 3 -l "Scale" -v1 $total_scale[0] -v2 $total_scale[1] -v3 $total_scale[2] -pre 4
+						total_sc`;
+				$child[$i++] = `intSliderGrp -field true -l "Number of Copies" -min 1 -max 100 -fieldMaxValue 1000
+						-cw 1 100 -v 1
+						total_count`;
+				$child[$i++] = `separator -style "in"`;
+				$child[$i++] = `radioButtonGrp  -numberOfRadioButtons 2 -select $total_geosel -l "Geometry Type" -labelArray2 "Copy" "Instance" 
+						-columnWidth 1 85 -columnWidth 2 165 
+						-columnAlign 1 "left"
+						total_geo`;
+				$child[$i++] = `radioButtonGrp  -numberOfRadioButtons 3 -select $total_grpsel -l "Group under" -labelArray3 "Parent" "World" "NewGroup" 
+						-columnWidth 1 85 -columnWidth 2 80 -columnWidth 3 85 
+						-columnAlign 1 "left"
+						total_group`;
+				$child[$i++] = `separator -style "in"`;
+				$child[$i++] = `checkBox  -label "Duplicate Upstream Graph" -v $total_upsteam -cc "total_dim_more" total_dupup`;
+				$child[$i++] = `checkBox  -label "Duplicate Input Connections" -v $total_input -cc "total_dim_most" total_dupin`;
+				$child[$i++] = `checkBox  -label "Instance Leaf Only" -v $total_leaf total_leaf`;
+		
+				$child[$i++] = `button -label "Duplicate" -command ("array_ok;deleteUI -window  TotalWin")`;
+				$child[$i++] = `button -label "Apply" -command ("array_ok")`;
+				$child[$i++] = `button -label "Close" -command ("deleteUI -window  TotalWin")`;
+		
+			formLayout -edit
+				-attachForm			$child[0]	"top"		0
+				-attachForm			$child[0]	"left"		30
+
+				-attachControl			$child[1]	"top"		0	$child[0]
+				-attachForm			$child[1]	"left"		30
+
+				-attachControl			$child[2]	"top"		0	$child[1]
+				-attachForm			$child[2]	"left"		30
+
+				-attachControl			$child[3]	"top"		0	$child[2]
+				-attachForm			$child[3]	"left"		70
+
+				-attachControl			$child[4]	"top"		0	$child[3]
+				-attachForm			$child[4]	"left"		0
+				-attachPosition			$child[4]	"right"		0	100
+
+				-attachControl			$child[5]	"top"		0	$child[4]
+				-attachForm			$child[5]	"left"		85
+
+				-attachControl			$child[6]	"top"		0	$child[5]
+				-attachForm			$child[6]	"left"		85
+
+				-attachControl			$child[7]	"top"		0	$child[6]
+				-attachForm			$child[7]	"left"		0
+				-attachPosition			$child[7]	"right"		0	100
+
+				-attachControl			$child[8]	"top"		0	$child[7]
+				-attachForm			$child[8]	"left"		170
+
+				-attachControl			$child[9]	"top"		0	$child[8]
+				-attachForm			$child[9]	"left"		170
+
+				-attachControl			$child[10]	"top"		0	$child[9]
+				-attachForm			$child[10]	"left"		170
+
+				-attachForm			$child[11]	"bottom"	5
+				-attachForm			$child[11]	"left"		5
+				-attachPosition			$child[11]	"right"		0	33
+				
+				-attachControl			$child[12]	"left"		5	$child[11]
+				-attachForm			$child[12]	"bottom"	5
+				-attachPosition			$child[12]	"right"		0	66
+
+				-attachForm			$child[13]	"bottom"		5
+				-attachControl			$child[13]	"left"		5	$child[12]
+				-attachPosition			$child[13]	"right"		0	100
+
+			$formLayout;
+		
+	showWindow TotalWin;
+	total_dim_more();
+	total_dim_most();
+}
+
+//save settings
+global proc array_saveset()
+{
+	int $val=`radioButtonGrp -q -select total_geo`;
+	optionVar -intValue "total_dup_geo" $val;
+
+	int $val=`radioButtonGrp -q -select total_group`;
+	optionVar -intValue "total_dup_grp" $val;
+	
+	int $val=`checkBox -q -v total_dupup`;
+	optionVar -intValue "total_dup_up" $val;
+	
+	int $val=`checkBox -q -v total_dupin`;
+	optionVar -intValue "total_dup_in" $val;
+	
+	int $val=`checkBox -q -v total_leaf`;
+	optionVar -intValue "total_dup_lf" $val;
+}
+
+//reset settings
+global proc array_reset()
+{
+
+	optionVar -remove "total_dup_geo";
+	optionVar -remove "total_dup_grp";
+	optionVar -remove "total_dup_up";
+	optionVar -remove "total_dup_in";
+	optionVar -remove "total_dup_lf";
+	
+	floatFieldGrp -e -en true -v1 0.0000 -v2 0.0000 -v3 0.0000 total_tr;	
+	floatFieldGrp -e -en true -v1 0.0000 -v2 0.0000 -v3 0.0000 total_rt;	
+	floatFieldGrp -e -en true -v1 1.0000 -v2 1.0000 -v3 1.0000 total_sc;	
+	intSliderGrp -e -v 1 total_count;
+	radioButtonGrp  -e -en true -select 1 total_geo;
+	radioButtonGrp  -e -select 1 total_group;
+
+	checkBox -e -en true -v 0 total_dupup;
+	checkBox -e -en true -v 0 total_dupin;
+	checkBox -e -v 0 total_leaf;
+}
+

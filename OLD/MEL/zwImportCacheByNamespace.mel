@@ -1,0 +1,62 @@
+global proc int zwImportCacheByNamespaceproc(string $namespace, string $filename, string $fileType)
+{
+	string $cacheFile = `match "[^/]+$" $filename`;
+	string $cacheDirectory = `substring $filename 1 (size($filename) - size($cacheFile) - 1)`;
+	$cacheFile = `match "[^.]+" $cacheFile`;
+
+	string $switchs[];
+	string $cmd = "cacheFile -createCacheNode -fileName \"" + $cacheFile + "\" -directory \"" + $cacheDirectory + "\"";
+	string $channelNames[] = `cacheFile -fileName $filename -query -channelName`;
+	for ($channelName in $channelNames)
+	{
+		string $obj = $namespace + ":" + `substitute "[^:]+:" $channelName ""`;
+		if (!`objExists $obj`)
+		{
+			warning ($obj + " 不存在");
+			continue;
+		}
+
+		string $switch = `createNode "historySwitch" -name "cacheSwitch"`;
+		$switchs[size($switchs)] = $switch;
+
+		setAttr ($switch + ".isHistoricallyInteresting") 0;
+		
+		connectAttr ($obj + ".outMesh") ($switch + ".undeformedGeometry[0]");
+		disconnectAttr ($obj + ".outMesh") ($switch + ".undeformedGeometry[0]");
+		connectAttr -force ($switch + ".outputGeometry[0]") ($obj + ".inMesh");
+
+		$cmd += " -channelName \"" + $channelName + "\" -inAttr \"" + $switch + ".inp[0]\"";
+	}
+	string $cacheFileNode = `eval $cmd`;
+
+	for ($switch in $switchs)
+	{
+		connectAttr ($cacheFileNode + ".inRange") ($switch + ".playFromCache");
+	}
+
+	return true;
+}
+
+global proc zwImportCacheByNamespace()
+{
+	global string $gReferenceEditorPanel;
+	string $selFileReal[] = `sceneEditor -query -selectItem $gReferenceEditorPanel`;
+	if (size($selFileReal) != 1)
+	{
+		error "选择一个reference";
+	}
+
+	if (!`file -query -uns $selFileReal[0]`)
+	{
+		error "没有使用namespace";
+	}
+	string $namespace = `file -query -renamingPrefix $selFileReal[0]`;
+
+	string $dir = `zwCacheSetDirectory "geoCache" ""`;
+	if (`filetest -d $dir`)
+	{
+		workspace -dir $dir;
+	}
+
+	fileBrowserDialog -mode 0 -fileCommand ("zwImportCacheByNamespaceproc \"" + $namespace + "\"") -actionName "Import";
+}

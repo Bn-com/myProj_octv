@@ -1,0 +1,433 @@
+//ObjectID_Pass_Creator
+// Date: 2010/01/22
+// Author: Dai Sato   dstruevision@dstruevision.com    http://www.dstruevision.com
+// Procedure Name: ObjectID_Pass_Creator
+// Description: This scripts enable you to to create ObjectID pass.
+// It also detects trasnparent shader, and keep that's transparency.
+
+
+//addAttr -ln miLabel -sn miLabel -nn miLabel -at long -k 1;
+
+global proc my_assign_miLabelWhithID(int $id) {
+
+int $temp_label_number = $id;
+$current_selection = `ls -sl`;
+
+ for($i=0;$i < size($current_selection);$i++) {
+
+  select $current_selection[$i];
+  $temp_check_exist = `attributeQuery -node $current_selection[$i] -ex miLabel`;
+
+ if($temp_check_exist) {
+    deleteAttr ($current_selection[$i] + ".miLabel" );
+                       }
+  addAttr -ln miLabel -sn miLabel -nn miLabel -at long -k 1;
+  setAttr ($current_selection[$i] + ".miLabel" ) $temp_label_number;
+  progressBar -edit -step 1 mainProgressBar;
+
+ 	}
+
+
+}
+
+global proc my_assign_miLabel() {
+
+int $temp_label_number = `intField -q -v my_label_number`;
+$current_selection = `ls -sl`;
+$progressMax = size($current_selection);
+
+if($progressMax) {
+
+ progressBar -edit -beginProgress -isInterruptable true -status "Calculation ..." -maxValue $progressMax mainProgressBar;
+
+ for($i=0;$i < size($current_selection);$i++) {
+
+  select $current_selection[$i];
+  $temp_check_exist = `attributeQuery -node $current_selection[$i] -ex miLabel`;
+
+ if($temp_check_exist) {
+    deleteAttr ($current_selection[$i] + ".miLabel" );
+                       }
+  addAttr -ln miLabel -sn miLabel -nn miLabel -at long -k 1;
+  setAttr ($current_selection[$i] + ".miLabel" ) $temp_label_number;
+  progressBar -edit -step 1 mainProgressBar;
+
+                                             }
+
+                }
+ progressBar -edit -endProgress mainProgressBar;
+}
+
+
+proc float my_create_RandomNumber() {
+
+float $temp_rand = 0.0;
+
+while( $temp_rand <0.004) {
+ $temp_rand = `rand 1.0`;
+  }
+
+return $temp_rand;
+
+}
+
+
+
+
+
+proc string extractTransCount(string $label) {
+
+//print "extractTransCount(string $label)!!!!!)";
+string $tokens[];
+string $surfaceShader_count[] = `ls -type surfaceShader`;
+$current_MaxNumber = 0;
+
+if(size($surfaceShader_count) >0 ) {
+
+ for($i=0; $i <size($surfaceShader_count); $i++) {
+
+      string $temp = $surfaceShader_count[$i];
+      int $numTokens = `tokenize $temp "_" $tokens`;
+
+
+
+      //print ($surfaceShader_count[$i] + "\n");
+
+      $temp_Header = $tokens[0] + "_" + $tokens[1] + "_" + $tokens[2];
+             if( $temp_Header == "My_Obj_ID" && $tokens[3] == $label) {
+
+                    if($current_MaxNumber < ( (int)$tokens[5] ) ) {
+
+                                 //print ($temp_Header + "\n");
+                                 //print ($tokens[5] + "\n");
+                                 $current_MaxNumber = $current_MaxNumber + 1;
+
+                                                                 }
+                                                                      }
+                                                  }
+
+                                    }
+
+   return $current_MaxNumber;
+
+}
+
+
+
+
+proc my_create_trans_nodeConnection(string $temp_checkTrans[], string $temp_Shader, string $temp_nodeType, float $Red, float $Green, float $Blue) {
+
+string $token[];
+int $numTokens = `tokenize $temp_checkTrans[0] "." $token`;
+
+$mr_shader_check = $token[1];
+
+                if($temp_nodeType =="reverse") {
+
+                        //print ($temp_checkTrans[0] + "-------Reverse" + "\n");
+
+                        connectAttr  -f ($temp_checkTrans[1] + ".output") ($temp_Shader + ".outTransparency");
+                        $temp_Connection = `listConnections -d off -s 1 ($temp_checkTrans[1] + ".input") `;
+
+                        connectAttr  -f ($temp_Connection[0] + ".outColor") ($temp_Shader + ".outMatteOpacity");
+                        $temp_reverse = `createNode reverse`;
+                        $temp_stencil = `createNode stencil`;
+                        connectAttr  -f ($temp_Connection[0] + ".outAlpha") ($temp_reverse + ".inputX");
+                        connectAttr  -f ($temp_reverse + ".outputX") ($temp_stencil + ".mask");
+                        setAttr ($temp_stencil + ".image")  $Red $Green $Blue;
+                        setAttr ($temp_stencil + ".defaultColor")  0.0  0.0  0.0;
+                        connectAttr  -f ($temp_stencil + ".outColor") ($temp_Shader + ".outColor");
+
+                        setAttr ($temp_Connection[0] +".alphaIsLuminance") 1;
+                        }
+
+                 if($temp_nodeType =="file") {
+
+                        //print ($temp_checkTrans[0] + "-------File" +  "\n");
+
+                        setAttr ($temp_checkTrans[1] +".alphaIsLuminance") 0;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_Shader + ".outTransparency");
+                        $temp_reverse_1 = `createNode reverse`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outTransparency") ($temp_reverse_1 + ".input");
+                        connectAttr -f  ($temp_reverse_1 + ".output") ($temp_Shader + ".outMatteOpacity");
+                        $temp_reverse_2 = `createNode reverse`;
+                        $temp_stencil_1 = `createNode stencil`;
+                        connectAttr -f  ($temp_checkTrans[1] + ".outAlpha") ($temp_reverse_2 + ".inputX");
+                        connectAttr -f  ($temp_reverse_2 + ".outputX") ($temp_stencil_1 + ".mask");
+                        setAttr ($temp_stencil_1 + ".image") $Red $Green $Blue;
+                        setAttr ($temp_stencil_1 + ".defaultColor") 0.0  0.0  0.0;
+                        connectAttr -f  ($temp_stencil_1 + ".outColor") ($temp_Shader + ".outColor");
+                                             }
+
+                 if($temp_nodeType =="file" && $mr_shader_check == ".cutout_opacity") {
+
+                        //print ($temp_checkTrans[0] + "-------File" +  "\n");
+
+                        connectAttr -f  ($temp_checkTrans[1] + ".outAlpha") ($temp_Shader + ".cutout_opacity");
+
+
+                                             }
+
+
+}
+
+proc string my_create_shader(string $found_flag, string $temp_checkTrans[], int $temp_label_number, string $found_surfaceShader, string $id_shader) {
+
+string $temp_Shader ;
+$temp_Shader = "";
+
+     float $Red = 0;
+     float $Green = 0;
+     float $Blue = 0;
+
+    while( $Red == $Green && $Red == $Blue && $Green == $Blue ) {
+
+       $Red = my_create_RandomNumber();
+
+       $Green =  my_create_RandomNumber() ;
+
+       $Blue =  my_create_RandomNumber() ;
+
+                                                                 }
+
+    if($found_flag == 0) {
+
+       if($temp_checkTrans[0] != "") {
+
+            $temp_Shader = `shadingNode -name ("My_Obj_ID_" + ((string)$temp_label_number) + "_trans_1_surfaceShader") -asShader surfaceShader`;
+            $temp_nodeType = `nodeType $temp_checkTrans[1]`;
+
+            my_create_trans_nodeConnection($temp_checkTrans, $temp_Shader, $temp_nodeType, $Red, $Green, $Blue);
+
+                                     }
+       else {
+            $temp_Shader = `shadingNode -name ("My_Obj_ID_" +$temp_label_number+ "_surfaceShader") -asShader surfaceShader`;
+            setAttr ($temp_Shader + ".outColor") $Red  $Green  $Blue ;
+
+             }
+
+                        }
+
+   else {
+
+        if($temp_checkTrans[0] != "") {
+          //print "HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
+            $exist_count = extractTransCount($temp_label_number);
+            $temp_color = `getAttr ($found_surfaceShader + ".outColor")`;
+            $temp_Shader = `shadingNode -name ("My_Obj_ID_" +$temp_label_number + "_trans_" + ((int)$exist_count + 1) + "_surfaceShader") -asShader surfaceShader`;
+
+            $temp_nodeType = `nodeType $temp_checkTrans[1]`;
+            my_create_trans_nodeConnection($temp_checkTrans, $temp_Shader, $temp_nodeType, $temp_color[0], $temp_color[1], $temp_color[2]);
+
+                                      }
+        else {
+
+          $temp_Shader = $id_shader;
+
+             }
+
+         }
+
+  return $temp_Shader;
+
+}
+
+
+proc string[] check_Trans(string $current_selection) {
+
+string $return_String[];
+
+select $current_selection;
+
+string $temp_Node[];
+hyperShade -smn;
+$temp_Node = `ls -sl`;
+
+string $temp_nodeType;
+$temp_nodeType = `nodeType $temp_Node[0]`;
+
+
+	if($temp_nodeType != "") {
+
+	   $temp_connectionToTrans = "";
+
+
+	  if($temp_nodeType =="surfaceShader") {
+
+		  $temp_connectionToTrans = ".outTransparency";
+
+										   }
+	  else {
+
+		  $temp_connectionToTrans = ".transparency";
+
+		   }
+
+
+	string $temp_getClassification[];
+	$temp_getClassification = `getClassification $temp_nodeType`;
+	string $temp_Connection[];
+
+
+		 if($temp_getClassification[0] == "shader/surface" || $temp_getClassification[0] == "shader/surface/utility") {
+
+			 $temp_Connection = `listConnections -d off -s 1 ( $temp_Node[0] + $temp_connectionToTrans) `;
+
+
+			if($temp_Connection[0] != "") {
+
+			$return_String[0] = $temp_Node[0] + $temp_connectionToTrans;
+			$return_String[1] = $temp_Connection[0];
+			return $return_String;
+			}
+		 }else{
+
+			if($temp_nodeType == "mia_material" || $temp_nodeType == "mia_material_x" || $temp_nodeType == "mia_material_x_passes" ) {
+
+				$temp_Connection = `listConnections -d off -s 1 ( $temp_Node[0] + ".cutout_opacity")`;
+
+
+				if($temp_Connection[0] != "") {
+
+				$return_String[0] = $temp_Node[0] + ".cutout_opacity";
+				$return_String[1] = $temp_Connection[0];
+				$return_String[2] = "mia_material";
+				return $return_String;
+				}
+			}
+
+		 }
+
+
+	}
+
+
+
+
+}
+
+
+
+
+
+global proc my_assign_ObjectID_material() {
+
+ $current_selection = `ls -sl`;
+ $progressMax = size($current_selection);
+
+ $temp_flieNode = `ls -type file`;
+
+ for($i=0; $i<size($temp_flieNode); $i++ ) {
+
+	editRenderLayerAdjustment ( $temp_flieNode[$i]+".alphaIsLuminance");
+
+      setAttr ($temp_flieNode[$i] +".alphaIsLuminance") 1;
+
+                                           }
+
+ string $temp_checkTrans[];
+
+
+ if($progressMax)
+ {
+
+       progressBar -edit -beginProgress -isInterruptable true -status "Calculation ..." -maxValue $progressMax mainProgressBar;
+
+	  for($i=0;$i <size($current_selection);$i++) {
+
+
+		$temp_check_exist = `attributeQuery -node $current_selection[$i] -ex miLabel`;
+
+
+		  if($temp_check_exist) {
+
+			$temp_checkTrans = check_Trans($current_selection[$i]);
+
+			$temp_label_number = `getAttr ($current_selection[$i] + ".miLabel")`;
+
+			$surfaceShader_count = `ls -type surfaceShader`;
+			$found_surfaceShader = "";
+			int $found_flag = 0;
+			string $id_shader = "My_Obj_ID_" +$temp_label_number+ "_surfaceShader";
+			string $id_trans_shader_count = extractTransCount($temp_label_number);
+			string $id_trans_shader = "My_Obj_ID_" +$temp_label_number + "_trans_" + $id_trans_shader_count + "_surfaceShader";
+
+				  for($j=0;$j < size($surfaceShader_count); $j++) {
+
+						if( $surfaceShader_count[$j] == $id_shader || $surfaceShader_count[$j] == $id_trans_shader) {
+
+											$found_flag = 1;
+
+													 if($surfaceShader_count[$j] == $id_trans_shader) {
+
+														  $found_surfaceShader = $surfaceShader_count[$j];
+
+													}
+
+						}
+				}
+				 string $temp_Shader = "";
+
+				 $temp_Shader = my_create_shader($found_flag, $temp_checkTrans, $temp_label_number, $found_surfaceShader, $id_shader);
+
+				 select $current_selection[$i];
+				 hyperShade -assign $temp_Shader;
+
+
+				}
+								 //if($temp_check_exist) End
+
+			 progressBar -edit -step 1 mainProgressBar;
+
+			 }
+                                            //For Loop End
+
+   progressBar -edit -endProgress mainProgressBar;
+   }
+              //if($progressMax) End
+
+}
+
+
+
+global proc ObjectID_Pass_Creator() {
+
+if ((`window -ex my_object_ID_Window`) == true) deleteUI my_object_ID_Window;
+window -t "Object_ID_Pass_Creator" -s true -mnb true -mxb true -mb true -w 100 -h 200 my_object_ID_Window;
+
+columnLayout mainLayout;
+
+columnLayout -rs 6;
+rowColumnLayout -numberOfRows 1;
+text -label "Enter \"miLabel\" number.";
+setParent mainLayout;
+
+columnLayout -rs 1;
+intField -w 50 -v 1 -cc "" my_label_number;
+setParent mainLayout;
+
+columnLayout -rs 1;
+rowColumnLayout -numberOfRows 1;
+button -l "Label selected objects!" -w 120 -h 30 -c "my_assign_miLabel()";
+setParent mainLayout;
+
+columnLayout -rs 1;
+rowColumnLayout -numberOfRows 1;
+text -label " ";
+setParent mainLayout;
+
+columnLayout -rs 1;
+rowColumnLayout -numberOfRows 1;
+button -l "Create Object ID PASS!!" -w 200 -h 30 -c "my_assign_ObjectID_material()";
+setParent mainLayout;
+
+columnLayout -rs 10;
+progressBar -width 200 -height 10 mainProgressBar;
+setParent mainLayout;
+
+window -e -width 300 -height 200  my_object_ID_Window;
+showWindow;
+
+}
+
+//ObjectID_Pass_Creator();

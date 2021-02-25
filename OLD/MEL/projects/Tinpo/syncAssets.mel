@@ -1,0 +1,1504 @@
+// syncAssets.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	To be run by lighting file open script node. Compares the assets in the scene with the assets in the shot group xml
+	and re-sync them if necessary.
+Use:
+	syncAssets file
+Options:
+	
+	
+Dependancies:
+
+	parseXML
+	performAssetSync
+	fileIO
+	syncCache
+	getPointCacheAssets
+
+Documentation:
+
+Examples:
+
+Notes:
+	- Build a list of assets in the scene, store whether they are loaded or not.
+	- Compare with the assets in the shot group xml
+	
+	Possibilities:
+	- Asset is not in the scene, but in the shot group xml. This means the animator has added an asset. Give the lighter the option to load
+	it, and if so ask him what version he wants...especially important now, since the lighter might not be the lighter, he might be the fx artist.
+	So custom versions, or versions other than live, of assets become a big deal. But this option should only be available if it isn't this
+	isn't a lighting shot. If it is lighting, it must be the live (or cache recieving) only. So we need to handle scenarios where the live isn't
+	yet available.
+	- Asset is in the scene, but not in the shot group xml. Animator has removed the asset. Ask the lighter whether to unload it.
+	- Asset is in the scene, and in the shot group xml, but marked as omitted. This means the animator has unloaded an asset. Ask the lighter
+	whether he wants to unload it too. But don't make him.
+	
+	- Possibilities for cameras:
+	- camera is in xml, but not scene:
+		- The animator has added cameras. Give the lighter the option of adding them too.
+	- camera is in the scene, but not in the xml
+		- The animator has removed cameras, or the lighter has added them. Ignore.
+	- camera is in the scene, and the xml, but their is a shape name mismatch. Who knows what happened? Re-sync the shape names in the scene
+		to what is in the xml.
+	- Imageplane has been added to a camera. Add the imageplane to the corresponding camera.
+	- camera is in the scene, and the xml, but the one in the scene is not hooked up to cameraMain.
+	
+	Second synching pass.
+	
+	After the first synching pass we have an xml describing the differences between what is in the scene, and what is in the shot group xml.
+	But some of these differences may be intended. The original shot builder xml signifies the original intention of what to include in the scene.
+	A second synching pass between what is in the scene and the original shot builder xml is done. This will create arrays describing what
+	differs between the shot builder xml and the scene contents. An AND boolean operation is done between the results of the first and second 
+	sync tables.
+	Note - Omit this for now...this is making the whole thing extremely complicated.
+	
+	
+Bugs:
+
+Original:	08/22/05
+Revisions:	08/23/05	Rev 1.0
+		- Adding camera synching
+		
+		08/24/05	Rev 1.1
+		- Adding second synching pass with shotBuilder xml..on hold
+		
+		08/26/05	Rev 1.2
+		- Changing call to syncCache to a generic callback which is passed to the main proc as an argument.
+		
+		09/10/05	Rev 1.3
+		- Changing to accomodate point caching
+
+		09/02/06	Rev 1.4
+		- Upgraded to handle cases where a reference has been replaced.
+
+		09/05/06	Rev 1.5
+		- Upgraded to handle cases where an asset has been removed alltogether in animation (no longer present in structure file)
+
+		09/06/06	Rev 1.6
+		- Fixed a small bug that appeared because of 1.5 above. Assets that had been removed in animation but were unloaded in the lit would still show
+		up as needing a sync
+
+		03/26/07	Rev 1.7
+		- Fixed a bug where malformed xml was getting written for use by performAssetSync (camera imagePlane data)
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// latest dev version of this script:
+// source "/diskx/film/apps/reelfx/maya/scripts/pipelineScripts/syncAssets.1.7.mel";
+
+
+
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+}
+// ---------------------------------------------------------------------------------------------------
+proc int assetTypeFromFilename (string $filename)
+{
+	string $enums[] = {"layoutRig","animProxyRig","live"};
+	string $basename = basename ($filename,"");
+	for ($i=0;$i<size($enums);$i++)
+	{
+		if (gmatch ($filename,("*"+$enums[$i]+"\.ma")))
+			return $i;
+	}
+	return 3;	
+}
+// ---------------------------------------------------------------------------------------------------
+proc int typeFromFoldername(string $foldername)
+{
+	string $enums[] = {"characters","vehicles","props","sets"};
+	string $buf[];
+	tokenize($foldername,"/",$buf);
+	int $index = stringArrayFindIndex ($buf[size($buf)-2],$enums);
+	return ($index==-1)?4:$index;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string sa_parseUI()
+{
+	string $uiAreas[] = {"syncAssets_type0","syncAssets_type2","syncAssets_type3","syncAssets_type4"};
+	string $assetTypeEnum[] =
+	{
+		"Character",
+		"Vehicle",
+		"Prop",
+		"Set",
+		"Misc"	
+	};
+	// 0 = assets to add
+	// 1 = assets to unload
+	// 1 = assets to reload
+	
+	string $xml = "<Desc>\n";
+	$xml += "\t<Assets>\n";
+	// assets to add
+	for ($i=0;$i<size($uiAreas);$i++)
+	{
+		string $assetsUI[] = `layout -q -ca $uiAreas[$i]`;	
+		for ($j=0;$j<size($assetsUI);$j++)
+		{
+			string $ui_elements[] = `layout -q -ca $assetsUI[$j]`;
+			string $namespaceUI = $ui_elements[0];
+			string $filenameUI = $ui_elements[1];
+			string $loadUI;
+			int $omitted;
+			int $doReplace;
+			switch ($i)
+			{
+				case 0:
+					$loadUI = $ui_elements[6]; 
+					$omitted = !`checkBox -q -v $loadUI`;
+					break;
+				case 1:
+					$loadUI = $ui_elements[3]; 
+					$omitted = !(`optionMenu -q -sl $loadUI`-1);
+					break;	
+				case 2:
+					$loadUI = $ui_elements[3]; 
+					$omitted = `optionMenu -q -sl $loadUI`-1;
+					break;	
+				case 3:
+					$loadUI = $ui_elements[6]; 
+					$doReplace = `checkBox -q -v $loadUI`;
+					break;
+				default:
+					break;
+			} 
+			
+			
+			string $namespace = `text -q -l $namespaceUI`;
+			string $path = `textField -q -ann $filenameUI`;
+			string $basename = `textField -q -tx $filenameUI`;
+			
+			string $name = basename ($path,"");
+			string $foldername = $name; 
+			int $assetTypeID = typeFromFoldername ($path)+1;
+			string $assetType = $assetTypeEnum[$assetTypeID-1];
+			string $refnode = $namespace+"RN";
+			
+			if ($i != 3 || $doReplace)
+			{
+				$xml += "\t\t<Asset ";
+				$xml += "AssetID=\"-1\" ";
+				$xml += "Name=\""+$name+"\" ";
+				$xml += "BaseName=\""+$basename+"\" ";
+				$xml += "AssetTypeID=\""+$assetTypeID+"\" ";
+				$xml += "FolderName=\""+$foldername+"\" ";
+				$xml += "Path=\""+$path+"\" ";
+				$xml += "AssetType=\""+$assetType+"\" ";
+				$xml += "Namespace=\""+$namespace+"\" ";
+				$xml += "RefNode=\""+$refnode+"\" ";
+				$xml += "Omitted=\""+$omitted+"\" ";
+				$xml += "/>\n";
+			}
+		}	
+	}	
+	$xml += "\t</Assets>\n";
+	// cameras
+	$xml += "\t<Cameras>\n";
+	string $camerasUI[] = `layout -q -ca syncAssets_cameras`;
+	string $xmlAttrs[] = {"Name","ShapeName","Index","BgPlate","imageName","sizeX","sizeY","offsetX","offsetY","depth","rotate"};
+	for ($i=0;$i<size($camerasUI);$i++)
+	{
+		string $ui_elements[] = `layout -q -ca $camerasUI[$i]`;
+		string $textUI = $ui_elements[0];
+		string $menuUI = $ui_elements[2];
+		
+		if ((`optionMenu -q -sl $menuUI`-1))
+			continue;
+		
+		$xml += "\t\t<Camera ";
+		string $tmp = `text -q -ann $textUI`;	
+		//print ("tmp = "+$tmp+"\n");
+		string $data[];
+		tokenize ($tmp,",",$data);
+		for ($j=0;$j<size($data);$j++)
+		{	
+			$xml += $xmlAttrs[$j]+"=\""+$data[$j]+"\" ";	
+		}
+		$xml += "/>\n";
+	}
+	$xml += "\t</Cameras>\n";
+	$xml += "</Desc>\n";
+	print $xml;
+	return $xml;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc int sa_fileBrowserCallback (string $textField, string $optionMenu, string $filename, string $filetype)
+{
+	string $sceneType[] = `fileInfo -q "sceneType"`;
+	if (!`filetest -f $filename`)
+		return false;
+	
+	string $menuItems[] = `optionMenu -q -ill $optionMenu`;
+	int $type = assetTypeFromFilename ($filename);
+	print ("Type = "+$type+"\n");
+	if ($sceneType[0]=="lighting")
+	{
+		if ($type != 2)
+		{
+			confirmDialog -t "Error" -m "Only a live file may be used in lighting." -b "Ok";
+			// set the textField back
+			string $dir = `textField -q -ann $textField`;
+			string $basename = basename($dir,"")+"_live.ma";
+			textField -e -tx $basename $textField;
+			return true;	
+		} 
+	}
+	else
+	{
+		if ($type < 3)
+		{
+			optionMenu -e -sl ($type+1) $optionMenu;
+			if (size($menuItems)>3)
+				deleteUI -mi $menuItems[3];	
+		}
+		else
+		{
+			if (size($menuItems)<4)
+				menuItem -p $optionMenu -l "Custom";
+			optionMenu -e -sl ($type + 1) $optionMenu;	
+		}
+	}
+	
+	textField -e -tx (basename($filename,"")) -ann (dirname($filename)) $textField;
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc sa_openFileBrowser (string $textField, string $optionMenu)
+{
+	string $cur = `textField -q -ann $textField`;
+	if (`filetest -d $cur`)
+		workspace -dir $cur;
+	
+	fileBrowser (("sa_fileBrowserCallback "+$textField+" "+$optionMenu),"Select","mayaAscii",0);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc sa_fileTextFieldChangeCmd(string $textField, string $optionMenu)
+{
+	string $file = `textField -q -tx $textField`;
+	sa_fileBrowserCallback($textField,$optionMenu,$file,"");
+}
+// ---------------------------------------------------------------------------------------------------
+global proc sa_changeAssetType (string $textField, string $optionMenu, int $pointCacheAvail)
+{
+	string $sceneType[] = `fileInfo -q "sceneType"`;
+	string $dir = `textField -q -ann $textField`;
+	string $enforcePointCachingAssetSelection[] = `fileInfo -q "enforcePointCachingAssetSelection"`;
+	int $enforcePointCaching = (size($enforcePointCachingAssetSelection))?(int)$enforcePointCachingAssetSelection[0]:0;
+	
+	string $assetTypes[];
+	if ($sceneType[0]=="Lighting")
+	{
+		if ($pointCacheAvail)
+		{
+			if ($enforcePointCaching)
+			{
+				$assetTypes = {"cachingProxy","caching"};
+			}
+			else
+			{
+				$assetTypes = {"live","cachingProxy","caching"};
+			}
+		}
+		else
+		{
+			$assetTypes = {"live"};
+		}
+	}
+	else
+	{
+		$assetTypes = {"layoutRig","animProxyRig","live","cachingProxy","caching"};
+	}
+	int $which = `optionMenu -q -sl $optionMenu`-1;
+	
+	string $basename = basename($dir,"");
+	$basename+= "_"+$assetTypes[$which]+".ma";
+	
+	textField -e -tx ($basename) $textField;
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------------------
+proc populateUI(
+	string $sNamespace,
+	string $sPath,
+	int $sOmitted,
+	int $sAssetTypeID,
+	int $sInfo,
+	int $pointCacheAvail
+	)
+{
+	string $sceneType[] = `fileInfo -q "sceneType"`;
+	string $enforcePointCachingAssetSelection[] = `fileInfo -q "enforcePointCachingAssetSelection"`;
+	int $enforcePointCaching = (int)$enforcePointCachingAssetSelection[0];
+		
+	int $win = `about -nt`;
+	switch ($sInfo)
+	{
+		case 0:
+		{
+			
+			int $menuWidth = ($win)?100:115;
+			string $assetTypesEnum[];
+			string $assetTypes[];
+			if ($sceneType[0]=="Lighting")
+			{
+				//$assetTypesEnum[0] = "Live";
+				//$assetTypes[0] = "live";
+				if ($pointCacheAvail)
+				{
+					if ($enforcePointCaching)
+					{
+						$assetTypesEnum = {"Caching Proxy","Caching"};
+						$assetTypes = {"cachingProxy","caching"};
+					}
+					else
+					{
+						$assetTypesEnum = {"Live","Caching Proxy","Caching"};
+						$assetTypes = {"live","cachingProxy","caching"};
+					}	
+				}
+				else
+				{
+					$assetTypesEnum = {"Live"};
+					$assetTypes = {"live"};
+				}
+				
+			}
+			else
+			{
+				if ($pointCacheAvail)
+				{
+					$assetTypesEnum = {"Layout Rig","Animation Rig","Live","Caching Proxy","Caching"};
+					$assetTypes = {"layoutRig","animProxyRig","live","cachingProxy","caching"};
+				}
+				else
+				{
+					$assetTypesEnum = {"Layout Rig","Animation Rig","Live"};
+					$assetTypes = {"layoutRig","animProxyRig","live"};
+				}
+			}
+			
+			formLayout -e -vis 1 syncAssets_type0Form;
+			rowLayout -nc 7 -cw 1 100 -cw 2 145 -cw 3 30 -cw 4 30 -cw 5 $menuWidth -cw 6 35 -cw 7 20 -p syncAssets_type0;
+			text -label $sNamespace;
+			string $textField = `textField -w 140 -tx (basename($sPath,"")) -ann (dirname($sPath))`;
+			string $browButton = `symbolButton -image "navButtonBrowse.xpm" `;
+			text -label "Type: ";
+			string $menu = `optionMenu -w 75`;
+			int $highest = 0;
+			
+			for ($i=0;$i<size($assetTypesEnum);$i++)
+			{
+				string $dir = dirname($sPath);
+				string $basename = basename($dir,"");
+				string $fullPath = dirname($sPath)+"/"+$basename+"_"+$assetTypes[$i]+".ma";
+				int $exists = `filetest -f $fullPath`;
+				$highest = ($exists)?$i+1:$highest;
+				menuItem -en $exists -l $assetTypesEnum[$i];	
+			}
+			// set option menu to highest available
+			if ($highest)
+			{
+				optionMenu -e -sl $highest $menu;
+				// execute optionMenu change command to update textField
+				sa_changeAssetType ($textField,$menu, $pointCacheAvail); 
+			}
+			
+			text -label "Load";
+			checkBox -l " " -v ($highest>0) -en ($highest>0);
+			// attach commands
+			optionMenu -e -cc ("sa_changeAssetType "+$textField+" "+$menu+" "+$pointCacheAvail) $menu;
+			symbolButton -e -c ("sa_openFileBrowser "+$textField+" "+$menu) $browButton;
+			textField -e -cc ("sa_fileTextFieldChangeCmd "+$textField+" "+$menu) $textField;
+			break;
+		}
+		case 2:
+		{
+			formLayout -e -vis 1 syncAssets_type2Form;
+			rowLayout -nc 4 -cw 1 100 -cw 2 145 -cw 3 45 -cw 4 60 -p syncAssets_type2;
+			text -label $sNamespace;
+			textField -w 140 -en false -tx (basename($sPath,"")) -ann (dirname($sPath));
+			text -label "Action: ";
+			optionMenu;
+			menuItem -l "Unload";
+			menuItem -l "Keep";
+			break;
+		}
+		case 3:
+		{
+			formLayout -e -vis 1 syncAssets_type3Form;
+			rowLayout -nc 4 -cw 1 100 -cw 2 145 -cw 3 45 -cw 4 60  -p syncAssets_type3;
+			text -label $sNamespace;
+			textField -w 140 -en false -tx (basename($sPath,""))  -ann (dirname($sPath));
+			text -label "Action: ";
+			optionMenu;
+			menuItem -l "Load";
+			menuItem -l "Ignore";
+			break;
+		}	
+		case 4:
+		{
+			// animator did a replace reference
+			int $menuWidth = ($win)?100:120;
+			string $assetTypesEnum[];
+			string $assetTypes[];
+
+
+			if ($sceneType[0]=="Lighting")
+			{
+				//$assetTypesEnum[0] = "Live";
+				//$assetTypes[0] = "live";
+				if ($pointCacheAvail)
+				{
+					if ($enforcePointCaching)
+					{
+						$assetTypesEnum = {"Caching Proxy","Caching"};
+						$assetTypes = {"cachingProxy","caching"};
+					}
+					else
+					{
+						$assetTypesEnum = {"Live","Caching Proxy","Caching"};
+						$assetTypes = {"live","cachingProxy","caching"};
+					}	
+				}
+				else
+				{
+					$assetTypesEnum = {"Live"};
+					$assetTypes = {"live"};
+				}
+				
+			}
+			else
+			{
+				if ($pointCacheAvail)
+				{
+					$assetTypesEnum = {"Layout Rig","Animation Rig","Live","Caching Proxy","Caching"};
+					$assetTypes = {"layoutRig","animProxyRig","live","cachingProxy","caching"};
+				}
+				else
+				{
+					$assetTypesEnum = {"Layout Rig","Animation Rig","Live"};
+					$assetTypes = {"layoutRig","animProxyRig","live"};
+				}
+			}
+
+			formLayout -e -vis 1 syncAssets_type4Form;
+			rowLayout -nc 7 -cw 1 100 -cw 2 145 -cw 3 30 -cw 4 30 -cw 5 $menuWidth -cw 6 50 -cw 7 20 -p syncAssets_type4;
+			text -label $sNamespace;
+			string $textField = `textField -w 140 -tx (basename($sPath,"")) -ann (dirname($sPath))`;
+			string $browButton = `symbolButton -image "navButtonBrowse.xpm" `;
+			text -label "Type: ";
+			string $menu = `optionMenu -w 75`;
+			int $highest = 0;
+
+			for ($i=0;$i<size($assetTypesEnum);$i++)
+			{
+				string $dir = dirname($sPath);
+				string $basename = basename($dir,"");
+				string $fullPath = dirname($sPath)+"/"+$basename+"_"+$assetTypes[$i]+".ma";
+				int $exists = `filetest -f $fullPath`;
+				$highest = ($exists)?$i+1:$highest;
+				menuItem -en $exists -l $assetTypesEnum[$i];	
+			}
+			// set option menu to highest available
+			if ($highest)
+			{
+				optionMenu -e -sl $highest $menu;
+				// execute optionMenu change command to update textField
+				sa_changeAssetType ($textField,$menu, $pointCacheAvail); 
+			}
+			
+			text -label "Replace";
+			checkBox -l " " -v ($highest>0) -en ($highest>0);
+			// attach commands
+			optionMenu -e -cc ("sa_changeAssetType "+$textField+" "+$menu+" "+$pointCacheAvail) $menu;
+			symbolButton -e -c ("sa_openFileBrowser "+$textField+" "+$menu) $browButton;
+			textField -e -cc ("sa_fileTextFieldChangeCmd "+$textField+" "+$menu) $textField;
+
+			break;
+		}	
+		default:
+			break;
+		
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc sa_cameraUISyncInfo(string $info)
+{
+	/*
+	0 = camera is in the xml, but not in the scene
+		1 = shape name mismatch
+		2 = imageplane has been added to cam in xml
+		3 = everything matches, but the camera in the scene isn't hooked up to camera main.
+	*/
+	string $text[] = {
+		"Animation has added a camera which isn't in this scene.",
+		("The camera shape node has a different name in this scene as in the animation scene. This will stop you "+
+		"recieving things like focal length through the cache."),
+		"An imageplane has been added to the camera in animation.",
+		"The camera isn't hooked up to cameraMain"
+	};
+	
+	string $infoText = "The camera is out of sync for the following reason(s):\n\n";
+	for ($i=0;$i<size($info);$i++)
+	{
+		string $char = substring ($info,($i+1),($i+1));
+		$infoText += "- "+$text[(int)$char]+"\n\n";	
+	}
+	
+	if (`window -exists cameraUISyncInfoWin`)
+	{
+		showWindow cameraUISyncInfoWin;
+		return;
+	}
+	if (`windowPref -exists cameraUISyncInfoWin`)
+		windowPref -r cameraUISyncInfoWin;	
+	
+	window -t "Camera Sync Info" -wh 400 235 cameraUISyncInfoWin;
+		columnLayout;
+			string $scrollField = `scrollField -w 390 -h 205 -ww true -text $infoText -editable false`;
+		setParent ..;
+	showWindow cameraUISyncInfoWin;
+	
+		
+	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc populateCameraUI(
+	string $sCamNames,
+	string $sCamShapeNames,
+	int $sCamIndex,
+	int $sBgPlate,
+	string $sCamImageName,
+	float $sCamSizeX,
+	float $sCamSizeY,
+	float $sCamOffsetX,
+	float $sCamOffsetY,
+	float $sCamDepth,
+	float $sCamRotate,
+	string $sCamInfo
+)
+{
+	formLayout -e -vis 1 syncAssets_camerasForm;
+	//rowLayout -nc 7 -cw 1 100 -cw 2 145 -cw 3 30 -cw 4 30 -cw 5 $menuWidth -cw 6 35 -cw 7 20 -p syncAssets_cameras;
+	rowLayout -nc 4 -cw 1 245 -cw 2 45 -cw 3 65 -cw 4 20 -p syncAssets_cameras;
+	
+	string $ann = $sCamNames+",";
+	$ann += $sCamShapeNames+",";
+	$ann += $sCamIndex+",";
+	$ann += $sBgPlate+",";
+	if ($sBgPlate)
+	{
+		$ann += $sCamImageName+",";
+		$ann += $sCamSizeX+",";
+		$ann += $sCamSizeY+",";
+		$ann += $sCamOffsetX+",";
+		$ann += $sCamOffsetY+",";
+		$ann += $sCamDepth+",";
+		$ann += $sCamRotate+"";
+	}
+	text -label $sCamNames -ann $ann -align "left";
+	text -label "Action: ";
+	optionMenu;
+	menuItem -l "Sync";
+	menuItem -l "Ignore";
+	symbolButton -w 20 -i "info.xpm" -c ("sa_cameraUISyncInfo "+$sCamInfo);
+	
+	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc setupTemplate()
+{
+	if (!`uiTemplate -exists syncAssetsUITemplate`)
+		uiTemplate syncAssetsUITemplate;
+		
+	columnLayout -defineTemplate syncAssetsUITemplate -rs 2 -co "left" 3;
+	frameLayout -defineTemplate syncAssetsUITemplate
+		-borderVisible true
+		-collapsable   true
+		-collapse      false
+		-borderStyle  "etchedIn"
+		-labelAlign "bottom"
+		//-labelIndent $gStandardIdent
+		-font "boldLabelFont";
+}
+// ---------------------------------------------------------------------------------------------------
+proc clearUI()
+{
+	string $uiAreas[] = {"syncAssets_type0","syncAssets_type2","syncAssets_type3","syncAssets_cameras"};
+	for ($i=0;$i<size($uiAreas);$i++)
+	{
+		string $children[] = `layout -q -ca $uiAreas[$i]`;
+		if (size($children))
+			deleteUI $children;	
+			
+		formLayout -e -vis 0 ($uiAreas[$i]+"Form");
+	}	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc sa_performSync()
+{
+	string $xml = sa_parseUI();	
+	string $file = `getenv ("TMPDIR")`+"/"+`getpid`+"_sync.xml";
+	writeFile ($file,$xml);
+	// DEBUG
+	print ("Wrote "+$file+"\n");
+	//return;
+	int $needsCache = performAssetSync($file);
+	if ($needsCache)
+	{
+		fileInfo "animCacheDirty" "1";	
+	}
+	global int $cacheCalled;
+	$cacheCalled = 1;
+	//syncCache (!`about -batch`);
+	global string $gPostSyncCallback;
+	if ($gPostSyncCallback != "")
+		eval ($gPostSyncCallback);
+	deleteUI syncAssetsWin;
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc syncAssetsUIClosed()
+{
+	global int $cacheCalled;
+	global string $gPostSyncCallback;
+	if (!$cacheCalled && $gPostSyncCallback != "")
+	{
+		//syncCache (!`about -batch`);
+		eval ($gPostSyncCallback);
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc syncAssetsUI()
+{
+	if (`window -exists syncAssetsWin`)
+	{
+		showWindow syncAssetsWin;
+		return;
+	}
+	if (`windowPref -exists syncAssetsWin`)
+		windowPref -r syncAssetsWin;	
+	
+	int $winWidth = 540;
+	setupTemplate;
+	window -t "Asset Sync Manager -- Revision 1.6 -- 09/06/06" -wh $winWidth 400 syncAssetsWin;
+		setUITemplate -pushTemplate syncAssetsUITemplate;
+		formLayout syncAssets_mainForm;
+			scrollLayout syncAssets_mainArea;
+				columnLayout;
+					formLayout -vis 0 -w ($winWidth-40) syncAssets_type0Form;
+						frameLayout -label "Animation has added the following assets:" syncAssets_type0Frame;
+							columnLayout syncAssets_type0;
+							setParent ..;
+						setParent ..;
+						separator -height 10 -width ($winWidth-40) -style "in";
+					setParent ..;
+					// end type 0 form
+					
+					formLayout -e 
+						-af syncAssets_type0Frame left 0 
+						-af syncAssets_type0Frame right 0
+						-af syncAssets_type0Frame bottom 0  
+						-af syncAssets_type0Frame top 0  
+							syncAssets_type0Form;
+					// Type 2
+					formLayout -vis 0 -w ($winWidth-40) syncAssets_type2Form;
+						frameLayout -label "Animation has removed/unloaded the following assets:" syncAssets_type2Frame;
+							columnLayout syncAssets_type2;
+							setParent ..;
+						setParent ..;
+						separator -height 10 -width ($winWidth-40) -style "in";
+					setParent ..;
+					// end type 2 form
+					formLayout -e 
+						-af syncAssets_type2Frame left 0 
+						-af syncAssets_type2Frame right 0
+						-af syncAssets_type2Frame bottom 0  
+						-af syncAssets_type2Frame top 0  
+							syncAssets_type2Form;
+					// Type 3 
+					formLayout -vis 0 -w ($winWidth-40)  syncAssets_type3Form;
+						frameLayout -label "Animation has reloaded the following assets:" syncAssets_type3Frame;
+							columnLayout syncAssets_type3;
+							setParent ..;
+						setParent ..;
+						separator -height 10 -width ($winWidth-40)  -style "in";
+					setParent ..;
+					// end type 3 form
+					formLayout -e 
+						-af syncAssets_type3Frame left 0 
+						-af syncAssets_type3Frame right 0
+						-af syncAssets_type3Frame bottom 0  
+						-af syncAssets_type3Frame top 0  
+							syncAssets_type3Form;
+					// 09/01/06 - Paths changed
+					formLayout -vis 0 -w ($winWidth-40)  syncAssets_type4Form;
+						frameLayout -label "Animation has replaced reference on the following assets:" syncAssets_type4Frame;
+							columnLayout syncAssets_type4;
+							setParent ..;
+						setParent ..;
+						separator -height 10 -width ($winWidth-40)  -style "in";
+					setParent ..;
+					// end type 4 form
+					formLayout -e 
+						-af syncAssets_type4Frame left 0 
+						-af syncAssets_type4Frame right 0
+						-af syncAssets_type4Frame bottom 0  
+						-af syncAssets_type4Frame top 0  
+							syncAssets_type4Form;
+					// end 09/01/06 changes
+					// Cameras
+					formLayout -vis 0 -w ($winWidth-40)  syncAssets_camerasForm;
+						frameLayout -label "Cameras:" syncAssets_camerasFrame;
+							columnLayout syncAssets_cameras;
+							setParent ..;
+						setParent ..;
+						separator -height 10 -width ($winWidth-40)  -style "in";
+					setParent ..;
+					// end type 3 form
+					formLayout -e 
+						-af syncAssets_camerasFrame left 0 
+						-af syncAssets_camerasFrame right 0
+						-af syncAssets_camerasFrame bottom 0  
+						-af syncAssets_camerasFrame top 0  
+							syncAssets_camerasForm;
+				setParent ..;
+				// end main column layout
+			setParent ..;
+			// end scrollLayout
+		rowLayout -nc 1 -cw 1 ($winWidth-15) -ct1 "both" -cl1 "center" syncAssetsWin_actions;
+				button -label "Do It" -c "sa_performSync";
+			setParent ..;
+		setParent ..;
+		formLayout -e
+			-attachForm "syncAssets_mainArea" "left" 3
+			-attachForm "syncAssets_mainArea" "right" 3
+			-attachForm "syncAssets_mainArea" "top" 3
+			-attachForm "syncAssets_mainArea" "bottom" 30
+			-attachForm "syncAssetsWin_actions" "bottom" 3
+			-attachForm "syncAssetsWin_actions" "left" 3
+			-attachForm "syncAssetsWin_actions" "right" 3
+				syncAssets_mainForm;
+		
+	
+	showWindow syncAssetsWin;
+	// create a script job that will be called when this window is closed.
+	// This is so that control can be cached to the cache syncher if this window is closed without any action having been taken.
+	scriptJob -runOnce true -uiDeleted syncAssetsWin syncAssetsUIClosed -p syncAssetsWin;
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc string stripCopyNum (string $path)
+{
+	string $buf[];
+	tokenize ($path,"{}",$buf);
+	return $buf[0];	
+}
+
+// ---------------------------------------------------------------------------------------------------
+proc string resolveFilename (string $filename)
+{
+	string $resolved = `workspace -q -act`;
+	string $buf[];
+	tokenize ($filename,"\\/",$buf);
+	int $startCopying = 0;
+	for ($i=0;$i<size($buf);$i++)
+	{
+		if ($buf[$i] == "cpsv")
+			$startCopying = 1;
+		if ($startCopying)
+			$resolved += "/"+$buf[$i];	
+	}
+	return $resolved;
+}
+// ---------------------------------------------------------------------------------------------------
+proc getAssetsFromScene(
+	string $namespaces[],
+	string $paths[],
+	int $omitted[]
+	)
+{
+	string $refs[] = listReferences (1);	// 1 = list the active one, when proxies are found.
+	//string $refs[] = `file -q -r`;
+	
+	for ($i=0;$i<size($refs);$i++)
+	{
+		$namespaces[$i] = `file -q -ns $refs[$i]`;
+		$paths[$i] = stripCopyNum ($refs[$i]);
+		$omitted[$i] = `file -q -dr $refs[$i]`; 	
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc getAssetsFromXML(
+	string $xml,
+	string $xNamespaces[],
+	string $xPaths[],
+	int $xAssetTypeID[],
+	int $xOmitted[]
+	)
+{
+	string $assetsXML[] = xml_getTag ($xml,"Asset");
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		$xOmitted[$i] = (int)xml_getVar ($assetsXML[$i],"Omitted");
+		
+		$name = xml_getVar ($assetsXML[$i],"Name");
+		$xNamespaces[$i] = xml_getVar ($assetsXML[$i],"Namespace");
+		$xPaths[$i] = resolveFilename(xml_getVar ($assetsXML[$i],"Path"))+"/"+$name+"_live.ma";
+		$xAssetTypeID[$i] = (int)xml_getVar ($assetsXML[$i],"AssetTypeID");		
+	}	
+}
+// ---------------------------------------------------------------------------------------------------
+proc generateSyncTable(
+	string $namespaces[],
+	string $paths[],
+	int $omitted[],
+	string $xNamespaces[],
+	string $xPaths[],
+	int $xAssetTypeID[],
+	int $xOmitted[],
+	string $sNamespaces[],
+	string $sPaths[],
+	int $sOmitted[],
+	int $sAssetTypeID[],
+	int $sInfo[]
+	)
+{
+	/*
+	Meaning of info:
+	0 = Asset is in the shot group xml, but not the scene
+	1 = Asset is in the scene, but deferred in the shot group xml - Animator has removed asset. Signified by namespace of ""
+	2 = Asset is in the scene, but deferred in the shot group xml - Animator has unloaded reference
+	3 = Asset is in the scene and deferred, but is not deferred in the shot group xml
+	4 = Asset is in the scene and the xml, neither are omitted, but the path is different in the xml
+	*/
+	/*
+	Note - sOmitted refers to the state of the asset in the scene, not the xml
+	*/
+	// go through the shot group xml
+	for ($i=0;$i<size($xNamespaces);$i++)
+	{
+		int $c = size($sNamespaces);
+		int $index = stringArrayFindIndex ($xNamespaces[$i],$namespaces);
+		if ($index == -1)
+		{
+			// It is in the xml, but not the scene. If it is omitted in the xml, skip, it doesn't matter
+			if ($xOmitted[$i])
+				continue;
+			// Past here means the lighter is missing an asset...
+			$sNamespaces[$c] = $xNamespaces[$i];
+			$sPaths[$c] = $xPaths[$i];
+			$sOmitted[$c] = 1;
+			$sAssetTypeID[$c] = $xAssetTypeID[$i];
+			$sInfo[$c] = 0;
+			continue;
+		}
+		// So, they both exist in some form.
+		// 09/01/06 - check path in lit vs structure.
+		// If they are both un-omitted, they are in sync - unless the path differs
+		int $pathDiffers = (dirname($xPaths[$i]) != dirname($paths[$index]));
+		if ($pathDiffers)
+			print (dirname($xPaths[$i]) + " != " + dirname ($paths[$index])+"\n");
+
+		if (!$xOmitted[$i] && !$omitted[$index] && !$pathDiffers)
+			continue;
+		// If they are both omitted, they are in sync
+		if ($xOmitted[$i] && $omitted[$index] && !$pathDiffers)
+			continue;
+		
+		// Past here, we are definately out of sync...
+		$sNamespaces[$c] = $xNamespaces[$i];
+		$sPaths[$c] = $paths[$index];
+		$sOmitted[$c] = 0;
+		$sAssetTypeID[$c] = $xAssetTypeID[$i];
+
+		if ($pathDiffers)
+		{
+			$sInfo[$c] = 4;
+			$sPaths[$c] = $xPaths[$i];
+		}
+		else
+		{
+			if ($xOmitted[$i] && !$omitted[$index])
+			{
+				// exists in scene, but is omitted in xml
+				
+				$sInfo[$c] = 2;
+			}
+			else
+			{
+				// loaded in scene, unloaded in xml
+				$sInfo[$c] = 3;	
+			}
+		}
+		
+	}
+
+	// -----------------------------------
+	// do a second pass over the assets in the scene to see if any are no longer in the structure file
+	// -----------------------------------
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		int $index = stringArrayFindIndex ($namespaces[$i],$xNamespaces);
+		if ($index == -1)
+		{
+			// it has been removed by animation.
+			// before we add to sync table make sure that it is loaded, if it is unloaded we are already in sync!
+			if ($omitted[$i])
+				continue;
+
+			int $c = size($sNamespaces);
+			$sNamespaces[$c] = $namespaces[$i];
+			$sPaths[$c] = $paths[$i];
+			$sOmitted[$c] = 1;
+			$sInfo[$c] = 2;
+			// look up Insight type id
+			string $type = getPath ("AssetTypeFromFilename",{$paths[$i]});
+			int $insightTypeID = 0;
+			switch ($type)
+			{
+				case "character":
+					$insightTypeID = 1;
+					break;
+				case "vehicle":
+					$insightTypeID = 2;
+					break;
+				case "prop":
+					$insightTypeID = 3;
+					break;
+				case "set":
+					$insightTypeID = 4;
+					break;
+				default:
+					break;
+			}
+			$sAssetTypeID[$c] = $xAssetTypeID[$i];
+		}
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+proc getCamerasFromScene(
+	string $name[],
+	string $shapeName[],
+	int $isConnectedToCameraMain[],
+	int $index[],
+	int $bgPlate[]
+	)
+{
+	string $allCameras[] = `ls -type camera`;
+	
+	for ($i=0;$i<size($allCameras);$i++)
+	{
+		if (`camera -q -o $allCameras[$i]`)
+			continue;
+		if ($allCameras[$i] == "cameraMainShape")
+			continue;
+		
+		int $c = size($shapeName);
+		$shapeName[$c] = $allCameras[$i];
+		
+		// transform name
+		string $transform[] = `listRelatives -p -pa $shapeName[$c]`;
+		$name[$c] = $transform[0];
+		
+		// is it connected to cameraMain?
+		string $hist[] = `listHistory -f 1 $name[$c]`;
+		if (size(stringArrayRemove({"cameraMainShape"},$hist))<size($hist))
+			$isConnectedToCameraMain[$c] = 1;	
+		else
+			$isConnectedToCameraMain[$c] = 0;
+			
+		// if it is connected to cameraMain, get it's index
+		if ($isConnectedToCameraMain[$c])
+		{
+			string $tmp[] = `listConnections -s 0 -d 1 -p 1 -type choice ($name[$c]+".translate")`;
+			if (size($tmp))
+			{
+				string $buf[];
+				tokenize ($tmp[0],"[]",$buf);
+				$index[$c] = (int)$buf[size($buf)-1];
+			}
+			else
+				$index[$c] = -1;
+		}
+		else
+			$index[$c] = -1;
+			
+		// does it have an imageplane attached
+		if (size(`listConnections -s 1 -d 0 ($shapeName[$c]+".imagePlane")`))
+			$bgPlate[$c] = 1;
+		else
+			$bgPlate[$c] = 0;
+		
+		
+		// debug: print some info
+		print ("name="+$name[$c]+"    shapeName="+$shapeName[$c]+"    Connected to cameraMain?: "+$isConnectedToCameraMain[$c]);
+		print ("    Index="+$index[$c]+"    bgPlate="+$bgPlate[$c]);
+		print ("\n");
+		
+	} 	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc getCamerasFromXML(
+	string $xml,
+	string $xCamNames[],
+	string $xCamShapeNames[],
+	int $xCamIndex[],
+	int $xBgPlate[],
+	string $xCamImageName[],
+	float $xCamSizeX[],
+	float $xCamSizeY[],
+	float $xCamOffsetX[],
+	float $xCamOffsetY[],
+	float $xCamDepth[],
+	float $xCamRotate[]
+	)
+{
+	string $camerasXML[] = xml_getTag ($xml,"Camera");
+	
+	for ($i=0;$i<size($camerasXML);$i++)
+	{
+		$xCamNames[$i] = xml_getVar($camerasXML[$i],"Name");	
+		$xCamShapeNames[$i] = xml_getVar($camerasXML[$i],"ShapeName");
+		$xCamIndex[$i] = (int)xml_getVar($camerasXML[$i],"Index");
+		string $bgPlateVal = xml_getVar($camerasXML[$i],"BgPlate");
+		if ($bgPlateVal != "")
+			$xBgPlate[$i] = (int)$bgPlateVal;
+		else
+			$xBgPlate[$i] = 0;
+		
+		if ($xBgPlate[$i])
+		{
+			$xCamImageName[$i] = xml_getVar($camerasXML[$i],"imageName");
+			$xCamSizeX[$i] = xml_getVar($camerasXML[$i],"sizeX");
+			$xCamSizeY[$i] = xml_getVar($camerasXML[$i],"sizeY");
+			$xCamOffsetX[$i] = xml_getVar($camerasXML[$i],"offsetX");
+			$xCamOffsetY[$i] = xml_getVar($camerasXML[$i],"offsetY");
+			$xCamDepth[$i] = xml_getVar($camerasXML[$i],"depth");
+			$xCamRotate[$i] = xml_getVar($camerasXML[$i],"rotate");
+		}
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc generateCameraSyncTable(
+		string $camNames[],
+		string $camShapeNames[],
+		int $isRfxCamera[],
+		int $camIndex[],
+		int $bgPlate[],
+		string $xCamNames[],
+		string $xCamShapeNames[],
+		int $xCamIndex[],
+		int $xBgPlate[],
+		string $xCamImageName[],
+		float $xCamSizeX[],
+		float $xCamSizeY[],
+		float $xCamOffsetX[],
+		float $xCamOffsetY[],
+		float $xCamDepth[],
+		float $xCamRotate[],
+		string $sCamNames[],
+		string $sCamShapeNames[],
+		int $sCamIndex[],
+		int $sBgPlate[],
+		string $sCamImageName[],
+		float $sCamSizeX[],
+		float $sCamSizeY[],
+		float $sCamOffsetX[],
+		float $sCamOffsetY[],
+		float $sCamDepth[],
+		float $sCamRotate[],
+		string $sCamInfo[]
+	)
+{
+	// codes for sCamInfo
+	/*
+		sCamInfo is a string that can contain several of the following codes 
+		0 = camera is in the xml, but not in the scene
+		1 = shape name mismatch
+		2 = imageplane has been added to cam in xml
+		3 = everything matches, but the camera in the scene isn't hooked up to camera main.
+	*/
+	for ($i=0;$i<size($xCamNames);$i++)
+	{
+		int $c = size($sCamInfo);
+		int $hasProbs = 0;
+		int $index = stringArrayFindIndex ($xCamNames[$i],$camNames);
+		
+		if ($index != -1)
+		{
+			// check that the shape names match
+			if ($xCamShapeNames[$i] != $camShapeNames[$index])
+			{
+				$sCamInfo[$c] = "1";
+				$hasProbs = 1;	
+			}	
+			// check to see if there is an image plane on the cam in the xml, but not the one in the scene
+			if ($xBgPlate[$i] && !$bgPlate[$index])
+			{
+				$sCamInfo[$c] = $sCamInfo[$c] + "2";
+				$hasProbs = 1;	
+			}
+			// check to see if the camera in the scene is hooked up to cameraMain
+			if (!$isRfxCamera[$index])
+			{
+				$sCamInfo[$c] = $sCamInfo[$c] + "3";
+				$hasProbs = 1;		
+			}
+		}
+		else
+		{
+			$sCamInfo[$c] = "0";	
+			$hasProbs = 1;	
+		}
+		
+		// if problems were found, copy everything over to the sync arrays
+		if (!$hasProbs)
+			continue;
+		
+		
+		
+		$sCamNames[$c] = $xCamNames[$i];
+		$sCamShapeNames[$c] = $xCamShapeNames[$i];
+		$sCamIndex[$c] = $xCamIndex[$i];
+		$sBgPlate[$c] = $xBgPlate[$i];
+		$sCamImageName[$c] = $xCamImageName[$i];
+		$sCamSizeX[$c] = $xCamSizeX[$i];
+		$sCamSizeY[$c] = $xCamSizeY[$i];
+		$sCamOffsetX[$c] = $xCamOffsetX[$i];
+		$sCamOffsetY[$c] = $xCamOffsetY[$i];
+		$sCamDepth[$c] = $xCamDepth[$i];
+		$sCamRotate[$c] = $xCamRotate[$i];
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc secondarySync (
+	string $xml,
+	string $namespaces[],
+	string $paths[],
+	int $omitted[],
+	string $sNamespaces[],
+	string $sPaths[],
+	int $sOmitted[],
+	int $sAssetTypeID[],
+	int $sInfo[]
+	)
+{
+	// xml argument is unparsed contents of the shot builder xml
+	
+	// buffer the primary sync table
+	string $pNamespaces[] = $sNamespaces;
+	string $pPaths[] = $sPaths;
+	int $pOmitted[] = $sOmitted;
+	int $pAssetTypeID[] = $sAssetTypeID;
+	int $pInfo[] = $sInfo;
+	
+	// clear the primary sync table
+	clear $sNamespaces;
+	clear $sPaths;
+	clear $sOmitted;
+	clear $sAssetTypeID;
+	clear $sInfo;
+	
+	// parse the shot builder xml
+	string $xNamespaces[],$xPaths[];
+	int $xAssetTypeID[],$xOmitted[];
+	
+	getAssetsFromXML (
+		$xml,
+		$xNamespaces,
+		$xPaths,
+		$xAssetTypeID,
+		$xOmitted
+	);
+	
+	// generate a sync table of the discrepancies between the shot builder xml and the contents of the scene
+	string $ssNamespaces[],$ssPaths[];
+	int $ssOmitted[],$ssAssetTypeID[],$ssInfo[];
+	generateSyncTable(
+		$namespaces,
+		$paths,
+		$omitted,
+		$xNamespaces,
+		$xPaths,
+		$xAssetTypeID,
+		$xOmitted,
+		$ssNamespaces,
+		$ssPaths,
+		$ssOmitted,
+		$ssAssetTypeID,
+		$ssInfo
+	);
+	
+	print("\nSecondary sync Table:\n");
+	for ($i=0;$i<size($ssNamespaces);$i++)
+	{
+		print($ssNamespaces[$i]+":\t\tPath:"+$ssPaths[$i]+"\t\tType: "+$ssAssetTypeID[$i]+"\tOmitted: "+$ssOmitted[$i]+"\tInfo: "+$ssInfo[$i]+"\n");	
+		
+	}
+	
+	// perform an AND operation between the primary and secondary sync tables
+	for ($i=0;$i<size($pNamespaces);$i++)
+	{
+		if (stringArrayFindIndex($pNamespaces[$i],$ssNamespaces)== -1)
+			continue;
+		int $c = size($sNamespaces);
+		
+		$sNamespaces[$c] = $pNamespaces[$i];
+		$sPaths[$c] = $pPaths[$i];
+		$sAssetTypeID[$c] = $pAssetTypeID[$i];
+		$sOmitted[$c] = $pOmitted[$i];
+		$sInfo[$c] = $pInfo[$i];	
+	}
+	
+}
+// ---------------------------------------------------------------------------------------------------
+global proc syncAssets( string $file, string $shotBuilderFile, string $callback) 
+{
+	loadDependencies();
+
+	// callback is to the name of a proc to be called when done synching
+	global string $gPostSyncCallback;
+	$gPostSyncCallback = $callback;
+	
+	// file is the shot group xml
+	
+	// get what is in the scene.
+	string $namespaces[],$paths[];
+	int $omitted[];
+	
+	getAssetsFromScene(
+		$namespaces,
+		$paths,
+		$omitted
+	);
+	
+	// debug: print some info
+	print ("Asset List from Scene:\n");
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		print($namespaces[$i]+":\t\t\tPath:"+$paths[$i]+"\t\tDeferred:"+$omitted[$i]+"\n");	
+	}
+	
+	// get assets from xml
+	string $xNamespaces[],$xPaths[];
+	int $xAssetTypeID[],$xOmitted[];
+	string $xml = readXML ($file,0);
+	
+	getAssetsFromXML (
+		$xml,
+		$xNamespaces,
+		$xPaths,
+		$xAssetTypeID,
+		$xOmitted
+	);
+	// debug: print some info
+	print("\nAsset List from XML:\n");
+	for ($i=0;$i<size($xNamespaces);$i++)
+	{
+		print($xNamespaces[$i]+":\t\tPath:"+$xPaths[$i]+"\t\tType: "+$xAssetTypeID[$i]+"\t\tOmitted: "+$xOmitted[$i]+"\n");	
+	}
+	
+	// build the sync table
+	string $sNamespaces[],$sPaths[];
+	int $sOmitted[],$sAssetTypeID[],$sInfo[];
+	generateSyncTable(
+		$namespaces,
+		$paths,
+		$omitted,
+		$xNamespaces,
+		$xPaths,
+		$xAssetTypeID,
+		$xOmitted,
+		$sNamespaces,
+		$sPaths,
+		$sOmitted,
+		$sAssetTypeID,
+		$sInfo
+	);
+	
+	// debug: print some info
+	print("\nSync Table:\n");
+	for ($i=0;$i<size($sNamespaces);$i++)
+	{
+		print($sNamespaces[$i]+":\t\tPath:"+$sPaths[$i]+"\t\tType: "+$sAssetTypeID[$i]+"\tOmitted: "+$sOmitted[$i]+"\tInfo: "+$sInfo[$i]+"\n");	
+	}
+	
+
+	// If a shot builder file is specified, perform secondary sync.
+	if (`filetest -f $shotBuilderFile`)
+	{
+		print ("Performing secondary sync pass.\n");
+		string $shotBuilderXML = readXML($shotBuilderFile,0);
+		secondarySync (
+			$shotBuilderXML,
+			$namespaces,
+			$paths,
+			$omitted,
+			$sNamespaces,
+			$sPaths,
+			$sOmitted,
+			$sAssetTypeID,
+			$sInfo
+		);
+	}
+	
+	// Cameras 
+	// Get cameras in the scene
+	string $camNames[],$camShapeNames[];
+	int $isRfxCamera[], $bgPlate[], $camIndex[];
+	
+	getCamerasFromScene(
+		$camNames,
+		$camShapeNames,
+		$isRfxCamera,
+		$camIndex,
+		$bgPlate
+	);
+	
+	// Get cameras from the xml
+	string $xCamNames[], $xCamShapeNames[];
+	int $xCamIndex[], $xBgPlate[];
+	string $xCamImageName[];
+	float $xCamSizeX[], $xCamSizeY[], $xCamOffsetX[], $xCamOffsetY[], $xCamDepth[], $xCamRotate[];
+	getCamerasFromXML(
+		$xml,
+		$xCamNames,
+		$xCamShapeNames,
+		$xCamIndex,
+		$xBgPlate,
+		$xCamImageName,
+		$xCamSizeX,
+		$xCamSizeY,
+		$xCamOffsetX,
+		$xCamOffsetY,
+		$xCamDepth,
+		$xCamRotate
+	);
+	
+	// build the sync table for cameras.
+	string $sCamNames[], $sCamShapeNames[];
+	int $sCamIndex[], $sBgPlate[];
+	string $sCamImageName[];
+	float $sCamSizeX[], $sCamSizeY[], $sCamOffsetX[], $sCamOffsetY[], $sCamDepth[], $sCamRotate[];
+	string $sCamInfo[];
+	
+	generateCameraSyncTable(
+		$camNames,
+		$camShapeNames,
+		$isRfxCamera,
+		$camIndex,
+		$bgPlate,
+		$xCamNames,
+		$xCamShapeNames,
+		$xCamIndex,
+		$xBgPlate,
+		$xCamImageName,
+		$xCamSizeX,
+		$xCamSizeY,
+		$xCamOffsetX,
+		$xCamOffsetY,
+		$xCamDepth,
+		$xCamRotate,
+		$sCamNames,
+		$sCamShapeNames,
+		$sCamIndex,
+		$sBgPlate,
+		$sCamImageName,
+		$sCamSizeX,
+		$sCamSizeY,
+		$sCamOffsetX,
+		$sCamOffsetY,
+		$sCamDepth,
+		$sCamRotate,
+		$sCamInfo
+	);
+	
+	if (!size($sNamespaces) && !size($sCamNames))
+	{
+		print("Assets are in sync.\n");
+		// call the post sync callback
+		if ($gPostSyncCallback != "")
+			eval ($gPostSyncCallback);
+		return;	
+	}
+	syncAssetsUI();
+	clearUI();
+	
+	// 09/11/05 find out if point caching is available for any of our assets that need synching
+	string $pointCacheFilenames[];
+	int $dummy[];
+	string $seq[] = `fileInfo -q "sequence"`;
+	string $shotGroup[] = `fileInfo -q "shotGroup"`;
+	getPointCacheAssets ($seq[0], $shotGroup[0], $pointCacheFilenames, $dummy);
+	int $pointCacheAvail[];
+	for ($i=0;$i<size($sPaths);$i++)
+	{
+		for ($j = 0; $j < size ($pointCacheFilenames);$j++)
+		{
+			string $searchName = resolveFilename (dirname ($pointCacheFilenames[$j])); // compare dirname's only
+			if (dirname($sPaths[$i]) == $searchName)
+			{
+				$pointCacheAvail[$i] = 1;
+				break;	
+			}	
+		}	
+	}
+	// done checking for point caching
+	
+	for ($i=0;$i<size($sNamespaces);$i++)
+	{
+		populateUI(
+			$sNamespaces[$i],
+			$sPaths[$i],
+			$sOmitted[$i],
+			$sAssetTypeID[$i],
+			$sInfo[$i],
+			$pointCacheAvail[$i]
+		);	
+	}
+	
+	print ("Cameras in need of synching: \n");
+	for ($i=0;$i<size($sCamNames);$i++)
+	{
+		print ($sCamNames[$i]+": "+$sCamInfo[$i]+"\n");
+		populateCameraUI(
+			$sCamNames[$i],
+			$sCamShapeNames[$i],
+			$sCamIndex[$i],
+			$sBgPlate[$i],
+			$sCamImageName[$i],
+			$sCamSizeX[$i],
+			$sCamSizeY[$i],
+			$sCamOffsetX[$i],
+			$sCamOffsetY[$i],
+			$sCamDepth[$i],
+			$sCamRotate[$i],
+			$sCamInfo[$i]
+		);
+	}
+	return;
+}

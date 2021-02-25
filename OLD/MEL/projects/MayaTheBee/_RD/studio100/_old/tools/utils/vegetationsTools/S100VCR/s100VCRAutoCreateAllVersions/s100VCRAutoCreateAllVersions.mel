@@ -1,0 +1,345 @@
+global proc s100VCRAutoCreateAllVersionsCheck()
+{
+$fName = `file -q -modified`;
+$fNameS = `file -q -sn`;
+
+	if($fName == 1)
+	{
+	$message = "save change to " + $fNameS +" ?";
+	$returnConf = `confirmDialog -title "scene was modified" -message $message
+		-button "Yes" -button "No" -button  "Cancel" -defaultButton "Yes"
+		-cancelButton "cancel" -dismissString "No"`;
+
+		if($returnConf == "Yes")
+		{
+		file -s;
+		s100VCRAutoCreateAllVersions ;
+		}
+		if($returnConf == "No")
+		{
+		s100VCRAutoCreateAllVersions ;
+		}
+    }else{
+
+
+	s100VCRAutoCreateAllVersions ;
+    }
+
+
+}
+
+
+global proc s100VCRAutoCreateAllVersions()
+{
+
+$fName = `file -q -sn`;
+$name = `s100VCRgetCleanName`;
+$pathL = `s100VCRgetLocalFolderFromName($fName)` ;
+$pathRoot = `s100VCRgetRootFolderFromName($fName)` ;
+$pathR = `s100VCRgetRefFolderFromName($fName) `;
+s100VCRAutoIncrementScene ;
+
+//local
+$highL = $pathRoot + $name + "_Hi.ma" ;
+$lowL = $pathRoot + $name + "_Lo.ma" ;
+$spriteLocal = $pathL + "sprites/"+ $name + "_Sprites.ma" ;
+$spriteLocalFolder = $pathL + "sprites/" ;
+$spriteNameSp = $name +"_hi";
+//Ref
+
+$highR1 = $pathR + $name + "_Hi1.ma" ;
+$highR2 = $pathR + $name + "_Hi2.ma" ;
+$highR3 = $pathR + $name + "_Hi3.ma" ;
+$lowR1 = $pathR + $name + "_Lo1.ma" ;
+$lowR2 = $pathR + $name + "_Lo2.ma" ;
+$tx = ("exectution flow for " + $name + " asset\n") ;
+
+$chL = `filetest -e $lowL ` ;
+	if($chL == 1 )
+		$lowRiggedTmp = `s100VCRCprepareLowToBeTransfert($lowL ) `;
+
+filetest -e $highL ;
+
+//create hi1
+$tx += "\nversion Hi1:\n";
+$ch = `sysFile -copy $highR1  $highL`;
+
+	if($ch == 1)
+	{
+
+	$tx += ("- created\n") ;
+	s100VCRDeleteAutoRigNode($highR1);
+	}else{
+	$tx += ("- not created\n") ;
+    }
+
+
+
+	if($chL == 1 )
+	{
+	//create hi2
+	$tx += "\nversion Hi2:\n";
+	$ch = `sysFile -copy $highR2  $highL`;
+		if($ch == 1)
+		{
+		$tx += ("- created\n") ;
+		s100VCRCleanSceneBeforeTransfert($highR2) ;
+		$tx += ("- cleaned\n") ;
+		s100VCRCleanHighRigAndRebuildForLowAndTransfertSkin($lowRiggedTmp ,$highR2);
+		s100VCRDeleteAutoRigNode($highR2);
+
+		$tx += ("- rigged\n") ;
+		}else{
+		$tx += ("- not created\n") ;
+		}
+
+	}
+
+//create hi3
+$tx += "\nversion Hi3:\n";
+
+$ch = `sysFile -copy $highR3  $highL`;
+	if($ch == 1)
+	{
+	$tx += ("- created\n") ;
+	s100VCRconvertToNoRig($highR3);
+	s100VCRDeleteAutoRigNode($highR3);
+
+	}else{
+
+	$tx += ("- not created\n") ;
+
+    }
+
+	if($chL == 1 )
+	{
+
+
+	//create lo1
+	$tx += "\nversion Lo1:\n";
+
+	$ch = `sysFile -copy $lowR1  $lowL`;
+		if($ch == 1)
+		{
+		$tx += ("- created\n") ;
+		s100VCRDeleteAutoRigNode($lowR1);
+		}else{
+		$tx += ("- not created\n") ;
+		}
+
+	//create lo2
+	$tx += "\nversion Lo2:\n";
+
+	$ch = `sysFile -copy $lowR2  $lowL`;
+		if($ch == 1)
+		{
+		$tx += ("- created\n") ;
+		s100VCRconvertToNoRig($lowR2);
+		s100VCRDeleteAutoRigNode($lowR2);
+		$tx += ("- rigged\n") ;
+
+		}else{
+		$tx += ("- not created\n") ;
+		}
+	}
+
+$tx =  s100VCRcreateSpriteScene($spriteLocal,  $tx, $highL, $spriteLocalFolder,$spriteNameSp);
+scrollField -e -tx $tx s100VCRAutoCreateAllRefLayScrollList2;
+file -f -o  $fName ;
+}
+
+global proc string  s100VCRCprepareLowToBeTransfert(string $files)
+{
+//$files =$lowL ;
+file -f -open $files ;
+$newName = "toTransfertSkin" ;
+$list = `listRelatives -ad -type "mesh" "deformed_grp" ` ;
+$listP = `listRelatives -p $list`;
+$listP1 = stringArrayRemoveDuplicates($listP) ;
+
+	if(size($listP1) > 1)
+	{
+	$dup = `duplicate $listP1` ;
+	$comb = `polyUnite -n "toTransfertSkin" -ch 1 $dup `;
+	DeleteHistory ;
+	delete $dup ;
+
+
+
+	$numbV=` polyEvaluate -v "toTransfertSkin"`;
+	select ("toTransfertSkin.vtx[0:" + $numbV[0] +"]");
+	$select = `filterExpand -ex true -sm 31 `;
+
+	$listJoint = `listRelatives -ad -type "joint" "joint_grp"`;
+	$skin = `skinCluster -n "toTransfertSkin_skinCluster" -obeyMaxInfluences 0  $listJoint "toTransfertSkin" `;
+
+	setAttr "toTransfertSkin_skinCluster.envelope" 1;
+	setAttr "toTransfertSkin_skinCluster.normalizeWeights" 1;
+
+
+	setAttr "toTransfertSkin_skinCluster.normalizeWeights" 0;
+
+	setAttr "toTransfertSkin_skinCluster.envelope" 0;
+
+
+
+	$lStep = 1 ;
+
+	int $countForMeshToTransfert = 0 ;
+	$z = $countForMeshToTransfert ;
+
+		float $iF2 = 0;
+		float $maxF = 100  ;
+		int $amount = 0;
+
+
+
+	//transfering by topology
+
+		for($i = 0 ; $i <  size($listP1);$i++)
+		{
+		$numbV=` polyEvaluate -v $listP1[$i]`;
+		select ($listP1[$i] +".vtx[0:" + $numbV[0] +"]");
+		$selectN  = `filterExpand -ex true -sm 31 `;
+		$oldSkin = findRelatedSkinCluster ($listP1[$i]) ;
+		$listInf = `skinCluster -q -inf $oldSkin `;
+
+		 progressWindow
+			-maxValue 100
+			 -title ("transfering skin" )
+			 -progress $amount
+			 -status "% done : 0%"
+			 -isInterruptable false;
+		$z2 = 0 ;
+			for($j = 0 ; $j < size($selectN) ; $j++)
+			{
+
+				for($k=0 ; $k < size($listInf) ; $k++)
+				{
+				float $value = `skinPercent -transform $listInf[$k] -query $oldSkin  ($selectN[$j])`;
+					if($value > 0 )
+					{
+					skinPercent -transformValue $listInf[$k] $value   $skin[0]  ($select[$z]);
+					//print ("\n transfering "+$selectN[$j]+" to " + $select[$z] ) ;
+					}
+
+
+				}
+			$iF2 = $z2 ;
+
+				$amount = ($iF2 / size($selectN)) * 100  ;
+				progressWindow -edit
+				-progress $amount
+				-status ("Get from "+ $listP1[$i] +":"+ $amount +" %");
+			$z2++ ;
+			$z++;
+			}
+		progressWindow -endProgress;
+
+		}
+
+
+	setAttr "toTransfertSkin_skinCluster.envelope" 1;
+	setAttr "toTransfertSkin_skinCluster.normalizeWeights" 1;
+	headsUpMessage "yeahhh !" ;
+
+
+	$listChild = `listRelatives -c "deformed_grp"` ;
+	delete $listChild ;
+
+	parent "toTransfertSkin" "deformed_grp" ;
+
+		if(`objExists "autoRig_grp"`)
+			delete "autoRig_grp";
+
+    }
+	if(size($listP1) == 1)
+	{
+	rename	$listP1[0] $newName;
+    }
+$path = `s100VCRReturnLowForTransferingPathAndCreateFolder($files)`;
+file -rename $path ;
+file -s ;
+return $path ;
+}
+
+
+
+
+global proc s100VCRCleanHighRigAndRebuildForLowAndTransfertSkin(string $hi,string $lo)
+{
+/*
+	s100VCRCleanHighRigAndRebuildForLow($lowL ,$highR2);
+
+$hi = $lowRiggedTmp
+$lo = $highR2
+
+*/
+
+file -f  -open $hi ;
+file -import -namespace "VCR" $lo;
+file -rename $lo ;
+
+
+
+
+
+
+$listS = `listRelatives -c  -type "transform" ("VCR:parented_grp")`;
+$dGrp = "deformed_grp" ;
+$listP = `listRelatives -c  -type "transform" ("VCR:deformed_grp")`;
+
+	if( `objExists $dGrp` )
+	{
+
+    }else{
+	group -n $dGrp -p "msh_grp" ;
+    }
+
+	if(size($listS) >0)
+		parent $listS "parented_grp";
+	if(size($listP) >0)
+		parent $listP $dGrp;
+
+$listG = `ls -type transform ("VCR:*") ` ;
+	for($i = 0; $i< size($listG) ; $i++)
+	{
+		if(`objExists $listG[$i]`)
+			{
+			$childM = `listRelatives -ad  -type "mesh" $listG[$i]`;
+				if(size($childM) >0)
+				{
+
+				}else{
+				delete $listG[$i] ;
+				}
+		}
+
+    }
+
+$listJoint = `listRelatives -ad -type "joint" "joint_grp"`;
+
+$childM = `listRelatives -ad  -type "mesh" ("VCR:*")`;
+$list = `listRelatives -p $childM` ;
+$listN = stringArrayRemoveDuplicates($list) ;
+$skinFrom = findRelatedSkinCluster("toTransfertSkin") ;
+
+	for($i = 0 ; $i < size($listN) ; $i++)
+	{
+	$sub = substituteAllString($listN[$i] , "VCR:" , "") ;
+	$sub = substituteAllString($sub  , "_msh" , "") ;
+	$skin = `skinCluster -n ($sub +"_skinCluster") -obeyMaxInfluences 0  $listJoint $listN[$i]`;
+	copySkinWeights -ss $skinFrom -ds $skin -noMirror;
+
+    }
+
+
+delete "toTransfertSkin" ;
+
+namespace -f -moveNamespace "VCR" ":" ;
+namespace -removeNamespace  "VCR" ;
+file -s;
+
+
+
+}

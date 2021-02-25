@@ -1,0 +1,394 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+// Make BOT Version 2.0
+//
+// Created by Yuya Sugiyama < yuya@sb.sakura.ne.jp >
+// Last Modify : 7th/March/2002
+// Please check my web site -INVISIBLE-.
+// URL : http://sb.sakura.ne.jp/~yuya/
+//
+// Description:
+//  This script make BOT(Block Ordered Texture). Without this script, you
+//  must type (moreover, you must do it for each files.)
+//
+//	makebot -i "in-image" -o "out-bot-file";
+//
+//  but use this, you can work with GUI. This script converts file textures to
+//  BOT files (all files or selected files) in your current scene. If you want, 
+//  this script modifies your file texture (i.e. assign BOT files).
+//
+// Usage:
+//  Type
+//
+//	yuya_makebot;
+//
+//  Then appear the window. Set options and push "Make BOT" button.
+//
+// Please use (and modify) this at your own lisk.
+//
+
+
+// Window Creation
+global proc kcMakeBot() {
+
+	if ((`window -ex yuya_makebot`) == true) deleteUI yuya_makebot;
+	window -menuBar true -resizeToFitChildren true -t "Make BOT (Block Ordered Texture)" -w 420 -h 100  yuya_makebot;
+
+		menu -label "Help";
+			menuItem -label "Help on Make BOT..." -command "zjHelpCallback kcMakeBot";
+
+		string $formLayout = `formLayout yuya_formLayout`;
+
+			radioButtonGrp
+				-cw3 140 80 100 
+				-nrb 2 
+				-label "File Nodes:" 
+				-la2 "All" "Selected" 
+				-select 2 
+				allOrSel;
+
+			radioButtonGrp 
+				-cw3 140 80 100 
+				-nrb 2 -label "Change Map Path:" 
+				-la2 "Yes" "No" 
+				-select 1
+				assingBOT;
+					
+			radioButtonGrp 
+				-cw4 140 80 120 100
+				-nrb 3 -label "BOT Location:" 
+				-la3 "Same" "SourceImages" "Specify" 
+				-select 3 
+				-cc "yuya_changeDirState"
+				fileLocation;
+
+			string $defaultPath = `workspace -q -rd` + "sourceimages/";
+				
+			textFieldGrp -label "Directory:" -columnWidth 1 140 -adjustableColumn 2 -text $defaultPath mkbDirField;
+			button -command "yuya_mkbGetDir" -label "Browse" mkbBrowseButton;
+
+			radioButtonGrp 
+				-l "Prefix/Postfix:"
+				-cw3 140 80 100 
+				-nrb 2 
+				-la2 "Prefix" "Postfix" 
+				-select 2
+				-cc "yuya_mkbSelPrePostFix"
+				selectFixType;
+
+			textField -text "bot_" -w 80 -enable false prefixText;
+			textField -text "bot" -w 80 -enable true postfixText;
+            
+			button -l "Make Memory Map" -c "jaye_makemapMain" makemapButton;
+			button -l "Make BOT" -c "yuya_makebotMain" makeBotButton;
+            
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		allOrSel	"top"	5
+			-attachForm		allOrSel	"left"	5
+			-attachForm		allOrSel	"right"	5
+
+			-attachControl	assingBOT	"top"	5	allOrSel
+			-attachForm		assingBOT	"left"	5
+			-attachForm		assingBOT	"right"	5
+
+			-attachControl	fileLocation	"top"	5	assingBOT
+			-attachForm		fileLocation	"left"	5
+			-attachForm		fileLocation	"right"	5
+
+			-attachControl	mkbDirField	"top"	5	fileLocation
+			-attachForm		mkbDirField	"left"	5
+			-attachControl	mkbDirField	"right"	5	mkbBrowseButton
+
+			-attachControl	mkbBrowseButton	"top"	5	fileLocation
+			-attachForm		mkbBrowseButton	"right"	5
+
+			-attachControl	selectFixType	"top"	5	mkbDirField
+			-attachForm		selectFixType	"left"	5
+			-attachForm		selectFixType	"right"	5	
+
+			-attachControl	prefixText	"top"	5	selectFixType
+			-attachForm		prefixText	"left"	145
+
+			-attachControl	postfixText	"top"	5	selectFixType
+			-attachControl	postfixText	"left"	0	prefixText
+
+			-attachControl	makeBotButton	"top"	5	prefixText
+			-attachForm		makeBotButton	"left"	5	
+			-attachForm		makeBotButton	"right"	5
+		
+			-attachControl	makemapButton	"top"	35	prefixText
+			-attachForm		makemapButton	"left"	5	
+			-attachForm		makemapButton	"right"	5
+			
+			
+			$formLayout;
+
+	showWindow yuya_makebot;
+}
+
+
+// Make BOT main procedure
+global proc int yuya_makebotMain () {
+
+	string $parent = "yuya_makebot|yuya_formLayout|";
+	int $allorsel = `radioButtonGrp -q -select ($parent+"allOrSel")`;
+	int $assbot = `radioButtonGrp -q -select ($parent+"assingBOT")`;
+	int $location = `radioButtonGrp -q -select ($parent+"fileLocation")`;
+
+	string $fileTex[];
+	if ( $allorsel == 1 ) {
+		$fileTex = `ls -type file`;
+	}else{
+		$fileTex = `ls -sl -type file`;
+	}
+
+	string $current;
+	string $locatePath;
+	
+	// Get path to sourceimages or specified directory.
+	switch($location){
+		
+		case 2:
+			$locatePath = `workspace -q -rd`+"sourceimages/";
+			break;
+		case 3:
+			string $parent = "yuya_makebot|yuya_formLayout|";
+			$locatePath = `textFieldGrp -q -text ($parent+"mkbDirField")`;
+			break;
+		default:
+			break;
+		
+	}
+
+	
+	string $assignBOTCmd;
+	for ( $current in $fileTex ) {
+
+		string $name = `getAttr ($current + ".ftn")`;
+		string $fileName[];
+		int $numTokens = `tokenize $name "/" $fileName`;
+
+		string $fileNameTmp;
+		$fileNameTmp = $fileName[$numTokens-1];
+		
+		int $sel = `radioButtonGrp -q -select ($parent+"selectFixType")`;
+		string $outFile;
+		if($sel==1){
+			string $prefix = `textField -q -text ($parent+"prefixText")`;
+			$prefix = strip($prefix);
+			
+			if($prefix==""){
+				error "Enter pre-fix string.";
+				return 0;
+			}
+			$outFile = $prefix + $fileNameTmp;
+		}else{
+			string $postfix = `textField -q -text ($parent+"postfixText")`;
+			$postfix = strip($postfix);
+			
+			if($postfix==""){
+				error "Enter post-fix string.";
+				return 0;
+			}
+
+			string $buf[];
+
+			if (`tokenize $fileNameTmp "." $buf` > 1)
+			{
+				// get rid of original extension
+
+				$fileNameTmp = "";
+
+				for ($i = 0; $i < size($buf) - 1; $i++)
+					$fileNameTmp += $buf[$i] + ".";
+			}
+
+			$outFile = $fileNameTmp + $postfix;
+		}
+
+		if($location==1){
+			$locatePath = `dirname $name` + "/";
+		}
+
+		$outFile = $locatePath + $outFile;
+		
+		$name = `fromNativePath $name`;
+		string $cmd = "makebot -i \""+$name+"\" -o \""+$outFile+"\";\n";
+		evalEcho $cmd;
+
+		if ($assbot == 1){
+			$assignBOTCmd += "setAttr -type \"string\" "+$current+".ftn \""+$outFile+"\";\n";
+		}
+	}
+
+	eval $assignBOTCmd;
+	return 1;
+
+}
+///////////////////////////////////////////////////////////////////////12.27.2005
+global proc int jaye_makemapMain () {
+
+	string $parent = "yuya_makebot|yuya_formLayout|";
+	int $allorsel = `radioButtonGrp -q -select ($parent+"allOrSel")`;
+	int $assbot = `radioButtonGrp -q -select ($parent+"assingBOT")`;
+	int $location = `radioButtonGrp -q -select ($parent+"fileLocation")`;
+
+	string $fileTex[];
+	if ( $allorsel == 1 ) {
+		$fileTex = `ls -type file`;
+	}else{
+		$fileTex = `ls -sl -type file`;
+	}
+
+	string $current;
+	string $locatePath;
+	
+	// Get path to sourceimages or specified directory.
+	switch($location){
+		
+		case 2:
+			$locatePath = `workspace -q -rd`+"sourceimages/";
+			break;
+		case 3:
+			string $parent = "yuya_makebot|yuya_formLayout|";
+			$locatePath = `textFieldGrp -q -text ($parent+"mkbDirField")`;
+			break;
+		default:
+			break;
+		
+	}
+
+	
+	string $jaassignmapCmd;
+	for ( $current in $fileTex ) {
+
+		string $name = `getAttr ($current + ".ftn")`;
+		string $fileName[];
+		int $numTokens = `tokenize $name "/" $fileName`;
+
+		string $fileNameTmp;
+		$fileNameTmp = $fileName[$numTokens-1];
+		
+		int $sel = `radioButtonGrp -q -select ($parent+"selectFixType")`;
+		string $outFile;
+		if($sel==1){
+			string $prefix = `textField -q -text ($parent+"prefixText")`;
+			$prefix = strip($prefix);
+			
+			if($prefix==""){
+				error "Enter pre-fix string.";
+				return 0;
+			}
+			$outFile = $prefix + $fileNameTmp;
+		}else{
+			string $postfix = `textField -q -text ($parent+"postfixText")`;
+			$postfix = strip($postfix);
+			
+			if($postfix==""){
+				error "Enter post-fix string.";
+				return 0;
+			}
+
+			string $buf[];
+
+			if (`tokenize $fileNameTmp "." $buf` > 1)
+			{
+				// get rid of original extension
+
+				$fileNameTmp = "";
+
+				for ($i = 0; $i < size($buf) - 1; $i++)
+					$fileNameTmp += $buf[$i] + ".";
+			}
+
+			$outFile = $fileNameTmp + $postfix;
+		}
+
+		if($location==1){
+			$locatePath = `dirname $name` + "/";
+		}
+
+		$outFile = $locatePath + $outFile;
+		
+		string $jamayalocation =`getenv "MAYA_LOCATION"`;
+	    string $jacmd = $jamayalocation + "/bin/imf_copy -p";
+	
+		
+		$name = `fromNativePath $name`;
+		string $jatexturetemp[];
+	       string $jatexturename=`tokenize $outFile "." $jatexturetemp`;
+		string $cmd = $jacmd+" "+$name+" "+$jatexturetemp[0]+".map map";
+		system ($cmd);
+		
+		
+	
+
+		if ($assbot == 1){
+			
+			string $jacurrent=$current+".ftn";
+			string $jacurrentname=$jatexturetemp[0]+".map";
+			
+			$jaassignmapCmd += "setAttr -type \"string\" "+$jacurrent+" \""+$jacurrentname+"\";\n";
+			
+		       
+		
+		}
+	}
+
+	eval $jaassignmapCmd;
+	return 1;
+
+}
+///////////////////////////////////////////////////////////////////////////////////////////////
+// Get directory procedures
+global proc yuya_mkbGetDir(){
+	string $first = `workspace -q -fn`;
+	setWorkingDirectory $first "" "";
+	fileBrowserDialog -m 4 -fc "yuya_mkbGetDirName" -ft "Select Directory" -an "Select_Dir";
+}
+
+global proc yuya_mkbGetDirName(string $dir, string $type){
+	string $parent = "yuya_makebot|yuya_formLayout|";
+	textFieldGrp -e -text ($dir+"/") ($parent+"mkbDirField");
+}
+
+
+// Enable-disable dir selector procedure
+global proc yuya_changeDirState(){
+
+	string $parent = "yuya_makebot|yuya_formLayout|";
+	int $state =`radioButtonGrp -q -select ($parent+"fileLocation")`;
+
+	if($state==3){
+		textFieldGrp -e -ed true ($parent+"mkbDirField");
+		button -e -enable true ($parent+"mkbBrowseButton");
+	}else{
+		textFieldGrp -e -ed false ($parent+"mkbDirField");
+		button -e -enable false ($parent+"mkbBrowseButton");
+	}
+
+}
+
+global proc yuya_mkbSelPrePostFix(){
+	string $parent = "yuya_makebot|yuya_formLayout|";
+	int $sel = `radioButtonGrp -q -select ($parent+"selectFixType")`;
+	
+	if($sel==1){
+		textField -e -enable true ($parent+"prefixText");
+		textField -e -enable false ($parent+"postfixText");
+	}else{
+		textField -e -enable false ($parent+"prefixText");
+		textField -e -enable true ($parent+"postfixText");
+	}
+}

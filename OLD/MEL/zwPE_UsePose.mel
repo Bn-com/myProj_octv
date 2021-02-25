@@ -1,0 +1,1007 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ª∆÷ŸŒ¨
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwPE_UsePose()
+{
+	source "ycPoseEditor.mel";
+
+	if(!`window -exists PEusePose`)
+	{
+		optionVar -intValue "PEusePoseShowIcon" 0;
+		optionVar -intValue "PEusePoseSetZero" 1;
+
+		if(!`optionVar -exists "creator"`)
+			optionVar -stringValue "creator" `getenv USERNAME`;
+		if(!`optionVar -exists "masterLibrary"`)
+			optionVar -intValue "masterLibrary" 1;
+	
+		window -retain -title "Pose/Clip Editor: Apply v1.0" -width 800 -height 600 -menuBar true PEusePose;
+			menu -label "Pose/Clip";
+				menuItem -label "Library" -subMenu true;
+					menuItem -checkBox `optionVar -query masterLibrary` -label "Master Library" -command "optionVar -intValue masterLibrary (1 - `optionVar -query masterLibrary`);PEusePoseLoadCharacter";
+					menuItem -checkBox `optionVar -query privateLibrary` -label "Private Library" -command "optionVar -intValue privateLibrary (1 - `optionVar -query privateLibrary`);PEusePoseLoadCharacter";
+					setParent -menu..;
+				menuItem -label "Refresh" -subMenu true;
+					radioMenuItemCollection;
+						menuItem -label "by Name" -radioButton `optionVar -query "PEusePoseSortBy"` -command "optionVar -intValue \"PEusePoseSortBy\" 1;PEusePoseLoadCharacter";
+						menuItem -label "by Date" -radioButton (!`optionVar -query "PEusePoseSortBy"`) -command "optionVar -intValue \"PEusePoseSortBy\" 0;PEusePoseLoadCharacter";
+						setParent -menu..;
+				menu -label "Options";
+					menuItem -label "Show Icons" -checkBox `optionVar -query PEusePoseShowIcon` -command "optionVar -intValue PEusePoseShowIcon (1 - `optionVar -query PEusePoseShowIcon`);PEusePoseShowIcon";
+				menu -label "Help";
+					menuItem -label "Help on Create Pose..." -command "zjHelpCallback zwPE_UsePose";
+
+			string $formLayout = `formLayout`;
+				paneLayout -configuration "horizontal2" PEusePose_paneLayout;
+					tabLayout PEusePose_tabLayout;
+						setParent..;
+					scrollLayout -childResizable true;
+						columnLayout -adjustableColumn true -rowSpacing 2 PEusePose_columnLayout_channels;
+							setParent..;
+						setParent..;
+					setParent..;
+				string $symbolCheckBox = `symbolCheckBox -onImage "SetZeroChannelsON.bmp" -offImage "SetZeroChannelsOFF.bmp" -value true`;
+				symbolCheckBox -edit -changeCommand ("PEusePoseSetZeroChannels " + $symbolCheckBox) $symbolCheckBox;
+
+		formLayout -edit
+			-attachForm	PEusePose_paneLayout	"top"		0
+			-attachForm	PEusePose_paneLayout	"left"		0
+			-attachControl	PEusePose_paneLayout	"bottom"	0	$symbolCheckBox
+			-attachForm	PEusePose_paneLayout	"right"		0
+
+			-attachForm	$symbolCheckBox	"left"		0
+			-attachForm	$symbolCheckBox	"bottom"	0
+			-attachForm	$symbolCheckBox	"right"		0
+		$formLayout;
+
+		showWindow PEusePose;
+		PEusePoseLoadCharacter;
+	}
+	else
+		showWindow PEusePose;
+
+	global int $PEusePoseScriptJob;
+	if($PEusePoseScriptJob == 0)
+		$PEusePoseScriptJob = `scriptJob -event "timeChanged" "PEusePoseCheckBox"`;
+}
+
+global proc PEusePoseSetZeroChannels(string $symbolCheckBox)
+{
+	int $PEusePoseSetZero = `symbolCheckBox -query -value $symbolCheckBox`;
+	optionVar -intValue "PEusePoseSetZero" $PEusePoseSetZero;
+}
+
+global proc PEusePoseLoadCharacter()
+{
+	global string $PEusePose_gridLayout[];
+
+	string $mainCharacter, $mainCharacters[], $child, $children[];
+
+	clear $PEusePose_gridLayout;
+
+	$children = `tabLayout -query -childArray PEusePose_tabLayout`;
+	for ($child in $children)
+		deleteUI $child;
+	$mainCharacters = `partition -query characterPartition`;
+	for ($mainCharacter in $mainCharacters)
+	{
+		setParent PEusePose_tabLayout;
+		
+		string $formLayout = `formLayout`;
+			string $button = `button -label "Key Whole Body" -command ("PEusePoseKeyWholeBody " + $mainCharacter)`;
+			string $scrollLayout = `scrollLayout -childResizable true -resizeCommand "PEusePoseScrollLayoutResizeCommand"`;
+				string $columnLayout = `columnLayout -adjustableColumn true`;
+
+		formLayout -edit
+			-attachForm	$button		"top"		5
+			-attachForm	$button		"left"		0
+			-attachForm	$button		"right"		0
+
+			-attachControl	$scrollLayout	"top"		5	$button
+			-attachForm	$scrollLayout	"left"		0
+			-attachForm	$scrollLayout	"bottom"	0
+			-attachForm	$scrollLayout	"right"		0
+		$formLayout;
+
+		tabLayout -edit -tabLabel $formLayout $mainCharacter PEusePose_tabLayout;
+		PEusePoseLoadSubCharacter $mainCharacter $columnLayout;
+	}
+	int $buf4[] = `paneLayout -query -paneSize PEusePose_paneLayout`;
+	if ($buf4[1] == 100)
+		$buf4[1] = 99;
+	paneLayout -edit -paneSize 1 100 ($buf4[1] + 1) PEusePose_paneLayout;
+	paneLayout -edit -paneSize 1 100 $buf4[1] PEusePose_paneLayout;
+	PEusePoseScrollLayoutResizeCommand;
+}
+
+global proc PEusePoseKeyWholeBody(string $character)
+{
+	string $buf[] = `character -query $character`;
+	$buf = `ls -type character $buf`;
+	for ($character in $buf)
+	{
+		if(!`gmatch $character "*_blink"` && !`gmatch $character "*_expression"` && !`gmatch $character "*_phoneme"` && !`gmatch $character "*_tongue"`)
+		{
+			string $chmem[] = `character -query $character`;
+			string $subcharacters[] = `ls -type character $chmem`;
+			string $channels[] = `stringArrayRemove $subcharacters $chmem`;
+			for ($channel in $channels)
+				setKeyframe $channel;
+		}
+	}
+}
+
+global proc PEusePoseLoadSubCharacter(string $mainCharacter, string $parent)
+{
+	string $subCharacter, $subCharacters[];
+	$subCharacters = `character -query $mainCharacter`;
+	$subCharacters = `ls -type character $subCharacters`;
+	for ($subCharacter in $subCharacters)
+	{
+		setParent $parent;
+		frameLayout -borderStyle "etchedIn" -collapsable true -label $subCharacter;
+		string $columnLayout = `columnLayout -adjustableColumn true`;
+		PEusePoseLoadSubCharacter $subCharacter $columnLayout;
+	}
+	PEusePoseGetLibPose $mainCharacter $parent;
+}
+
+global proc PEusePoseGetLibPose(string $character, string $parent)
+{
+	global string $PEusePose_gridLayout[];
+
+	string $gridLayout[], $str, $folder, $subfolder, $folders[], $folders1[], $characters[];
+	int $i, $j, $find;
+	
+	tokenize $character "_" $characters;
+	
+	if (`size $characters` != 2)
+		return;
+
+	$gridLayout[$i] = `gridLayout -parent $parent -visible false -allowEmptyCells false -cellWidthHeight 76 98`;
+	$PEusePose_gridLayout[size($PEusePose_gridLayout)] = $gridLayout[$i];
+	$i++;
+	if (`optionVar -query masterLibrary`)
+	{
+
+		$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/giant/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/approved/";
+		if(!`filetest -d $folder`)
+			$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/human/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/approved/";
+		if(`filetest -d $folder`)
+			PEusePoseLoadClip $character $gridLayout[0] $folder 0;
+		$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/giant/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/";
+		if(!`filetest -d $folder`)
+			$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/human/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/";
+/*
+		$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/giant/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/approved/";
+		if(!`filetest -d $folder`)
+			$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/human/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/approved/";
+		if(`filetest -d $folder`)
+			PEusePoseLoadClip $character $gridLayout[0] $folder 0;
+		$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/giant/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/";
+		if(!`filetest -d $folder`)
+			$folder = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/human/" + $characters[0] + "/" + $characters[0] + "_common/clips/" + $characters[1] + "/";
+*/
+		if(`filetest -d $folder`)
+		{
+			$folders = `getFileList -folder $folder`;
+			for ($str in $folders)
+			{
+				$subfolder = $folder + $str + "/approved/";
+				if (`filetest -d $subfolder`)
+				{
+					string $frameLayout = `frameLayout -parent $parent -borderStyle "etchedIn" -collapsable true -label $str`;
+					string $columnLayout = `columnLayout -parent $frameLayout -adjustableColumn true`;
+					$gridLayout[$i] = `gridLayout -parent $columnLayout -visible false -allowEmptyCells false -cellWidthHeight 76 98`;
+					$PEusePose_gridLayout[size($PEusePose_gridLayout)] = $gridLayout[$i];
+					PEusePoseLoadClip $character $gridLayout[$i] $subfolder 0;
+				}
+				$i++;
+			}
+		}
+	}
+	if (`optionVar -query privateLibrary`)
+	{
+		$folder = `workspace -query -rootDirectory` + "clips/" + $character + "/";
+		
+		if(`filetest -d $folder`)
+		{
+			PEusePoseLoadClip $character $gridLayout[0] $folder 1;
+
+			$folders1 = `getFileList -folder $folder`;
+			for ($str in $folders1)
+			{
+				$subfolder = $folder + $str + "/";
+				if (`filetest -d $subfolder`)
+				{
+					$subfolder = $folder + $str + "/";
+					
+					$find = false;
+					for ($j=0; $j<size($folders); $j++)
+					{
+						if ($folders[$j] == $str)
+						{
+							PEusePoseLoadClip $character $gridLayout[$j+1] $subfolder 1;
+							$find = true;
+							break;
+						}
+					}
+					if (!$find)
+					{
+						string $frameLayout = `frameLayout -parent $parent -borderStyle "etchedIn" -collapsable true -label $str`;
+						string $columnLayout = `columnLayout -parent $frameLayout -adjustableColumn true`;
+						$PEusePose_gridLayout[size($PEusePose_gridLayout)] = `gridLayout -parent $columnLayout -visible false -allowEmptyCells false -cellWidthHeight 76 98`;
+						PEusePoseLoadClip $character $PEusePose_gridLayout[size($PEusePose_gridLayout)-1] $subfolder 1;
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc PEusePoseLoadClip(string $character, string $parent, string $folder, int $private)
+{
+	string $clip, $clips[];
+	
+	string $gridLayout = "PEusePose_gridLayout_" + $character;
+
+	if(`optionVar -query "PEusePoseSortBy"`)
+		$clips = `PEusePoseSortByName $folder`;
+	else
+		$clips = `PEusePoseSortByTime $folder`;
+	if(size($clips))
+		gridLayout -edit -visible true $parent;
+
+	for ($clip in $clips)
+	{
+		setParent $parent;
+		string $attr[] = `PEusePosePoseAttr $folder $clip`;
+
+		string $annotation = $attr[3];
+		if($attr[1] != "")
+			$annotation += "; " + $attr[1];
+		if($attr[2] != "")
+		$annotation += "; " + $attr[2];	
+
+		string $label = $clip;
+		if(`gmatch $clip ($character + "_*")`)
+			$label = `substring $clip (size($character) + 2) (size($clip))`;
+
+		string $formLayout = `formLayout`;
+
+			string $canvas1 = `canvas -backgroundColor (0.5*(1-$private)) (0.5*(1-$private)) (0.5*(1+$private)) -height 1`;
+			string $canvas2 = `canvas -backgroundColor (0.5*(1-$private)) (0.5*(1-$private)) (0.5*(1+$private)) -width 1`;
+			string $canvas3 = `canvas -backgroundColor (0.5*(1-$private)) (0.5*(1-$private)) (0.5*(1+$private)) -height 1`;
+			string $canvas4 = `canvas -backgroundColor (0.5*(1-$private)) (0.5*(1-$private)) (0.5*(1+$private)) -width 1`;
+			
+			string $symbolButton = `symbolButton -annotation $annotation`;
+			string $image = $folder + $clip + ".iff";
+			if(!`filetest -f $image`)
+				$image = "maya.bmp";
+			if(catch (`symbolButton -edit -width 70 -height 70 -image $image $symbolButton`))
+			{
+				$image = "maya.bmp";
+				symbolButton -edit -width 70 -height 70 -image $image $symbolButton;
+			}
+			reloadImage $image $symbolButton;
+
+			string $canvas = `canvas -visible ($attr[0] == "clip") -backgroundColor 1 0 0 -height 2`;
+
+			string $text = `text -align center -label $label -annotation $clip`;
+			if($attr[0] == "clip")
+		//	{
+		//		if ($private)
+		//			symbolButton -edit -command ("PEusePoseClickCommand \"" + $character + "\" \"" + $clip + "_p\" \"" + $folder + $clip + ".mb\"") $symbolButton;
+		//		else
+		//			symbolButton -edit -command ("PEusePoseClickCommand \"" + $character + "\" \"" + $clip + "\" \"" + $folder + $clip + ".mb\"") $symbolButton;
+		//	}
+				symbolButton -edit -command ("PEuseClipSetAttr \"" + $character + "\" \"" + $clip + "\" \"" + $folder + $clip + ".mb.des\"") $symbolButton;
+			else
+				symbolButton -edit -command ("PEusePoseSetAttr \"" + $character + "\" \"" + $clip + "\" \"" + $folder + $clip + ".mb.des\"") $symbolButton;
+			
+			setParent..;
+
+		formLayout -edit
+			-attachForm		$symbolButton	"top"		3
+			-attachForm		$symbolButton	"left"		3
+			-attachForm		$symbolButton	"right"		3
+
+			-attachControl		$canvas		"top"		0	$symbolButton
+			-attachOppositeControl	$canvas		"left"		0	$symbolButton
+			-attachOppositeControl	$canvas		"right"		0	$symbolButton
+
+			-attachControl		$text		"top"		3	$canvas
+			-attachOppositeControl	$text		"left"		1	$symbolButton
+			-attachOppositeControl	$text		"right"		1	$symbolButton
+
+			-attachOppositeControl	$canvas1	"left"		0	$symbolButton
+			-attachControl		$canvas1	"bottom"	0	$text
+			-attachOppositeControl	$canvas1	"right"		0	$symbolButton
+	
+			-attachOppositeControl	$canvas2	"top"		0	$text
+			-attachOppositeControl	$canvas2	"bottom"	0	$text
+			-attachOppositeControl	$canvas2	"right"		0	$symbolButton
+
+			-attachControl		$canvas3	"top"		0	$text
+			-attachOppositeControl	$canvas3	"left"		0	$symbolButton
+			-attachOppositeControl	$canvas3	"right"		0	$symbolButton
+
+			-attachOppositeControl	$canvas4	"left"		0	$symbolButton
+			-attachOppositeControl	$canvas4	"bottom"	0	$text
+			-attachOppositeControl	$canvas4	"top"		0	$text
+		$formLayout;
+	}
+}
+
+global proc string[] PEusePoseSortByTime(string $folder)
+{
+	string $temp, $buf[], $times[], $clips[];
+	int $i, $j;
+
+	$clips = `getFileList -filespec ($folder + "*.mb.des")`;
+	for ($i=0; $i<size($clips); $i++)
+	{
+		$clips[$i] = `substring $clips[$i] 1 (size($clips[$i]) - 7)`;
+		$buf = `PEusePosePoseAttr $folder $clips[$i]`;
+		$times[$i] = $buf[3];
+	}
+	for ($i=0; $i<size($clips); $i++)
+	{
+		for ($j=$i+1; $j<size($clips); $j++)
+		{
+			if (`PEusePoseTimeComp $times[$i] $times[$j]`)
+			{
+				$temp = $times[$j];
+				$times[$j] = $times[$i];
+				$times[$i] = $temp;
+				
+				$temp = $clips[$j];
+				$clips[$j] = $clips[$i];
+				$clips[$i] = $temp;
+			}
+		}
+	}
+	for ($i=0; $i<size($clips); $i++)
+	{
+		if (`gmatch $clips[$i] "*natural"`)
+		{
+			$clip = $clips[$i];
+			for ($j=$i; $j>0; $j--)
+				$clips[$j] = $clips[$j-1];
+			$clips[0] = $clip;
+		//	break;
+		}
+	}
+	return $clips;
+}
+
+global proc string[] PEusePosePoseAttr(string $folder, string $clip)
+{
+	string $file, $attr[];
+	int $fileId;
+
+	$file = $folder + $clip + ".mb.des";
+	if (`filetest -f $file`)
+	{
+		$fileId = `fopen $file "r"`;
+		if ($fileId)
+		{
+			$attr[0] = strip(`fgetline $fileId`);
+			$attr[1] = strip(`fgetline $fileId`);
+			$attr[2] = strip(`fgetline $fileId`);
+			$attr[3] = strip(`fgetline $fileId`);
+			if(size($attr[0]) < 15)
+				$attr[0] = "";
+			else
+				$attr[0] = `substring $attr[0] 15 (size($attr[0]))`;
+			if(size($attr[1]) < 15)
+				$attr[1] = "";
+			else
+				$attr[1] = `substring $attr[1] 15 (size($attr[1]))`;
+			if(size($attr[2]) < 15)
+				$attr[2] = "";
+			else
+				$attr[2] = `substring $attr[2] 15 (size($attr[2]))`;
+			if(size($attr[3]) < 15)
+				$attr[3] = "";
+			else
+				$attr[3] = `substring $attr[3] 15 (size($attr[3]))`;
+			fclose $fileId;
+		}
+	}
+
+	return $attr;
+}
+
+global proc string[] PEusePoseSortByName(string $folder)
+{
+	string $clip;
+	int $i, $j;
+
+	string $clips[] = `getFileList -filespec ($folder + "*.mb.des")`;
+	for ($i=0; $i<size($clips); $i++)
+		$clips[$i] = `substring $clips[$i] 1 (size($clips[$i]) - 7)`;
+	for ($i=0; $i<size($clips); $i++)
+	{
+		if (`gmatch $clips[$i] "*_l"` && `gmatch $clips[$i+1] "*_r"`)
+		{
+			if (`substring $clips[$i] 1 (size($clips[$i])-2)` == `substring $clips[$i+1] 1 (size($clips[$i+1])-2)`)
+			{
+				$clip = $clips[$i];
+				$clips[$i] = $clips[$i+1];
+				$clips[$i+1] = $clip;
+			}
+		}
+	}
+	for ($i=0; $i<size($clips); $i++)
+	{
+		if (`gmatch $clips[$i] "*natural"`)
+		{
+			$clip = $clips[$i];
+			for ($j=$i; $j>0; $j--)
+				$clips[$j] = $clips[$j-1];
+			$clips[0] = $clip;
+		//	break;
+		}
+	}
+
+	return $clips;
+}
+
+global proc int PEusePoseTimeComp(string $time1, string $time2)
+{
+	if(!`gmatch $time1 "????-??-?? ??:??:??"`)
+		return 0;
+	if(!`gmatch $time2 "????-??-?? ??:??:??"`)
+		return 0;
+
+	string $buf1[], $buf2[];
+	tokenize $time1 " " $buf1;
+	tokenize $buf1[1] ":" $buf2;
+	tokenize $buf1[0] "-" $buf1;
+	
+	string $buf3[], $buf4[];
+	tokenize $time2 " " $buf3;
+	tokenize $buf3[1] ":" $buf4;
+	tokenize $buf3[0] "-" $buf3;
+
+	if((int)$buf3[0] > (int)$buf1[0])
+		return 0;
+	else if((int)$buf3[0] < (int)$buf1[0])
+		return 1;
+	else if((int)$buf3[1] > (int)$buf1[1])
+		return 0;
+	else if((int)$buf3[1] < (int)$buf1[1])
+		return 1;
+	else if((int)$buf3[2] > (int)$buf1[2])
+		return 0;
+	else if((int)$buf3[2] < (int)$buf1[2])
+		return 1;
+	else if((int)$buf4[0] > (int)$buf2[0])
+		return 0;
+	else if((int)$buf4[0] < (int)$buf2[0])
+		return 1;
+	else if((int)$buf4[1] > (int)$buf2[1])
+		return 0;
+	else if((int)$buf4[1] < (int)$buf2[1])
+		return 1;
+	else if((int)$buf4[2] > (int)$buf2[2])
+		return 0;
+	else if((int)$buf4[2] < (int)$buf2[2])
+		return 1;
+	else
+		return 0;
+}
+
+global proc PEusePoseScrollLayoutResizeCommand()
+{
+	global string $PEusePose_gridLayout[];
+
+	string $child;
+	int $numberOfColumns, $numberOfRows;
+
+	if (`window -query -width PEusePose` < 130)
+		$numberOfColumns = 1;
+	else
+		$numberOfColumns = (`window -query -width PEusePose` - 45) / 76;
+	for ($child in $PEusePose_gridLayout)
+	{
+		$numberOfRows = (`gridLayout -query -numberOfChildren $child` + $numberOfColumns - 1) / $numberOfColumns;
+		if($numberOfRows)
+			gridLayout -edit -numberOfRowsColumns $numberOfRows $numberOfColumns $child;
+	}
+}
+
+global proc PEusePoseCopyAttr(string $source, string $dest)
+{
+	string $creator = `optionVar -query creator`;
+	if (`attributeExists "creator" $source`)
+		$creator = `getAttr ($source + ".creator")`;
+
+	string $description;
+	if (`attributeExists "description" $source`)
+		$description = `getAttr ($source + ".description")`;
+
+	string $time = `idmtTime`;
+	if (`attributeExists "time" $source`)
+		$time = `getAttr ($source + ".time")`;
+	
+	addAttr -longName "creator" -dataType "string" $dest;
+	setAttr ($dest + ".creator") -type "string" $creator;
+
+	addAttr -longName "description" -dataType "string" $dest;
+	setAttr ($dest + ".description") -type "string" $description;
+
+	addAttr -longName "time" -dataType "string" $dest;
+	setAttr ($dest + ".time") -type "string" $time;
+}
+
+global proc PEusePoseInstanceClip(string $clip )
+{
+	if(!`objExists $clip`)
+		return;
+	
+	string $characters[] = `clip -q -ch $clip`;
+	if (size($characters) > 0)
+	{
+		string $curTime = `currentTime -query`;
+
+		// Schedule an instance of the clip.
+		string $c;
+		for ($c in $characters) {
+			string $sch = `character -q -sc $c`;
+			string $cmd = ("clipSchedule -start "+$curTime+" -in "+$clip+" "+$sch);
+			evalEcho $cmd;
+		}
+	} else {
+		string $errorStr = ($clip+" is not attached to a character (use copy and paste to apply it to a character).");
+		error($errorStr);
+	}
+}
+
+global proc string PEusePoseIcon(string $object, string $attribute)
+{
+	string $reference, $str, $image, $buf[], $buf1[];
+
+	if (`attributeExists "reference" $object`)
+	{
+		$reference = `getAttr ($object + ".reference")`;
+		tokenize $attribute "_" $buf;
+		$attribute = `substring $attribute 1 (size($attribute) - size($buf[size($buf)-1]) - 1)`;
+		tokenize $reference "\n" $buf;
+		for ($str in $buf)
+		{
+			tokenize $str "\\/." $buf1;
+			if (size($buf1) > 2)
+			{
+				if ($buf1[size($buf1)-2] == $attribute)
+				{
+					$image = `substring $str 1 (size($str) - 2)` + "iff";
+					return $image;
+				}
+			}
+		}
+	}
+
+	return $image;
+}
+
+global proc PEaddImportedTarget(string $target, string $blendShape)
+{
+	global int $refresh;
+	$refresh = 0;
+
+	string $str, $file, $tlist[], $curSh[];
+	int $ncs, $i;
+
+	$str = `substring $target 1 (size($target)-7)`;
+	$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/giant/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/DIRECTOR_FINAL/model/character/human/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/giant/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/MASTER/model/character/human/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/WORKING/model/character/giant/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		$file = `getenv "IDMT_PROJECTS"` + "/Thru_The_Moebius_Strip/Production/WORKING/model/character/human/" + $blendShape + "/" + $blendShape + "_common/facial_target/approved/" + $str + ".mb";
+	if (!`filetest -f $file`)
+		return;
+	
+	$tlist = `listAttr -m ($blendShape + ".w")`;
+	if(`stringArrayCount $target $tlist`)
+		return;
+
+	$curSh = `ls -as`;
+	$ncs = size($curSh);
+
+	file -reference $file;
+
+	$curSh = `ls -as`;
+	for($i=$ncs; $i<size($curSh); $i++)
+	{
+		if(gmatch($curSh[$i], "*target*"))
+			addTarget $blendShape $curSh[$i];
+	}
+
+	if (!`attributeExists "reference" $blendShape`)
+		addAttr -longName "reference" -dataType "string" $blendShape;
+	setAttr -type "string" ($blendShape + ".reference") (`getAttr ($blendShape + ".reference")` + $file + "\n");
+
+	addJawAttr($blendShape, $target);
+
+	if (size(`ls ($target + ".drivenKey")`) != 0)
+	{
+		string $drivenKey = `getAttr ($target + ".drivenKey")`;
+		kcBSapplyDrivenKey(($blendShape + "." + $target), $drivenKey);
+	}
+
+	file -removeReference $file;
+}
+
+global proc PEusePoseLazyLoading(string $character, string $clip)
+{
+	string $channel, $channels[], $buf[];
+	int $i;
+
+	if (`attributeExists "channels" $clip`)
+		$channel = `getAttr ($clip + ".channels")`;
+
+	tokenize $channel "\n" $channels;
+
+	for ($i=0; $i<size($channels); $i++)
+	{
+		
+		tokenize $channels[$i] "." $buf;
+		if(`objExists $buf[0]`)
+		{
+			if(`nodeType $buf[0]` == "blendShape")
+				PEaddImportedTarget $buf[1] $buf[0];
+			if (`objExists $channels[$i]`)
+			{
+				if (!`character -isMember $character $channels[$i]`)
+					character -forceElement $character $channels[$i];
+			}
+		}
+	}
+}
+
+
+global proc PEusePoseClickCommand(string $character, string $clip, string $fileName)
+{
+	global string $PEusePoseChannel[], $PEusePoseCheckBox[];
+	global float $PEusePoseValue[];
+	clear $PEusePoseChannel;
+	clear $PEusePoseCheckBox;
+	clear $PEusePoseValue;
+
+	string $buf[] = `columnLayout -query -childArray PEusePose_columnLayout_channels`;
+	for ($str in $buf)
+		deleteUI $str;
+
+	string $selection[] = `ls -sl`;
+
+	$clip = $clip + "Source";
+
+	if (`objExists $clip`)
+	{
+		if (!`getAttr ($clip + ".clipInstance")`)
+		{
+			PEusePoseInstanceClip $clip;
+			select $selection;
+			return;
+		}
+		else
+			delete $clip;
+	}
+
+	string $tmpNamespace = "clipImportTmp";
+	string $oldNamespace = `namespaceInfo -cur`;
+	namespace -set ":";
+	file -reference -namespace $tmpNamespace -options "v=0;p=17" $fileName;
+	namespace -set (":"+$tmpNamespace);
+	string $nameSpaceNodes[] = `namespaceInfo -lod`;
+	
+	string $clips[] = `ls -type animClip $nameSpaceNodes`;
+
+	namespace -set $oldNamespace;
+
+	if (size($clips) == 1)
+	{
+			
+		catch(`PEusePoseLazyLoading $character $clips[0]`);
+
+		if (`getAttr ($clips[0] + ".clipInstance")` == 0)
+		{
+			string $oldClips[] = `ls -type animClip`;
+			
+			string $cmd = ("clip -copy " + $clips[0] + "; clip -paste -sc 0 -mm \"byNodeName\" " + $character);
+			catch(`eval $cmd`);
+
+			string $newClips[] = `ls -type animClip`;
+			$newClips = `stringArrayRemove $oldClips $newClips`;
+			if (size($newClips))
+			{
+				PEusePoseCopyAttr $clips[0] $newClips[0];
+				rename $newClips[0] $clip;
+			}
+			file -rr $fileName;
+
+			PEusePoseInstanceClip $clip;
+		}
+	}
+	else
+		file -rr $fileName;
+
+	select $selection;
+}
+
+global proc PEusePoseSetAttr(string $character, string $clip, string $file)
+{
+	global string $PEusePoseChannel[], $PEusePoseCheckBox[];
+	global float $PEusePoseValue[];
+	clear $PEusePoseChannel;
+	clear $PEusePoseCheckBox;
+	clear $PEusePoseValue;
+
+	string $str, $channel, $image;
+	int $i;
+	float $value;
+	
+	int $PEusePoseShowIcon = `optionVar -query PEusePoseShowIcon`;
+	int $PEusePoseSetZero = `optionVar -query PEusePoseSetZero`;
+	string $buf[] = `columnLayout -query -childArray PEusePose_columnLayout_channels`;
+	for ($str in $buf)
+		deleteUI $str;
+	setParent PEusePose_columnLayout_channels;
+
+	rowLayout -numberOfColumns 4 -columnWidth4 35 500 50 100 -columnAttach 1 "left" 5;
+		button -label "GE" -annotation "Graph Anim Curves" -command ("PEusePoseCurve " + $character);
+		
+		$floatSliderGrp = `floatSliderGrp -label $clip -field true -minValue 0 -maxValue 1 -value 1 -columnWidth 1 250 -columnAlign 1 "left"`;
+		floatSliderGrp -edit -changeCommand ("PEusePoseSetAll " + $floatSliderGrp) -dragCommand ("PEusePoseSetAll " + $floatSliderGrp) $floatSliderGrp;
+		if (`gmatch $clip "*natural"`)
+			button -label "Key All" -command ("PEusePoseKeyAll \"" + $character + "\" 1");
+		else
+			button -label "Key All" -command ("PEusePoseKeyAll \"" + $character + "\" 1");
+		setParent..;
+	separator;
+
+	int $fileId = `fopen $file "r"`;
+	for ($i=0; $i<11; $i++)
+		fgetline $fileId;
+	while (!`feof $fileId`)
+	{
+		$str = `fgetline $fileId`;
+		tokenize $str "\t" $buf;
+		$channel = $buf[0];
+		$value = float($buf[1]);
+
+		tokenize $channel "." $buf;
+		if(`objExists $buf[0]`)
+		{
+			if(`nodeType $buf[0]` == "blendShape")
+				PEaddImportedTarget $buf[1] $buf[0];
+			if (`objExists $channel`)
+			{
+				if (!`character -isMember $character $channel`)
+					character -forceElement $character $channel;
+			}
+		}
+		if (`objExists $channel`)
+		{
+			if ($value != 0)
+			{
+				$PEusePoseChannel[size($PEusePoseChannel)] = $channel;
+				$PEusePoseValue[size($PEusePoseValue)] = $value;
+				setAttr $channel $value;
+
+				$image = `PEusePoseIcon $buf[0] $buf[1]`;
+				rowLayout -numberOfColumns 4 -columnWidth4 35 500 50 100 -rowAttach 1 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -rowAttach 2 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -columnAttach 1 "left" 5;
+					button -label "GE" -annotation "Graph Anim Curves" -command ("PEusePoseCurve " + $channel);
+					attrFieldSliderGrp -attribute $channel -label $channel -fieldMinValue -1000 -fieldMaxValue 1000 -sliderMinValue 0 -sliderMaxValue 1 -columnWidth 1 250 -columnAlign 1 "left";
+					$PEusePoseCheckBox[size($PEusePoseCheckBox)] = `checkBox -label "Key"`;
+					if($PEusePoseShowIcon && `filetest -f $image`)
+						image -width 64 -height 64 -image $image;
+					setParent..;
+			}
+			else
+			{
+				if($PEusePoseSetZero || `gmatch $clip "*natural"`)
+					setAttr $channel $value;
+			}
+		}
+	}
+	fclose $fileId;
+	PEusePoseCheckBox;
+}
+
+global proc PEuseClipSetAttr(string $character, string $clip, string $file)
+{
+	global string $PEusePoseChannel[], $PEusePoseCheckBox[];
+	global float $PEusePoseValue[];
+	clear $PEusePoseChannel;
+	clear $PEusePoseCheckBox;
+	clear $PEusePoseValue;
+
+	string $str, $channel, $image;
+	int $i;
+	float $value;
+	
+	int $PEusePoseShowIcon = `optionVar -query PEusePoseShowIcon`;
+	int $PEusePoseSetZero = `optionVar -query PEusePoseSetZero`;
+	string $buf[] = `columnLayout -query -childArray PEusePose_columnLayout_channels`;
+	for ($str in $buf)
+		deleteUI $str;
+/*
+	setParent PEusePose_columnLayout_channels;
+
+	rowLayout -numberOfColumns 4 -columnWidth4 35 500 50 100 -columnAttach 1 "left" 5;
+		button -label "GE" -annotation "Graph Anim Curves" -command ("PEusePoseCurve " + $character);
+		
+		$floatSliderGrp = `floatSliderGrp -label $clip -field true -minValue 0 -maxValue 1 -value 1 -columnWidth 1 250 -columnAlign 1 "left"`;
+		floatSliderGrp -edit -changeCommand ("PEusePoseSetAll " + $floatSliderGrp) -dragCommand ("PEusePoseSetAll " + $floatSliderGrp) $floatSliderGrp;
+		if (`gmatch $clip "*natural"`)
+			button -label "Key All" -command ("PEusePoseKeyAll \"" + $character + "\" 1");
+		else
+			button -label "Key All" -command ("PEusePoseKeyAll \"" + $character + "\" 1");
+		setParent..;
+	separator;
+*/
+	int $fileId = `fopen $file "r"`;
+	for ($i=0; $i<11; $i++)
+		fgetline $fileId;
+	while (!`feof $fileId`)
+	{
+		$str = `fgetline $fileId`;
+		tokenize $str "\t" $buf;
+		$channel = $buf[0];
+	//	$value = float($buf[1]);
+
+		tokenize $channel "." $buf;
+		if(`objExists $buf[0]`)
+		{
+			if(`nodeType $buf[0]` == "blendShape")
+				PEaddImportedTarget $buf[1] $buf[0];
+			if (`objExists $channel`)
+			{
+				if (!`character -isMember $character $channel`)
+					character -forceElement $character $channel;
+			}
+		}
+		if (`objExists $channel`)
+			ycImportClip $str 1 1;
+/*
+		{
+			if ($value != 0)
+			{
+				$PEusePoseChannel[size($PEusePoseChannel)] = $channel;
+				$PEusePoseValue[size($PEusePoseValue)] = $value;
+				setAttr $channel $value;
+			
+				$image = `PEusePoseIcon $buf[0] $buf[1]`;
+				rowLayout -numberOfColumns 4 -columnWidth4 35 500 50 100 -rowAttach 1 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -rowAttach 2 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -columnAttach 1 "left" 5;
+					button -label "GE" -annotation "Graph Anim Curves" -command ("PEusePoseCurve " + $channel);
+					attrFieldSliderGrp -attribute $channel -label $channel -fieldMinValue -1000 -fieldMaxValue 1000 -sliderMinValue 0 -sliderMaxValue 1 -columnWidth 1 250 -columnAlign 1 "left";
+					$PEusePoseCheckBox[size($PEusePoseCheckBox)] = `checkBox -label "Key"`;
+					if($PEusePoseShowIcon && `filetest -f $image`)
+						image -width 64 -height 64 -image $image;
+					setParent..;
+			}
+			else
+			{
+				if($PEusePoseSetZero || `gmatch $clip "*natural"`)
+					setAttr $channel $value;
+			}
+		}
+*/
+	}
+	fclose $fileId;
+//	PEusePoseCheckBox;
+}
+
+global proc PEusePoseShowIcon()
+{
+	global string $PEusePoseChannel[], $PEusePoseCheckBox[];
+	clear $PEusePoseCheckBox;
+
+	int $i;
+
+	int $PEusePoseShowIcon = `optionVar -query PEusePoseShowIcon`;
+	string $buf[] = `columnLayout -query -childArray PEusePose_columnLayout_channels`;
+	for ($i=2; $i<size($buf); $i++)
+		deleteUI $buf[$i];
+	setParent PEusePose_columnLayout_channels;
+	for ($i=0; $i<size($PEusePoseChannel); $i++)
+	{
+		tokenize $PEusePoseChannel[$i] "." $buf;
+		string $image = `PEusePoseIcon $buf[0] $buf[1]`;
+		rowLayout -numberOfColumns 4 -columnWidth4 35 500 50 100 -rowAttach 1 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -rowAttach 2 "top" (21 * $PEusePoseShowIcon * `filetest -f $image`) -columnAttach 1 "left" 5;
+		button -label "GE" -annotation "Graph Anim Curves" -command ("PEusePoseCurve " + $PEusePoseChannel[$i]);
+		attrFieldSliderGrp -attribute $PEusePoseChannel[$i] -label $PEusePoseChannel[$i] -fieldMinValue -1000 -fieldMaxValue 1000 -sliderMinValue 0 -sliderMaxValue 1 -columnWidth 1 250 -columnAlign 1 "left";
+		$PEusePoseCheckBox[size($PEusePoseCheckBox)] = `checkBox -label "Key"`;
+		if($PEusePoseShowIcon && `filetest -f $image`)
+			image -width 64 -height 64 -image $image;
+		setParent..;
+	}
+	PEusePoseCheckBox;
+}
+
+global proc PEusePoseCurve(string $channel)
+{
+	if(`objExists $channel`)
+	{
+		select -toggle $channel;
+		GraphEditor;
+	}
+}
+
+global proc PEusePoseCheckBox()
+{
+	global string $PEusePoseChannel[], $PEusePoseCheckBox[];
+	
+	string $buf[];
+	int $i;
+
+	int $time =`currentTime -query`;
+	for ($i=0; $i<size($PEusePoseChannel); $i++)
+	{
+		if(`objExists $PEusePoseChannel[$i]`)
+		{
+			tokenize $PEusePoseChannel[$i] "." $buf;
+			int $idx[] = `keyframe -time $time -indexValue -query $PEusePoseChannel[$i]`;
+			checkBox -edit -value (size($idx) > 0) -onCommand ("setKeyframe " + $PEusePoseChannel[$i]) -offCommand ("cutKey -clear -time " + $time + " -attribute " + $buf[1] + " " + $buf[0]) $PEusePoseCheckBox[$i];
+		}
+	}
+}
+
+global proc PEusePoseSetAll(string $floatSliderGrp)
+{
+	global string $PEusePoseChannel[];
+	global float $PEusePoseValue[];
+	
+	int $i;
+	float $value = `floatSliderGrp -query -value $floatSliderGrp`;
+
+	for ($i=0; $i<size($PEusePoseChannel); $i++)
+	{
+		if(`objExists $PEusePoseChannel[$i]`)
+			setAttr $PEusePoseChannel[$i] ($PEusePoseValue[$i] * $value);
+	}
+}
+
+global proc PEusePoseKeyAll(string $character, int $PEusePoseSetZero)
+{
+	global string $PEusePoseChannel[];
+	global float $PEusePoseValue[];
+	
+	int $i;
+
+	string $chmem[] = `character -query $character`;
+	string $subcharacters[] = `ls -type character $chmem`;
+	string $channels[] = `stringArrayRemove $subcharacters $chmem`;
+	if($PEusePoseSetZero == -1)
+		$PEusePoseSetZero = `optionVar -query PEusePoseSetZero`;
+	if($PEusePoseSetZero)
+	{
+		for ($i=0; $i<size($channels); $i++)
+			setKeyframe $channels[$i];
+	}
+	else
+	{
+		for ($i=0; $i<size($PEusePoseChannel); $i++)
+		{
+			if(`objExists $PEusePoseChannel[$i]`)
+				setKeyframe $PEusePoseChannel[$i];
+		}
+	}
+	PEusePoseCheckBox;
+}

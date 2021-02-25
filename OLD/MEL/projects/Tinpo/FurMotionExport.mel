@@ -1,0 +1,248 @@
+// FurMotionExport.mel (c) 2007 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	After FurExport is complete, this script is called to generate motion vectors from the current and previous frames.
+Use:
+	FurMotionExport argList
+
+Arguments:
+	argList (string)	- list of args, delimited by ';'
+
+Returns:
+	
+Dependancies:
+
+	argList.mel
+	parseXML.mel
+	xml_parser plug-in
+	getPath
+	rfx_fur_generate_motion app
+
+Documentation:
+
+Examples:
+
+Notes:
+	This step is to be skipped when in single frame mode.
+	This is called for once less frames than the FurExport (which needs to generate startFrame-1)
+	
+Bugs:
+
+Original:	02/26/07
+Revisions:	03/07/07	Rev 1.1
+		- Put some checking in to make sure previous and current fur.tmp files exist.
+
+		03/19/07	Rev 1.2
+		- Export locally and copy to lighten network load.
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// current dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/FurMotionExport.1.2.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	
+}
+// ---------------------------------------------------------------------------------------------------
+proc int do_furMotionExport ()
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global int $gPlaylistItem;
+	global string $gTaskType;
+
+	// -------------------------------------------------
+	/*
+		Confirm that the playlist exists
+	*/
+	// -------------------------------------------------
+	if (!`filetest -f $gPlaylist`)
+	{
+		print ($gTaskType+": Playlist "+$gPlaylist+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+	// -------------------------------------------------
+	/*
+		Parse the playlist, and make sure that the playlist item is in range
+	*/
+	// -------------------------------------------------
+	string $xml = readXML ($gPlaylist,0);
+	string $jobs[] = xml_getTag ($xml,"Job");
+	if ($gPlaylistItem >= size($jobs))
+	{
+		print ($gTaskType+": Playlist item "+$gPlaylistItem+" is out of range in "+$gPlaylist+" Can't continue.\n\n");
+		return false;
+	}
+	// now parse the data for the job that this sub-job is assigned to.
+	string $thisJob = $jobs[$gPlaylistItem];
+	int $frame = (int)xml_getVar ($thisJob,"frame");
+	string $node[] = xml_getTag ($thisJob,"CacheOutput");
+	string $location = xml_getVar ($node[0],"location");
+	$node = xml_getTag ($thisJob,"VersionOutput");
+	string $ver_location = xml_getVar ($node[0],"location");
+	$node = xml_getTag ($thisJob,"Asset");
+	string $assetName = xml_getVar ($node[0],"name");
+	string $assetType = xml_getVar ($node[0],"type");
+	string $assetFilename = xml_getVar ($node[0],"filename");
+	string $namespace = xml_getVar ($node[0],"namespace");
+	string $furExportData = getPath ("AssetInfoDir",{$assetType,$assetName})+"/furExportData.xml";
+	float $totalTime = 0.0;
+	string $tempExport = "/usr/tmp/exported.fur";	// files are exported locally here, then copied to final location
+	int $copy_max_tries = 5;
+
+	// -------------------------------------------------
+	/*
+		Confirm that fur export data exists.
+	*/
+	// -------------------------------------------------
+	if (!`filetest -f $furExportData`)
+	{
+		print ($gTaskType+": Fur Export Info file "+$furExportData+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+
+	// -------------------------------------------------
+	/*
+		Parse the fur export data. This gives us a list of nodes that we exported in FurExport.
+	*/
+	// -------------------------------------------------
+	$xml = readXML ($furExportData,0);
+	string $furObjects[] = xml_getTag ($xml,"furObjects");
+	string $objects[] = xml_getTag ($furObjects[0],"Object");
+
+	for ($i=0;$i<size($objects);$i++)
+	{
+		string $type = xml_getVar ($objects[$i],"type");
+		string $exported = xml_getVar ($objects[$i],"shape");
+		
+		// for now, assume that type is "shaveHair", since this is the only one implemented yet.
+
+		// build a path to the fur file
+		string $fur_file_current = $ver_location+"/"+$exported+"."+padNumber($frame,4)+".fur.tmp";
+		string $fur_file_prev = $ver_location+"/"+$exported+"."+padNumber($frame-1,4)+".fur.tmp";
+
+		string $output_file = $ver_location+"/"+$exported+"."+padNumber($frame,4)+".fur";
+
+		// check that we have our files
+		if (!`filetest -f $fur_file_prev`)
+		{
+			print ($gTaskType+": WARNING. Fur file for previous frame "+$fur_file_prev+" doesn't exist. Can't generate motion vectors!\n");
+			continue;
+		}
+		if (!`filetest -f $fur_file_current`)
+		{
+			print ($gTaskType+": WARNING. Fur file for current frame "+$fur_file_current+" doesn't exist. Can't generate motion vectors!\n");
+			continue;
+		}
+
+		// if a temp file exists from before, get rid of it
+		if (`filetest -f $tempExport`)
+			system ("rm "+$tempExport);
+
+		// execute the rfx_fur_generate_motion command
+		string $which = system ("which rfx_fur_generate_motion");
+		print ($gTaskType+": Using "+$which+"\n");
+		string $cmd = "rfx_fur_generate_motion ";
+		//$cmd += $fur_file_prev+" "+$fur_file_current+" "+$output_file;
+		$cmd += $fur_file_prev+" "+$fur_file_current+" "+$tempExport;
+
+		float $st = `timerX`;
+		print ($cmd+"\n");
+		system ($cmd);
+		
+		// now copy to network
+
+		int $success = false;
+		// do a loop to make sure it got there
+		for ($j=0;$j<$copy_max_tries;$j++)
+		{
+			if ($j)
+			{
+				print ($gTaskType+": Copy FAILED! Waiting 5 secs and retrying.\n");
+				pause -sec 5;
+			}
+			
+			print ("cp "+$tempExport+" "+$output_file+"\n");
+			//$st = `timerX`;
+			system ("cp "+$tempExport+" "+$output_file);
+			//$elapsed = `timerX -st $st`;
+			//$copyTime += $elapsed;
+
+			if (`filetest -f $output_file`)
+			{
+				//print ($gTaskType+": Done copying fur to "+$output_file+". Elapsed time: "+$elapsed+" seconds.\n");
+				system ("chmod 777 "+$output_file);
+				
+				$success = true;
+				break;
+			}
+		}
+		// if temp file exists from before, delete it
+		if (`filetest -f $tempExport`)
+			system ("rm "+$tempExport);
+
+		if (!$success)
+		{
+			print ($gTaskType+": Copy FAILED, even after "+$copy_max_tries+"! Bailing!.\n");
+			return false;
+		}
+
+		float $elapsed = `timerX -st $st`;
+		$totalTime += $elapsed;
+
+		//system ("chmod 777 "+$output_file);
+		
+		print ($gTaskType+": Time to generate motion vectors for "+$exported+": "+$elapsed+" seconds.\n");
+
+		// rfx_fur_generate_motion prev.fur current.fur output.fur
+	}
+
+	print ("\n"+$gTaskType+": Total time to generate motion vectors: "+$totalTime+" seconds.\n");
+	
+	print ("\n"+$gTaskType+": DONE.\n");
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc FurMotionExport(string $args) 
+{
+	loadDependencies();
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global int $gPlaylistItem;
+	global string $gTaskType = "FurMotionExport";
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gPlaylist = getArgValue ($args,"playlist");
+	$gPlaylistItem = getArgValue ($args,"playlistItem");
+
+	// do it
+	do_furMotionExport();
+}

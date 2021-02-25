@@ -1,0 +1,821 @@
+
+/*global proc ot_HHSetExport()
+{
+	ot_GeoCache_replaceReference;
+	ot_SetSwitche;
+	ot_SetExport;
+}
+*/
+//本机
+global proc ot_HHGeocacheHighend()
+{
+	ot_GeoCache_replaceReference;
+	ot_SetSwitche;
+	ot_HHSetExport;
+	string $SETs[]=`ls -set`;
+	for($s in $SETs)
+	{
+		if(`match "s006001StreetC" $s`!="")
+		{
+			ot_DeleteSet;
+		}
+	}
+
+	ot_HHGeoCache_Batch;
+ }
+
+//网渲
+//GeoCache 启动文件
+global proc ot_GeocacheHighend()
+{
+	ot_GeoCache_replaceReference;
+	ot_SetSwitche;
+	ot_SetExport;
+	string $SETs[]=`ls -set`;
+	for($s in $SETs)
+	{
+		if(`match "s006001StreetC" $s`!="")
+		{
+			ot_DeleteSet;
+		}
+	}
+	ot_GeoCache_Batch;
+}
+//记录group组
+global proc string[] ot_groupname()
+{
+	string $groupnames[];
+	clear $groupnames;
+	string $SETS[]=`ls -set`;
+	for($set in $SETS)
+	{
+		if(`match "GEO_CACHE_SET" $set`!="")
+		{
+			string $buff[];
+			$nums=`tokenize $set ":" $buff`;
+			string $workspace=$buff[0];
+			string $buffs[];
+			$numss=`tokenize $workspace "_" $buffs`;
+			$groupname=$buffs[1];
+		//	rename $set $newset;
+		    $groupnames[size($groupname)] = $groupname;
+		}
+	}
+	 return $groupnames;
+}
+
+//替换参考(ms_an--->ms_cache
+global proc ot_GeoCache_replaceReference()
+{
+	string $refPaths[]=`file -q -r`;
+	if(size($refPaths)!=0)
+	{
+		for($ref in $refPaths)
+		{
+			string $refRN = `file -q -rfn $ref`;
+			if (`match "ms_anim" $ref` !="")
+			{
+				string $newrefname = `substitute "anim" $ref "cache"`;
+				string $full =`workspace -expandName $newrefname`;
+				string $ful= `match "[^{]+"$full`;
+				if (`filetest -f $ful`)
+				{
+					file -loadReference $refRN  -type "mayaBinary" -options "v=0" $newrefname;
+				}
+			}
+
+		}
+	}
+}
+
+
+//导入所有参考
+global proc ot_GeoCache_imReference()
+{
+	string $refPath[]=`file -q -r`;
+	if(size($refPath)!=0)
+	{
+		for ($r in $refPath)
+		{
+			string $refRN = `file -q -rfn $r`;
+			if (`file -q -dr $r`)	file -loadReference $refRN;
+			file -ir $r;
+		}
+	}
+	
+}
+//
+global proc ot_RenameSet()
+{
+	
+	string $SETS[]=`ls -set`;
+	for($set in $SETS)
+	{
+		if(`match "GEO_CACHE_SET" $set`!="")
+		{
+			string $buff[];
+			$nums=`tokenize $set ":" $buff`;
+			string $workspace=$buff[0];
+			string $buffs[];
+			$numss=`tokenize $workspace "_" $buffs`;
+			$groupname=$buffs[1];
+			string $newset=$workspace+":"+$groupname+"_"+"CACHE_CHA";
+			rename $set $newset;
+		}
+	}
+}
+//
+global proc ot_GeoCache_Batch()
+{
+	
+	string $doCacheGroup[]={};
+	clear $doCacheGroup;
+	//int $tmp = 0;
+	ot_GeoCache_replaceReference();
+	ot_SetSwitche;
+	ot_GeoCache_imReference();
+	ot_RenameSet();
+	zjRemoveNamespace;
+	ot_HHstrTime();
+	//	隐藏modelPanel
+	string $scripts = "";
+		string $modelPanels[] = `getPanel -visiblePanels`;
+		for ($modelPanel in $modelPanels)
+		{
+			if (`getPanel -typeOf $modelPanel` == "modelPanel")
+			{
+				if (!`isolateSelect -query -state $modelPanel`);
+				{
+					isolateSelect -state true $modelPanel;
+					$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+				}
+			}
+		}
+	string $SETS[]=`ls -set`;
+	for($set in $SETS)
+	{
+		if(`match "CACHE_CHA" $set`!="")
+		{
+			string $objs[]=`sets -q  $set`;
+
+
+					
+			select $objs;
+			ot_GeoCache_copyCha();
+			ot_GeoCache_recordMaterial();
+			ot_GeoCache_createCeoCache();
+			ot_GeoCache_deleteCeoCache();
+			ot_GeoCache_deleteParticles();
+			ot_GeoCache_importCeoCache();
+			ot_GeoCache_returnMaterial();
+			ot_GeoCache_BakeFiles();
+			source "zzjUtilityTools.mel";pre_BakeFileNode_ImageNumber();
+
+//	共用cache；
+			evalDeferred ("zwOptimizeGeoCache");
+//		恢复显示	
+			if ($scripts != "")
+			{
+				eval $scripts;
+			}
+		}
+	}
+		
+				
+		string $buf[] = `ls "*_Geocache*"`;
+		for ($obj in $buf)
+		{
+			if (`match "_Geocache[0-9]*$" $obj` != "")
+			{
+				string $objss=`select -add $obj`; 
+			}
+		}
+		string $sceneName=`file -q -sn -shn`;
+		string $newrefname = `substitute "dy" $sceneName "geocache_fs"`;
+		string $outputPath= `workspace -q -rd`+"scenes/"+$newrefname;
+		file -force -options "v=0" -typ "mayaBinary" -pr -es $outputPath;
+		idmtProject -checkin $outputPath -description "Geocache文件";
+
+}
+//本机调
+global proc ot_HHGeoCache_Batch()
+{
+	
+	string $doCacheGroup[]={};
+	clear $doCacheGroup;
+	//int $tmp = 0;
+	ot_GeoCache_replaceReference();
+	ot_SetSwitche;
+	ot_GeoCache_imReference();
+	ot_RenameSet();
+	zjRemoveNamespace;
+	ot_HHstrTime();
+	//	隐藏modelPanel
+	string $scripts = "";
+		string $modelPanels[] = `getPanel -visiblePanels`;
+		for ($modelPanel in $modelPanels)
+		{
+			if (`getPanel -typeOf $modelPanel` == "modelPanel")
+			{
+				if (!`isolateSelect -query -state $modelPanel`);
+				{
+					isolateSelect -state true $modelPanel;
+					$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+				}
+			}
+		}
+	string $SETS[]=`ls -set`;
+	for($set in $SETS)
+	{
+		if(`match "CACHE_CHA" $set`!="")
+		{
+			string $objs[]=`sets -q  $set`;
+
+
+					
+			select $objs;
+			ot_GeoCache_copyCha();
+			ot_GeoCache_recordMaterial();
+			ot_GeoCache_createCeoCache();
+			ot_GeoCache_deleteCeoCache();
+			ot_GeoCache_deleteParticles();
+			ot_GeoCache_importCeoCache();
+			ot_GeoCache_returnMaterial();
+			ot_GeoCache_BakeFiles();
+			source "zzjUtilityTools.mel";pre_BakeFileNode_ImageNumber();
+
+//	共用cache；
+			evalDeferred ("zwOptimizeGeoCache");
+//		恢复显示	
+			if ($scripts != "")
+			{
+				eval $scripts;
+			}
+		}
+	}
+		
+		string $buf[] = `ls "*_Geocache*"`;
+		for ($obj in $buf)
+		{
+			if (`match "_Geocache[0-9]*$" $obj` != "")
+			{
+				string $objss=`select -add $obj`; 
+			}
+		}
+		string $sceneName=`file -q -sn -shn`;
+		string $newrefname = `substitute "dy" $sceneName "geocache_fs"`;
+		string $outputPath= `workspace -q -rd`+"scenes/"+$newrefname;
+		file -force -options "v=0" -typ "mayaBinary" -pr -es $outputPath;
+		//idmtProject -checkin $outputPath -description "Geocache文件";
+
+}
+global proc ot_HHref()
+{
+	ot_GeoCache_replaceReference();
+	ot_SetSwitche;
+	ot_GeoCache_imReference();
+	ot_RenameSet();
+	zjRemoveNamespace;
+	ot_HHstrTime();
+}
+
+// 本机geocache(按选择)
+global proc ot_HHGeoCacheSelect_Batch()
+{
+	ot_HHGeoCache_copyCha();
+	ot_GeoCache_recordMaterial();
+	ot_GeoCache_createCeoCache();
+	ot_GeoCache_deleteCeoCache();
+	ot_GeoCache_deleteParticles();
+	ot_GeoCache_importCeoCache();
+	ot_GeoCache_returnMaterial();
+	ot_GeoCache_BakeFiles();
+	source "zzjUtilityTools.mel";pre_BakeFileNode_ImageNumber();
+
+//	共用cache；
+	evalDeferred ("zwOptimizeGeoCache");
+//		恢复显示	
+
+}
+
+
+//      调用自nj项目
+//	0.load,再import所有的Reference	
+//	1.记录选择的模型
+//	2.copy模型
+//	3.将copy出来的模型转换为柔体
+//	4.创建goal
+//	5.记录材质
+//	6.创建GeoCache
+//	7.删除柔体粒子
+//	8.恢复材质
+
+//float $startTime = `timerX`;
+
+/*global proc ot_GeoCache_copyEnv()
+{
+//	1.记录选择的模型
+	int $start_Frame = `playbackOptions -q -min`-1;
+	if (`currentTime -q`!= $start_Frame)	currentTime $start_Frame;
+	string $selectObjs[] = `ls -sl -l`;
+
+	
+	global string $ot_GeoCache_geoGroup[];
+	clear $ot_GeoCache_geoGroup;
+	global string $ot_GeoCache_particleGroup[];
+	clear $ot_GeoCache_particleGroup;
+	int $indexOfFile =0;	
+	
+//	每次创建一个	GEO_CACHE_OBJ*	的空组
+	global string $ot_groupshort;
+	$ot_groupshort ="Env";
+	global string $ot_GeoCache_geoGroupName;
+	$ot_GeoCache_geoGroupName =`group -em -name GEO_CACHE_OBJ`;	
+	
+//	2.copy模型
+	for ($obj in $selectObjs)
+	{
+		string $objTypes[]=`getShapes($obj)`;
+		if (`nodeType $objTypes[0]`!="mesh" && 
+		`nodeType $objTypes[0]`!="nurbsSurface"&& 
+		`nodeType $objTypes[0]`!="nurbsCurve")	continue;
+
+
+		string $sf=`playbackOptions -q -min`;
+		string $ef=`playbackOptions -q -max`;
+		string $timeRange=$sf+":"+$ef;		
+		
+		string $animCurve = "";
+//		bake模型的visibility，如果原来就没有变化，则bakeResults的返回值为0。
+		if (`bakeResults -t $timeRange ($obj+".v")`)
+		{
+//			查询曲线，
+
+			string $animCurves[]=`listConnections -d 0 -s 1 ($obj+".v")`;
+						
+			for ($ac in $animCurves)
+			{
+				if (`nodeType $ac`=="animCurveTU")
+				{
+					$animCurve=$ac;
+					break;	
+				}					
+			}
+		}
+		
+		else
+		{
+			if (`getAttr ($obj+".v")`==0)	continue;	
+		}
+		
+		select $obj;
+		duplicate -rr;
+		string $newObj[]=`ls -sl -l`;
+		
+		if ($animCurve!="")		connectAttr -f ($animCurve+".output") ($newObj[0]+".visibility");
+
+		parent $newObj[0] $ot_GeoCache_geoGroupName;
+		$newObj=`ls -sl -l`;
+		
+		string $softParticle[] = `soft -c $newObj[0]`;	
+		
+//		如果不是在起始帧复制的模型，这里加上了，反而到了起始帧，模型位置不对
+		setAttr ($softParticle[0]+".startFrame") $start_Frame;	
+
+		$ot_GeoCache_geoGroup[$indexOfFile] = $newObj[0];	
+		$ot_GeoCache_particleGroup[$indexOfFile] = $softParticle[0];	
+		$indexOfFile++;
+		goal -w 1 -utr 0   -g $obj $newObj[0];
+
+	}
+
+
+}
+*/
+//选择
+global proc ot_HHGeoCache_copyCha()
+{
+//	1.记录选择的模型
+	int $start_Frame = `playbackOptions -q -min`-1;
+	if (`currentTime -q`!= $start_Frame)	currentTime $start_Frame;
+	string $selectObjs[] = `ls -sl -l`;
+
+	
+	global string $ot_GeoCache_geoGroup[];
+	clear $ot_GeoCache_geoGroup;
+	global string $ot_GeoCache_particleGroup[];
+	clear $ot_GeoCache_particleGroup;
+	
+	int $indexOfFile =0;	
+	
+//	每次创建一个	Cha_Geocache*	的空组
+	global string $ot_GeoCache_geoGroupName;
+	$ot_GeoCache_geoGroupName =`group -em -name GEO_CACHE_OBJ`;
+
+	
+//	2.copy模型
+	for ($obj in $selectObjs)
+	{
+		string $objTypes[]=`getShapes($obj)`;
+		if (`nodeType $objTypes[0]`!="mesh" && 
+		`nodeType $objTypes[0]`!="nurbsSurface"&& 
+		`nodeType $objTypes[0]`!="nurbsCurve")	continue;
+
+
+		string $sf=`playbackOptions -q -min`;
+		string $ef=`playbackOptions -q -max`;
+		string $timeRange=$sf+":"+$ef;		
+		
+		string $animCurve = "";
+//		bake模型的visibility，如果原来就没有变化，则bakeResults的返回值为0。
+		if (`bakeResults -t $timeRange ($obj+".v")`)
+		{
+//			查询曲线，
+
+			string $animCurves[]=`listConnections -d 0 -s 1 ($obj+".v")`;
+						
+			for ($ac in $animCurves)
+			{
+				if (`nodeType $ac`=="animCurveTU")
+				{
+					$animCurve=$ac;
+					break;	
+				}					
+			}
+		}
+		
+		else
+		{
+			if (`getAttr ($obj+".v")`==0)	continue;	
+		}
+		
+		select $obj;
+		duplicate -rr;
+		string $newObj[]=`ls -sl -l`;
+		
+		if ($animCurve!="")		connectAttr -f ($animCurve+".output") ($newObj[0]+".visibility");
+
+		parent $newObj[0] $ot_GeoCache_geoGroupName;
+		$newObj=`ls -sl -l`;
+		
+		string $softParticle[] = `soft -c $newObj[0]`;	
+		
+//		如果不是在起始帧复制的模型，这里加上了，反而到了起始帧，模型位置不对
+		setAttr ($softParticle[0]+".startFrame") $start_Frame;	
+
+		$ot_GeoCache_geoGroup[$indexOfFile] = $newObj[0];	
+		$ot_GeoCache_particleGroup[$indexOfFile] = $softParticle[0];	
+		$indexOfFile++;
+		goal -w 1 -utr 0   -g $obj $newObj[0];
+
+	}
+
+
+}
+
+
+global proc ot_GeoCache_copyCha()
+{
+//	1.记录选择的模型
+	int $start_Frame = `playbackOptions -q -min`-1;
+	if (`currentTime -q`!= $start_Frame)	currentTime $start_Frame;
+	string $selectObjs[] = `ls -sl -l`;
+
+	
+	global string $ot_GeoCache_geoGroup[];
+	clear $ot_GeoCache_geoGroup;
+	global string $ot_GeoCache_particleGroup[];
+	clear $ot_GeoCache_particleGroup;
+	
+	int $indexOfFile =0;	
+	
+//	每次创建一个	Cha_Geocache*	的空组
+	string $Setss[]=`listSets -object  $selectObjs`;
+	global string $ot_groupshort;
+	$ot_groupshort=`match "[^_]+"$Setss[0]`;
+	string $groupname=$ot_groupshort+"_Geocache";
+	global string $ot_GeoCache_geoGroupName;
+	$ot_GeoCache_geoGroupName =`group -em -name $groupname`;	
+	
+//	2.copy模型
+	for ($obj in $selectObjs)
+	{
+		string $objTypes[]=`getShapes($obj)`;
+		if (`nodeType $objTypes[0]`!="mesh" && 
+		`nodeType $objTypes[0]`!="nurbsSurface"&& 
+		`nodeType $objTypes[0]`!="nurbsCurve")	continue;
+
+
+		string $sf=`playbackOptions -q -min`;
+		string $ef=`playbackOptions -q -max`;
+		string $timeRange=$sf+":"+$ef;		
+		
+		string $animCurve = "";
+//		bake模型的visibility，如果原来就没有变化，则bakeResults的返回值为0。
+		if (`bakeResults -t $timeRange ($obj+".v")`)
+		{
+//			查询曲线，
+
+			string $animCurves[]=`listConnections -d 0 -s 1 ($obj+".v")`;
+						
+			for ($ac in $animCurves)
+			{
+				if (`nodeType $ac`=="animCurveTU")
+				{
+					$animCurve=$ac;
+					break;	
+				}					
+			}
+		}
+		
+		else
+		{
+			if (`getAttr ($obj+".v")`==0)	continue;	
+		}
+		
+		select $obj;
+		duplicate -rr;
+		string $newObj[]=`ls -sl -l`;
+		
+		if ($animCurve!="")		connectAttr -f ($animCurve+".output") ($newObj[0]+".visibility");
+
+		parent $newObj[0] $ot_GeoCache_geoGroupName;
+		$newObj=`ls -sl -l`;
+		
+		string $softParticle[] = `soft -c $newObj[0]`;	
+		
+//		如果不是在起始帧复制的模型，这里加上了，反而到了起始帧，模型位置不对
+		setAttr ($softParticle[0]+".startFrame") $start_Frame;	
+
+		$ot_GeoCache_geoGroup[$indexOfFile] = $newObj[0];	
+		$ot_GeoCache_particleGroup[$indexOfFile] = $softParticle[0];	
+		$indexOfFile++;
+		goal -w 1 -utr 0   -g $obj $newObj[0];
+
+	}
+
+
+}
+
+
+//	string $totalTime = `timerX -startTime $startTime`;
+//	print ("\nTotal Time: "+$totalTime+"\n");	
+
+global proc ot_GeoCache_recordMaterial()
+{
+//	5.记录材质
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjReturnMatList.mel";
+	zzjGetMatList;			
+}
+
+global proc ot_GeoCache_createCeoCache()
+{
+//	6.创建GeoCache		
+	source "doCreateGeometryCache.mel";
+	global string $ot_GeoCache_geoGroup[];
+	global string $ot_GeoCache_geoGroupName;
+	select $ot_GeoCache_geoGroup;
+
+	global string $ot_GeoCache_xmls[];
+	clear $ot_GeoCache_xmls;
+	
+	string $version = `about -version`;
+	$version = `substring  $version 1 4`;
+	global string $ot_groupshort;
+	string $cachePath = `zwGetPath "geoCache" ""`+"/"+$ot_groupshort;
+	sysFile -md $cachePath;
+
+	if ($version == "2008")
+	{
+		$ot_GeoCache_xmls=`doCreateGeometryCache 4 { "2", "1", "10", "OneFilePerFrame", "1", $cachePath, "0",$ot_GeoCache_geoGroupName,"0", "add", "1", "1", "1","0","1" } `;	
+	}
+	else
+	{
+		$ot_GeoCache_xmls=`doCreateGeometryCache 5 { "2", "1", "10", "OneFilePerFrame", "1", $cachePath, "0",$ot_GeoCache_geoGroupName,"0", "add", "1", "1", "1","0","1","mcc" } `;
+	}
+	
+	string $cf = "";
+	string $objHis[]=`listHistory $ot_GeoCache_geoGroup[0]`;
+	for ($o in $objHis)
+	{
+		if (`nodeType $o`=="cacheFile")
+		{
+			if (`getAttr ($o+".enable")`)
+			{
+				$cf = $o;
+				break;	
+			}
+		}
+	}
+	
+	string $cfs[]=`ls -type cacheFile $cf`;
+	clear $ot_GeoCache_xmls;
+	$ot_GeoCache_xmls=`cacheFile -q -f $cfs[0]`;
+}
+
+global proc ot_GeoCache_deleteCeoCache()
+{				
+//	7.删除cache
+	global string $ot_GeoCache_geoGroup[];
+	select $ot_GeoCache_geoGroup;
+	source "deleteCacheFile.mel";
+	deleteCacheFile 3 { "keep", "", "geometry" } ;
+}
+
+//	8.删除柔体粒子
+global proc ot_GeoCache_deleteParticles()
+{
+	global string $ot_GeoCache_particleGroup[];
+	delete $ot_GeoCache_particleGroup;
+}
+
+global proc ot_GeoCache_importCeoCache()
+{
+//	9.导入缓存
+	global string $ot_GeoCache_geoGroup[];
+	global string $ot_GeoCache_xmls[];
+	select $ot_GeoCache_geoGroup;
+	source "doImportCacheFile.mel";
+	doImportCacheFile $ot_GeoCache_xmls[0] "xml" $ot_GeoCache_geoGroup {};
+}
+		
+
+
+global proc ot_GeoCache_returnMaterial()
+{
+//	10.恢复材质			
+		zzjSetMatList;
+}
+
+	
+global proc ot_GeoCache_BakeFiles()
+{
+//	11.bake所有表情贴图
+	int $start_Frame = `playbackOptions -q -min`;
+	int $end_Frame = `playbackOptions -q -max`;
+	string $time_Range=string($start_Frame + ":"+$end_Frame);
+
+	string $files[]=`ls -type file`;
+	for ($f in $files)
+	{
+		string $cons[]=`listConnections ($f+".frameExtension")`;
+		if (`size $cons`)
+		{
+			bakeResults -t  $time_Range  -sb 1 ($f+".frameExtension");
+		}
+	}
+
+}
+
+global proc ot_GeoCache_fixSelectCeoCache()
+{				
+//	12.修复cache
+	source "deleteCacheFile.mel";
+	source "doImportCacheFile.mel";
+	string $sl[]=`ls -sl -l`;
+	
+	for ($s in $sl)
+	{
+		string $cf = "";
+		string $objHis[]=`listHistory $s`;
+		for ($o in $objHis)
+		{
+			if (`nodeType $o`=="cacheFile")
+			{
+				if (`getAttr ($o+".enable")`)
+				{
+					$cf = $o;
+					break;	
+				}
+			}
+		}		
+		if ($cf!="")
+		{
+			string $cachePath[]=`cacheFile -q -f $cf`;
+			DeleteHistory;
+
+			doImportCacheFile $cachePath[0] "xml" $sl {};
+			
+		}
+		
+	}
+}
+//group
+global proc ot_Geocachegroup()
+{
+	string $objs[]=`listRelatives -children GEO_CACHE_OBJ`;
+	for($obj in $objs)
+	{
+		string $buff[];
+		$numTokens = `tokenize $obj "_" $buff`;
+		string $groupname =$buff[0] + "_group";
+		
+		if (!`objExists $groupname`)
+		{
+		    group -empty -name $groupname -parent "GEO_CACHE_OBJ";
+		}
+		parent $obj $groupname;
+	}
+}
+global proc ot_SetSwitche()
+{
+	string $refPaths[]=`file -q -r`;
+	if(size($refPaths)!=0)
+	{
+		for($ref in $refPaths)
+		{
+		    
+		    string $refRN = `file -q -rfn $ref`;
+		    string $animfile =`match "ms_notex" $ref`;
+		    if (size($animfile)!=0)
+		    {
+			string $newrefname = `substitute "notex" $ref "tex"`;
+			string $full =`workspace -expandName $newrefname`;
+			if (`filetest -f $full`)
+			{
+				file -loadReference $refRN  -type "mayaBinary" -options "v=0" $newrefname;
+			}
+		    }
+
+		}
+	}
+}
+//网渲
+global proc ot_SetExport()
+{
+	string $SETS[]=`ls -set`;
+	for ($set in $SETS)
+	{
+		
+		if (`match "Background_SET" $set`!="")
+		{
+			string $objs[]=`sets -q $set`;
+
+			select -add $objs;
+		 }
+	}
+	string $sceneName=`file -q -sn -shn`;
+	string $newrefname = `substitute "dy" $sceneName "Set_fs"`;
+	string $outputPath= `workspace -q -rd`+"scenes/"+$newrefname;
+        file -force -options "v=0" -typ "mayaBinary" -pr -es $outputPath;
+	idmtProject -checkin $outputPath -description "背景文件";	
+}
+//本机
+global proc ot_HHSetExport()
+{
+	string $SETS[]=`ls -set`;
+	for ($set in $SETS)
+	{
+		
+		if (`match "Background_SET" $set`!="")
+		{
+			string $objs[]=`sets -q $set`;
+
+			select -add $objs;
+		 }
+	}
+	string $sceneName=`file -q -sn -shn`;
+	string $newrefname = `substitute "dy" $sceneName "Set_fs"`;
+	string $outputPath= `workspace -q -rd`+"scenes/"+$newrefname;
+        file -force -options "v=0" -typ "mayaBinary" -pr -es $outputPath;
+	//idmtProject -checkin $outputPath -description "背景文件";
+}
+
+//本机导场景工具
+global proc ot_HHExSet()
+{
+	ot_SetSwitche;
+	ot_HHSetExport;
+}
+//解决头发解算飞点问题
+global proc ot_setCachestart()
+{
+	string $cacheNodes[]=`ls -type "cacheFile"`;
+	for ($cacheNode in $cacheNodes)
+	{
+	  setAttr( $cacheNode+".sourceStart") 980;
+	  setAttr( $cacheNode+".originalStart") 980;
+	}
+}
+//设置起始帧数
+global proc ot_HHstrTime()
+{
+	playbackOptions -min 980 -animationStartTime 968;
+}
+//删除场景
+global proc ot_DeleteSet()
+{
+	string $SETS[]=`ls -set`;
+	for ($set in $SETS)
+	{
+		if (`match "Background_SET" $set`!="")
+		{
+			string $objs[]=`sets -q $set`;
+			string $GroupSet[]=`listRelatives -p $objs[0]`;
+			select $GroupSet;
+			delete  $GroupSet;
+		}
+	}
+	//putenv "MAYA_TESTING_CLEANUP" "MAYA_TESTING_CLEANUP";
+	//cleanUpScene 0;	
+}

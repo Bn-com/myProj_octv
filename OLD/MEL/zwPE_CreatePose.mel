@@ -1,0 +1,1878 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: »ÆÖÙÎ¬
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwPE_CreatePose()
+{
+	source "ycPoseEditor.mel";
+
+	if(!`window -exists PEcreatePose`)
+	{
+		if(!`optionVar -exists "creator"`)
+			optionVar -stringValue "creator" `getenv USERNAME`;
+		window -retain -title "Pose/Clip Editor: Create v1.0" -menuBar true -width 700 -height 500 PEcreatePose;
+			menu -label "Pose/Clip";
+				menuItem -label "Create Pose..." -command ("PEperformCreatePose 1");
+				menuItem -label "Create Clip..." -command ("PEperformCreateClip 1");
+				$menu = `menuItem -subMenu true -label "Export"`;
+				menuItem -edit -postMenuCommand ("PEcreatePoseBuildSetCharacterMenu " + $menu) $menu;
+				setParent -menu ..;
+				menuItem -divider true;
+				menuItem -label "Refresh" -subMenu true;
+					radioMenuItemCollection;
+						menuItem -label "by Name" -radioButton `optionVar -query "PEcreatePoseSortBy"` -command "optionVar -intValue \"PEcreatePoseSortBy\" 1;PEcreatePoseLoadCharacter";
+						menuItem -label "by Date" -radioButton (!`optionVar -query "PEcreatePoseSortBy"`) -command "optionVar -intValue \"PEcreatePoseSortBy\" 0;PEcreatePoseLoadCharacter";
+			menu -label "Help";
+				menuItem -label "Help on Create Pose..." -command "zjHelpCallback zwPE_CreatePose";
+			tabLayout PEcreatePose_tabLayout;
+	}
+	PEcreatePoseLoadCharacter;
+	showWindow PEcreatePose;
+}
+
+global proc PEcreatePoseBuildSetCharacterMenu( string $menu ) 
+{
+	string $character, $characters[];
+
+	setParent -menu $menu;
+	menu -edit -deleteAllItems $menu;
+
+	$characters = `partition -query characterPartition`;
+	for ( $character in $characters )
+		PEcreatePoseCharacterMenuItem $character;
+}
+
+global proc PEcreatePoseCharacterMenuItem(string $character)
+{
+	string $chmem[] = `character -query $character`;
+	string $subcharacters[] = `ls -type character $chmem`;
+	int $submenu = (size($subcharacters) > 0);
+	menuItem -label $character -subMenu $submenu -command ("PEcreaterPoseExportCharacter " + $character);
+	if ($submenu)
+	{
+		menuItem -label $character -command ("PEcreaterPoseExportCharacter " + $character);
+		menuItem -divider true;
+		for ($sub in $subcharacters)
+			PEcreatePoseCharacterMenuItem $sub;
+		setParent -menu ..;
+	}
+}
+
+global proc PEcreatePoseLoadCharacter()
+{
+	string $scrollLayout, $columnLayout, $mainCharacter, $child, $mainCharacters[], $children[];
+
+	$children = `tabLayout -query -childArray PEcreatePose_tabLayout`;
+	for ($child in $children)
+		deleteUI $child;
+	$mainCharacters = `partition -query characterPartition`;
+	for ($mainCharacter in $mainCharacters)
+	{
+		setParent PEcreatePose_tabLayout;
+		$scrollLayout = `scrollLayout -childResizable true`;
+		$columnLayout = "PEcreatePose_columnLayout_" + $mainCharacter;
+		columnLayout -adjustableColumn true $columnLayout;
+		PEcreatePoseLoadSubCharacter $mainCharacter $columnLayout;
+		scrollLayout -edit -resizeCommand "PEscrollLayoutResizeCommand" $scrollLayout;
+		tabLayout -edit -tabLabel $scrollLayout $mainCharacter PEcreatePose_tabLayout;
+	}
+	PEscrollLayoutResizeCommand;
+}
+
+global proc PEcreatePoseLoadSubCharacter(string $maincharacter, string $parent)
+{
+	string $columnLayout, $subCharacter, $clip, $subCharacters[], $clips[];
+
+	$subCharacters = `character -query $maincharacter`;
+	$subCharacters = `ls -type character $subCharacters`;
+	for ($subCharacter in $subCharacters)
+	{
+		setParent $parent;
+		frameLayout -borderStyle "etchedIn" -collapsable true -label $subCharacter $subCharacter;
+		$columnLayout = "PEcreatePose_columnLayout_" + $subCharacter;
+		columnLayout -adjustableColumn true $columnLayout;
+		PEcreatePoseLoadSubCharacter $subCharacter $columnLayout;
+	}		
+
+	$clips = `pose -query -name $maincharacter`;
+	if(`optionVar -query "PEcreatePoseSortBy"`)
+		$clips = `PEcreatePoseSortByName $clips`;
+	else
+		$clips = `PEcreatePoseSortByTime $clips`;
+	for ($clip in $clips)
+		PEcreaterPoseLoadClip $maincharacter $clip 0;
+	$clips = `clip -query -name $maincharacter`;
+	if(`optionVar -query "PEcreatePoseSortBy"`)
+		$clips = `PEcreatePoseSortByName $clips`;
+	else
+		$clips = `PEcreatePoseSortByTime $clips`;
+	for ($clip in $clips)
+		PEcreaterPoseLoadClip $maincharacter $clip 1;
+}
+
+global proc string[] PEcreatePoseSortByTime(string $clips[])
+{
+	string $time1, $time2, $clip;
+	int $i, $j;
+
+	for ($i=0; $i<size($clips); $i++)
+	{
+		if(`attributeExists "time" $clips[$i]`)
+			$time1 = `getAttr ($clips[$i] + ".time")`;
+		else
+			$time1 = "";
+		for ($j=$i+1; $j<size($clips); $j++)
+		{
+			if(`attributeExists "time" $clips[$j]`)
+				$time2 = `getAttr ($clips[$j] + ".time")`;
+			else
+				$time2 = "";
+			
+			if (`PEcreatePoseTimeComp $time1 $time2`)
+			{
+				$time1 = $time2;
+				$clip = $clips[$j];
+				$clips[$j] = $clips[$i];
+				$clips[$i] = $clip;
+			}
+		}
+	}
+	return $clips;
+}
+
+global proc string[] PEcreatePoseSortByName(string $clips[])
+{
+	string $clip;
+	int $i;
+
+	for ($i=0; $i<size($clips); $i++)
+	{
+		if (`gmatch $clips[$i] "*_l"` && `gmatch $clips[$i+1] "*_r"`)
+		{
+			if (`substring $clips[$i] 1 (size($clips[$i])-2)` == `substring $clips[$i+1] 1 (size($clips[$i+1])-2)`)
+			{
+				$clip = $clips[$i];
+				$clips[$i] = $clips[$i+1];
+				$clips[$i+1] = $clip;
+			}
+		}
+	}
+	return $clips;
+}
+
+global proc int PEcreatePoseTimeComp(string $time1, string $time2)
+{
+	if(!`gmatch $time1 "????-??-?? ??:??:??"`)
+		return 0;
+	if(!`gmatch $time2 "????-??-?? ??:??:??"`)
+		return 0;
+
+	string $buf1[], $buf2[];
+	tokenize $time1 " " $buf1;
+	tokenize $buf1[1] ":" $buf2;
+	tokenize $buf1[0] "-" $buf1;
+	
+	string $buf3[], $buf4[];
+	tokenize $time2 " " $buf3;
+	tokenize $buf3[1] ":" $buf4;
+	tokenize $buf3[0] "-" $buf3;
+
+	if((int)$buf3[0] > (int)$buf1[0])
+		return 0;
+	else if((int)$buf3[0] < (int)$buf1[0])
+		return 1;
+	else if((int)$buf3[1] > (int)$buf1[1])
+		return 0;
+	else if((int)$buf3[1] < (int)$buf1[1])
+		return 1;
+	else if((int)$buf3[2] > (int)$buf1[2])
+		return 0;
+	else if((int)$buf3[2] < (int)$buf1[2])
+		return 1;
+	else if((int)$buf4[0] > (int)$buf2[0])
+		return 0;
+	else if((int)$buf4[0] < (int)$buf2[0])
+		return 1;
+	else if((int)$buf4[1] > (int)$buf2[1])
+		return 0;
+	else if((int)$buf4[1] < (int)$buf2[1])
+		return 1;
+	else if((int)$buf4[2] > (int)$buf2[2])
+		return 0;
+	else if((int)$buf4[2] < (int)$buf2[2])
+		return 1;
+	else
+		return 0;
+}
+
+global proc PEcreaterPoseLoadClip(string $subCharacter, string $clip, int $isClip)
+{
+	string $character[] = `clip -query -character $clip`;
+	if (size($character) != 1)
+		return;
+
+	if(!`gmatch $clip ($subCharacter + "_*")`)
+		$clip = `rename $clip ($subCharacter + "_" + $clip)`;
+
+	string $gridLayout = "PEcreatePose_gridLayout_" + $subCharacter;
+	string $formLayout = "PEcreatePose_formLayout_" + $clip;
+	string $symbolButton = "PEcreatePose_symbolButton_" + $clip;
+	string $text = "PEcreatePose_text_" + $clip;
+	
+	if(!`gridLayout -exists $gridLayout`)
+	{
+		$columnLayout = "PEcreatePose_columnLayout_" + $subCharacter;
+		gridLayout -allowEmptyCells false -numberOfColumns 10 -cellWidthHeight 70 90 -parent $columnLayout $gridLayout;
+	}
+
+	setParent $gridLayout;
+	formLayout $formLayout;
+		symbolButton $symbolButton;
+			popupMenu;
+				menuItem -label "Create New Snapshot";
+				menuItem -label "Change Property...";
+				menuItem -label "Delete";
+				menuItem -label "Export";
+		text -align center -label "" $text;
+
+	formLayout -edit
+		-attachForm		$symbolButton	"top"	5
+		-attachForm		$symbolButton	"left"	5
+
+		-attachControl		$text		"top"	2	$symbolButton
+		-attachOppositeControl	$text		"left"	0	$symbolButton
+		-attachOppositeControl	$text		"right"	0	$symbolButton
+	$formLayout;
+
+	if($isClip)
+	{
+		$canvas = `canvas -backgroundColor 1 0 0 -height 2`;
+		formLayout -edit
+			-attachControl		$canvas	"top"	0	$symbolButton
+			-attachOppositeControl	$canvas	"left"	1	$symbolButton
+			-attachOppositeControl	$canvas	"right"	0	$symbolButton
+		$formLayout;
+	}
+
+	PEcreaterPoseEditClip $clip;
+}
+
+global proc PEcreaterPoseEditClip(string $clip)
+{
+	string $label, $annotation, $creator, $description, $character[];
+
+	$character = `clip -query -character $clip`;
+	if(`gmatch $clip ($character[0] + "_*")`)
+		$label = `substring $clip (size($character[0]) + 2) (size($clip))`;
+	else
+		$label = $clip;
+
+	if(`attributeExists "time" $clip`)
+		$annotation = `getAttr ($clip + ".time")`;
+	if(`attributeExists "creator" $clip`)
+		$creator = `getAttr ($clip + "." + "creator")`;
+	if(`attributeExists "description" $clip`)
+		$description = `getAttr ($clip + "." + "description")`;
+	if($creator != "")
+		$annotation += "; " + $creator;
+	if($description != "")
+		$annotation += "; " + $description;
+	
+	string $symbolButton = "PEcreatePose_symbolButton_" + $clip;
+	string $popupMenuArray[] = `symbolButton -query -popupMenuArray $symbolButton`;
+	$popupMenuArray = `popupMenu -query -itemArray $popupMenuArray[0]`;
+	string $text = "PEcreatePose_text_" + $clip;
+
+	symbolButton -edit -annotation $annotation -command ("PEclipInstanceMenuCommand " + $clip) $symbolButton;
+	menuItem -edit -command ("PEnewSnapshot " + $clip) $popupMenuArray[0];
+	menuItem -edit -command ("PEchangePoseProperty " + $clip) $popupMenuArray[1];
+	menuItem -edit -command ("PEdeletePose " + $clip) $popupMenuArray[2];
+	menuItem -edit -command ("PEcreatePoseExportClip " + $character[0] + " " + $clip) $popupMenuArray[3];
+	text -edit -label $label -annotation $clip $text;
+
+	PEsymbolButton $clip;
+}
+
+global proc PEsymbolButton(string $clip)
+{
+	string $symbolButton = "PEcreatePose_symbolButton_" + $clip;
+	string $image = `workspace -query -rootDirectory` + "clips/" + $clip + ".iff";
+	if(!`filetest -f $image`)
+		$image = "maya.bmp";
+	if(catch (`symbolButton -edit -width 64 -height 64 -image $image $symbolButton`))
+	{
+		$image = "maya.bmp";
+		symbolButton -edit -width 64 -height 64 -image $image $symbolButton;
+	}
+	reloadImage $image $symbolButton;
+}
+
+global proc PEscrollLayoutResizeCommand()
+{
+	string $child, $children[];
+	int $numberOfColumns, $numberOfRows;
+
+	if (`window -query -width PEcreatePose` <= 115)
+		$numberOfColumns = 1;
+	else
+		$numberOfColumns = (`window -query -width PEcreatePose` - 45) / 70;
+	$children = `ls -type character`;
+	for ($child in $children)
+	{
+		$child = "PEcreatePose_gridLayout_" + $child;
+		if (`gridLayout -exists $child`)
+		{
+			$numberOfRows = (`gridLayout -query -numberOfChildren $child` + $numberOfColumns - 1) / $numberOfColumns;
+			gridLayout -edit -numberOfRowsColumns $numberOfRows $numberOfColumns $child;
+		}
+	}
+}
+
+global proc PEcreaterPoseExportCharacter(string $character)
+{
+	string $chmem[] = `character -query $character`;
+	string $subcharacters[] = `ls -type character $chmem`;
+	for ($sub in $subcharacters)
+		PEcreaterPoseExportCharacter $sub;
+
+	string $channels[] = `stringArrayRemove $subcharacters $chmem`;
+
+	string $clips[] = `pose -query -name $character`;
+	for ($clip in $clips)
+		PEcreatePoseExportClip $character $clip;
+	$clips = `clip -query -name $character`;
+	for ($clip in $clips)
+		PEcreatePoseExportClip $character $clip;
+}
+
+global proc PEcreatePoseExportClip(string $character, string $clip)
+{
+	string $channels;
+
+	string $chmem[] = `character -query $character`;
+	string $subcharacters[] = `ls -type character $chmem`;
+	string $channel[] = `stringArrayRemove $subcharacters $chmem`;
+	int $i;
+	for ($i=0; $i<size($channel); $i++)
+		$channels += $channel[$i] + "\n";
+
+	PEaddAttr $clip;
+
+	if(`attributeExists "rename" $clip`)
+		deleteAttr ($clip + ".rename");
+	if(!`attributeExists "channels" $clip`)
+		addAttr -dataType "string" -longName "channels" $clip;
+	setAttr ($clip + ".channels") -type "string" $channels;
+
+	string $folder = `workspace -query -rootDirectory` + "clips/" + $character;
+	sysFile -makeDir $folder;
+
+//	string $file = $folder + "/" + $clip + ".mb";
+//	sysFile -delete $file;
+
+	string $buf[] = `clip -query -allClips`;
+//	if(`stringArrayCount $clip $buf`)
+//		PEclipEditorExportClip $file $clip;
+
+	deleteAttr ($clip + ".channels");
+	
+	string $oldIcon = `workspace -query -rootDirectory` + "clips/" + $clip + ".iff";
+	$oldIcon = `substituteAllString $oldIcon "/" "\\"`;
+	string $newIcon = $folder + "/" + $clip + ".iff";
+	$newIcon = `substituteAllString $newIcon "/" "\\"`;
+	if(`filetest -f $newIcon`)
+		sysFile -delete $newIcon;
+	chdir "c:";
+	system ("copy \"" + $oldIcon + "\" \"" + $newIcon + "\"");
+
+	string $desFile = $folder + "/" + $clip + ".mb.des";
+	if(`filetest -f $desFile`)
+		sysFile -delete $desFile;
+	int $fileId=`fopen $desFile "w"`;
+	string $des = "Type        : pose";
+	if(`stringArrayCount $clip $buf`)
+		$des = "Type        : clip";
+	$des += "\nCreator     : " + `getAttr ($clip + ".creator")`;
+	$des += "\nDescription : " + `getAttr ($clip + ".description")`;
+	$des += "\nCreate Time : " + `getAttr ($clip + ".time")`;
+	$des += "\n\n\n\n\n\n\n[Channels]\n";
+	fprint $fileId $des;
+
+	if(`stringArrayCount $clip $buf`)
+		$des = `ycExportClip $clip`;
+	else
+	{
+		$des = `PEcreatePoseChannelValue $clip`;
+		undo;
+	}
+	fprint $fileId $des;
+	fclose $fileId;
+
+	if(`filetest -f $newIcon` && `filetest -f $desFile`)
+		print ($desFile + "\n");
+	else
+	{
+		sysFile -delete $newIcon;
+		sysFile -delete $desFile;
+		warning ($clip + " is not exported.");
+	}
+}
+
+global proc string PEcreatePoseChannelValue(string $clip)
+{
+	string $result, $buf[];
+	int $i;
+	
+	string $allPoses[] = `pose -query -allPoses`;
+	string $character[] = `clip -query -character $clip`;
+	string $clipSchedule = `character -query -scheduler $character[0]`;
+	clipSchedule -instance $clip $clipSchedule;
+	string $clipIndex[] = `clipSchedule -query -clipIndex $clipSchedule`;
+	tokenize $clipIndex[size($clipIndex)-1] "," $buf;
+	string $listPairs[] = eval ("clipSchedule -clipIndex " + $buf[1] + "-query -listPairs " + $clipSchedule);
+	for ($i=0; $i<size($listPairs); $i++)
+	{
+		if ($i != 0)
+			$result += "\n";
+		tokenize $listPairs[$i] " " $buf;
+		$result = $result + $buf[0];
+		if(`stringArrayCount $clip $allPoses`)
+		{
+			float $value[] = `keyframe -index 0 -query -valueChange $buf[1]`;
+			$result = $result + "\t" + $value[0];
+		}
+	}
+	return $result;
+}
+
+global proc PEnewSnapshot(string $clip)
+{
+	PEsnapshot $clip;
+
+	PEsymbolButton $clip;
+}
+
+global proc PEsnapshot(string $clip)
+{
+	PEaddAttr $clip;
+
+	string $image = `workspace -query -rootDirectory` + "clips/";
+	sysFile -makeDir $image;
+
+	string $selection[] = `ls -selection`;
+	select -clear;
+	$image = Snapshotfunc($image, $clip, 64, false, false, false, true);
+	select $selection;
+	
+	$image = `substituteAllString $image "/" "\\"`;
+	string $temp = `internalVar -userTmpDir` + "clips.iff";
+	$temp = `substituteAllString $temp "/" "\\"`;
+	chdir "c:";
+	system ("copy \"" + $image + "\" \"" + $temp + "\"");
+	system ("imgcvt -f iff -t bmp \"" + $temp + "\" \"" + $image + "\"");
+	sysFile -delete $temp;
+}
+
+global proc PEchangePoseProperty(string $clip)
+{
+	string $child[];
+
+	string $creator, $description;
+
+	if(`attributeExists "creator" $clip`)
+		$creator = `getAttr ($clip + "." + "creator")`;
+	if(`attributeExists "description" $clip`)
+		$description = `getAttr ($clip + "." + "description")`;
+
+	if (`window -q -exists PoseEditorChangeProperty`)
+		deleteUI -window PoseEditorChangeProperty;
+
+	window -title "Change Pose Property" -width 350 -height 145 PoseEditorChangeProperty;
+		
+		string $formLayout = `formLayout`;
+
+ 			$child[0] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Pose Name:" -text $clip`;
+ 			$child[1] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Creator:" -text $creator`;
+ 			$child[2] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Description:" -text $description`;
+			$child[3] = `button -label "OK" -command ("PEchangePosePropertyOK " + $clip + " " + $child[0] + " " + $child[1] + " " + $child[2])`;
+			$child[4] = `button -label "Cancel" -command "deleteUI -window PoseEditorChangeProperty"`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$child[0]	"top"	5
+			-attachForm		$child[0]	"left"	5
+			-attachForm		$child[0]	"right"	5
+
+			-attachControl		$child[1]	"top"	5	$child[0]
+			-attachForm		$child[1]	"left"	5
+			-attachForm		$child[1]	"right"	5
+
+			-attachControl		$child[2]	"top"	5	$child[1]
+			-attachForm		$child[2]	"left"	5
+			-attachForm		$child[2]	"right"	5
+
+			-attachControl		$child[3]	"top"	10	$child[2]
+			-attachForm		$child[3]	"left"	5
+			-attachPosition		$child[3]	"right"	5	50
+
+			-attachControl		$child[4]	"top"	10	$child[2]
+			-attachPosition		$child[4]	"left"	5	50
+			-attachForm		$child[4]	"right"	5
+		$formLayout;
+
+	showWindow PoseEditorChangeProperty;
+}
+
+global proc PEchangePosePropertyOK(string $clip, string $clipControl, string $creatorControl, string $descriptionControl)
+{
+	string $newName = `textFieldGrp -q -text $clipControl`;
+	string $creator = `textFieldGrp -q -text $creatorControl`;
+	string $description = `textFieldGrp -q -text $descriptionControl`;
+
+	string $character[] = `clip -query -character $clip`;
+	if(!`gmatch $newName ($character[0] + "_*")`)
+		$newName = $character[0] + "_" + $newName;
+	
+	$newName = `rename $clip $newName`;
+
+	string $oldIcon = `workspace -query -rootDirectory` + "clips/" + $clip + ".iff";
+	$oldIcon = `substituteAllString $oldIcon "/" "\\"`;
+	string $newIcon = `workspace -query -rootDirectory` + "clips/" + $newName + ".iff";
+	$newIcon = `substituteAllString $newIcon "/" "\\"`;
+	system ("move \"" + $oldIcon + "\" \"" + $newIcon + "\"");
+
+	PEaddAttr $newName;
+	setAttr ($newName + ".creator") -type "string" $creator;
+	setAttr ($newName + ".description") -type "string" $description;
+
+	if ($clip != $newName)
+	{
+		renameUI ("PEcreatePose_formLayout_" + $clip) ("PEcreatePose_formLayout_" + $newName);
+		renameUI ("PEcreatePose_symbolButton_" + $clip) ("PEcreatePose_symbolButton_" + $newName);
+		renameUI ("PEcreatePose_text_" + $clip) ("PEcreatePose_text_" + $newName);
+	}
+
+	PEcreaterPoseEditClip $newName;
+
+	deleteUI -window PoseEditorChangeProperty;
+}
+
+global proc PEdeletePose(string $clip)
+{
+	string $image = `workspace -query -rootDirectory` + "clips/" + $clip + ".iff";
+	sysFile -delete $image;
+	string $formLayout = "PEcreatePose_formLayout_" + $clip;
+	deleteUI $formLayout;
+	if (`objExists $clip`)
+		delete $clip;
+}
+
+//
+// From doExportClipArgList.mel
+//	global proc int clipEditorExportClip(string $fileName, string $fileType)
+//
+global proc int PEclipEditorExportClip(string $fileName, string $expClipName)
+{
+	string $expClipEditor = "";
+	string $fileType = "mayaBinary";
+	
+	int $ii;
+	string $selClips[];
+	if ($expClipName != "") {
+		$selClips[0] = $expClipName;
+	}
+	else if ($expClipEditor == "") {
+		$selClips = `ls -sl -type animClip`;
+	} else {
+		string $sel[];
+		$sel = `clipEditor -q -sc $expClipEditor`;
+		int $selSize = size($sel);
+		for ($ii = 0; $ii < $selSize; $ii += 2) {
+			string $sch = $sel[$ii];
+			int $clipIndex = $sel[$ii+1];
+			string $clipName = `clipSchedule -ci $clipIndex -q -n $sch`;
+			$selClips[size($selClips)] = $clipName;
+		}
+	}
+	if (size($selClips) == 0) {
+		error("Select clips to be exported.");
+	}
+
+	string $sourceClips[];
+	for ($clipName in $selClips) {
+		string $sourceClipName = `clip -q -scn $clipName`;
+		int $found = 0;
+		for ($item in $sourceClips) {
+			if ($item == $sourceClipName) {
+				$found = 1;
+				break;
+			}
+		}
+		if (! $found) {
+			$sourceClips[size($sourceClips)] = $sourceClipName;
+		}
+	}
+
+	if (size($sourceClips) == 0) {
+		error("Found no source clips for the selected clips.");
+		return 0;
+	}
+	
+	// save the current selection to restore it at the end
+	//
+	string $sel[] = `ls -sl`;
+
+	// create the command string
+	//
+	string $result[];
+	string $isolateCmd = "clip -isolate";
+	string $clipNames = "";
+	for ($clip in $sourceClips) {
+		$clipNames += (" -name "+$clip);
+	}
+	$isolateCmd += $clipNames;
+	catch($result = eval($isolateCmd));
+
+	if (size($result)) {
+		select -r $result;
+		file -type $fileType -exportSelected -channels true -constructionHistory true $fileName;
+		$lib = `ls -type clipLibrary $result`;
+		if (size($lib)) {
+			delete $lib;
+		}
+	} else {
+		select -r $sel;		
+		error("Unable to export. See script editor for details.");
+	}
+
+	// restore selection
+	//
+	select -r $sel;
+	return 1;
+}
+
+global proc PEaddAttr(string $clip)
+{
+	if (!`attributeExists "creator" $clip`)
+	{
+		string $creator = `optionVar -query creator`;
+		addAttr -longName "creator" -dataType "string" $clip;
+		setAttr ($clip + ".creator") -type "string" $creator;
+	}
+
+	if (!`attributeExists "description" $clip`)
+		addAttr -longName "description" -dataType "string" $clip;
+
+	if (!`attributeExists "time" $clip`)
+	{
+		string $time = `idmtTime`;
+		addAttr -longName "time" -dataType "string" $clip;
+		setAttr ($clip + ".time") -type "string" $time;
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//
+// Form hypergraphAnimClipMenu.mel
+//	global proc clipInstanceMenuCommand(string $clip )
+//
+global proc PEclipInstanceMenuCommand(string $clip )
+{
+	string $characters[] = `clip -q -ch $clip`;
+	if (size($characters) > 0)
+	{
+		string $curTime = `currentTime -query`;
+
+		// Schedule an instance of the clip.
+		string $c;
+		for ($c in $characters) {
+			string $sch = `character -q -sc $c`;
+			string $cmd = ("clipSchedule -start "+$curTime+" -in "+$clip+" "+$sch);
+			evalEcho $cmd;
+		}
+	} else {
+		string $errorStr = ($clip+" is not attached to a character (use copy and paste to apply it to a character).");
+		error($errorStr);
+	}
+}
+
+
+//
+// Form hypergraphAnimClipMenu.mel
+//	global proc clipInstanceMenuCommand(string $clip )
+//
+global proc PEclipInstanceMenuCommand1(string $clip )
+{
+	string $characters[] = `clip -q -ch $clip`;
+	if (size($characters) > 0)
+	{
+		string $curTime = `clip -name $clip -query -startTime`;
+
+		// Schedule an instance of the clip.
+		string $c;
+		for ($c in $characters) {
+			string $sch = `character -q -sc $c`;
+			string $cmd = ("clipSchedule -start " + $curTime+" -in "+$clip+" "+$sch);
+			evalEcho $cmd;
+		}
+	} else {
+		string $errorStr = ($clip+" is not attached to a character (use copy and paste to apply it to a character).");
+		error($errorStr);
+	}
+}
+
+
+//--------------------------------------------------------doCreatePoseArgList.mel------------------------------------------------------------------------------
+
+
+// Copyright (C) 1997-2001 Alias|Wavefront,
+// a division of Silicon Graphics Limited.
+//
+// The information in this file is provided for the exclusive use of the
+// licensees of Alias|Wavefront.  Such users have the right to use, modify,
+// and incorporate this code into other products for purposes authorized
+// by the Alias|Wavefront license agreement, without fee.
+//
+// ALIAS|WAVEFRONT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+// INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+// EVENT SHALL ALIAS|WAVEFRONT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+// CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+// DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+// TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+// PERFORMANCE OF THIS SOFTWARE.
+//
+//
+//  Alias|Wavefront Script File
+//  MODIFY THIS AT YOUR OWN RISK
+//
+//  Creation Date:  Jan, 2000
+//
+//
+//	Procedure Name:
+//		doCreatePoseArgList
+//
+//	Description:
+//		Create a new pose
+//
+//	Input Arguments:
+//	$version: The version of this option box.  Used to know how to 
+//	interpret the $args array.
+//		"1" : $name
+//  
+//	$args
+//	Version 1
+//	[0]		$name :  name to give the new pose
+//
+//	Return Value:
+//		None
+//
+
+global proc PEdoCreatePoseArgList( string $version, string $args[] )
+{
+	string $name = $args[0];
+
+	int $versionNo = $version;
+
+	string $sel[] = `ls -sl -type character`;
+
+	// If no character selected, see if there is a current character
+	//
+	if (0 == size($sel)) {
+		$sel = `currentCharacters`;
+	}
+
+	if (size($sel) != 1) {
+	    error "Select exactly one character.";
+		return;
+	}
+	
+	string $subCharacters[] = `character -query $sel[0]`;
+	$subCharacters = `ls -type character $subCharacters`;
+	if (size($subCharacters))
+		error "The selected character contains subcharacters.";
+
+	if(!`gmatch $name ($sel[0] + "_*")`)
+		$name = $sel[0] + "_" + $name;
+
+	// Build the create pose command
+	//
+	string $cmd = ( "pose -name \"" + $name + "\" "+$sel[0]);
+
+	// Create the new pose
+	//
+	string $pose = evalEcho( $cmd );
+
+	if(`objExists $pose`)
+	{
+
+		string $creator = $args[1];
+		string $description = $args[2];
+
+		PEaddAttr $pose;
+		setAttr ($pose + ".creator") -type "string" $creator;
+		setAttr ($pose + ".description") -type "string" $description;
+
+		PEsnapshot $pose;
+		PEcreaterPoseLoadClip $sel[0] $pose 0;
+	}
+}
+
+
+//--------------------------------------------------------doCreateClipArgList.mel------------------------------------------------------------------------------
+
+
+// Copyright (C) 1997-2001 Alias|Wavefront,
+// a division of Silicon Graphics Limited.
+//
+// The information in this file is provided for the exclusive use of the
+// licensees of Alias|Wavefront.  Such users have the right to use, modify,
+// and incorporate this code into other products for purposes authorized
+// by the Alias|Wavefront license agreement, without fee.
+//
+// ALIAS|WAVEFRONT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+// INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+// EVENT SHALL ALIAS|WAVEFRONT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+// CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+// DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+// TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+// PERFORMANCE OF THIS SOFTWARE.
+//
+//
+//  Alias|Wavefront Script File
+//  MODIFY THIS AT YOUR OWN RISK
+//
+//  Creation Date:  Oct, 1999
+//
+//
+//	Procedure Name:
+//		doCreateClipArgList
+//
+//	Description:
+//		Create a new clip
+//
+//	Input Arguments:
+//	$version: The version of this option box.  Used to know how to 
+//	interpret the $args array.
+//		"1" : first verison of nla
+//  
+//	$args
+//	Version 1
+//	[0]		$name :  name to give the new clip
+//	[1]		$schedule :  how to create the clip
+// 			1 == Remove character's animation, add clip to track editor
+// 			2 == Remove character's animation and add clip to library
+// 			3 == Keep existing animation and add clip to library
+//	[2]		$rangeMethod : how to choose the start and end of the clip
+//  [3][4]  $start, $end : if $rangeMethod == specify
+//	Version 2
+//	[5]		$useSubCharacter :  include subcharacters in the clip
+//	Version 3
+//	[6]		$warpMethod : should a time warp curve be created and enabled.
+//				"noWarp" == Do not create a time warp currve
+//				"enabledWarp" == Create a time warp curve and enable it
+//				"disabledWarp" == Create a time warp curve but do not enable it.
+//								
+//
+//	Return Value:
+//		$string: The command string
+//
+
+
+global proc
+PEdoCreateClipArgList( string $version, string $args[] )
+{
+    global string $gPlayBackSlider;
+	// error message for use if there is an error
+	//
+	string $errorMessage = "Too many characters are selected.";
+
+	// Is a character selected?
+	//
+    string $sel[]    = `ls -sl -type character`;
+
+	// If no character selected, see if there is a current character
+	//
+	if (0 == size($sel)) {
+		$sel = `currentCharacters`;
+		$errorMessage = "More than one character is current.";
+	}
+
+	if (size($sel) == 0) {
+		string $ch = `autoCreateCharacter 1 {}`;
+		if ($ch == "") {
+			return;
+		} else {
+			$sel[0] = $ch;
+		}
+	}
+
+	if (size($sel) != 1) {
+	    error($errorMessage);
+		return;
+	}
+
+
+	string $subCharacters[] = `character -query $sel[0]`;
+	$subCharacters = `ls -type character $subCharacters`;
+	if (size($subCharacters))
+		error "The selected character contains subcharacters.";
+
+
+	int    $versionNo   = $version;
+	string $name        = $args[0];
+	string $method 		= $args[1];
+	string $rangeMethod = $args[2];
+	float  $start       = $args[3];
+	float  $end         = $args[4];
+
+	
+	if(!`gmatch $name ($sel[0] + "_*")`)
+		$name = $sel[0] + "_" + $name;
+
+	// use subcharacter flag introduced for v2 of this script (maya3.0 CG)
+	//
+	int    $useSubCharacter = 1;
+	if ($versionNo > 0) {
+		$useSubCharacter = $args[5];
+	}
+
+    // use warp flag introduced for v3 of this script (maya4.0)
+	string $warpMethod  = "noWarp";
+	if ($versionNo > 2) {
+		$warpMethod  = $args[6];
+    }
+
+	int    $scheduleIt  = 0;
+	int    $leaveOriginal  = 0;	
+
+	if ($method == 3)
+		$leaveOriginal = 1;
+
+	string $cmdStart = "clip -name \"" + $name + "\" -sc " + $scheduleIt + " ";
+	if ($leaveOriginal) {
+		$cmdStart += "-leaveOriginal ";
+	}
+
+	if ($useSubCharacter == 0) {
+		$cmdStart += "-ignoreSubcharacters ";
+	}
+	
+	string $clips[];
+	string $cmd;
+	if ($rangeMethod == "selectedMethod") {
+	    float $range[] = `timeControl -q -ra $gPlayBackSlider`;
+		$cmd = $cmdStart + "-startTime " + $range[0] + " -endTime " + $range[1] + " " + $sel[0];
+	}
+	else if ($rangeMethod == "timeSliderMethod") {
+	    float $rangeStart = `playbackOptions -q -min`;
+	    float $rangeEnd   = `playbackOptions -q -max`;
+        $cmd = $cmdStart + "-startTime " + $rangeStart + " -endTime " + $rangeEnd + " " + $sel[0];
+	}
+	else if ($rangeMethod == "animCurveMethod") {
+	    $cmd = $cmdStart + "-animCurveRange "+$sel[0];
+	}
+	else if ($rangeMethod == "startEndMethod") {
+        $cmd = $cmdStart + "-startTime " + $start + " -endTime " + $end + " " + $sel[0];
+	}
+	else {
+	    error("Invalid range method:  " + $rangeMethod + "!");
+		$cmd = "";
+	}
+
+	if (size($cmd) > 0)
+	{
+		string $clipsOld[] = `clip -q -allSourceClips`;
+		evalEcho($cmd);
+		$clips = `clip -q -allSourceClips`;
+		$clips = `stringArrayRemove $clipsOld $clips`;
+		$clips[0] = `rename $clips[0] $name`;
+		if ($method == 1)
+			PEclipInstanceMenuCommand1 $clips[0];
+		
+		string $creator = $args[7];
+		string $description = $args[8];
+		
+		PEaddAttr $clips[0];
+		setAttr ($clips[0] + ".creator") -type "string" $creator;
+		setAttr ($clips[0] + ".description") -type "string" $description;
+
+		PEsnapshot $clips[0];
+		PEcreaterPoseLoadClip $sel[0] $clips[0] 1;
+	}
+
+	//	Set the time warp (if any)
+	//
+	if (size($warpMethod) > 0 && $warpMethod != "noWarp") {
+		int $enabled = ($warpMethod == "enabledWarp");
+		doCreateClipTimeWarp($clips, $enabled);
+	}
+}
+
+
+//--------------------------------------------------------performCreatePose.mel--------------------------------------------------------------------------------
+
+
+// Copyright (C) 1997-2001 Alias|Wavefront,
+// a division of Silicon Graphics Limited.
+//
+// The information in this file is provided for the exclusive use of the
+// licensees of Alias|Wavefront.  Such users have the right to use, modify,
+// and incorporate this code into other products for purposes authorized
+// by the Alias|Wavefront license agreement, without fee.
+//
+// ALIAS|WAVEFRONT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+// INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+// EVENT SHALL ALIAS|WAVEFRONT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+// CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+// DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+// TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+// PERFORMANCE OF THIS SOFTWARE.
+//
+//
+//  Alias|Wavefront Script File
+//  MODIFY THIS AT YOUR OWN RISK
+//
+//  Creation Date:  January 2000
+//
+//  Description:
+//      This script is the create pose option box dialog.
+//
+//  Input Arguments:
+//      None.
+//
+//  Return Value:
+//      None.
+//
+
+global proc PEposeSetOptionVars (int $forceFactorySettings)
+{
+	// Pose name
+	//
+	if ($forceFactorySettings || !`optionVar -exists createPoseName`) {
+		optionVar -stringValue createPoseName "pose1";
+	}
+
+	if ($forceFactorySettings || !`optionVar -exists creator`) {
+		string $creator = `getenv USERNAME`;
+		optionVar -stringValue creator $creator;
+	}
+
+	if ($forceFactorySettings || !`optionVar -exists clipsDescription`) {
+		optionVar -stringValue clipsDescription "";
+	}
+}
+
+//
+//  Procedure Name:
+//      createPoseSetup
+//
+//  Description:
+//		Update the state of the option box UI to reflect the option values.
+//
+//  Input Arguments:
+//      parent               - Top level parent layout of the option box UI.
+//                             Required so that UI object names can be 
+//                             successfully resolved.
+//
+//	forceFactorySettings     - Whether the option values should be set to
+//                             default values.
+//
+//  Return Value:
+//      None.
+//
+global proc PEcreatePoseSetup (string $parent, int $forceFactorySettings)
+{
+	// Retrieve the option settings
+	//
+	PEposeSetOptionVars( $forceFactorySettings );
+
+	setParent $parent;
+	
+	// name
+	//
+	string $name = `optionVar -query createPoseName`;
+	textFieldGrp -e -text $name poseNameWidget;
+
+	string $creator = `optionVar -query creator`;
+	textFieldGrp -e -text $creator poseCreatorWidget;
+
+	string $description = `optionVar -query clipsDescription`;
+	textFieldGrp -e -text $description poseDescriptionWidget;
+}
+
+//
+//  Procedure Name:
+//      createPoseCallback
+//
+//  Description:
+//		Update the option values with the current state of the option box UI.
+//
+//  Input Arguments:
+//      parent - Top level parent layout of the option box UI.  Required so
+//               that UI object names can be successfully resolved.
+//
+//	doIt       - Whether the command should execute.
+//
+//  Return Value:
+//      None.
+//
+global proc PEcreatePoseCallback (string $parent, int $doIt)
+{
+    setParent $parent;
+
+	// Name
+	//
+	optionVar -stringValue createPoseName
+		`textFieldGrp -q -text poseNameWidget`;
+	
+	optionVar -stringValue creator `textFieldGrp -q -text poseCreatorWidget`;
+	optionVar -stringValue clipsDescription `textFieldGrp -q -text poseDescriptionWidget`;
+
+	if ($doIt)
+	{	
+		PEperformCreatePose false; 
+		addToRecentCommandQueue "PEperformCreatePose false" "CreatePose";
+	}
+}
+
+
+proc string PEceatePoseWidgets( string $parent )
+{
+	setParent $parent;
+	
+	string $tabForm = `columnLayout -adjustableColumn true`;
+
+	textFieldGrp -label "Name" -text "pose1" poseNameWidget;
+	textFieldGrp -label "Creator" poseCreatorWidget;
+	textFieldGrp -label "Description" poseDescriptionWidget;
+
+	return $tabForm;
+}
+
+global proc PEcreatePoseOptions ()
+{
+	string $commandName = "PEcreatePose";
+
+	string $applyTitle = "Create";
+	
+	// Build the option box "methods"
+	//
+	string $callback = ($commandName + "Callback");
+	string $setup = ($commandName + "Setup");
+
+	//	Get the option box.
+	//
+	//  The value returned is the name of the layout to be used as
+	//	the parent for the option box UI.
+	//
+	string $layout = getOptionBox();
+	setParent $layout;
+
+	setOptionBoxCommandName("pose");
+
+	setUITemplate -pushTemplate DefaultTemplate;
+	waitCursor -state 1;
+	tabLayout -scr true -tv false;	// To get the scroll bars
+
+	string $parent = `columnLayout -adjustableColumn 1`;
+
+	PEceatePoseWidgets $parent;
+
+	waitCursor -state 0;
+	setUITemplate -popTemplate;
+
+	//	'Apply' button.
+	//
+	string $applyBtn = getOptionBoxApplyBtn();
+	button -edit
+		-label "Create Pose"
+		-command ($callback + " " + $parent + " " + 1)
+		$applyBtn;
+
+	//	'Save' button.
+	//
+	string $saveBtn = getOptionBoxSaveBtn();
+	button -edit 
+		-command ($callback + " " + $parent + " " + 0 + "; hideOptionBox")
+		$saveBtn;
+
+	//	'Reset' button.
+	//
+	string $resetBtn = getOptionBoxResetBtn();
+	button -edit 
+		-command ($setup + " " + $parent + " " + 1)
+		$resetBtn;
+
+	//	Set the option box title.
+	//
+	setOptionBoxTitle("Create Pose Options");
+
+	//	Customize the 'Help' menu item text.
+	//
+	setOptionBoxHelpTag( "CreatePose" );
+
+	//	Set the current values of the option box.
+	//
+	eval (($setup + " " + $parent + " " + 0));	
+	
+	//	Show the option box.
+	//
+	showOptionBox();
+}
+
+
+//
+//  Procedure Name:
+//      assembleCmd
+//
+//  Description:
+//		Construct the command that will apply the option box values.
+//
+//  Input Arguments:
+//      None.
+//
+//  Return Value:
+//      None.
+//
+proc string PEposeAssembleCmd()
+{
+	string $cmd;
+
+	PEposeSetOptionVars(false);
+
+	// get the partition name
+	string $poseName = "pose1";
+	if (`optionVar -exists createPoseName`) {
+		$poseName = `optionVar -query createPoseName`;
+	}
+
+	string $creator = `optionVar -query creator`;
+	string $description = `optionVar -query clipsDescription`;
+
+	// doCreatePoseArgList takes a string array 
+	//
+	$cmd =	"PEdoCreatePoseArgList 2 { " +
+		"\"" + $poseName + "\"" +
+		",\"" + $creator + "\"" +
+		",\"" + $description + "\"" +
+		" };";
+
+	return $cmd;
+}
+
+//
+//  Procedure Name:
+//      performCreatePose
+//
+//  Description:
+//		Create a pose and add the animatable attributes from the 
+//      selected nodes.  This procedure will also show the option box
+//		window if necessary as well as construct the command string
+//		that will create a pose with the current option box values.
+//
+//  Input Arguments:
+//      0 - Execute the command.
+//      1 - Show the option box dialog.
+//      2 - Return the command.
+//
+//  Return Value:
+//      None.
+//
+global proc string PEperformCreatePose (int $action)
+{
+	string $cmd = "";
+
+	switch ($action) {
+
+		//	Execute the command.
+		//
+		case 0:
+			//	Retrieve the option settings
+			//
+			PEposeSetOptionVars(false);
+
+			//	Get the command.
+			//
+			$cmd = `PEposeAssembleCmd`;
+
+			//	Execute the command with the option settings.
+			//
+			evalEcho($cmd);
+
+			break;
+
+		//	Show the option box.
+		//
+		case 1:
+			PEcreatePoseOptions;
+			break;
+		case 2:
+			//	Get the command.
+			//
+			$cmd = `PEposeAssembleCmd`;
+	}
+	return $cmd;
+}
+
+
+
+//---------------------------------------------------------performCreateClip.mel-------------------------------------------------------------------------------
+
+
+// Copyright (C) 1997-2001 Alias|Wavefront,
+// a division of Silicon Graphics Limited.
+//
+// The information in this file is provided for the exclusive use of the
+// licensees of Alias|Wavefront.  Such users have the right to use, modify,
+// and incorporate this code into other products for purposes authorized
+// by the Alias|Wavefront license agreement, without fee.
+//
+// ALIAS|WAVEFRONT DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+// INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS, IN NO
+// EVENT SHALL ALIAS|WAVEFRONT BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+// CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+// DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+// TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+// PERFORMANCE OF THIS SOFTWARE.
+//
+//
+//  Alias|Wavefront Script File
+//  MODIFY THIS AT YOUR OWN RISK
+//
+//  Creation Date:  July 16, 1999
+//
+//
+//  Description:
+//      This script is the create clip option box dialogs.
+//
+//  Input Arguments:
+//      None.
+//
+//  Return Value:
+//      None.
+//
+
+global proc PEclipSetOptionVars (int $forceFactorySettings)
+{
+	// Clip name
+	//
+	if ($forceFactorySettings || !`optionVar -exists createClipName`) {
+		optionVar -stringValue createClipName "clip1";
+	}	
+
+	if ($forceFactorySettings || !`optionVar -exists createClipSchedule`) {
+		optionVar -intValue createClipSchedule 1;
+	}	
+
+	if ($forceFactorySettings || !`optionVar -exists createClipSubChar`) {
+		optionVar -intValue createClipSubChar 1;
+	}	
+
+	if( $forceFactorySettings || !`optionVar -exists createClipStart` ) {
+		optionVar -floatValue createClipStart 0;
+	} 
+	
+	if( $forceFactorySettings || !`optionVar -exists createClipEnd` ) {
+		optionVar -floatValue createClipEnd 10;
+	} 
+	
+	//	createClipTimeWarp
+	// 	0: No Warp Curve Created
+	//	1: Time Warp Curve Created
+	//
+	if ( $forceFactorySettings || !`optionVar -exists createClipTimeWarp`) {
+		optionVar -intValue createClipTimeWarp 0;
+	}
+
+	//	createClipRangeMethodWhich:
+	//	1: set the clip for the selected range
+	//	2: set the clip for the time slider range
+	//	3: set the clip for the length of the anim curves
+	//	4: set the clip for the specified start and end times (default)
+	//
+	if ( $forceFactorySettings || !`optionVar -exists createClipRangeMethodWhich`) {
+		optionVar -intValue createClipRangeMethodWhich 3;
+	}
+
+	if ($forceFactorySettings || !`optionVar -exists creator`) {
+		string $creator = `getenv USERNAME`;
+		optionVar -stringValue creator $creator;
+	}
+
+	if ($forceFactorySettings || !`optionVar -exists clipsDescription`) {
+		optionVar -stringValue clipsDescription "";
+	}
+}
+
+//
+//  Procedure Name:
+//      createClipSetup
+//
+//  Description:
+//		Update the state of the option box UI to reflect the option values.
+//
+//  Input Arguments:
+//      parent               - Top level parent layout of the option box UI.
+//                             Required so that UI object names can be 
+//                             successfully resolved.
+//
+//	forceFactorySettings     - Whether the option values should be set to
+//                             default values.
+//
+//  Return Value:
+//      None.
+//
+global proc PEcreateClipSetup (string $parent, int $forceFactorySettings)
+{
+	// Retrieve the option settings.
+	PEclipSetOptionVars( $forceFactorySettings );
+
+	setParent $parent;
+	
+	// Set the clip name.
+	string $name = `optionVar -query createClipName`;
+	textFieldGrp -e -text $name clipNameWidget;
+
+	// Set the schedule flag
+	int $scheduleIt = `optionVar -query createClipSchedule`;
+
+	// Set the subcharacter flag
+	int $useSubcharacters = `optionVar -query createClipSubChar`;
+	checkBoxGrp -edit -value1 $useSubcharacters useSubCharWidget;
+
+	switch ($scheduleIt) {
+	case 1:
+			radioButtonGrp -e -sl 1 scheduleMethod;
+			break;
+	default:
+	case 2:
+	case 3:			
+			radioButtonGrp -e -sl 1 moveToLibraryMethod;
+			break;
+	}
+	
+	// 1 == Remove character's existing animation & add clip to track editor
+	// 2 == Remove character's existing animation and add clip to library
+    // 3 == Keep existing animation and add clip to library
+	//
+	if ($scheduleIt == 3) {
+		checkBoxGrp -edit -value1 true leaveKeysWidget;
+		radioButtonGrp -e -enable false scheduleMethod;
+	} else {
+		radioButtonGrp -e -enable true scheduleMethod;		
+		checkBoxGrp -edit -value1 false leaveKeysWidget;		
+	}
+
+	//	Set the start and end times.
+	float $start = `optionVar -query createClipStart`;
+	float $end   = `optionVar -query createClipEnd`;
+	floatFieldGrp -edit -value1 $start -value2 $end -enable false startEndValues;
+
+    // Set the correct radio button.
+	int $whichMethod = `optionVar -query createClipRangeMethodWhich`;
+	switch($whichMethod) {
+		case 1:
+			radioButtonGrp -e -sl 1 selectedMethod;
+			break;
+		case 2:
+			radioButtonGrp -e -sl 1 timeSliderMethod;
+			break;
+		case 3:
+			radioButtonGrp -e -sl 1 animCurveMethod;
+			break;
+		case 4:
+		default:
+			radioButtonGrp -e -sl 1 startEndMethod;
+	        floatFieldGrp -edit -enable true startEndValues;
+			break;
+	}
+
+	// Set the correct warp curve radio button.
+	//
+	int $whichWarp = `optionVar -query createClipTimeWarp`;
+	checkBoxGrp -edit -value1 $whichWarp createTimeWarpGrp;
+
+	string $creator = `optionVar -query creator`;
+	textFieldGrp -e -text $creator clipCreatorWidget;
+
+	string $description = `optionVar -query clipsDescription`;
+	textFieldGrp -e -text $description clipDescriptionWidget;
+}
+
+//
+//  Procedure Name:
+//      createClipCallback
+//
+//  Description:
+//		Update the option values with the current state of the option box UI.
+//
+//  Input Arguments:
+//      parent - Top level parent layout of the option box UI.  Required so
+//               that UI object names can be successfully resolved.
+//
+//	doIt       - Whether the command should execute.
+//
+//  Return Value:
+//      None.
+//
+global proc PEcreateClipCallback (string $parent, int $doIt)
+{
+    setParent $parent;
+
+	// Name
+	//
+	optionVar -stringValue createClipName
+		`textFieldGrp -q -text clipNameWidget`;
+
+	optionVar -stringValue creator `textFieldGrp -q -text clipCreatorWidget`;
+	optionVar -stringValue clipsDescription `textFieldGrp -q -text clipDescriptionWidget`;
+	
+	// Set the schedule flag
+	int $leaveKeys = `checkBoxGrp -query -value1 leaveKeysWidget`;	
+
+	int $useSubChar = `checkBoxGrp -query -value1 useSubCharWidget`;	
+	optionVar -intValue createClipSubChar $useSubChar;
+
+	// if the user selects leaveKeys, dim the scheduleMethod widget, since
+	// we only allow you add add the clip to the library if you leave the
+	// keys
+	//
+	if ($leaveKeys) {
+		optionVar -intValue createClipSchedule 3;
+		radioButtonGrp -e -enable false scheduleMethod;
+		radioButtonGrp -e -sl 1 moveToLibraryMethod;		
+	} else {
+		radioButtonGrp -e -enable true scheduleMethod;		
+		if (`radioButtonGrp -q -sl scheduleMethod` == 1) {
+			optionVar -intValue createClipSchedule 1;
+		} else if (`radioButtonGrp -q -sl moveToLibraryMethod` == 1) {
+			optionVar -intValue createClipSchedule 2;
+		}
+	}
+	
+	if (`radioButtonGrp -q -sl selectedMethod` == 1) {
+		optionVar -intValue createClipRangeMethodWhich 1;
+	} else if (`radioButtonGrp -q -sl timeSliderMethod` == 1) {
+		optionVar -intValue createClipRangeMethodWhich 2;
+	} else if (`radioButtonGrp -q -sl animCurveMethod` == 1) {
+		optionVar -intValue createClipRangeMethodWhich 3;
+	} else {
+		optionVar -intValue createClipRangeMethodWhich 4;
+	}
+
+    optionVar -floatValue  createClipStart `floatFieldGrp -query -value1 startEndValues`;
+    optionVar -floatValue  createClipEnd `floatFieldGrp -query -value2 startEndValues`;
+
+	int $warpOption = `checkBoxGrp -q -value1 createTimeWarpGrp`;
+	optionVar -intValue createClipTimeWarp $warpOption;
+
+	if ($doIt)
+		PEperformCreateClip false;
+}
+
+global proc string PEcreateClipWidgets( string $parent )
+{
+	setParent $parent;
+	
+	string $tabForm = `columnLayout -adj true`;
+
+	textFieldGrp -label "Name" -text "clip1" -parent $tabForm
+	        clipNameWidget;
+	
+	textFieldGrp -label "Creator" clipCreatorWidget;
+	textFieldGrp -label "Description" clipDescriptionWidget;
+	separator;
+
+	// schedule it
+	checkBoxGrp
+		-label "Keys"
+		-label1 "Leave Keys in Timeline"
+		-onc "radioButtonGrp -e -enable false scheduleMethod; radioButtonGrp -e -sl 1 moveToLibraryMethod;"
+		-ofc "radioButtonGrp -e -enable true scheduleMethod;"
+		-numberOfCheckBoxes 1
+		leaveKeysWidget;
+	
+	// how to schedule it
+	radioButtonGrp -numberOfRadioButtons 1
+		-label "Clip"
+		-label1 "Put Clip in Visor Only"
+		moveToLibraryMethod;
+
+	radioButtonGrp -numberOfRadioButtons 1
+		-label1 "Put Clip in Trax Editor and Visor"
+		-shareCollection moveToLibraryMethod
+		scheduleMethod;
+
+	// clip start & duration
+	radioButtonGrp -numberOfRadioButtons 1
+		-label "Time Range"
+		-label1 "Use Selected"
+		selectedMethod;
+
+	radioButtonGrp -numberOfRadioButtons 1
+		-label1 "Use Time Slider Range"
+		-shareCollection selectedMethod
+		timeSliderMethod;
+
+	radioButtonGrp -numberOfRadioButtons 1
+		-label1 "Use Animation Curve Range"
+		-shareCollection selectedMethod
+		animCurveMethod;
+
+	radioButtonGrp -numberOfRadioButtons 1
+		-label1 "Specify Start and End"
+		-select 1
+		-shareCollection selectedMethod
+		-onCommand "floatFieldGrp -e -enable true startEndValues"
+		-offCommand "floatFieldGrp -e -enable false startEndValues"
+		startEndMethod;
+
+	floatFieldGrp -label "Start and End" -numberOfFields 2 -parent $tabForm
+	        -columnAttach 1 "right" 5 -columnAttach 2 "left" 0 startEndValues;
+
+	// whether to include subcharacters in the clip
+	checkBoxGrp
+		-label "Subcharacters"
+		-label1 "Include Subcharacters in Clip"
+		-numberOfCheckBoxes 1
+		useSubCharWidget;
+
+	// clip time warps
+	checkBoxGrp
+		-label "Time Warp"
+		-label1 "Create Time Warp Curve"
+		-numberOfCheckBoxes 1
+		createTimeWarpGrp;
+
+	return $tabForm;
+}
+
+global proc PEcreateClipOptions ()
+{
+	string $commandName = "PEcreateClip";
+
+	string $applyTitle = "Create";
+	
+	// Build the option box "methods"
+	//
+	string $callback = ($commandName + "Callback");
+	string $setup = ($commandName + "Setup");
+
+	//	Get the option box.
+	//
+	//  The value returned is the name of the layout to be used as
+	//	the parent for the option box UI.
+	//
+	string $layout = getOptionBox();
+	setParent $layout;
+
+	setOptionBoxCommandName("clip");
+
+	setUITemplate -pushTemplate DefaultTemplate;
+	waitCursor -state 1;
+	tabLayout -scr true -tv false;	// To get the scroll bars
+
+	string $parent = `columnLayout -adjustableColumn 1`;
+
+	PEcreateClipWidgets $parent;
+
+	waitCursor -state 0;
+	setUITemplate -popTemplate;
+
+	//	'Apply' button.
+	//
+	string $applyBtn = getOptionBoxApplyBtn();
+	button -edit
+		-label "Create Clip"
+		-command ($callback + " " + $parent + " " + 1)
+		$applyBtn;
+
+	//	'Save' button.
+	//
+	string $saveBtn = getOptionBoxSaveBtn();
+	button -edit 
+		-command ($callback + " " + $parent + " " + 0 + "; hideOptionBox")
+		$saveBtn;
+
+	//	'Reset' button.
+	//
+	string $resetBtn = getOptionBoxResetBtn();
+	button -edit 
+		-command ($setup + " " + $parent + " " + 1)
+		$resetBtn;
+
+	//	Set the option box title.
+	//
+	setOptionBoxTitle("Create Clip Options");
+
+	//	Customize the 'Help' menu item text.
+	//
+	setOptionBoxHelpTag( "CreateClip" );
+
+	//	Set the current values of the option box.
+	//
+	eval (($setup + " " + $parent + " " + 0));	
+	
+	//	Show the option box.
+	//
+	showOptionBox();
+}
+
+
+//
+//  Procedure Name:
+//      assembleCmd
+//
+//  Description:
+//		Construct the command that will apply the option box values.
+//
+//  Input Arguments:
+//      None.
+//
+//  Return Value:
+//      None.
+//
+global proc string PEclipAssembleCmd()
+{
+	string $cmd;
+
+	PEclipSetOptionVars(false);
+
+	// get the partition name
+	string $clipName = "clip1";
+	if (`optionVar -exists createClipName`) {
+		$clipName = `optionVar -query createClipName`;
+	}
+
+	int $scheduleIt = 1;
+	if (`optionVar -exists createClipSchedule`) {
+		$scheduleIt = `optionVar -query createClipSchedule`;
+	}
+
+	int $useSubChar = 1;
+	if (`optionVar -exists createClipSubChar`) {
+		$useSubChar = `optionVar -query createClipSubChar`;
+	}
+
+	string $createMethod = "startEndMethod";
+	int $whichMethod = `optionVar -q createClipRangeMethodWhich`;
+	switch ($whichMethod) {
+		case 1:
+			$createMethod = "selectedMethod";
+			break;
+		case 2:
+			$createMethod = "timeSliderMethod";
+			break;
+		case 3:
+			$createMethod = "animCurveMethod";
+			break;
+	}
+
+	string $warpMethod = "noWarp";
+	int $timeWarp = `optionVar -q createClipTimeWarp`;
+	if ($timeWarp > 0) {
+		$warpMethod = "enabledWarp";
+	}
+
+	string $creator = `optionVar -query creator`;
+	string $description = `optionVar -query clipsDescription`;
+
+	// doCreateClipArgList takes a string array 
+	//
+	
+	$cmd =	"PEdoCreateClipArgList 3 { " +
+				"\"" + $clipName + "\"" +
+				",\"" + $scheduleIt + "\"" +		
+				",\"" + $createMethod + "\"" +
+				",\"" + `optionVar -query createClipStart` + "\"" +
+				",\"" + `optionVar -query createClipEnd` + "\"" +
+				",\"" + $useSubChar + "\"" +
+				",\"" + $warpMethod + "\"" +
+				",\"" + $creator + "\"" +
+				",\"" + $description + "\"" +
+			" };";
+
+	return $cmd;
+}
+
+//
+//  Procedure Name:
+//      performCreateClip
+//
+//  Description:
+//		Create a clip and add the animatable attributes from the 
+//      selected nodes.  This procedure will also show the option box
+//		window if necessary as well as construct the command string
+//		that will create a clip with the current option box values.
+//
+//  Input Arguments:
+//      0 - Execute the command.
+//      1 - Show the option box dialog.
+//      2 - Return the command.
+//
+//  Return Value:
+//      None.
+//
+global proc string PEperformCreateClip (int $action)
+{
+	string $cmd = "";
+
+	switch ($action) {
+
+		//	Execute the command.
+		//
+		case 0:
+			//	Retrieve the option settings
+			//
+			PEclipSetOptionVars(false);
+
+			//	Get the command.
+			//
+			$cmd = `PEclipAssembleCmd`;
+
+			//	Execute the command with the option settings.
+			//
+			if ($cmd != "")
+			    eval($cmd);
+			break;
+
+		//	Show the option box.
+		//
+		case 1:
+			PEcreateClipOptions;
+			break;
+		case 2:
+			//	Get the command.
+			//
+			$cmd = `PEclipAssembleCmd`;
+	}
+	return $cmd;
+}

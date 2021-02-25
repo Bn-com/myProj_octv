@@ -1,0 +1,109 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 廖尚恒
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//这个脚本的用途是通过key 相机的filmOffset 和 cameraScale 属性，
+//使指定的物体始终在指定的相机的中心点，而且保持大小不变。
+//廖尚恒写于2003年4月11日。
+//使用：第一个参数指定相机的名字，第二个参数指定要渲染的物体的名字，第三个参数指定物体的高度
+//,如果指定的高度为零，则使用物体的boundingBox的Y轴上的大小。
+
+//廖尚恒修改于4月14日。
+
+
+global proc shCenterCam(string $cam, string $obj, float $YSize)
+{
+ if(!$YSize)
+ {
+  $YSize = `getAttr ($obj + ".boundingBox.boundingBoxSize.boundingBoxSizeY")`;
+  if(!$YSize)
+    $YSize = 0.02;
+ }
+ $YSize *= 0.5;
+
+ float $Smax = 11;
+ float $scaleValue;
+ 
+ float $AspectRatio = `getAttr defaultResolution.deviceAspectRatio`;
+
+ $scaleValue = 23.26*$YSize/($Smax/$AspectRatio);
+
+ float $filmOffsetX,$filmOffsetY,$cameraScale;
+ int   $startFrame = `playbackOptions -q -minTime`;
+ int   $endFrame = `playbackOptions -q -maxTime`;
+
+ //声明表示相机的坐标，对象的坐标，对象在相机坐标系的坐标的浮点型变量。
+ float $camPos[3];
+ float $objPos[3];
+ float $obj_cam_pos[3];
+
+ //声明表示物体的轴心在投影平面上的坐标的变量。
+ float $Cx,$Cy,$Cz;
+
+ //假设基本焦距为35 。
+ float $baseFL = 35.00;
+ float $camFL =  `getAttr ($cam + ".focalLength")`;
+ float $multFL = $camFL/$baseFL;
+
+ float $camMatrix[16] = `getAttr ($cam + ".worldInverseMatrix")`;
+ matrix $CM[4][4];
+ matrix $PM[1][4];
+ matrix $PP[1][4];
+
+ //以下每帧运行一次。
+
+ for($i = $startFrame; $i <= $endFrame; $i++)
+ {
+  currentTime $i;
+  
+  //获得对象的world space坐标。  
+  $objPos = `xform -q -ws -rp $obj`;
+
+  //获得指定相机的worldInverseMatrix[0];
+  $camMatrix = `getAttr ($cam + ".worldInverseMatrix[0]")`;
+
+  $CM = <<$camMatrix[0],$camMatrix[1],$camMatrix[2], $camMatrix[3];$camMatrix[4], $camMatrix[5], $camMatrix[6], $camMatrix[7];$camMatrix[8], $camMatrix[9], $camMatrix[10], $camMatrix[11];$camMatrix[12], $camMatrix[13], $camMatrix[14], $camMatrix[15]>>;
+  $PM = <<$objPos[0],$objPos[1],$objPos[2],1>>;  //在Maya里，点表示为行矩阵，不是列矩阵,跟图形学中的常用表示相反。
+  $PP = $PM*$CM;  //通过坐标变换的矩阵运算得到物体的轴心点在相机坐标系中的坐标。
+
+  $obj_cam_pos[0] = $PP[0][0];
+  $obj_cam_pos[1] = $PP[0][1];
+  $obj_cam_pos[2] = $PP[0][2];
+ 
+  //设置camera的cameraScale值，必须在设置offset值之前设置。
+  $cameraScale = `abs (1/($obj_cam_pos[2]/$scaleValue))`;
+  setAttr ($cam + ".cameraScale") $cameraScale; //$scaleValue越大，物体越小。
+  setKeyframe ($cam + ".cameraScale");
+
+  //print "obj in camera space: \n";
+  //print $obj_cam_pos;
+  //print "\n";
+
+  //尝试算出对象中心在投影平面上的坐标。
+  float $B = `pow ($obj_cam_pos[0]*$obj_cam_pos[0]+$obj_cam_pos[1]*$obj_cam_pos[1]) 0.5`;
+  float $A = $B/$obj_cam_pos[2];
+ 
+  $Cx = $A*$obj_cam_pos[0]/$B;
+  $Cy = $A*$obj_cam_pos[1]/$B;
+
+  //物体的轴心点在相机的投影平面上的投影和相机的cameraScale有关，是线性关系。
+  $Cx *= -$multFL/$cameraScale; 
+  $Cy *= -$multFL/$cameraScale;
+
+
+  $filmOffsetX = $Cx/0.0426*0.0587; //0.0426和0.0587刚刚好呀。
+  $filmOffsetY = $Cy/0.0426*0.0587; 
+  
+  setAttr ($cam + ".horizontalFilmOffset") $filmOffsetX;
+  setAttr ($cam + ".verticalFilmOffset") $filmOffsetY;
+
+  setKeyframe ($cam + ".horizontalFilmOffset");
+  setKeyframe ($cam + ".verticalFilmOffset");
+ }
+}

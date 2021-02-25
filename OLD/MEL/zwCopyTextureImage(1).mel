@@ -1,0 +1,1226 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 复制贴图函数
+/*
+proc MakeBot(string $source, string $bot, string $destFolder)
+{
+	string $temp = `internalVar -userTmpDir` + $bot;
+	sysFile -delete $temp;
+	makebot -input $source -output $temp;
+	zwPublishCopyFile $temp $destFolder "other" "MASTER" false;
+	sysFile -delete $temp;
+}
+*/
+
+global proc zwCopyTextureImage(string $version, string $args[])
+{
+	eval "source \"zwGetSequence.mel\"";
+
+	string $nodeType;	// 节点类型，例如：file、brush、imagePlane
+	string $attr;		// 节点属性，例如：fileTextureName、leafImage、flowerImage、imageName
+	string $destFolder;	// 目标目录
+	int $modifyPath;	// 修改贴图路经
+	int $convertToIff;	// 转换成iff 格式
+	int $errorStop;		// 当出错时error 而不是warning
+	int $percentage;	// 进度
+	string $exceptFolder[];	// 排除目录的表达式
+	string $project;
+	int $useProxy = false;	// 使用CheckinService
+	int $selectionOnly = false;
+
+	python ("import idmt.maya.path");
+
+	if ($version == 3)
+	{
+		$nodeType	= $args[0];
+		$attr		= $args[1];
+		$destFolder	= $args[2];
+		$modifyPath	= $args[3];
+		$convertToIff	= $args[4];
+		$errorStop	= $args[5];
+		$percentage	= $args[6];
+		$project	= $args[7];
+		$useProxy	= $args[8];
+		$selectionOnly	= $args[9];
+	}
+	if ($project == "Calimero")
+	{
+		zwCopyTextureImageCalimero($nodeType, $attr, $destFolder);
+		return;
+	}
+
+	string $formatDest = "iff";
+	int $nj2017 = false;
+	if ($project == "Enyo" || $project == "GummiTarzan" || $project == "TomAndJerry" || $project == "EarthQuake")
+	{
+		$formatDest = "map";
+	}
+	else if ($project == "HeartBroken")
+	{
+		$formatDest = "dds";
+	}
+	else if ($project == "XingYungu" || $project == "MiniTiger" || `match "^diveollydive[0-9]+$" (tolower($project))` != "")	//  || $project == "ShunLiu"
+	{
+		$formatDest = "tx";
+	}
+	else if ($project == "YODA")
+	{
+		$formatDest = "tif";
+	}
+	else if ($project == "MagicForest")
+	{
+		$formatDest = "png";
+	}
+	else if ($project == "Ninjago")
+	{
+		if (`match "[/\\]E7[^/\\]+[/\\][^/\\]+$" $destFolder` != "" || `match "[/\\]I7[^/\\]+[/\\][^/\\]+$" $destFolder` != "" || `match "[/\\]EW[^/\\]+[/\\][^/\\]+$" $destFolder` != "" || `match "[/\\]IW[^/\\]+[/\\][^/\\]+$" $destFolder` != "" || `match "[/\\]XYJ[/\\][^/\\]+$" $destFolder` != "")
+		{
+			$formatDest = "png";
+			$nj2017 = true;
+		}
+		else
+		{
+			string $asset = `match "[^/\\]+$" $destFolder`;
+			if (`idmtService "IsNj2017" $asset` == "True")
+			{
+				$formatDest = "png";
+				$nj2017 = true;
+			}
+		}
+	}
+
+	int $batchMode = `about -batch`;
+
+	string $rs, $message, $iff, $all[], $buf2[], $buf4[];
+	string $mayalocation =`getenv "MAYA_LOCATION"`;
+
+	$destFolder = `zwFullPath $destFolder`;
+
+	if (`match "//file-cluster/GDC/Netrender/" $destFolder` != "")	// Netrender
+	{
+		$exceptFolder[size($exceptFolder)] = "//*";
+	}
+	else
+	{
+		if (`gmatch $destFolder "*/sourceimages/Animation/*"`)	// animation
+		{
+			$exceptFolder[size($exceptFolder)] = `substitute "/sourceimages/.*" $destFolder "/sourceimages/*"`;
+		}
+		else							// asset
+		{
+			if ($project == "Enyo" || $project == "WinxTV" || $project == "ShenShou")
+			{
+				$exceptFolder[size($exceptFolder)] = $destFolder + "/*/*";
+			}
+			else if (zwIsRainbowProject($project))
+			{
+				if (`match "/MC_roma/" $destFolder` != "")
+				{
+					$exceptFolder[size($exceptFolder)] = $destFolder + "/*/*";
+				//	$exceptFolder[size($exceptFolder)] = "//file-cluster/GDC/Projects/ROMA/PRJ_roma/MC_roma/sourceimages/characters/Global_Textures/*";
+					$exceptFolder[size($exceptFolder)] = "//file-cluster/GDC/Projects/ROMA/PRJ_roma/MC_roma/sourceimages*/Global_Textures/*";
+					$exceptFolder[size($exceptFolder)] = `substitute "/sourceimages/" $destFolder "/scenes/"` + "/setup/fur/sourceimages/*";
+					$exceptFolder[size($exceptFolder)] = `substitute "/sourceimages/" $destFolder "/scenes/"` + "/setup/hairs/sourceimages/*";
+				}
+				else
+				{
+				//	$exceptFolder[size($exceptFolder)] = "//file-cluster/GDC/Projects/ROMA/PRJ_roma/MC_roma/sourceimages/*";
+					$exceptFolder[size($exceptFolder)] = "//file-cluster/GDC/Projects/ROMA/PRJ_roma/MC_roma/*";
+					$exceptFolder[size($exceptFolder)] = $destFolder + "/*";
+				}
+			}
+			else if (`match "^diveollydive[0-9]+$" (tolower($project))` != "" && $useProxy)
+			{
+				$exceptFolder[size($exceptFolder)] = "//file-cluster/GDC/Projects/" + $project + "/Project/sourceimages/*";
+				$exceptFolder[size($exceptFolder)] = "L:/Projects/" + $project + "/Project/sourceimages/*";
+				$exceptFolder[size($exceptFolder)] = $destFolder + "/*";
+			}
+			else if ($project == "S00W3" || $project == "SW")
+			{
+				$exceptFolder[size($exceptFolder)] = $destFolder + "/*";
+				$exceptFolder[size($exceptFolder)] = `substitute "/maps$" $destFolder "/map/*"`;
+			}
+			else if ($project == "XCM_2019DY")
+			{
+				$exceptFolder[size($exceptFolder)] = $destFolder + "/*";
+				string $xcmDest = `substitute "/sourceimages$" $destFolder "/data/*"`;
+				if ($xcmDest != $destFolder)
+				{
+					$exceptFolder[size($exceptFolder)] = $xcmDest;
+				}
+				else
+				{
+					$xcmDest = `substitute "/data$" $destFolder "/sourceimages/*"`;
+					if ($xcmDest != $destFolder)
+					{
+						$exceptFolder[size($exceptFolder)] = $xcmDest;
+					}
+				}
+			}
+			else
+			{
+				$exceptFolder[size($exceptFolder)] = $destFolder + "/*";
+			}
+		}
+	}
+
+	string $nodes[];
+	if ($selectionOnly)
+	{
+		$nodes = `zwTextureNetwork`;
+	}
+	else
+	{
+		catch($nodes = `ls -type $nodeType`);
+	}
+	int $max = `size $nodes`;
+	int $progress = 0;
+	if ($max && !$batchMode)
+		progressWindow -progress $progress -max $max -title "Copy Maps" -status ($progress + "/" + $max) -isInterruptable true;
+	for ($node in $nodes)
+	{
+		if (!$batchMode)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				progressWindow -endProgress;
+				error "";
+			}
+			$progress ++;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "\t" + $node);
+		}
+
+	//	if (`reference -isNodeReferenced $node` && $useProxy && `match "/MC_roma/" $destFolder` != "")
+		if (`reference -isNodeReferenced $node` && $useProxy)
+		{
+			continue;
+		}
+
+		string $file = `getAttr ($node + "." + $attr)`;
+		if ($file == "")
+		{
+			continue;
+		}
+
+		$file = `workspace -expandName $file`;
+
+//// bot 文件会认为是由iff 文件转过来的
+//		if (`gmatch (tolower($file)) "*.bot"`)
+//		{
+//			$file = `substring $file 1 (size($file)-3)` + "iff";
+//			if (!`filetest -f $file`)
+//			{
+//				if ($node == "brush")
+//				{
+//					if ($attr == "imageName")
+//					{
+//						if (!(`getAttr ($node + ".mapColor")` && `getAttr ($node + ".textureType")` == 4))
+//						{
+//							continue;
+//						}
+//					}
+//					if ($attr == "leafImage")
+//					{
+//						if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".leaves")` && !`getAttr ($node + ".leafUseBranchTex")`))
+//						{
+//							continue;
+//						}
+//					}
+//					if ($attr == "flowerImage")
+//					{
+//						if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".flowers")` && !`getAttr ($node + ".flowerUseBranchTex")`))
+//						{
+//							continue;
+//						}
+//					}
+//				}
+//
+//				$message = "找不到bot 文件相对应的iff 贴图：" + $node + "." + $attr + "\t" + $file;
+//				if ($errorStop)
+//				{
+//					if (!$batchMode)
+//						progressWindow -endProgress;
+//					error $message;
+//				}
+//				else
+//				{
+//					warning $message;
+//					continue;
+//				}
+//			}
+//		}
+
+		string $filename = `match "[^/\\]+$" $file`;
+		string $folder = `substring $file 1 (size($file) - size($filename))`;
+
+		int $useFrameExtension = false;
+		if (`match "#" $filename` != "")
+		{
+			$useFrameExtension = true;
+		}
+		if (`attributeExists "useFrameExtension" $node`)
+		{
+			if (`getAttr ($node + ".useFrameExtension")`)
+			{
+				$useFrameExtension = true;
+			}
+		}
+		if (`attributeExists "uvTilingMode" $node`)
+		{
+			if (`getAttr ($node + ".uvTilingMode")` != 0)
+			{
+				$useFrameExtension = true;
+			}
+		}
+		int $findSource = true;
+		string $frames[];
+		clear $frames;
+		if ($useFrameExtension)
+		{
+			$frames = zwGetSequence($folder + "/" + $filename);
+			if (size($frames) == 0)
+			{
+				$findSource = false;
+			}
+		}
+		else if (!`filetest -f $file`)
+		{
+			if ($node == "brush")
+			{
+				if ($attr == "imageName")
+				{
+					if (!(`getAttr ($node + ".mapColor")` && `getAttr ($node + ".textureType")` == 4))
+					{
+						continue;
+					}
+				}
+				if ($attr == "leafImage")
+				{
+					if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".leaves")` && !`getAttr ($node + ".leafUseBranchTex")`))
+					{
+						continue;
+					}
+				}
+				if ($attr == "flowerImage")
+				{
+					if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".flowers")` && !`getAttr ($node + ".flowerUseBranchTex")`))
+					{
+						continue;
+					}
+				}
+			}
+
+			string $filename = `match "[^/\\]+$" $file`;
+			string $file1 = `workspace -expandName $filename`;
+			string $file2 = `workspace -expandName ("sourceimages/" + $filename)`;
+			if (`filetest -f $file1`)
+			{
+				$file = $file1;
+			}
+			else if (`filetest -f $file2`)
+			{
+				$file = $file2;
+			}
+			else
+			{
+				$findSource = false;
+			}
+		}
+
+		if (!$findSource)
+		{
+			$message = "贴图丢失：" + $node + "." + $attr + "\t" + $file;
+			if ($errorStop)
+			{
+				if (!$batchMode)
+					progressWindow -endProgress;
+			//	if ($percentage >= 100)
+					error $message;
+			//	else
+			//		warning $message;
+			}
+			else
+			{
+				warning $message;
+				continue;
+			}
+		}
+
+		$file = `zwFullPath $file`;
+		string $texture = $file;
+
+		string $formatSource = zwGetFormatByExt($texture);
+
+		int $except = false;
+		for ($i=0; $i<size($exceptFolder); $i++)
+		{
+			if (`gmatch (tolower($file)) (tolower($exceptFolder[$i]))`)
+			{
+				$except = true;
+				break;
+			}
+		}
+
+		int $convertFormat = false;
+		if (!(`match "^diveollydive[0-9]+$" (tolower($project))` != "" && $except && `match "[/\\]sets[/\\]caustic[/\\]" (tolower($file))` != ""))
+		{
+			if ($convertToIff && $formatSource != "" && $formatSource != "map")
+			{
+				if ($formatSource != $formatDest)
+				{
+					if ($except)
+					{
+						//string $filename = `match "[^/\\]+$" $file`;
+						//string $folder = `substring $file 1 (size($file) - size($filename))`;
+
+						//$texture = `zwCopyTextureGetDestFolder $destFolder $file` + "/" + $filename;
+						//string $x = zwCopyTextureImageGetDestName($texture, $formatSource, $formatDest);
+						string $x = zwCopyTextureImageGetDestName($texture, $formatSource, $formatDest);
+						if ($formatDest != "tx")	// tx还是指向原来格式
+						{
+							$texture = $x;
+						}
+
+						if (!`filetest -f $x`)
+						{
+							$convertFormat = true;
+						}
+					}
+					else
+					{
+						$convertFormat = true;
+					}
+				}
+			//	else if ($formatDest == "iff" && !$except)
+			//	{
+			//		$convertFormat = true;
+			//	}
+			}
+		}
+
+		clear $buf4;
+		if($convertFormat || !$except)	// 需要转换格式或者上传
+		{
+			$texture = `zwCopyTextureGetDestFolder2 $destFolder $file $except` + "/" + $filename;
+			if($convertFormat && $formatDest != "tx")	// tx还是指向原来格式
+			{
+				$texture = zwCopyTextureImageGetDestName($texture, $formatSource, $formatDest);
+			}
+
+			if (!$useFrameExtension)
+			{
+				$buf4[size($buf4)] = $file;
+			}
+
+			if ($project == "MiniTiger")
+			{
+				string $rgb = $folder + "/" + `substitute "[.]" $filename "_rgb."`;
+				if (`filetest -f $rgb`)
+				{
+					$buf4[size($buf4)] = $rgb;
+				}
+			}
+
+			if ($useFrameExtension)
+			{
+				for ($seq in $frames)
+				{
+					$buf4[size($buf4)] = $folder + "/" + $seq;
+
+					if ($project == "MiniTiger")
+					{
+						string $rgb = $folder + "/" + `substitute "[.]" $seq "_rgb."`;
+						if (`filetest -f $rgb`)
+						{
+							$buf4[size($buf4)] = $rgb;
+						}
+					}
+				}
+			}
+		}
+
+		for ($source in $buf4)
+		{
+			if (!$batchMode)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					progressWindow -endProgress;
+					error "";
+				}
+			}
+
+			if(`stringArrayCount $source $all`)
+				continue;
+
+			$all[size($all)] = $source;
+
+			string $filename = `match "[^/\\]+$" $source`;
+			string $dest = `zwCopyTextureGetDestFolder2 $destFolder $source $except` + "/" + $filename;
+
+			if($convertFormat)	// 转换格式
+			{
+				if ($formatDest != "iff")
+				{
+					$rs = `zwSysFile "copy" $source $dest $useProxy`;
+				}
+
+				$filename = zwCopyTextureImageGetDestName($filename, $formatSource, $formatDest);
+				$dest = `zwCopyTextureGetDestFolder2 $destFolder $source $except` + "/" + $filename;
+				if ($useProxy)
+				{
+					$iff = `internalVar -userTmpDir` + $filename;
+				}
+				else
+				{
+					$iff = $dest;
+				}
+
+				int $cvtrs;
+				if ($nj2017)
+				{
+					$cvtrs = `zwImgcvtNJ2017 $source $iff`;
+				}
+				else
+				{
+					$cvtrs = `zwImgcvt $source $iff`;
+				}
+				if (!$cvtrs)
+				{
+					$message = "未能转换成" + $formatDest + "格式：" + $node + "." + $attr + "\nSOURCE: " + $source + "\nDEST: " + $iff;
+					if ($formatDest == "tx")
+					{
+						warning $message;
+					}
+					else if ($errorStop)
+					{
+						if (!$batchMode)
+							progressWindow -endProgress;
+					//	if ($percentage >= 100)
+							error $message;
+					//	else
+					//		warning $message;
+					}
+					else
+					{
+						warning $message;
+						continue;
+					}
+				}
+
+				if ($useProxy && `filetest -f $iff`)
+				{
+				//	$rs = `zwSysFile "move" $iff $dest $useProxy`;
+					$rs = `zwSysFile "copy" $iff $dest $useProxy`;
+					sysFile -delete $iff;
+				}
+
+				if ($project == "ShunLiu" && $formatDest != "tx" && $useProxy)
+				{
+					string $tempTx = `internalVar -userTmpDir` + `substitute "[.][^/\\.]+$" $filename ".tx"`;
+					sysFile -delete $tempTx;
+					zwImgcvt $dest $tempTx;
+					string $destTx = `substitute "[.][^/\\.]+$" $dest ".tx"`;
+					zwSysFile "move" $tempTx $destTx $useProxy;
+				}
+			}
+			else
+			{
+				$rs = `zwSysFile "copy" $source $dest $useProxy`;
+				if (`match "[.]ass$" $source` != "")
+				{
+					string $asstocSource = `substitute "[.]ass$" $source ".asstoc"`;
+					if (`filetest -f $asstocSource`)
+					{
+						string $asstocDest = `substitute "[.]ass$" $dest ".asstoc"`;
+						zwSysFile "copy" $asstocSource $asstocDest $useProxy;
+					}
+				}
+			}
+
+			if ($rs != "")
+			{
+				$message = "拷贝文件出错：" + $node + "." + $attr + "\n" + $rs;
+				if ($errorStop)
+				{
+					if (!$batchMode)
+						progressWindow -endProgress;
+				//	if ($percentage >= 100)
+						error $message;
+				//	else
+				//		warning $message;
+				}
+				else
+				{
+					warning $message;
+					continue;
+				}
+			}
+			else
+				print ($dest + "\n");
+		}
+
+		string $sourceUrl = `getAttr ($node + "." + $attr)`;
+		$sourceUrl = `substituteAllString $sourceUrl "\\" "/"`;
+		string $destUrl = $texture;
+		if (!($nodeType == "mentalrayTexture" || $nodeType == "mentalrayIblShape"))
+		{
+		//	zwImportModule("idmt.maya.path", true);
+			$destUrl = `python ("idmt.maya.path.GetDollarPath('" + $texture + "')")`;
+		}
+
+	//	if ($modifyPath && `filetest -f $texture` && $texture != `getAttr ($node + "." + $attr)`)
+		if ($modifyPath && `filetest -f $texture` && tolower($sourceUrl) != tolower($destUrl))
+		{
+//			string $newTexture = `substitute ".*/sourceimages/" $texture "sourceimages/"`;
+//			if ($newTexture != $texture)
+//			{
+//		//		string $workspace = `workspace -query -dir`;
+//		//		string $newWorkspace = `substitute "/sourceimages/.*" $texture ""`;
+//		//		workspace -dir $newWorkspace;
+//		//		setAttr ($node + "." + $attr) -type "string" $newTexture;
+//		//		workspace -dir $workspace;
+//				$zwCopyTextureImage += "setAttr \"" + $node + "." + $attr + "\" -type \"string\" \"" + $newTexture + "\";\n";
+//			}
+//			else
+//			{
+			//	setAttr ($node + "." + $attr) -type "string" $texture;
+				setAttr ($node + "." + $attr) -type "string" $destUrl;
+//			}
+		}
+	}
+	if ($max && !$batchMode)
+		progressWindow -endProgress;
+}
+
+global proc zwCopyTextureImagePgYetiMaya(string $destFolder)
+{
+	int $useProxy = true;
+	string $sources[];
+	string $all[];
+	string $sequences[];
+
+	string $project = zwGetProject("");
+
+	int $batchMode = `about -batch`;
+	$destFolder = `zwFullPath $destFolder`;
+
+	string $pgYetiMayas[] = `ls -type "pgYetiMaya"`;
+	int $max = `size $pgYetiMayas`;
+	int $progress = 0;
+	if ($max && !$batchMode)
+	{
+		progressWindow -progress $progress -max $max -title "Copy Maps" -status ($progress + "/" + $max) -isInterruptable true;
+	}
+	for ($pgYetiMaya in $pgYetiMayas)
+	{
+		if (!$batchMode)
+		{
+			$progress ++;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "\t" + $pgYetiMaya);
+		}
+		if (`reference -isNodeReferenced $pgYetiMaya`)
+		{
+			continue;
+		}
+		string $textures[] = `pgYetiGraph -listNodes -type "texture" $pgYetiMaya`;
+		for ($texture in $textures)
+		{
+			if (!$batchMode)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					progressWindow -endProgress;
+					error "";
+				}
+			}
+			string $file_name = `pgYetiGraph -node $texture -param "file_name" -getParamValue $pgYetiMaya`;
+			if ($file_name == "")
+			{
+				continue;
+			}
+			string $source = `workspace -expandName $file_name`;
+			clear $sequences;
+			if (`match "<UDIM>" $source` != "")
+			{
+				$sequences = `zwGetSequence $source`;
+				if (size($sequences) == 0)
+				{
+					$message = "贴图丢失：" + $pgYetiMaya + " " + $texture + " " + $file_name;
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					error $message;
+				}
+				for ($i=0; $i<size($sequences); $i++)
+				{
+					$sequences[$i] = `substitute "[^/\\]+$" $source $sequences[$i]`;
+				}
+				$source = $sequences[0];
+			}
+			else
+			{
+				$sequences[0] = $source;
+				if (!`filetest -f $source`)
+				{
+					$message = "贴图丢失：" + $pgYetiMaya + " " + $texture + " " + $file_name;
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					error $message;
+				}
+			}
+			$source = `zwFullPath $source`;
+			if ($project == "XCM_2019DY")
+			{
+				if (`match "/sourceimages/" (tolower($source))` != "")
+				{
+					$destFolder = `substitute "/data$" $destFolder "/sourceimages"`;
+				}
+				else if (`match "/data/" (tolower($source))` != "")
+				{
+					$destFolder = `substitute "/sourceimages$" $destFolder "/data"`;
+				}
+			}
+
+			int $except = false;
+			if (`gmatch (tolower($source)) (tolower($destFolder) + "/*")`)
+			{
+				$except = true;
+			}
+			clear $sources;
+			if(!$except)
+			{
+				for ($source in $sequences)
+				{
+					$sources[size($sources)] = $source;
+				}
+			}
+			for ($source in $sources)
+			{
+				if (!$batchMode)
+				{
+					if (`progressWindow -query -isCancelled`)
+					{
+						progressWindow -endProgress;
+						error "";
+					}
+				}
+				if(`stringArrayCount $source $all`)
+				{
+					continue;
+				}
+				$all[size($all)] = $source;
+				string $filename = `match "[^/\\]+$" $source`;
+				string $dest = `zwCopyTextureGetDestFolder2 $destFolder $source $except` + "/" + $filename;
+				$rs = `zwSysFile "copy" $source $dest $useProxy`;
+				print ("copy \"" + $source + "\" \"" + $dest + "\"\n");
+				if ($rs != "")
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					error $rs;
+				}
+			}
+			string $dest = `zwCopyTextureGetDestFolder2 $destFolder $source $except` + "/" + `match "[^/\\]+$" $file_name`;
+			string $dest0 = `substitute "[^/\\]+$" $dest ""` + `match "[^/\\]+$" $source`;
+			if (`filetest -f $dest0` && tolower($file_name) != tolower($dest))
+			{
+				pgYetiGraph -node $texture -param "file_name" -setParamValueString $dest $pgYetiMaya;
+			}
+		}
+	}
+	if ($max && !$batchMode)
+	{
+		progressWindow -endProgress;
+	}
+}
+
+global proc zwCopyTextureImageCalimero(string $nodeType, string $attr, string $destFolder)
+{
+//	python "import time";
+	zwImportModule("idmt.maya.Calimero.publish", true);
+
+	int $useProxy = true;
+
+	string $sceneName = `file -query -sceneName -shortName`;
+
+	int $batchMode = `about -batch`;
+
+	string $rs, $message, $all[], $buf2[], $buf4[];
+
+	string $nodes[];
+	catch($nodes = `ls -type $nodeType`);
+
+	int $max = `size $nodes`;
+	int $progress = 0;
+	if ($max && !$batchMode)
+	{
+		progressWindow -progress $progress -max $max -title "Copy Maps" -status ($progress + "/" + $max) -isInterruptable true;
+	}
+	
+	for ($node in $nodes)
+	{
+		if (!$batchMode)
+		{
+			if (`progressWindow -query -isCancelled`)
+			{
+				progressWindow -endProgress;
+				error "";
+			}
+			$progress ++;
+			progressWindow -edit -progress $progress -status ($progress + "/" + $max + "\t" + $node);
+		}
+
+		if (`reference -isNodeReferenced $node`)
+		{
+			continue;
+		}
+
+		if (`gmatch $destFolder "*/sourceimages/Animation/*"`)	// animation
+		{
+			error "未能处理镜头的贴图，请联系TD";
+		}
+
+		string $texture = `getAttr ($node + "." + $attr)`;
+		if ($texture == "")
+		{
+			continue;
+		}
+		string $file = `workspace -expandName $texture`;
+
+		// bot 文件会认为是由iff 文件转过来的
+		if (`gmatch (tolower($file)) "*.bot"`)
+		{
+			$file = `substring $file 1 (size($file)-3)` + "iff";
+			if (!`filetest -f $file`)
+			{
+				if ($node == "brush")
+				{
+					if ($attr == "imageName")
+					{
+						if (!(`getAttr ($node + ".mapColor")` && `getAttr ($node + ".textureType")` == 4))
+						{
+							continue;
+						}
+					}
+					if ($attr == "leafImage")
+					{
+						if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".leaves")` && !`getAttr ($node + ".leafUseBranchTex")`))
+						{
+							continue;
+						}
+					}
+					if ($attr == "flowerImage")
+					{
+						if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".flowers")` && !`getAttr ($node + ".flowerUseBranchTex")`))
+						{
+							continue;
+						}
+					}
+				}
+
+				$message = "找不到bot 文件相对应的iff 贴图：" + $node + "." + $attr + "\t" + $file;
+				if (!$batchMode)
+				{
+					progressWindow -endProgress;
+				}
+				error $message;
+			}
+		}
+
+		if (!`filetest -f $file`)
+		{
+			if ($node == "brush")
+			{
+				if ($attr == "imageName")
+				{
+					if (!(`getAttr ($node + ".mapColor")` && `getAttr ($node + ".textureType")` == 4))
+					{
+						continue;
+					}
+				}
+				if ($attr == "leafImage")
+				{
+					if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".leaves")` && !`getAttr ($node + ".leafUseBranchTex")`))
+					{
+						continue;
+					}
+				}
+				if ($attr == "flowerImage")
+				{
+					if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".flowers")` && !`getAttr ($node + ".flowerUseBranchTex")`))
+					{
+						continue;
+					}
+				}
+			}
+
+			$message = "贴图丢失：" + $node + "." + $attr + "\t" + $file;
+			if (`match "walt.alphanim.lan" $file` == "")
+			{
+				if (!$batchMode)
+				{
+					progressWindow -endProgress;
+				}
+				error $message;
+			}
+			else
+			{
+				warning $message;
+				continue;
+			}
+		}
+
+
+		int $is1k = false;
+		int $wh[] = zwImageSize($file);
+		if (!($wh[0] > 1024 || $wh[1] > 1024))
+		{
+			$is1k = true;
+		}
+
+	//	int $is256 = true;
+	//	string $png = `substitute "[.][^/\\.]+$" $file ".png"`;
+	//	$wh = zwImageSize($png);
+	//	if ($wh[0] > 256 || $wh[1] > 256)
+	//	{
+	//		$is256 = false;
+	//	}
+
+		clear $buf4;
+		$buf4[size($buf4)] = $file;
+		string $filename = `match "[^/\\]+$" $file`;
+		string $folder = `substring $file 1 (size($file) - size($filename))`;
+		if (`attributeExists "useFrameExtension" $node`)
+		{
+			if (`getAttr ($node + ".useFrameExtension")`)
+			{
+				string $buf2[] = zwGetSequence($folder + "/" + $filename);
+				for ($seq in $buf2)
+				{
+					$buf4[size($buf4)] = $folder + "/" + $seq;
+				}
+			}
+		}
+
+		for ($source in $buf4)
+		{
+			if (!$batchMode)
+			{
+				if (`progressWindow -query -isCancelled`)
+				{
+					progressWindow -endProgress;
+					error "";
+				}
+			}
+
+			if(`stringArrayCount $source $all`)
+			{
+				continue;
+			}
+			$all[size($all)] = $source;
+
+			// 备份源文件
+			string $filename = `match "[^/\\]+$" $source`;
+			string $dest = $destFolder + "/" + $filename;
+			if (!`zwCopyTextureExists $source $dest`)
+			{
+				$rs = `zwSysFile "copy" $source $dest $useProxy`;
+				if ($rs != "")
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					print ("copy \"" + $source + "\" \"" + $dest + "\"\n");
+					error $rs;
+				}
+			}
+
+			// 转256png
+			$filename = `substitute "[.][^/\\.]+$" $filename ".png"`;
+			$dest = $destFolder + "/" + $filename;
+			int $convertPng = false;
+			if (`zwCopyTextureExists $source $dest`)
+			{
+				int $wh[] = zwImageSize($dest);
+			//	$convertPng = ($wh[0] > 256 || $wh[1] > 256);
+			}
+			else
+			{
+				$convertPng = true;
+			}
+			if ($convertPng)
+			{
+				string $temp = `internalVar -userTmpDir` + $filename;
+			//	int $resize = `idmtImage -resize 256 256 $source $temp`;
+			//	python "time.sleep(1.0)";
+			//	if (!$resize)
+				python ("idmt.maya.Calimero.publish.makePng('" + $source + "', '" + $temp + "')");
+				if (!`filetest -f $temp`)
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					string $message = "未能转换成 png 格式：" + $node + "." + $attr + "\nSOURCE: " + $source + "\nDEST: " + $temp;
+					error $message;
+				}
+				$rs = `zwSysFile "copy" $temp $dest $useProxy`;
+				sysFile -delete $temp;
+				if ($rs != "")
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					print ("copy \"" + $temp + "\" \"" + $dest + "\"\n");
+					error $rs;
+				}
+			}
+
+			if (`match "_rg[._]" (tolower($sceneName))` != "" || `match "_mo[._]" (tolower($sceneName))` != "")
+			{
+				continue;
+			}
+
+			// 转tga
+			$filename = `substitute "[.][^/\\.]+$" $filename ".tga"`;
+			$dest = $destFolder + "/" + $filename;
+			if (!`zwCopyTextureExists $source $dest`)
+			{
+				string $temp = `internalVar -userTmpDir` + $filename;
+				if (!`zwImgcvt $source $temp`)
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					string $message = "未能转换成 tga 格式：" + $node + "." + $attr + "\nSOURCE: " + $source + "\nDEST: " + $temp;
+					error $message;
+				}
+				$rs = `zwSysFile "copy" $temp $dest $useProxy`;
+				sysFile -delete $temp;
+				if ($rs != "")
+				{
+					if (!$batchMode)
+					{
+						progressWindow -endProgress;
+					}
+					print ("copy \"" + $temp + "\" \"" + $dest + "\"\n");
+					error $rs;
+				}
+			}
+
+			// 转map
+			if (`match "_ms_render[._]" (tolower($sceneName))` != "" && !$is1k)
+			{
+				$filename = `substitute "[.][^/\\.]+$" $filename ".map"`;
+				$dest = $destFolder + "/" + $filename;
+				if (!`zwCopyTextureExists $source $dest`)
+				{
+					string $temp = `internalVar -userTmpDir` + $filename;
+					if (!`zwImgcvt $source $temp`)
+					{
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+						string $message = "未能转换成 map 格式：" + $node + "." + $attr + "\nSOURCE: " + $source + "\nDEST: " + $temp;
+						error $message;
+					}
+					$rs = `zwSysFile "copy" $temp $dest $useProxy`;
+					sysFile -delete $temp;
+					if ($rs != "")
+					{
+						if (!$batchMode)
+						{
+							progressWindow -endProgress;
+						}
+						print ("copy \"" + $temp + "\" \"" + $dest + "\"\n");
+						error $rs;
+					}
+				}
+			}
+
+			print ($dest + "\n");
+		}
+
+		$filename = `match "[^/\\]+$" $texture`;
+		if (`match "_rg[._]" (tolower($sceneName))` != "" || `match "_mo[._]" (tolower($sceneName))` != "")
+		{
+			if (`match "fx" (tolower($node))` == "")
+			{
+				$filename = `substitute "[.][^/\\.]+$" $filename ".png"`;
+			}
+			else
+			{
+				$filename = `substitute "[.][^/\\.]+$" $filename ".tga"`;
+				if (!`filetest -f ($destFolder + "/" + $filename)`)
+				{
+					$filename = `substitute "[.][^/\\.]+$" $filename ".png"`;
+				}
+			}
+		}
+		else if(`match "_ms_render[._]" (tolower($sceneName))` != "")
+		{
+			if ($is1k)
+			{
+				$filename = `substitute "[.][^/\\.]+$" $filename ".tga"`;
+			}
+			else
+			{
+				$filename = `substitute "[.][^/\\.]+$" $filename ".map"`;
+			}
+		}
+		else
+		{
+			$filename = `substitute "[.][^/\\.]+$" $filename ".tga"`;
+		}
+
+		string $path = $destFolder + "/" + $filename;
+		if (!($nodeType == "mentalrayTexture" || $nodeType == "mentalrayIblShape"))
+		{
+		//	zwImportModule("idmt.maya.path", true);
+			$path = `python ("idmt.maya.path.GetDollarPath('" + $path + "')")`;
+		}
+		if ($path != $texture)
+		{
+			setAttr ($node + "." + $attr) -type "string" $path;
+		}
+	}
+
+	if ($max && !$batchMode)
+	{
+		progressWindow -endProgress;
+	}
+}
+
+global proc int zwCopyTextureExists(string $source, string $dest)
+{
+	int $rs = false;
+
+	if (`filetest -f $dest`)
+	{
+		if (`match "[.]map$" (tolower($source))` != "")
+		{
+			return true;
+		}
+		$rs = `idmtFile -compareModified $source $dest`;
+	}
+
+	return $rs;
+}
+
+global proc string zwCopyTextureGetDestFolder2(string $destFolder, string $sourcePath, int $except)
+{
+	if ($except)
+	{
+		$destFolder = `substitute "[/\\][^/\\]+$" $sourcePath ""`;
+	}
+	else
+	{
+		string $project = zwGetProject("");
+		if ($project == "XCM_2019DY")
+		{
+			string $path = `substitute ".*[/\\]sourceimages[/\\]+" $sourcePath ""`;
+			$path = `substitute ".*[/\\]data[/\\]+" $path ""`;
+			if ($path != $sourcePath)
+			{
+				$path = `substitute "[/\\]*[^/\\]+$" $path ""`;
+				if ($path != "")
+				{
+					$destFolder = $destFolder + "/" + $path;
+				}
+			}
+		}
+	}
+	return $destFolder;
+}
+
+global proc string zwCopyTextureGetDestFolder(string $destFolder, string $sourcePath)
+{
+	if (`match "/CONTENT_4_GLOBAL/PRJ_winxII/MC_winxII/" $destFolder` != "" || `match "/Projects/Enyo/Project/sourceimages/" $destFolder` != "" || `match "/Projects/WinxTV/Project/sourceimages/" $destFolder` != "" || `match "/Projects/ShenShou/Project/sourceimages/" $destFolder` != "")
+	{
+		$sourcePath = `match "[^/\\]+$" $sourcePath`;
+		string $res = `match "_[124][kK][.]" $sourcePath`;
+		if ($res != "")
+		{
+			$res = tolower($res);
+			$destFolder += "/" + `match "[124]k" $res`;
+		}
+		else if (`match "_512[.]" $sourcePath` != "")
+		{
+			$destFolder += "/512";
+		}
+		else if (`match "_256[.]" $sourcePath` != "")
+		{
+			$destFolder += "/256";
+		}
+		else if (`match "BLD_" $sourcePath` != "" || `match "CLH_" $sourcePath` != "")
+		{
+			$destFolder += "/hair_fur";
+		}
+		else
+		{
+			$destFolder += "/temp";
+		}
+	}
+	else if (`match "/Projects/ROMA/PRJ_roma/MC_roma/sourceimages/" $destFolder` != "")
+	{
+		if (`match "/setup/fur/sourceimages/" (tolower($sourcePath))` != "" || `match "/setup/hairs/sourceimages/" (tolower($sourcePath))` != "")
+		{
+			$destFolder = `substitute "/sourceimages/" $destFolder "/scenes/"` + `match "/setup/[^/]+/sourceimages" (tolower($sourcePath))`;
+		}
+		else if (`match "/fol/" (tolower($sourcePath))` != "")
+		{
+			string $fol1 = `match "/fol/.*" (tolower($sourcePath))`;
+			string $fol2 = `substitute "[/\\][^/\\]+$" $fol1 ""`;
+			$destFolder += `substring $sourcePath (size($sourcePath)-size($fol1)+1) (size($sourcePath)-size($fol1)+size($fol2))`;
+		}
+		else
+		{
+			$sourcePath = `substitute "[/\\][^/\\]+$" $sourcePath ""`;
+			$destFolder += "/" + `match "[^/\\]+$" $sourcePath`;
+		}
+	}
+
+	return $destFolder;
+}
+
+global proc string zwCopyTextureImageGetDestName(string $filename, string $formatSource, string $formatDest)
+{
+	if ($formatSource == "map")	// map -> 复原
+	{
+	//	$filename = `substitute "[.][^/\\.]+$" $filename ""`;
+	//	string $format = zwGetFormatByExt($filename);
+	//	if ($format == "")
+	//	{
+	//		$filename += ".iff";
+	//	}
+	}
+	else if ($formatDest == "map")	// 其他 -> map
+	{
+	//	$filename += "." + $formatDest;
+		$filename = `substitute "[.][^/\\.]+$" $filename ("." + $formatDest)`;
+	}
+	else
+	{
+		$filename = `substitute "[.][^/\\.]+$" $filename ("." + $formatDest)`;
+	}
+
+	return $filename;
+}

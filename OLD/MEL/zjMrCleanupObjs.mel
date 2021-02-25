@@ -1,0 +1,383 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 赵志杰
+///
+/// Creation Date: 
+///
+/// Description: 
+///
+
+// Copyright (C) 1997-2006 Autodesk, Inc., and/or its licensors.
+// All rights reserved.
+//
+// The coded instructions, statements, computer programs, and/or related
+// material (collectively the "Data") in these files contain unpublished
+// information proprietary to Autodesk, Inc. ("Autodesk") and/or its licensors,
+// which is protected by U.S. and Canadian federal copyright law and by
+// international treaties.
+//
+// The Data is provided for use exclusively by You. You have the right to use,
+// modify, and incorporate this Data into other products for purposes authorized 
+// by the Autodesk software license agreement, without fee.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AUTODESK
+// DOES NOT MAKE AND HEREBY DISCLAIMS ANY EXPRESS OR IMPLIED WARRANTIES
+// INCLUDING, BUT NOT LIMITED TO, THE WARRANTIES OF NON-INFRINGEMENT,
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, OR ARISING FROM A COURSE 
+// OF DEALING, USAGE, OR TRADE PRACTICE. IN NO EVENT WILL AUTODESK AND/OR ITS
+// LICENSORS BE LIABLE FOR ANY LOST REVENUES, DATA, OR PROFITS, OR SPECIAL,
+// DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES, EVEN IF AUTODESK AND/OR ITS
+// LICENSORS HAS BEEN ADVISED OF THE POSSIBILITY OR PROBABILITY OF SUCH DAMAGES.
+
+//****************************************************************************
+// Definition of user interface for mental ray approximation attributes.
+//****************************************************************************
+
+global string $MRApproxLayouts[];
+
+proc string findLayout(string $approx) 
+{
+	global string $MRApproxLayouts[];
+
+	switch ($approx)
+	{
+		case "displaceApprox": return $MRApproxLayouts[1];
+		case "subdivApprox":   return $MRApproxLayouts[2];
+		case "surfaceApprox":  return $MRApproxLayouts[3];
+		case "curveApprox":    return $MRApproxLayouts[4];
+	}
+
+	return "UNKOWN";
+}
+
+
+// Check for node compatibility
+proc int checkCompatible(string $approxNodeType, string $shapeNode)
+{
+	string $shapeNodeType = `nodeType $shapeNode`;
+	if (($shapeNodeType == "subdiv") || ($shapeNodeType == "mesh"))
+	{
+		if(($approxNodeType == "mentalrayDisplaceApprox") || 
+		   ($approxNodeType == "mentalraySubdivApprox"))
+		{
+			return 1;
+		}
+		return 0;
+	}
+
+	if($shapeNodeType == "nurbsSurface")
+	{
+		if($approxNodeType != "mentalraySubdivApprox")
+			return 1;
+		return 0;
+	}
+	return 0;
+}
+
+proc string createApproxNode(string $approxNodeType)
+{
+	string $approxNode;
+	string $mrItemsListAttr;
+	string $mrItemsListNodeList[];
+	string $mrItemsListNode;
+	switch ($approxNodeType) 
+	{
+		case "mentalrayDisplaceApprox":
+			$mrItemsListAttr = "displaceApproxs";
+			break;
+		case "mentalraySurfaceApprox":
+			$mrItemsListAttr = "surfaceApproxs";
+			break;
+		case "mentalrayCurveApprox":
+			$mrItemsListAttr = "curveApproxs";
+			$attrShortName = "mitca";
+			break;
+		case "mentalraySubdivApprox":
+			$mrItemsListAttr = "subdivApproxs";
+			break;
+	}
+	$approxNode = `createNode $approxNodeType`;
+	$mrItemsListNodeList = `ls -type mentalrayItemsList`;
+	if(size($mrItemsListNodeList) == 0)
+	{
+		$mrItemsListNode = `createNode -name mentalrayItemsList mentalrayItemsList`;
+	}
+	else 
+	{
+		$mrItemsListNode = $mrItemsListNodeList[0];
+	}
+	connectAttr -na ($approxNode + ".message") ($mrItemsListNode + "." + $mrItemsListAttr);
+
+	return $approxNode;
+}
+
+proc connectApproxAttr(string $approxNode, string $shapeNode, string $attrLongName)
+{
+	connectAttr -f ($approxNode + ".message") ($shapeNode + "." + $attrLongName);
+}
+
+proc disconnectApproxAttr(string $approxNode, string $shapeNode, string $attrLongName)
+{
+	disconnectAttr ($approxNode + ".message") ($shapeNode + "." + $attrLongName);
+}
+
+proc string[] findSelection()
+{
+	string $selectionList[] = `ls -l -sl`;
+	return $selectionList;
+}
+
+proc string findApproxNodeName(string $approxNodeTypeShort)
+{
+	string $rowLayout = findLayout($approxNodeTypeShort);
+	string $optionMenu = ($rowLayout + "|om");
+	$approxNode = `optionMenu -query -value $optionMenu`;
+	return $approxNode;
+}
+
+proc string findCreateOptions()
+{
+	global string $MRApproxLayouts[];
+	string $radioBtnGrp = $MRApproxLayouts[0]+"|singleMultiRadioGrp";
+	int $radioSelection = `radioButtonGrp -query -sl $radioBtnGrp`;
+	if ($radioSelection == 1)
+		return "single";
+
+	return "multi";
+}
+
+
+proc showHypergraph(string $createApproxNodeList[])
+{
+	string $hypergraph = localizedPanelLabel("Hypergraph" );
+	tearOffPanel $hypergraph "hyperGraphPanel" true;
+	$hypergraphName = `getPanel -wl $hypergraph`;
+	select -r $createApproxNodeList;
+	showDGLevel ($hypergraphName + "HyperGraphEd");
+}
+
+proc assignApproxNode(string $approxNode, string $selectionList[])
+{	
+	string $approxNodeType = `nodeType $approxNode`;
+	string $shapeNodes[];
+	string $existApproxAttrList[];
+	string $existNodeConnections[];
+	string $attrLongName;
+	string $attrShortName;
+		
+	switch ($approxNodeType) 
+	{
+		case "mentalrayDisplaceApprox":
+			$attrLongName = "miDisplaceApprox";
+			$attrShortName = "mida";
+			break;
+		case "mentalraySurfaceApprox":
+			$attrLongName = "miSurfaceApprox";
+			$attrShortName = "misa";
+			break;
+		case "mentalrayCurveApprox":
+			$attrLongName = "miCurveApprox";
+			$attrShortName = "mitca";
+			break;
+		case "mentalraySubdivApprox":
+			$attrLongName = "miSubdivApprox";
+			$attrShortName = "miva";
+			break;
+	}
+
+	for($i=0; $i<(size($selectionList)); $i++)
+	{
+		$shapeNodes = `listRelatives -fullPath -allDescendents -type subdiv -type mesh -type nurbsSurface $selectionList[$i]`;
+		for($j=0; $j<(size($shapeNodes)); $j++)
+		{
+			string $warningMsg;
+			string $displayMsg;
+			if((checkCompatible($approxNodeType, $shapeNodes[$j])) == 1)
+			{				
+				$existApproxAttrList = `listAttr -st $attrLongName $shapeNodes[$j]`;
+				if(size($existApproxAttrList) > 0)
+				{
+					$existNodeConnections = `listConnections -d off -s on ($shapeNodes[$j] + "." + $attrLongName)`;
+					if(size($existNodeConnections) > 0)
+					{
+						$warningMsg = (uiRes("m_mentalrayApproxEditor.kDisconnectMsg"));
+						$displayMsg = `format -s $attrLongName -s $shapeNodes[$j] $warningMsg`;
+						miWarn($displayMsg);
+						disconnectApproxAttr($existNodeConnections[0], $shapeNodes[$j], $attrLongName);
+					}
+					connectApproxAttr($approxNode, $shapeNodes[$j], $attrLongName);
+					}				
+				else 
+				{
+					addAttr -ln $attrLongName -sn $attrShortName -at message $shapeNodes[$j];
+					connectApproxAttr($approxNode, $shapeNodes[$j], $attrLongName);
+				}
+			}
+			else
+			{
+				$warningMsg = (uiRes("m_mentalrayApproxEditor.kSkippedMsg"));
+				$displayMsg = `format -s $approxNode -s $shapeNodes[$j] $warningMsg`;
+				miWarn($displayMsg);
+			}
+		}
+	}
+}
+
+
+proc doAssignApproxNode(string $approxNode)
+{
+	string $selectionList[];
+	$selectionList = findSelection();
+	assignApproxNode($approxNode, $selectionList);
+}
+
+
+
+proc string createAssignApproxNode(string $approxNodeTypeShort, string $multiSingle)
+{
+	string $selectionList[];
+	string $multiSelection[];
+	$selectionList = findSelection();
+	string $approxNodeType;
+	string $approxNode;
+	string $createApproxNodeList[];
+	switch ($approxNodeTypeShort) 
+	{
+		case "displaceApprox":
+			$approxNodeType = "mentalrayDisplaceApprox";
+			break;
+		case "surfaceApprox":
+			$approxNodeType = "mentalraySurfaceApprox";
+			break;
+		case "curveApprox":
+			$approxNodeType = "mentalrayCurveApprox";
+			break;
+		case "subdivApprox":
+			$approxNodeType = "mentalraySubdivApprox";
+			break;
+	}
+	
+	if($multiSingle == "single")
+	{
+		$approxNode = createApproxNode($approxNodeType);
+		assignApproxNode($approxNode, $selectionList);
+		$createApproxNodeList[0] = $approxNode;
+	}
+	else if($multiSingle == "multi")
+	{
+		for($i=0; $i<(size($selectionList)); $i++)
+		{
+			$approxNode = createApproxNode($approxNodeType);
+			$createApproxNodeList[$i] = $approxNode;
+			$multiSelection[0] = $selectionList[$i];
+			assignApproxNode($approxNode, $multiSelection);
+		}
+	}
+
+
+	return $approxNode;
+}
+
+
+
+
+
+//set user_defined attribute 
+proc gp_setAttr(string $obj,int $level) 
+{
+	string $lS[] = `listAttr -userDefined -string subdiv $obj`;
+
+	if (size($lS) == 0)   
+	{
+		addAttr -keyable true -longName subdiv -attributeType long  -min 0 -max 10 -defaultValue 2 $obj;
+		string $var = $obj+".subdiv";
+		setAttr $var $level $obj;
+	}
+	else if (size($lS) == 1)
+	{
+		deleteAttr ($obj+".subdiv");
+		addAttr -keyable true -ln subdiv -at long  -min 0 -max 10 -dv 2 $obj;
+		string $var = $obj+".subdiv";
+		setAttr $var $level $obj;
+	}
+	print "\n";
+
+}
+
+global proc zjCleanupObjs()
+{
+	string $gp[] = `ls -tr -sl`;
+	if (size($gp)!=1)
+		error "请先选择1个组/物体";
+
+	string $sel[] = `ls -dag -sl -ni -type mesh`;
+	if (size($sel))
+	{
+		string $node = createAssignApproxNode("subdivApprox", "single");
+		gp_setAttr($gp[0],1);
+		connectAttr -f ($gp[0] + ".subdiv") ($node + ".nSubdivisions");
+	}
+	select -r $gp[0];
+
+}
+
+proc gp_remAttr(string $obj) 
+{
+	string $lS[] = `listAttr -ud -st subdiv $obj`;
+	if (size($lS) == 1)
+		deleteAttr -at "subdiv" $obj;
+}
+
+proc opt()
+{
+	//delete unused mentalraySubdivApprox nodes
+	string $files[] = `ls -type mentalraySubdivApprox`;
+	for ($item in $files)
+	{
+		string $cons[] = `listConnections -s 0 -d 1 -type mesh $item`;
+		if (size($cons) == 0)
+			deleteIfNotReferenced $item;
+	}
+
+	string $objs[] = `ls -dag -ni -type transform`;
+	for ($item in $objs)
+	{
+		string $cons[] = `listConnections -s 0 -d 1 -type mentalraySubdivApprox $item`;
+		if (size($cons) == 0)
+			gp_remAttr($item);
+	}
+
+}
+
+global proc zjBreakApproxSub()
+{
+	string $gp[] = `ls -tr -sl`;
+	if (size($gp)!=1)
+		error "请先选择1个组/物体";
+
+	string $objs[] = `ls -dag -sl -type mesh`;
+	for ($item in $objs)
+	{
+		string $cons[] = `listConnections -plugs 1 -s 1 -d 0 -type mentalraySubdivApprox $item`;
+		$cons = stringArrayRemoveDuplicates($cons);
+		if (size($cons)==1)
+		{
+			catch(`disconnectAttr $cons[0] ($item + ".miSubdivApprox ")`);
+		}
+	}
+	
+	opt();
+
+}
+
+global proc zjMrCleanupObjs()
+{
+	if(!`window -exists zjWinMrCo`)
+	{
+		window -title "Mr Subdivision" zjWinMrCo;
+			columnLayout -adjustableColumn true;
+			button -width 170 -label "Create Subdivision" -command "zjCleanupObjs";
+			button -width 170 -label "Delete Subdivision" -command "zjBreakApproxSub";
+	}
+	showWindow zjWinMrCo;
+	window -edit -width 178 -height 95 zjWinMrCo;
+}

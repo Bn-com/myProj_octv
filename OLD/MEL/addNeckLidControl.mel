@@ -1,0 +1,131 @@
+/// Author: liang
+///
+/// Creation Date: 2007/02/02
+///
+/// Description: 脖子增强控制系统生成器
+///
+/// Modify: liang
+
+///////////////////////////////////////////////////////////////////
+
+global proc addNeckLidControl(string $charName)
+{
+	//复制neckA,neckB,head骨骼，并加上_con后缀
+	select ($charName + "_neckA");
+	string $dupNewName[1] = `duplicate`;
+	rename $dupNewName[0] ($charName + "_neckA_con");
+	rename ($charName + "_neckA_con|" + $charName + "_neckB") ($charName + "_neckB_con");
+	rename ($charName + "_neckA_con|" + $charName + "_neckB_con|"  + $charName + "_head") ($charName + "_head_con");
+	
+	//删除多复制出来的物体对象
+	select -hi ($charName + "_neckA_con");
+	select -d ($charName + "_head_con") ($charName + "_neckB_con") ($charName + "_neckA_con");
+	delete;
+	
+	//在三个新复制的骨骼上面加设lid控制骨骼
+	//select ($charName +"_head_con") ($charName +"_neckB_con") ($charName +"_neckA_con");
+	//lidControlAdd("Driven");
+	select ($charName + "_head_con") ($charName + "_neckB_con") ($charName + "_neckA_con");
+	lidControlAdd("All");
+	
+	//连接属性使骨骼联动
+	connectAttr ($charName +"_neckA_conAll" + ".rotate") ($charName +"_neckB_conAll" + ".rotate");
+	connectAttr ($charName +"_neckA_conAll" + ".rotate") ($charName +"_head_conAll" + ".rotate");
+	//connectAttr ($charName +"_neckA_conDriven" + ".rotate") ($charName +"_neckB_conDriven" + ".rotate");
+	//connectAttr ($charName +"_neckA_conDriven" + ".rotate") ($charName +"_head_conDriven" + ".rotate");
+	
+	//让控制骨骼约束蒙皮骨骼
+	pointConstraint -mo -weight 1  ($charName + "_neckA_con") ($charName + "_neckA");
+	orientConstraint -mo -weight 1 ($charName + "_neckA_con") ($charName + "_neckA");
+	scaleConstraint -mo -weight 1  ($charName + "_neckA_con") ($charName + "_neckA");
+	
+	pointConstraint -mo -weight 1  ($charName + "_neckB_con") ($charName + "_neckB");
+	orientConstraint -mo -weight 1 ($charName + "_neckB_con") ($charName + "_neckB");
+	scaleConstraint -mo -weight 1  ($charName + "_neckB_con") ($charName + "_neckB");
+	
+	pointConstraint -mo -weight 1  ($charName + "_head_con") ($charName + "_head");
+	orientConstraint -mo -weight 1 ($charName + "_head_con") ($charName + "_head");
+	scaleConstraint -mo -weight 1  ($charName + "_head_con") ($charName + "_head");
+
+///////////////////////////////////////////////////////////////////
+
+	//建立头部整体控制器
+	float $oreint[3],$position[3] ;
+	circle -c 0 0 0 -nr 0 1 0 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s 8 -ch 1 -n ($charName + "_headWholdCon");
+	setAttr ($charName + "_headWholdCon.rotateX") 15;
+	makeIdentity -apply true -rotate true ($charName + "_headWholdCon");
+	DeleteHistory ($charName + "_headWholdCon") ;
+	group -em -n ($charName + "_headWholdConAdjust");
+	group -em -n ($charName + "_headConstrainValue");
+	addAttr -ln autoAdjust -at double  -min 0 -max 1 -dv 0 -k 1 ($charName + "_headWholdCon");
+
+	//调整头部整体控制器的方位和层级
+	$oreint = `getAttr ($charName + "_neckA" + ".rotate")` ;
+	$position = `xform -query -worldSpace -translation ($charName + "_neckA")`;
+	
+	setAttr ($charName + "_headWholdCon.rx") $oreint[0] ;
+	setAttr ($charName + "_headWholdCon.ry") $oreint[1] ;
+	setAttr ($charName + "_headWholdCon.rz") $oreint[2] ;
+	xform -worldSpace -translation $position[0] $position[1] $position[2] ($charName + "_headWholdCon") ;
+	
+	setAttr ($charName + "_headWholdConAdjust.rx") $oreint[0] ;
+	setAttr ($charName + "_headWholdConAdjust.ry") $oreint[1] ;
+	setAttr ($charName + "_headWholdConAdjust.rz") $oreint[2] ;
+	xform -worldSpace -translation $position[0] $position[1] $position[2] ($charName + "_headWholdConAdjust") ;
+	
+	setAttr ($charName + "_headConstrainValue.rx") $oreint[0] ;
+	setAttr ($charName + "_headConstrainValue.ry") $oreint[1] ;
+	setAttr ($charName + "_headConstrainValue.rz") $oreint[2] ;
+	xform -worldSpace -translation $position[0] $position[1] $position[2] ($charName + "_headConstrainValue") ;
+	
+	parent ($charName + "_headWholdCon") ($charName + "_headWholdConAdjust");
+	parent ($charName + "_headConstrainValue") ($charName + "_headWholdConAdjust");
+	parent ($charName + "_headWholdConAdjust") ($charName + "_chestB");
+
+///////////////////////////////////////////////////////////////////
+
+	//建立数据控制节点
+	
+	//建立约束得到数据
+	orientConstraint -n ($charName + "_headConstrainValue_orientConstraint") -mo -weight 1 ($charName + "_MASTER") ($charName + "_headConstrainValue");	
+	
+	//组合整体转动和自动角度
+	shadingNode -asUtility plusMinusAverage -n ($charName + "_headWholdCon" + "_plusMinusAverage");		
+	setAttr ($charName + "_headWholdCon" + "_plusMinusAverage.operation") 1;
+	//使自动的程度受到autoAdjust控制（从0到1）
+	shadingNode -asUtility multiplyDivide -n ($charName + "_headWholdCon" + "_multiplyDivide");			
+	setAttr ($charName + "_headWholdCon" + "_multiplyDivide.operation") 1;
+	//调整输入脖子的转动数据为原来数据的1/3
+	shadingNode -asUtility multiplyDivide -n ($charName + "_headWholdConAdjust" + "_multiplyDivide");	
+	setAttr ($charName + "_headWholdConAdjust" + "_multiplyDivide.operation") 2;
+	setAttr ($charName + "_headWholdConAdjust" + "_multiplyDivide.input2X") 3;
+	setAttr ($charName + "_headWholdConAdjust" + "_multiplyDivide.input2Y") 3;
+	setAttr ($charName + "_headWholdConAdjust" + "_multiplyDivide.input2Z") 3;
+	
+	//连接数据
+	//headWholdConAdjust接收身体旋转值并处理成相反且为原来的1/3
+	connectAttr -f ($charName + "_headConstrainValue.rotate") ($charName + "_headWholdConAdjust" + "_multiplyDivide.input1");
+	//输出autoAdjust调节数据（0到1之间）给multiplyDivide
+	connectAttr -f ($charName + "_headWholdCon.autoAdjust") ($charName + "_headWholdCon" + "_multiplyDivide.input2X");
+	connectAttr -f ($charName + "_headWholdCon.autoAdjust") ($charName + "_headWholdCon" + "_multiplyDivide.input2Y");
+	connectAttr -f ($charName + "_headWholdCon.autoAdjust") ($charName + "_headWholdCon" + "_multiplyDivide.input2Z");
+	//使控制数据和调整好的输入数据相乘，使自动调整旋转数据的影响力从0到1变化
+	connectAttr -f ($charName + "_headWholdConAdjust" + "_multiplyDivide.output") ($charName + "_headWholdCon" + "_multiplyDivide.input1");
+	//plusMinusAverage节点接受两组旋转分支数据输出给脖子，脖子受到两者共同作用
+	connectAttr -f ($charName + "_headWholdCon.rotate") ($charName + "_headWholdCon" + "_plusMinusAverage.input3D[0]");						//来自整体控制器的数据
+	connectAttr -f ($charName + "_headWholdCon" + "_multiplyDivide.output") ($charName + "_headWholdCon" + "_plusMinusAverage.input3D[1]");	//来自制动调节器的数据
+	connectAttr -f ($charName + "_headWholdCon" + "_plusMinusAverage.output3D") ($charName +"_neckA_conAll" + ".rotate");
+	
+	//更改con名称
+	rename ($charName + "_head_con") ($charName + "_headCon");
+	rename ($charName + "_neckB_con") ($charName + "_neckBCon");
+	rename ($charName + "_neckA_con") ($charName + "_neckACon");
+	rename ($charName + "_head_conAll") ($charName + "_headConAll");
+	rename ($charName + "_neckB_conAll") ($charName + "_neckBConAll");
+	rename ($charName + "_neckA_conAll") ($charName + "_neckAConAll");
+	//end
+}
+
+
+
+

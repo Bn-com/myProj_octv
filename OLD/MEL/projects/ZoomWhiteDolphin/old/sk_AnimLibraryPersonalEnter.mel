@@ -1,0 +1,228 @@
+global proc sk_AnimLibraryPersonalEnter()
+{
+    if(`window -ex sk_AnimLibraryPersonalUI`)
+    	deleteUI sk_AnimLibraryPersonalUI;
+        window -t "个人专用库" -menuBar 1 -rtf 1 sk_AnimLibraryPersonalUI;
+        menu -label "说明";
+        	menuItem -label "帮助" -c sk_m8_help;
+        	   
+        columnLayout;
+            columnLayout -adjustableColumn 1;
+                optionMenuGrp -adjustableColumn 1 -columnWidth 150 150 -cc "sk_AnimLibraryPersonalListUpdate"  sk_AnimLibraryProjectList;
+                    menuItem  -label   "ZoomWhiteDolphin";
+                    menuItem  -label   "Zorro";
+            setParent..;
+            
+            columnLayout;
+                button  -w 150 -h 30  -l "创建新库" 
+                -c "sk_AnimLibraryPersonalCreate" ;
+            setParent..;
+            
+            columnLayout;
+                textScrollList -width 150 -numberOfRows 10 -allowMultiSelection 0 -doubleClickCommand "sk_AnimLibraryPersonalListSelectCMD"  sk_AnimLibraryPersonalList;
+                string $project = `optionMenuGrp -q -value  sk_AnimLibraryProjectList`;
+                sk_AnimLibraryPersonalListUpdate();            
+                
+                source "//file-cluster/GDC/Resource/Support/Maya/projects/ZoomWhiteDolphin/slAnimPoseLibraryProject_Enter.mel";
+            setParent..;
+        	
+        	
+    showWindow sk_AnimLibraryPersonalUI;
+}
+
+global proc sk_AnimLibraryPersonalCreate()
+{
+    string $text;
+    string $result = `promptDialog
+        -title "新建自定义动作库"
+        -message "请输入您要创建的动作库名"
+        -button "创建" -button "退出"
+        -defaultButton "创建" -cancelButton "退出"
+        -dismissString "退出"`;
+    
+    if ($result == "创建") {
+        $text = `promptDialog -query -text`;
+        
+        
+        string $project = `optionMenuGrp -q -value  sk_AnimLibraryProjectList`;
+        slAnimPoseLibraryProject_Enter($text,$project);
+        sk_AnimLibraryPersonalListUpdate();
+    }
+}
+
+
+global proc sk_AnimLibraryPersonalListUpdate()
+{
+    string $project = `optionMenuGrp -q -value  sk_AnimLibraryProjectList`;
+    
+    string $path =  "\\\\file-cluster\\GDC\\Projects\\" + $project + "\\"+ $project + "_Scratch\\Animation_Personal\\" ;
+    string $infoDir[] = `getFileList - folder $path`;
+    
+    textScrollList -e -removeAll sk_AnimLibraryPersonalList;
+    
+    for( $dir in $infoDir)
+    {
+        textScrollList -e -append $dir sk_AnimLibraryPersonalList;
+    }
+    
+
+}
+
+global proc sk_AnimLibraryPersonalListSelectCMD()
+{
+    string $item[] = ` textScrollList -q -selectItem sk_AnimLibraryPersonalList`;
+    
+    string $project = `optionMenuGrp -q -value  sk_AnimLibraryProjectList`;
+    
+    slAnimPoseLibraryProject_Enter($item[0],$project);
+    
+}
+
+
+global proc slAnimPoseLibraryProject_Enter(string $name ,string $project )
+{
+	//source "ddAnimationPanelUI.mel";
+	
+	global string $anzovinInterfaceCurrentCharacterNamespace;
+	
+	string $fmCamera = "FM_faceMapCam";
+	string $reCamera = "re_cam_faceRigging";
+
+	string $view = "";
+	int $selectView = 0;
+	
+	string $woPath  = "";
+	string $woAnPath = "";
+        if($name !="")
+        {
+	$woPath = "\\\\file-cluster\\GDC\\Projects\\" + $project + "\\"+ $project + "_Scratch\\Animation_Personal\\" + $name + "\\Pose";
+	$woAnPath = "\\\\file-cluster\\GDC\\Projects\\" + $project + "\\"+ $project + "_Scratch\\Animation_Personal\\"+ $name +"\\动作库";
+	}
+	else
+	{
+	$woPath = "\\\\file-cluster\\GDC\\Projects\\" + $project + "\\"+ $project + "_Scratch\\Animation\\Pose";
+	$woAnPath = "\\\\file-cluster\\GDC\\Projects\\" + $project + "\\"+ $project + "Scratch\\Animation\\动作库";
+	}
+	sysFile -makeDir $woPath;
+	sysFile -makeDir $woAnPath;
+
+	string $characters[] = slAnimPoseLibraryGetCharacter();
+	
+	if(`window -exists slAnimPoseLibraryWin`)
+		deleteUI slAnimPoseLibraryWin;
+	if(`modelPanel -exists slAnimPoseLibraryWin_fmView`)
+		deleteUI -panel slAnimPoseLibraryWin_fmView;
+	
+	window -title "Pose Library " -in "PL" -menuBar  true -mxb 1 -mnb 1 slAnimPoseLibraryWin;
+
+		paneLayout -configuration "vertical2" slAnimPoseLibraryWin_panel;
+			
+			string $child1 = `formLayout`;
+				string $row1 = `rowLayout -nc 5 -cw5 40 50 10 50 40`;
+					string $t1 = `text -l "Start" -w 40 `;
+					string $sf = `textField  -text  "" -w 50 -en 0 slAnimPoseLibraryWin_An_start`;
+					string $sp = `separator -st "single" -w 10 -h 20`;
+					string $ef = `textField  -text  "" -w 50 -en 0 slAnimPoseLibraryWin_An_end`;
+					string $t2 = `text -l "End" -w 40`;
+				setParent ..;
+				string $cb1 = `checkBox -l "entire curve" -v 1 slAnimPoseLibraryWin_An_ec`;
+					checkBox -e -onc "textField -e -en 0 slAnimPoseLibraryWin_An_start;textField -e -en 0 slAnimPoseLibraryWin_An_end;" 
+							     -ofc  "textField -e -en 1 slAnimPoseLibraryWin_An_start;textField -e -en 1 slAnimPoseLibraryWin_An_end;" slAnimPoseLibraryWin_An_ec;
+				string $cb2 = `checkBox -l "cycle"	-v 1 -en 1 slAnimPoseLibraryWin_An_rp`;
+				string $cb3 = `checkBox -l "connect" -v 1 -en 1 slAnimPoseLibraryWin_An_cn`;
+				string $omg1 = `optionMenuGrp -adj 2 -label "Path: " -columnWidth2 40 600 -columnAlign 1 "right" -cc "" `;
+					menuItem -l $woAnPath;
+					optionMenuGrp -e -v $woAnPath $omg1;
+				string $fr1 = `frameLayout -bv false -lv false`;
+						string $sh1 = `shelfLayout -cwh 60 90 -st "iconAndTextVertical"`;
+							string $sb1 = `shelfButton -annotation "please select correct path" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "null" -fn "boldLabelFont"`;
+							slAnimPoseLibraryFaceGetCharListAn($omg1,$fr1);
+					setParent ..;
+				setParent ..;
+			setParent ..;
+			formLayout -edit
+				-af	$row1	"top"	10
+				-af	$row1	"left"	2
+				-ap	$row1	"right"	1	50
+				
+				-af	$cb1		"top"	10
+				-ac	$cb1		"left"	10	$row1
+				
+				-af	$cb2		"top"	10
+				-ac	$cb2		"left"	10	$cb1
+
+				-af	$cb3		"top"	10
+				-ac	$cb3		"left"	10	$cb2
+
+				-ac	$omg1	"top"	5	$row1
+				-af	$omg1	"left"	2
+				-ap	$omg1	"right"	1	99
+
+				-ac	$fr1		"top"	5	$omg1
+				-af	$fr1		"left"	2
+				-af	$fr1		"right"	2
+				-af	$fr1		"bottom"	2
+			$child1;
+			setParent slAnimPoseLibraryWin_panel;
+
+			string $child2 = `formLayout `;
+				checkBox -label "Key"		-value 1	slAnimPoseLibraryWin_Keyable;
+				checkBox -label "Mirror"	-value 0	slAnimPoseLibraryWin_Mirrorable;
+				floatSliderGrp -label "Value" -field true -cw 1 40 -cw 2 40 -cw 3 10 -adj 3
+						-minValue 0 -maxValue 2.0 -fieldMinValue 0 -fieldMaxValue 10 -value 1 slAnimPoseLibraryWin_KeyValue;
+				optionMenuGrp 	-label "Path: " -columnWidth2 40 600 -columnAlign 1 "right"  
+						-cc "slAnimPoseLibraryFaceGetTab;slAnimPoseLibraryUpdatOptionVar;" slAnimPoseLibraryWin_CustomPath;
+					menuItem -label "   ";
+					if (`optionVar -ex slAnimPoseLibraryWin_path`)
+					{
+						string $children[] = `optionMenuGrp -q -ill  slAnimPoseLibraryWin_CustomPath`;
+							deleteUI $children;
+						
+						string $path[] = `optionVar -q slAnimPoseLibraryWin_path`;
+						for ($item in $path)
+						{
+							menuItem -label $item ;
+							optionMenuGrp -e -v $item  slAnimPoseLibraryWin_CustomPath;	
+						}
+					}
+				slAnimPoseLibrarySetPath $woPath "";
+				optionMenuGrp -e -v $woPath slAnimPoseLibraryWin_CustomPath;
+				//button -label "Browse" -c "slAnimPoseLibraryGetPath;slAnimPoseLibraryFaceGetTab;" -en false slAnimPoseLibraryWin_Browse;
+				//button -label "Creat New Facial..." -c "slAnimPoseLibraryCreateNew" -en false slAnimPoseLibraryWin_CreateNew;
+				frameLayout -bv false -lv false slAnimPoseLibraryWin_Custom_fr;
+						shelfLayout -cwh 60 90 -st "iconAndTextVertical" slAnimPoseLibraryWin_CustomBut;
+							shelfButton -annotation "please select correct path" -style "iconAndTextVertical" -image1 "commandButton.xpm" -l "null" -fn "boldLabelFont";
+							slAnimPoseLibraryFaceGetCharList();
+					setParent ..;
+				setParent ..;
+			setParent ..;
+			formLayout -edit
+				-af		slAnimPoseLibraryWin_KeyValue		"top"		10
+				-af		slAnimPoseLibraryWin_KeyValue		"left"		2
+				-ap		slAnimPoseLibraryWin_KeyValue		"right"		1	50	
+				
+				-af		slAnimPoseLibraryWin_Keyable		"top"		10
+				-ac		slAnimPoseLibraryWin_Keyable		"left"		10	slAnimPoseLibraryWin_KeyValue
+
+				-af		slAnimPoseLibraryWin_Mirrorable		"top"		10
+				-ac		slAnimPoseLibraryWin_Mirrorable		"left"		10	slAnimPoseLibraryWin_Keyable
+				
+				-ac		slAnimPoseLibraryWin_CustomPath		"top"		5	slAnimPoseLibraryWin_Keyable
+				-af		slAnimPoseLibraryWin_CustomPath		"left"		5
+				-af		slAnimPoseLibraryWin_CustomPath		"right"		10	
+
+				//-ac		slAnimPoseLibraryWin_Browse			"top"		5	slAnimPoseLibraryWin_Keyable
+				//-ac		slAnimPoseLibraryWin_Browse			"right"		10	slAnimPoseLibraryWin_CreateNew
+
+				//-ac		slAnimPoseLibraryWin_CreateNew		"top"		5	slAnimPoseLibraryWin_Keyable
+				//-af		slAnimPoseLibraryWin_CreateNew		"right"		2
+				
+				-ac		slAnimPoseLibraryWin_Custom_fr		"top"		5	slAnimPoseLibraryWin_CustomPath
+				-af		slAnimPoseLibraryWin_Custom_fr		"left"		2
+				-af		slAnimPoseLibraryWin_Custom_fr		"right"		2
+				-af		slAnimPoseLibraryWin_Custom_fr		"bottom"	2
+			$child2;
+			setParent slAnimPoseLibraryWin_panel;
+
+	showWindow slAnimPoseLibraryWin;
+}

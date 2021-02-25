@@ -1,0 +1,358 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjMushroomExp()
+{
+	if (`window -q -exists zjMushroomExpWin`)
+		return;
+
+	window -title "Mushroom Tool" zjMushroomExpWin;
+		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Assign Mushrooms..." -command "zjHelpCallback zjMushroomExp";
+				setParent ..;
+    			frameLayout -label "Create Expression" -labelAlign "top" -cll true 
+    				-borderStyle "etchedIn";
+
+				string $formLayout = `formLayout`;
+					$but1 = `button -label "For Joints" -command "zjMushroomSway"`;
+					$but2 = `button -label "For Clusters(Rotation)" -command "zjMushroomSway2"`;
+					$but3 = `button -label "For Clusters(Translation)" -command "zjMushroomSway3"`;
+
+				setParent ..;
+
+				formLayout -edit
+
+					-attachForm		$but1	"top"		10
+					-attachForm		$but1	"left"		0
+					-attachPosition		$but1	"right"		0	33
+
+					-attachForm		$but2	"top"		10	
+					-attachControl		$but2	"left"		5	$but1
+					-attachPosition		$but2	"right"		0	66
+
+					-attachForm		$but3	"top"		10	
+					-attachControl		$but3	"left"		5	$but2
+					-attachPosition		$but3	"right"		0	100
+
+				$formLayout;
+
+				setParent ..;
+			setParent ..;
+
+    			frameLayout -label "Distribute Mushroom" -labelAlign "top" -cll true 
+    				-borderStyle "etchedIn";
+				string $formLayout = `formLayout`;
+					radioCollection;
+					$rad1 = `radioButton -label "Copy while keeping original objects" -select`;
+					$rad2 = `radioButton -label "Copy while replacing original objects"`;
+					$rad3 = `radioButton -label "Instance"`;
+					$but1 = `button -label "Apply" -command ("zjMushdtr " + $rad1 + " " + $rad2 + " " + $rad3)`;
+
+				setParent ..;
+
+				formLayout -edit
+
+					-attachForm		$rad1	"top"		10
+					-attachForm		$rad1	"left"		25
+					-attachForm		$rad1	"right"		5
+
+					-attachControl		$rad2	"top"		10	$rad1
+					-attachForm		$rad2	"left"		25
+					-attachForm		$rad2	"right"		5
+
+					-attachControl		$rad3	"top"		10	$rad2
+					-attachForm		$rad3	"left"		25
+					-attachForm		$rad3	"right"		5
+
+					-attachControl		$but1	"top"		10	$rad3
+					-attachForm		$but1	"left"		5
+					-attachForm		$but1	"right"		5
+
+				$formLayout;
+
+				setParent ..;
+			setParent ..;
+		setParent ..;
+	showWindow zjMushroomExpWin;
+
+}
+
+//create expression according to the structure of the mushroom
+global proc zjMushroomSway()
+{
+//for joint use
+	string $cmd = "\n";
+
+	string $root[] = `ls -selection -type joint`;
+	if (size($root) == 1)
+	{
+		//add extra attributes to top joint
+		addAttr -longName Seed -attributeType long -min 0 -max 10000 -defaultValue 500 $root[0];
+		addAttr -longName Speed -attributeType "float" -min 0 -max 10 -defaultValue 1 $root[0];
+		addAttr -longName Magnitude -attributeType "float" -min 0 -max 90 -defaultValue 0.5 $root[0];
+		addAttr -longName Direction -attributeType long -min -1 -max 90 -defaultValue -1 $root[0];
+
+		string $joints[] = `listRelatives -allDescendents -type joint $root[0]`;
+		$joints = stringArrayCatenate($root,$joints);
+		
+		$cmd += "float $seed =  " + $root[0] + ".Seed;\n";
+		$cmd += "seed($seed);\n";
+		$cmd += "float $speed =  " + $root[0] + ".Speed;\n";
+		$cmd += "float $magnitude =  " + $root[0] + ".Magnitude;\n";
+		$cmd += "float $dt = " + $root[0] + ".Direction;\n";
+		$cmd += "seed(rand(10000));\n";
+		$cmd += "float $mag = rand($magnitude);\n";
+		$cmd += "float $rotX = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+		$cmd += "float $rotZ = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+		$cmd += "\n";
+
+		for ($joint in $joints)
+			if (`getAttr -lock ($joint + ".rx")` == 0&&`getAttr -lock ($joint + ".ry")` == 0&&`getAttr -lock ($joint + ".rz")` == 0)
+			{
+				$cmd += $joint + ".rx = rand(1.0, 2.0)*$rotX;\n";
+				$cmd += "if ($dt >= 0) \n	$rotZ = tan($dt)*$rotX;\n";
+				$cmd += $joint + ".rz = rand(1.0, 2.0)*$rotZ;\n";
+				$cmd += "\n";
+			}
+		if ($cmd != "")
+		{
+			string $buff[];
+			tokenize $root[0] "_" $buff;
+			string $name = $buff[0] + "_" + $buff[1] + "_exp";
+			expression -name $name -string $cmd;
+		}
+	}
+	else warning "please select the first skeleton joint of the mushroom.";
+}
+
+
+global proc zjMushroomSway2()
+{
+//for cluster use
+	string $cmd = "";
+
+	string $root[] = `ls -selection -tr`;
+	if (size($root) == 1)
+	{
+		string $clustershapes[] = `listRelatives -allDescendents -type clusterHandle $root[0]`;
+		string $clusters[];
+		int $count = 0;
+		for ($item in $clustershapes)
+		{
+			string $trf = getTransform($item);
+			$clusters[$count++] = $trf;
+		}
+		if (size($clusters)>0)
+		{
+			addAttr -longName Seed -attributeType long -min 0 -max 10000 -defaultValue 200 $root[0];
+			addAttr -longName Randomicity -attributeType "float" -min 0 -max 20 -defaultValue 10 $root[0];
+			addAttr -longName Speed -attributeType "float" -min 0 -max 10 -defaultValue 1 $root[0];
+			addAttr -longName Magnitude -attributeType "float" -min 0 -max 10 -defaultValue 5 $root[0];
+			$cmd += "float $seed =  " + $root[0] + ".Seed;\n";
+			$cmd += "seed($seed);\n";
+			$cmd += "float $radm =  " + $root[0] + ".Randomicity;\n";
+			$cmd += "float $speed =  " + $root[0] + ".Speed;\n";
+			$cmd += "float $magnitude =  " + $root[0] + ".Magnitude;\n";
+			$cmd += "float $mag = rand($magnitude);\n";
+			$cmd += "float $rotX = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+			$cmd += "float $rotZ = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+			$cmd += "\n";
+			for ($i =0; $i<size($clusters); $i++)
+			{
+				if (kcIsType($clusters[$i], "clusterHandle"))
+				{
+					if (`getAttr -lock ($clusters[$i] + ".rx")` == 0&&`getAttr -lock ($clusters[$i] + ".rz")` == 0)
+					{
+						$cmd += $clusters[$i] + ".rx = rand(1-$radm,1+$radm) * $rotX;\n";
+						$cmd += $clusters[$i] + ".rz = rand(1-$radm,1+$radm) * $rotZ;\n";
+						$cmd += "\n";
+					}
+				}
+			}
+
+			if ($cmd != "")
+			{
+				string $buff[];
+				tokenize $root[0] "_" $buff;
+				string $name = $buff[0] + "_" + $buff[1] + "_exp";
+				expression -name $name -string $cmd;
+			}
+		}
+		else warning "please select the group of the clusters.";
+	}
+	else warning "please select the group of the clusters.";
+}
+
+
+global proc zjMushroomSway3()
+{
+//for cluster use
+	string $cmd = "";
+
+	string $root[] = `ls -selection -tr`;
+	if (size($root) == 1)
+	{
+		string $clustershapes[] = `listRelatives -allDescendents -type clusterHandle $root[0]`;
+		string $clusters[];
+		int $count = 0;
+		for ($item in $clustershapes)
+		{
+			string $trf = getTransform($item);
+			$clusters[$count++] = $trf;
+		}
+		if (size($clusters)>0)
+		{
+			addAttr -longName Seed -attributeType long -min 0 -max 10000 -defaultValue 200 $root[0];
+			addAttr -longName Randomicity -attributeType "float" -min 0 -max 20 -defaultValue 10 $root[0];
+			addAttr -longName Speed -attributeType "float" -min 0 -max 10 -defaultValue 1 $root[0];
+			addAttr -longName Magnitude -attributeType "float" -min 0 -max 1 -defaultValue 0.05 $root[0];
+			$cmd += "float $seed =  " + $root[0] + ".Seed;\n";
+			$cmd += "seed($seed);\n";
+			$cmd += "float $radm =  " + $root[0] + ".Randomicity;\n";
+			$cmd += "float $speed =  " + $root[0] + ".Speed;\n";
+			$cmd += "float $magnitude =  " + $root[0] + ".Magnitude;\n";
+			$cmd += "float $mag = rand($magnitude);\n";
+			$cmd += "float $tX = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+			$cmd += "float $tZ = $mag * noise(rand(0.1, 1.0) + time*$speed);\n";
+			$cmd += "\n";
+			for ($i =0; $i<size($clusters); $i++)
+			{
+				if (kcIsType($clusters[$i], "clusterHandle"))
+				{
+					if (`getAttr -lock ($clusters[$i] + ".tx")` == 0&&`getAttr -lock ($clusters[$i] + ".tz")` == 0)
+					{
+						$cmd += $clusters[$i] + ".tx = rand(1-$radm,1+$radm) * $tX;\n";
+						$cmd += $clusters[$i] + ".tz = rand(1-$radm,1+$radm) * $tZ;\n";
+						$cmd += "\n";
+					}
+				}
+			}
+
+			if ($cmd != "")
+			{
+				string $buff[];
+				tokenize $root[0] "_" $buff;
+				string $name = $buff[0] + "_" + $buff[1] + "_exp";
+				expression -name $name -string $cmd;
+			}
+		}
+		else warning "please select the group of the clusters.";
+	}
+	else warning "please select the group of the clusters.";
+}
+
+//import mushrooms and distribute them
+global proc zjMushdtr(string $rad1, string $rad2, string $rad3)
+{
+	string $sel[] = `ls -long -selection`;
+	int $option1 = `radioButton -q -select $rad1`;
+	int $option2 = `radioButton -q -select $rad2`;
+	int $option3 = `radioButton -q -select $rad3`;
+	if ($option1)
+	{
+		//only copy the skeletons
+		if (size($sel)>1)
+		{
+			string $matrix[] = `listRelatives -fullPath -children -type transform $sel[0]`;
+			string $master = "";
+			for ($item in $matrix)
+			{
+				if (`gmatch $item "*MASTER*"`)
+				{
+					$master = $item;
+					break;
+				}
+			}
+			if (!`objExists $master`)
+			{
+				warning "please select imported mushroom first and the distributed mushrooms second.";
+				return;
+			}
+			
+			string $mushrooms[] = stringArrayRemove({$sel[0]}, $sel);
+			
+			for ($i=0; $i<size($mushrooms); $i++)
+			{
+				string $clustershapes[] = `listRelatives -fullPath -children -type transform $mushrooms[$i]`;
+				string $his[] = `listHistory -pruneDagObjects true $clustershapes[0]`;
+				int $bindflag = 0;
+				for ($item in $his)
+				{
+					if (`nodeType $item` == "skinCluster")
+					{
+						$bindflag = 1;
+						break;
+					}
+				}
+				if ($bindflag == 0)
+				{
+					string $return[] = `duplicate -upstreamNodes -returnRootsOnly $master`;
+					string $master = $return[0];
+					if (size($master)>0)
+					{
+						parent $master $mushrooms[$i];
+						setAttr ($master+".translate") 0 0 0;
+						setAttr ($master+".rotate") 0 0 0;
+						setAttr ($master+".scale") 1 1 1;
+						
+						string $skeletons[] = `listRelatives -fullPath -children -type joint $master`;
+						skinCluster $skeletons $clustershapes[0];
+					}
+				}
+			}
+		}
+		else warning "please select imported mushroom first and the distributed mushrooms second.";
+	}
+	else if ($option2)
+	{
+		if (size($sel)>1)
+		{
+			string $matrix[] = `listRelatives -fullPath -children -type transform $sel[0]`;
+			string $mushrooms[] = stringArrayRemove({$sel[0]}, $sel);
+			
+			for ($i=0; $i<size($mushrooms); $i++)
+			{
+				string $clustershapes[] = `listRelatives -fullPath -children -type transform $mushrooms[$i]`;
+				delete $clustershapes[0];
+				string $return[] = `duplicate -upstreamNodes -returnRootsOnly $matrix`;
+				string $master = $return[0];
+				if (size($master)>0)
+				{
+					parent $master $mushrooms[$i];
+					setAttr ($master+".translate") 0 0 0;
+					setAttr ($master+".rotate") 0 0 0;
+					setAttr ($master+".scale") 1 1 1;
+				}
+			}
+		}
+		else warning "please select imported mushroom first and the distributed mushrooms second.";
+	}
+	else if ($option3)
+	{
+		if (size($sel)>1)
+		{
+			string $singleMush[] = `ls -long -selection -dag -shapes -ni $sel[0]`;
+			string $mushrooms[] = stringArrayRemove({$sel[0]}, $sel);
+			for ($i=0; $i<size($mushrooms); $i++)
+			{
+				string $clustershapes[] = `listRelatives -fullPath -children -type transform $mushrooms[$i]`;
+				delete $clustershapes[0];
+				$return = `instance $singleMush[0]`;
+				parent $return[0] $mushrooms[$i];
+				setAttr ($mushrooms[$i]+"|"+$return[0]+".translate") 0 0 0;
+				setAttr ($mushrooms[$i]+"|"+$return[0]+".rotate") 0 0 0;
+				setAttr ($mushrooms[$i]+"|"+$return[0]+".scale") 1 1 1;
+			}
+		}
+		else warning "please select imported mushroom first and the distributed mushrooms second.";
+	}
+}

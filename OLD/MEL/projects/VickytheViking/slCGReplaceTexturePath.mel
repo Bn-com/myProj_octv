@@ -1,0 +1,164 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slCGReplaceTexturePath()
+{
+	if (`window -ex slCGReplaceTexturePathWin`)
+		deleteUI slCGReplaceTexturePathWin;
+	
+	window -menuBar true -title "Change Texture Path" -resizeToFitChildren true slCGReplaceTexturePathWin;
+		columnLayout -adjustableColumn true;
+			optionMenuGrp -label "Disk:" -columnAlign 1 "left" slCGReplaceTexturePathWin_Local;
+				menuItem -label "D:";
+				menuItem -label "E:";
+				menuItem -label "M:";
+				menuItem -label "L:";
+				menuItem -label "Z:";
+			optionMenuGrp -e -v "M:" slCGReplaceTexturePathWin_Local;
+			button -label "Copy Texture" -command "slCGReplaceTexture";
+
+	showWindow slCGReplaceTexturePathWin;
+}
+
+global proc slCGReplaceTexture()
+{
+	string $local = 	`optionMenuGrp -q -v slCGReplaceTexturePathWin_Local`;
+
+	slCGReplaceServicePath $local;
+
+	confirmDialog -title "" -message ""  -button "完成"  -defaultButton "完成" -cancelButton "完成" -dismissString "完成";
+}
+
+
+global proc slCGReplaceServicePath(string $service)
+{
+	//贴图路径
+	string $files[] =  `ls -type file`;
+	for ($f in $files)
+	{
+		string $old = `getAttr ($f+".fileTextureName")`;
+		string $attr = "FileNetPath";
+		/*if (objExists($f+"."+$attr))
+		{
+			$old = `getAttr ($f+"."+$attr)`;
+			//setAttr -type "string" ($f+".fileTextureName") $old;
+		}*/
+		$old = substituteAllString($old,"\\","/");
+		$old = substituteAllString($old,"${IDMT_PROJECTS}","//file-cluster/gdc/Projects");
+
+
+		if ($service == "L:")//L盘路径
+		{
+			if (objExists($f+"."+$attr))
+			{
+				$old = `getAttr ($f+"."+$attr)`;
+			}
+			else //if (!objExists($f+"."+$attr))
+			{
+				addAttr -ln $attr  -dt "string"  $f;
+				setAttr -e-keyable true ($f+"."+$attr);
+				setAttr -type "string" ($f+"."+$attr) $old;
+			}
+			$old = substituteAllString($old,"\\","/");
+			$old = substituteAllString($old,"${IDMT_PROJECTS}","//file-cluster/gdc/Projects");
+			
+			string $match = match("^//[fF][iI][lL][eE]-[cC][lL][uU][sS][tT][eE][rR]/[gG][dD][cC]/",$old);
+			if ($match=="")
+			{
+				$match=match("^[zZ]:/",$old);
+			}
+
+			if ($match != "")
+			{
+				string $new = substituteAllString($old,$match,"L:/");
+				if (!`filetest -r $new`)
+				{
+					string $buff[] = stringToStringArray($new,"/");
+					string $folder = substituteAllString($new,$buff[size($buff)-1],"");
+					sysFile -md $folder;
+					sysFile -copy $new $old;
+				}
+				setAttr -type "string" ($f+".fileTextureName") $new;
+			}
+		}
+		else if ($service == "Z:") //file-cluster/gdc路径
+		{
+			string $match = match("^[a-zA-Z]:/",$old);
+
+			if ($match != "")
+			{
+				string $new = substituteAllString($old,$match,"//file-cluster/gdc/");
+				if (!`filetest -r $new`)
+				{
+					string $buff[] = stringToStringArray($new,"/");
+					string $folder = substituteAllString($new,$buff[size($buff)-1],"");
+					sysFile -md $folder;
+					sysFile -copy $new $old;
+				}
+				string $idmt = match("^//[fF][iI][lL][eE]-[cC][lL][uU][sS][tT][eE][rR]/[gG][dD][cC]/[pP][rR][oO][jJ][eE][cC][tT][sS]/",$new);
+				/*if ($idmt != "")
+				{
+					$new = substituteAllString($new,$idmt,"\${IDMT_PROJECTS}/");
+				}*/
+				setAttr -type "string" ($f+".fileTextureName") $new;
+			}
+		}
+		else //本地路径
+		{
+			if (objExists($f+"."+$attr))
+			{
+				$old = `getAttr ($f+"."+$attr)`;
+			}
+			else //if (!objExists($f+"."+$attr))
+			{
+				addAttr -ln $attr  -dt "string"  $f;
+				setAttr -e-keyable true ($f+"."+$attr);
+				setAttr -type "string" ($f+"."+$attr) $old;
+			}
+			$old = substituteAllString($old,"\\","/");
+			$old = substituteAllString($old,"${IDMT_PROJECTS}","//file-cluster/gdc/Projects");
+
+			string $match = match("^[lL]:/",$old);
+			if ($match=="")
+			{
+				$match=match("^[zZ]:/",$old);
+				if ($match=="")
+				{
+					$match=match("^//[fF][iI][lL][eE]-[cC][lL][uU][sS][tT][eE][rR]/[gG][dD][cC]/",$old);
+				}
+			}
+
+			if ($match != "")
+			{
+				string $new = substituteAllString($old,$match,($service+"/"));
+				if (!`filetest -r $new`)
+				{
+					string $buff[] = stringToStringArray($new,"/");
+					string $folder = substituteAllString($new,$buff[size($buff)-1],"");
+					sysFile -md $folder;
+					sysFile -copy $new $old;
+				}
+				else
+				{
+					//对比网络本地素材新旧
+					python("import idmt.maya.slLittleTools as slt");
+					string $same=python("slt.slFileContrast(\""+$old+"\",\""+$new+"\")");
+					if ($same == 0)
+					{
+						sysFile -copy $new $old;
+					}
+				}
+				setAttr -type "string" ($f+".fileTextureName") $new;
+			}
+		}
+	}
+}

@@ -1,0 +1,320 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ¿Ó»Ò
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//           Name:         lr_batchDaily
+//     Created By:         Larry
+//           Date:         2002.5.20
+//    Description:         handle the daily convert interface, create slate file. 
+//                         It was called when change the Render With Auto Daily 
+//                         Convert option in Batch Render Option window. 
+//                         
+//                         $index == 1    call from batch render
+//                         $index == 2    call from netrender tool
+//
+
+global proc lr_batchDaily(int $index)
+{
+	
+	int $checkval;
+	if($index ==1)
+	{
+	   $checkval =  `checkBoxGrp -q -v1 autodailyCTL`;
+	}
+	if($index ==2)
+	{
+	   $checkval = `checkBoxGrp -q -v1 autonetdailyCTL`;
+	}
+	if(!renderglobalCheck())
+	{
+	   confirmDialog -title "Warning" -message "Please set out format to name.#.ext\n Out format IFF, TGA, JPG" -button "Close";		
+	   if($index ==1) checkBoxGrp -e -v1 0 autodailyCTL;
+	   if($index ==2) checkBoxGrp -e -v1 0 autonetdailyCTL;
+	   return;
+	}
+	
+// For mayabatch render 
+      
+      if($index ==1)
+      {  
+  
+// resize batchrender window
+       global string $gBatchRenderWindow;
+       if($checkval)
+       {
+       	    if(`window -ex $gBatchRenderWindow`)
+            {
+       	       window -e -w 470 batchRenderWnd;
+       	       window -e -h 400 batchRenderWnd;
+// reset batch render button command;
+               button -e -c ("ondailybatch 1") batchRenderButton;                 
+            }
+         
+            
+       }else{
+           if(`window -ex $gBatchRenderWindow`)
+            {
+       	       window -e -w 470 batchRenderWnd;
+       	       window -e -h 160 batchRenderWnd;
+       	       // reset batch button command
+       	       button -e -c "batchRender -f \"\"" batchRenderButton;
+               // remove post mel script;
+               setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+            }
+       }
+       
+      updateAutodaily($checkval,"DailyConvertLY");
+      
+     }
+     
+// for net render tool     
+     if($index ==2)
+     {
+     	if($checkval)
+     	{
+     	    if(`window -ex MusterInkworksUI`)
+     	    {
+     	        window -e -h 720 MusterInkworksUI;
+     	    }
+     	}else{
+     	    if(`window -ex MusterInkworksUI`)
+     	    {
+     	        window -e -h 500 MusterInkworksUI;
+     	    }
+     	}
+     	updateAutodaily($checkval,"DailyNetConvertLY");
+     }
+
+}
+
+global proc int ondailybatch(int $index)
+{
+    if(!slateCheck())
+    {
+        confirmDialog -title "Warning" -message "Slate Not Ready!" -button "Close";
+        return 0;
+    }
+ 
+// create daily folder
+   
+   string $path = `textFieldButtonGrp -q -text DailyFolderCTL` + "/" + `textFieldGrp -q -text DailyfoldernameCTL`;
+   
+   string $outjpeg  = $path + "/jpg/";
+   string $outuyvy  = $path + "/uyvy/";
+    
+   if(!`filetest -d $outjpeg`)
+    {
+        if(!`sysFile -makeDir $outjpeg`)
+    	{
+    	    error ("Can not create target out put folder " + $outjpeg);
+    	    return 0;
+    	}
+    }
+    if(!`filetest -d $outuyvy`)
+    {
+        if(!`sysFile -makeDir $outuyvy`)
+    	{
+    	    error ("Can not create target out put folder " + $outuyvy);
+    	    return 0;
+    	}
+    }
+     
+   
+// post mel script
+
+    string $slate = getSlate();
+    int $ef;
+    if($index ==1)
+    {
+    	$ef = `getAttr defaultRenderGlobals.endFrame`;
+    	setAttr defaultRenderGlobals.postRenderMel -type "string" ("lr_postmel(\"" + $path + "\",\"" + $slate + "\"," + $ef + ")");
+        batchRender -f "";
+        setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+    }
+    if($index ==2)
+    {
+    	$ef = `intFieldGrp -q -value1 efCTL`;
+    	setAttr defaultRenderGlobals.postRenderMel -type "string" ("lr_postmel(\"" + $path + "\",\"" + $slate + "\"," + $ef + ")");   
+    }
+    
+
+    return 1;
+    
+}
+
+global proc string getSlate()
+{
+    string $comment = `scrollField -q -text SlateCTL9`;
+
+// comment string filter
+         
+     int $i = 1;
+     int $size = size($comment);
+     string $filtercomment ="";
+     for($i; $i <= $size; $i++)
+     {
+         string $tm = `substring $comment $i $i`;
+         if($i !=$size)
+     	 {
+     	   if(`substring $comment ($i+1) ($i+1)` == "\n") continue;
+     	 }
+     	 $filtercomment += $tm;
+     }
+     $filtercomment = `substituteAllString $filtercomment "\n" "\\n"`;
+
+    string $slate ;
+           $slate =
+                    "Resolution       : "  +  `optionMenu   -q -value ResCTL`   + "\\n"
+                  + "Date             : "  +  `textFieldGrp -q -text SlateCTL1` + "\\n"   
+                  + "Due Date         : "  +  `textFieldGrp -q -text SlateCTL2` + "\\n"
+                  + "Department       : "  +  `textFieldGrp -q -text SlateCTL3` + "\\n"
+                  + "Artist (Staff ID): "  +  `textFieldGrp -q -text SlateCTL4` + "\\n"
+                  + "Scene            : "  +  `textFieldGrp -q -text SlateCTL5` + "\\n"
+                  + "Shot             : "  +  `textFieldGrp -q -text SlateCTL6` + "\\n"
+                  + "Version          : "  +  `textFieldGrp -q -text SlateCTL7` + "\\n"
+                  + "With Story Camera: "  +  `textFieldGrp -q -text SlateCTL8` + "\\n"
+                  + "Comment          :\\n\\n" +  $filtercomment + "\\n"
+                  ;
+                  
+     return $slate;   
+}
+global proc updateAutodaily(int $state,string $parent)
+{
+   // chdir "c:/";
+    if($state)
+    {
+    	if(`columnLayout -ex AutoDailycl`) deleteUI AutoDailycl;
+    	
+        columnLayout -cal "center" -adj true -p $parent AutoDailycl;
+            separator -style "in" -h 20;	
+            textFieldButtonGrp -label "Target Path:" -text "" 
+		               -buttonLabel "  Browse.. " -editable 0
+			       -cw3 100 280 80 -buttonCommand on_setdaily_button
+			       DailyFolderCTL;
+            textFieldGrp -label "Folder Name:" 
+		                 -text ""
+		                 -cw2 100 100
+		                 DailyfoldernameCTL;
+            optionMenu -label "          Resolution:" ResCTL;
+    	                  menuItem -label "1920x1080";
+    	                  menuItem -label "720x405";
+    	                  menuItem -label "Other";
+            separator -style "in" -h 10;
+            text -label "Slate Info" -align "center";
+            
+            rowColumnLayout -numberOfColumns 2 -cw 1 200 -cw 2 200;
+                      textFieldGrp -label "Date:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL1;
+                      textFieldGrp -label "Due:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL2;
+		      
+                      textFieldGrp -label "Department:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL3;
+                      textFieldGrp -label "Artist(Staff ID):" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL4;
+		                   
+                      textFieldGrp -label "Scene:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL5;
+                      textFieldGrp -label "Shot:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL6;
+		                   	
+                      textFieldGrp -label "Version:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL7;
+                      textFieldGrp -label "With Story Camera:" 
+		                   -text ""
+		                   -cw2 100 80
+		                   SlateCTL8;			                 	                  
+            setParent ..;
+            text -label "Write Comment here";
+            scrollField -wordWrap true -w 300 -h 60 -text "" SlateCTL9;
+            
+            separator -style "in" -h 20;
+        setParent ..;
+    }else{
+    
+        deleteUI AutoDailycl;
+    }
+    
+}
+
+
+global proc on_setdaily_button()
+{
+     string $oldworkdir = `workspace -q -dir`;
+     string $dailyDir = "e://";
+     workspace -dir $dailyDir; 
+     fileBrowserDialog -mode 4 -fc setdailypath -an "Select Daily Folder: ";
+ 	
+//set back the workspace dir	
+     workspace -dir $oldworkdir;    
+}
+global proc setdailypath(string $filename, string $fileType)
+{
+    if($filename !="")
+    {
+    	textFieldButtonGrp -e -text $filename DailyFolderCTL;
+    }
+}
+
+global proc int slateCheck()
+{
+    int $result = 1;
+    
+    int $i = 1;
+    for($i; $i <= 9 ; $i ++)
+    {
+    	
+    	string $content;
+    	if($i <=8)
+    	{
+    	    $content =  `textFieldGrp -q -text ("SlateCTL" + $i)`;
+    	}else{
+    	    $content =  `scrollField -q -text SlateCTL9`;
+    	}
+    	if(size($content) == 0) 
+    	{	
+    	    return 0;
+    	}
+    }
+   string $path = `textFieldButtonGrp -q -text DailyFolderCTL`;
+   string $pname = `textFieldGrp -q -text DailyfoldernameCTL`;
+   if(size($path) ==0)  return 0;
+   if(size($pname)==0)  return 0;
+ 
+    
+    return $result;
+}
+
+
+global proc int renderglobalCheck()
+{
+    if(!`getAttr defaultRenderGlobals.animation`)  return 0;
+    if(`getAttr defaultRenderGlobals.outFormatControl`) return 0;
+    if(!`getAttr "defaultRenderGlobals.putFrameBeforeExt"`) return 0;
+    if(!`getAttr "defaultRenderGlobals.periodInExt"`) return 0;
+    int $imageNum = `getAttr "defaultRenderGlobals.imageFormat"`;
+    if($imageNum == 7 || $imageNum == 8||$imageNum == 19) return 1;
+    else return 0;
+    return 1; 
+}

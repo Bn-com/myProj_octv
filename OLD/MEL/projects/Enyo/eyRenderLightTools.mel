@@ -1,0 +1,98 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc eyRenderLightTools()
+{
+	string $proj,$epi,$sc;
+	
+	string $filename = `file -q -sn -shn`;
+	string $buff[];
+	tokenize $filename "_" $buff;
+	$proj = "Enyo";
+	$epi = $buff[1];
+	$sc = $buff[3];
+	
+	if (`window -exists eyRenderLightToolsUI`)
+		deleteUI eyRenderLightToolsUI;
+	window -title "Reference Camera" -resizeToFitChildren true eyRenderLightToolsUI;
+		columnLayout -adjustableColumn true;
+			string $project = `optionMenuGrp -l "                               Project:"`;
+				menuItem -label $proj;	
+			string $episode = `textFieldGrp -label "Episode:" -text $epi`;
+			string $scene = `textFieldGrp -label "Scene:" -text $sc`;
+			button -label "导出" -command ("eyRenderLightToolsExport \"" + $project + "\" \"" + $episode + "\" \"" + $scene + "\"");
+			button -label "导入" -command ("eyRenderLightToolsImport \"" + $project + "\" \"" + $episode + "\" \"" + $scene + "\"");
+	showWindow eyRenderLightToolsUI;
+}
+
+global proc eyRenderLightToolsExport(string $project,string $episode,string $scene)
+{
+	string $proj = `optionMenuGrp -q -v $project`;
+	string $epi = `textFieldGrp -q -tx $episode`;
+	string $sc = `textFieldGrp -q -tx $scene`;
+	
+	if (size($epi)==0 || size($sc)==0)
+		error "请填写需要输出的集数镜头号信息!";
+
+	string $path = `getenv IDMT_PROJECTS`+"/"+$proj+"/"+$proj+"_Scratch/render/sequence_light/episode_"+$epi+"/";
+	print $path;
+
+	string $lights[] = `ls -l -type light`;
+	string $group[];
+	for($l in $lights)
+	{
+		string $lref = `referenceQuery -rfn $l`;
+		
+		string $buff[];
+		int $num = `tokenize $l "|" $buff`;
+		for($i=0;$i<$num;$i++)
+		{
+			if(`referenceQuery -inr $buff[$i]`)
+			{
+				string $pref = `referenceQuery -rfn $buff[$i]`;
+				if($lref == $pref)
+				{
+					$group[size($group)] = $buff[$i];
+					break;
+				}
+			}
+		}
+	}
+	$group = stringArrayRemoveDuplicates($group);
+	//print $group;
+	string $duplicates[] = `duplicate -rr $group`;
+	string $parents[] = `parent -w $duplicates`;
+	select -r $parents;
+	file -op "v=0;p=17" -typ "mayaAscii" -pr -es ($path+"ey_"+$epi+"_"+$sc+"_light.ma");
+
+	delete $parents;
+}
+
+global proc eyRenderLightToolsImport(string $project,string $episode,string $scene)
+{
+	string $proj = `optionMenuGrp -q -v $project`;
+	string $epi = `textFieldGrp -q -tx $episode`;
+	string $sc = `textFieldGrp -q -tx $scene`;
+	
+	if (size($epi)==0 || size($sc)==0)
+		error "请填写需要导入灯光的集数镜头号信息!";
+
+	string $path = `getenv IDMT_PROJECTS`+"/"+$proj+"/"+$proj+"_Scratch/render/sequence_light/episode_"+$epi+"/";
+	
+	if (`filetest -r ($path+"ey_"+$epi+"_"+$sc+"_light.ma")`)
+	{
+		file -import -type "mayaAscii" -rpr "light" -options "v=0;p=17"  -pr -loadReferenceDepth "all" ($path+"ey_"+$epi+"_"+$sc+"_light.ma");
+	}
+	else 
+		error "不存在对应镜头的灯光请确认!";
+}

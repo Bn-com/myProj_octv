@@ -1,0 +1,547 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjTDSmooth() 
+{
+	if (`window -q -exists TD_Smwindow`)
+		return;
+
+	window -title "Apply Smooth" TD_Smwindow;
+    		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Apply Smooth..." -command "zjHelpCallback zjTDSmooth";
+				setParent ..;
+    			frameLayout -label "Set Render Smooth" -labelAlign "top" -cll true
+    				-borderStyle "etchedIn";
+				string $form1 = `formLayout`;
+				string $b1 = `radioButtonGrp  -numberOfRadioButtons 3 -select 1 -label "Character:" -labelArray3 "Far" "Medium" "Near" 
+					-columnWidth 1 82 TD_inherit`;
+				string $b2=`intSliderGrp -field true -l "Sets&Props:" -min 1 -max 4
+						-v 1 -columnWidth 1 85
+						TD_SbSd`; 
+				string $b3 = `button -label "Set Smooth Attr"     -w 125 -command  "TD_SetSmooth"`;
+				string $b4 = `button -label "Remove Smooth Attr"  -w 125 -command  "TD_RemoveSmooth"`;
+				formLayout -edit
+
+					-attachForm	$b1	"top"	10	
+					-attachForm	$b1	"left"	0
+
+					-attachControl	$b2	"top"	10	$b1
+					-attachForm	$b2	"left"	5
+
+					-attachControl	$b3	"top"	10	$b2
+					-attachForm	$b3	"left"	0
+					-attachPosition	$b3	"right"	0	50
+
+					-attachControl	$b4	"top"	10	$b2
+					-attachControl	$b4	"left"	0	$b3
+					-attachPosition	$b4	"right"	0	100
+				$form1;
+				setParent ..;
+			setParent ..;
+				
+    			frameLayout -label "Apply Render Smooth(Add Smooth Node)" -labelAlign "top" -cll true
+    				-borderStyle "etchedIn";
+				string $form2 = `formLayout`;
+				string $b5 = `radioButtonGrp  -numberOfRadioButtons 2 -select 1 -label "Apply to:" -labelArray2 "Selected" "All" 
+						-columnWidth 1 50 -columnWidth 2 100 
+						-columnAlign 1 "left"`;
+				string $b6 = `button -label "Apply Smooth"     -w 125 -command  ("TD_ApplySmooth "+$b5)`;
+				string $b7 = `button -label "De-apply Smooth"  -w 125 -command  ("TD_De_applySmooth "+$b5)`;
+				string $b8 = `checkBox -label "Smooth During Rendering" -v 0 -cc "TD_rsswitch" Smooth_Switch`;
+				formLayout -edit
+					-attachForm	$b5	"top"	10
+					-attachForm	$b5	"left"	22
+
+					-attachControl	$b6	"top"	5	$b5
+					-attachForm	$b6	"left"	0
+					-attachPosition	$b6	"right"	0	50
+
+					-attachControl	$b7	"top"	5	$b5
+					-attachControl	$b7	"left"	0	$b6
+					-attachPosition	$b7	"right"	0	100
+
+					-attachControl	$b8	"top"	10	$b7
+					-attachForm	$b8	"left"	20
+				$form2;
+				setParent ..;
+			setParent ..;
+
+			frameLayout -label "Delete Smooth(Del Smooth Node)" -labelAlign "top" -cll true
+    				-borderStyle "etchedIn";
+				string $form3 = `formLayout`;
+				string $b9 = `radioButtonGrp  -numberOfRadioButtons 2 -select 1 -label "Delete from:" -labelArray2 "Selected" "All" 
+						-columnWidth 1 65 -columnWidth 2 120 
+						-columnAlign 1 "left"`;
+				string $b10 = `button -label "Delete Smooth"     -w 125 -command  ("TD_De_nodeSmooth "+$b9)`;
+				formLayout -edit
+					-attachForm	$b9	"top"	10
+					-attachForm	$b9	"left"	22
+
+					-attachControl	$b10	"top"	5	$b9
+					-attachForm	$b10	"left"	0
+					-attachPosition	$b10	"right"	0	50
+		
+				$form3;
+				setParent ..;
+			setParent ..;
+
+
+	showWindow TD_Smwindow;
+
+	scriptJob -permanent -parent TD_Smwindow -event NewSceneOpened ("TD_updateSmooth");
+	scriptJob -permanent -parent TD_Smwindow -event SceneOpened ("TD_updateSmooth");
+
+	setAttr defaultRenderGlobals.preRenderMel -type "string" "";
+	setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+
+
+}
+
+proc string[] getDescendents()
+{
+	string $allsel[];
+	string $sel[] = `ls -long -selection -type "transform"`;
+	string $children[];
+	int $count = 0;
+	for ($shp in $sel)
+	{
+		string $des[] = `listRelatives -allDescendents -fullPath -noIntermediate -type "transform"`;
+		for ($item in $des)
+		{
+			if (kcIsType($item, "mesh"))
+				$children[$count++] = $item;
+		}
+
+		// added by KC (18 June 2003)
+
+		if (kcIsType($shp, "mesh"))
+			$children[$count++] = $shp;
+	}
+
+	$children = stringArrayRemoveDuplicates($children);
+
+	if (size($children)>0)
+		$allsel = $children;
+//	else
+//		$allsel = $sel;
+
+	return $allsel;
+}
+
+// added by KC (31 May 2003)
+
+proc string getLineSmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if (`gmatch $his[$i] "lineSmooth*"`) 
+			return $his[$i];
+	}
+	return "";
+}
+
+//test whether there is a PolySmoothFace node on given object
+proc string getsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		//if (`gmatch $his[$i] "finalSmooth*"`) 
+		if (`nodeType  $his[$i] ` == "polySmoothFace") 
+			return $his[$i];
+	}
+	return "";
+}
+
+//set user_defined attribute 
+proc TD_SetsmAttr(string $obj,int $level) 
+{
+	string $lS[] = `listAttr -userDefined -string sm_divisions $obj`;
+
+	if (size($lS) == 0)   
+	{
+		addAttr -longName sm_divisions -attributeType long  -min 0 -max 4 -defaultValue 1 $obj;
+		string $var = $obj+".sm_divisions";
+		setAttr $var $level $obj;
+	}
+	else if (size($lS) == 1)
+	{
+		deleteAttr ($obj+".sm_divisions");
+		addAttr -ln sm_divisions -at long  -min 0 -max 4 -dv 1 $obj;
+		string $var = $obj+".sm_divisions";
+		setAttr $var $level $obj;
+	}
+	print "\n";
+
+}
+
+//remove user_defined attribute
+proc TD_RemsmAttr(string $obj) 
+{
+	string $lS[] = `listAttr -ud -st sm_divisions $obj`;
+	if (size($lS) == 1)
+		deleteAttr -at "sm_divisions" $obj;
+}
+
+//get the intersection of two arrays
+proc string[] Intersector(string $arr1[],string $arr2[])
+{
+	$myIntersector = `stringArrayIntersector -r`;
+
+	// Intersect some string arrays using the intersector
+	//
+	stringArrayIntersector -edit -intersect $arr1 $myIntersector;
+	stringArrayIntersector -edit -intersect $arr2 $myIntersector;
+
+	// Query the intersector to see what the intersection is so far
+	//
+	string $result[] = `stringArrayIntersector -query $myIntersector`;
+	stringArrayIntersector -edit -reset $myIntersector;
+	return $result;
+}
+
+
+//switch enable
+global proc Applysm_switch()
+{
+	if (`checkBox -q -v TD_option`)
+	{
+		radioButtonGrp -e -en false TD_inherit;
+		intSliderGrp -e -en true TD_SbSd; 
+	}
+	else
+	{
+		radioButtonGrp -e -en true TD_inherit;
+		intSliderGrp -e -en false TD_SbSd; 
+	}
+}
+
+//add "sm_divisions" attribute to objects
+global proc TD_SetSmooth() 
+{
+	string $list[] = getDescendents();
+	for ($shp in $list)
+	{
+		int $level,$order;
+
+		$order = `radioButtonGrp -q -select TD_inherit`;
+
+		string $far[] = `listAttr -userDefined -string FarSmooth $shp`;
+		if (size($far) == 1)
+		{
+			if ($order == 1)
+			{
+				$level = `getAttr ($shp+".FarSmooth")`;
+				TD_SetsmAttr($shp,$level);
+			}
+			if ($order == 2)
+			{
+				string $close[] = `listAttr -userDefined -string MediumSmooth $shp`;
+				if (size($close) == 1)
+				{
+					$level = `getAttr ($shp+".MediumSmooth")`;
+					TD_SetsmAttr($shp,$level);
+				}
+			}
+			if ($order == 3)
+			{
+				string $close[] = `listAttr -userDefined -string CloseSmooth $shp`;
+				if (size($close) == 1)
+				{
+					$level = `getAttr ($shp+".CloseSmooth")`;
+					TD_SetsmAttr($shp,$level);
+				}
+			}
+							
+		}
+		else
+		{
+			$level = `intSliderGrp -q -v TD_SbSd`;
+			string $lS[] = `listAttr -userDefined -string MaxSmooth $shp`;
+			if (size($lS) == 1)   
+			{
+				$limit = `getAttr ($shp+".MaxSmooth")`;
+				if ($limit >= $level)
+				{
+					TD_SetsmAttr($shp,$level);
+				}
+				else warning ("can't set smooth on "+$shp+", subdivision level "+$level+"> MaxSmooth "+$limit);
+			}
+			else 
+			{
+				TD_SetsmAttr($shp,$level);
+				print ("set smooth on "+$shp+", subdivision level ="+$level);
+			}
+		}
+	}
+}
+
+//remove "sm_divisions" attribute
+global proc TD_RemoveSmooth() 
+{
+	string $list[] = getDescendents();
+	for ($obj in $list)
+		TD_RemsmAttr($obj);
+}
+
+proc setFinalvalue(string $obj, int $val)
+{
+	string $shapes[] = `listRelatives -ni -fullPath -shapes -type "mesh" $obj`;
+	if (size($shapes)>0)
+	{
+		string $plyname[] = `polySmooth -divisions $val -continuity 1 -keepBorder 0 -kmb 0 -keepSelectionBorder 1 -keepTessellation 1 -constructionHistory 1 $shapes[0]`;
+		setAttr ($plyname[0] + ".smoothUVs") true;
+		rename $plyname[0] "finalSmooth";
+	}
+}
+
+proc int getUVminsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if ((`gmatch $his[$i] "UVMinSmooth*"`) && (`nodeType $his[$i]` == "polySmoothFace"))
+		{
+			return `getAttr ($his[$i] + ".divisions")`;
+		}
+	}
+	return 0;
+}
+
+proc int getxUVsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if ((`gmatch $his[$i] "xtraUVSmooth*"`) && (`nodeType $his[$i]` == "polySmoothFace"))
+		{
+			return `getAttr ($his[$i] + ".divisions")`;
+		}
+	}
+	return 0;
+}
+
+
+//apply attribute's value to polySmooth's divisions
+proc TD_smapply(string $list[])
+{
+	waitCursor -state on;
+
+	for ($obj in $list)
+	{
+		$poly = getsmooth($obj); 
+		if ($poly!= "")
+		{
+			string $lS[] = `listAttr -ud -st sm_divisions $obj`;
+			int $UVS = getUVminsmooth($obj);
+			int $xS = getxUVsmooth($obj);
+			if (size($lS)&&$UVS&&$xS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $UVS - $xS;
+				if ($val>0)
+					setAttr ($poly+".divisions") $val $obj;
+			}
+			else if (size($lS)&&$UVS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $UVS;
+				if ($val>0)
+					setAttr ($poly+".divisions") $val $obj;
+			}
+			else if (size($lS)&&$xS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $xS;
+				if ($val>0)
+					setAttr ($poly+".divisions") $val $obj;
+			}
+			else if (size($lS))
+			{
+				int $value = `getAttr ($obj+".sm_divisions")`;
+				setAttr ($poly+".divisions") $value $obj;
+			}
+		}
+		else
+		{
+			string $lS[] = `listAttr -ud -st sm_divisions $obj`;
+			int $UVS = getUVminsmooth($obj);
+			int $xS = getxUVsmooth($obj);
+			if (size($lS)&&$UVS&&$xS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $UVS - $xS;
+				if ($val>0)
+					setFinalvalue( $obj, $val);	
+			}
+			else if (size($lS)&&$UVS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $UVS;
+				if ($val>0)
+					setFinalvalue( $obj, $val);	
+			}
+			else if (size($lS)&&$xS)
+			{
+				int $value1 = `getAttr ($obj+".sm_divisions")`;
+				int $val = $value1 - $xS;
+				if ($val>0)
+					setFinalvalue( $obj, $val);	
+			}
+			else if (size($lS))
+			{
+				int $val = `getAttr ($obj+".sm_divisions")`;
+				if ($val>0)
+					setFinalvalue( $obj, $val);	
+
+			}
+		}
+	}
+
+	// added by KC (31 May 2003)
+
+	string $nodes[] = `ls -type polySmoothFace "lineSmooth*"`;
+
+	if (size($nodes) > 1)
+		kcLineInputSmoothFile(0);
+
+	waitCursor -state off;
+}
+
+//set polySmooth's divisions to 0
+proc TD_smdeapply(string $list[])
+{
+	for ($object in $list)
+	{
+		string $shapes[] = getShapes($object);
+		for ($shp in $shapes)
+		{
+			$poly = getsmooth($shp); 
+			if ($poly!= "")
+				setAttr ($poly+".divisions") 0 $shp;
+
+			// added by KC (31 May 2003)
+
+			$poly = getLineSmooth($shp); 
+			if ($poly!= "")
+				setAttr ($poly+".divisions") 0 $shp;
+		}
+	}
+	print "De_apply Smooth";
+}
+
+
+proc TD_smdeapplynode(string $list[])
+{ 
+	//add by lijunyan,complete the delete smooth node function.
+	for ($object in $list)
+	{       
+		string $shapes[] = getShapes($object);
+		for ($shp in $shapes)
+		{
+			string $poly = getsmooth($shp); 
+			if ($poly!= "")
+			{
+				setAttr ($poly + ".divisions") 0;
+				deleteIfNotReferenced $poly ;
+			}
+		}
+			
+	}
+	
+	print "De_applynode Smooth";
+}
+//apply smooth
+global proc TD_ApplySmooth(string $control)
+{
+	// added by KC (10-Jul-03): fix the order of the smooth node on Hymo
+
+	kcFixHymoSmooth();
+
+	string $nodes[] = `selectedNodes -dagObjects`;
+
+	int $towhom = `radioButtonGrp -q -select $control`;
+	if ($towhom == 1 )
+	{
+		string $list[] = getDescendents();
+		TD_smapply($list);
+	}
+	else
+	{
+		string $list[] = `ls -long -type "transform"`;
+		TD_smapply($list);
+	}
+	select -r $nodes;
+	print "Apply Smooth";
+}
+
+//de_apply smooth
+global proc TD_De_applySmooth(string $control)
+{
+	string $nodes[] = `selectedNodes -dagObjects`;
+	int $towhom = `radioButtonGrp -q -select $control`;
+	if ($towhom == 1 )
+	{
+		string $list[] = getDescendents();
+		TD_smdeapply($list);
+	}
+	else
+	{
+		string $list[] = `ls -long -type "transform"`;
+		TD_smdeapply($list);
+	}
+	select -r $nodes;
+	
+}
+global proc TD_De_nodeSmooth(string $control)
+{
+	string $nodes[] = `selectedNodes -dagObjects`;
+	int $towhom = `radioButtonGrp -q -select $control`;
+	if ($towhom == 1 )
+	{
+		string $list[] = getDescendents();
+		TD_smdeapplynode($list);
+	}
+	else
+	{
+		string $list[] = `ls -long -type "transform"`;
+		TD_smdeapplynode($list);
+	}
+	select -r $nodes;
+	print "delete the smooth node.";
+}
+
+global proc TD_updateSmooth()
+{
+	setAttr defaultRenderGlobals.preRenderMel -type "string" "";
+	setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+	checkBox -e -v 0 Smooth_Switch;
+}
+
+//trigger this function when switching the checkbox
+global proc TD_rsswitch()
+{
+
+	int $TD_smooth = `checkBox -q -v Smooth_Switch`;
+	if ($TD_smooth == 1)
+	{
+		setAttr defaultRenderGlobals.preRenderMel -type "string" "TD_smbfrender";
+		setAttr defaultRenderGlobals.postRenderMel -type "string" "TD_smafrender";
+	}
+	else
+	{
+		setAttr defaultRenderGlobals.preRenderMel -type "string" "";
+		setAttr defaultRenderGlobals.postRenderMel -type "string" "";
+	}
+}
+

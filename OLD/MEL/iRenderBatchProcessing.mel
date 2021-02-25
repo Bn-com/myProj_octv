@@ -1,0 +1,138 @@
+global proc neilSceneOpenedScriptJob(string $mod)
+{
+	scriptJob -event "SceneOpened" "source iRenderBatchProcessing.mel;catch(`iRenderBatchProcess($mod)`)";
+	catch(`iRenderBatchProcess($mod)`);
+}
+
+global proc iRenderBatchProcessing_HAIR()
+{
+	// Save as a starting point
+	// iRenderStepSaveAs;
+
+	// Step1: Scene optimization
+	catch(`allRef2Import`);
+	// Remove namespace
+	catch(`zjRemoveNamespace`);
+	catch(`delMTS`);
+
+	// create "Matte" if it do not exists
+	catch( `file -import -type "mayaBinary" -rpr "br_hairLight" -options "v=0" "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\Import\\iRender\\matte.mb"`);
+
+	// Create renderlayer and assign Matter.
+	// Put ONLY things needed when rendering.
+	// In case in future switching to renderers, like Prman.
+	string $surfs[] = `ls -type surfaceShape`;
+	catch(`sets -e -forceElement MatteSG $surfs`);
+
+	string $laits[] = `ls -lights`;
+	string $pfxH[] = `ls -type pfxHair`;
+	for ($ps in $pfxH){
+		setAttr ($ps + ".primaryVisibility") 1;
+	}
+	// Render layer
+	string $layerName = `iRenderFileNameKeyword`;
+	if (size($surfs)>0){
+		string $hairRLayer = `createRenderLayer -name  $layerName -number 1 -makeCurrent -noRecurse $surfs $laits $pfxH`;
+		setAttr "defaultRenderLayer.renderable" 0;
+	}
+
+	// Step4: Render Global Settings
+	zwQueryCameraTime "defaultRenderGlobals";
+	// production quality setting
+	setAttr "defaultRenderGlobals.enableStrokeRender" 1;
+	setAttr "defaultRenderGlobals.oversamplePaintEffects" 1;
+	setAttr "defaultRenderGlobals.oversamplePfxPostFilter" 1;
+
+	// Step5: Save process
+	catch(`file -force -s`);
+}
+
+global proc iRenderBatchProcessing_RGBA()
+{
+	// Maybe some operation on hairsystems
+	catch(`allRef2Import`);
+	catch(`delMTS`);
+	catch( `file -import -type "mayaBinary" -rpr "br_hairLight" -options "v=0" "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\Import\\iRender\\colorA.mb"`);
+	string $surfs[] = `ls -type surfaceShape`;
+	catch(`sets -e -forceElement ez_colorASG $surfs`);
+	string $laits[] = `ls -lights`;
+	// Render layer
+	string $layerName = `iRenderFileNameKeyword`;
+	if (size($surfs)>0){
+		string $hairRLayer = `createRenderLayer -name  $layerName -number 1 -makeCurrent -noRecurse $surfs $laits`;
+		setAttr "defaultRenderLayer.renderable" 0;
+	}
+	zwQueryCameraTime "defaultRenderGlobals";
+	catch(`zjRemoveNamespace`);
+	catch(`file -force -s`);
+}
+
+global proc iRenderBatchProcessing_OCC()
+{
+	//iRenderStepSaveAs;
+	catch(`allRef2Import`);
+	catch(`delMTS`);
+	string $surfs[] = `ls -type surfaceShape`;
+	// Render layer
+	string $layerName = `iRenderFileNameKeyword`;
+	if (size($surfs)>0){
+		string $hairRLayer = `createRenderLayer -name  $layerName -number 1 -makeCurrent -noRecurse $surfs`;
+		setAttr "defaultRenderLayer.renderable" 0;
+	}
+	// Occlusion preset
+	renderLayerBuiltinPreset occlusion $layerName;
+	string $sceneName = `file -q -sceneName -shortName`;
+	string $buffer[] = `iRenderFileNameAnalysis($sceneName)`;
+	// Bratz
+	if ($buffer[0]=="br"){
+		string $kjo[] = `ls -type mib_amb_occlusion`;
+		for ($m in $kjo){
+			setAttr ($m+".samples") 64;
+			setAttr ($m+".max_distance") 5;
+		}
+	}
+	zwQueryCameraTime "defaultRenderGlobals";
+	catch(`zjRemoveNamespace`);
+	catch(`file -force -s`);
+}
+
+global proc iRenderBatchProcessing_DEPTH()
+{
+	//iRenderStepSaveAs;
+	catch(`allRef2Import`);
+	catch(`delMTS`);
+	string $layerName = "depth";
+	string $surfs[] = `ls -type surfaceShape`;
+	if (size($surfs)>0){
+		string $hairRLayer = `createRenderLayer -name  $layerName -number 1 -makeCurrent -noRecurse $surfs`;
+		setAttr "defaultRenderLayer.renderable" 0;
+	}
+	// Depth preset
+	renderLayerBuiltinPreset linearDepth $layerName;
+	zwQueryCameraTime "defaultRenderGlobals";
+	catch(`zjRemoveNamespace`);
+	catch(`file -force -s`);
+}
+
+global proc iRenderBatchProcess(string $mod)
+{
+	// Source statement
+	source iRenderScriptsHub.mel;
+
+	// Case 
+	switch ($mod)
+	{
+		case "hair" :
+			iRenderBatchProcessing_HAIR;
+			break;
+		case "rgba" :
+			iRenderBatchProcessing_RGBA;
+			break;
+		case "occ" :
+			iRenderBatchProcessing_OCC;
+			break;
+		case "depth" :
+			iRenderBatchProcessing_DEPTH;
+			break;
+	}
+}

@@ -1,0 +1,1248 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 李锐
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:  lr_image_pub.mel
+//       Version:  1.0
+//   Description:  Publish rendered images, and make project folder for back up
+//                 from old lr_shotrender.mel;
+//    Created By:  Larry  2002.9.10
+// 
+//
+///////////////////////////////////////////////////////////////////////
+
+//   History:
+
+//        2002.9.10   change the whole structure 
+//                    1. create project
+//                    2. move images and project
+//                    3. add database record
+//                    
+//
+/////////////////////////////////////////////////////////////////////////
+//
+//   global variable description
+//   
+//        name                 type          description
+//   layernum                 int           number of render layers in the scenes
+//   scene_description        string        save the scene description in Create New shot project window
+//   target_file_name         string        save the target file name;
+//   target_state             int           save the target state, 1 means all ready, 0 means not ready.
+//                                          user can not move resource untill all ready.
+//   target_IDMT_PROJECTS      string        save the target project path.
+//   ServerIP                 string        The dispatcher server ip address
+//   gLayer_list[]            string        Layer List in this shot
+//   sLayer_list[]            string        Layer list in this file
+//   sourceImageList[]        string        Image list of select iamges.
+//
+////////////////////////////////////////////////////////////////////////
+
+
+global proc lr_image_pub()
+{
+global int $layernum;
+global string $scene_description;
+global string $target_file_name;
+global string $target_IDMT_PROJECTS;
+
+global string $ServerIP;
+$ServerIP = "192.168.0.219";
+
+global int $target_state;
+$target_state = 1;
+
+// set globals
+
+//  Delete exist UI, and Create new UI
+    if(`window -ex MoveResourceWIN`) deleteUI MoveResourceWIN;
+    if(`window -ex ShotRenderUI`) deleteUI ShotRenderUI;
+    
+    window -title "Render Images Publish Tool V1.0" -sizeable 1 -widthHeight 600 650 ShotRenderUI;
+        menuBarLayout;
+            menu -label "Help";
+            menuItem -label "Help on Images Publish Tool..." -command "zjHelpCallback lr_image_pub";
+        setParent ..;
+        
+        columnLayout -adjustableColumn 1;
+                   
+               frameLayout -label "Seq Setting" -collapsable 1 -collapse 0 -w 560  seqframe1 ;
+		    
+                      columnLayout -adjustableColumn true ;
+				
+                               separator -style "none";
+                               textFieldGrp -label " Source File Name:" -text "" 
+                                                  -editable 0
+                                                  -cw2 120 360  
+                                                  browseCTL;
+                               textFieldButtonGrp -label "Project Path:" -text "" -editable 0 -cw3 120 360 80
+                                                  -buttonLabel "   Set ..    " -enableButton 0
+                                                  -buttonCommand SetProject
+                                                  projCTL;
+                               columnLayout selectSceneCLM;
+                                     separator -style "in" -h 20;
+
+                               setParent ..;
+                               intFieldGrp -label "End Frame:" -value1 10 -cw2 120 60 SelectendframeCTL;
+                               
+                               separator -style "in" -h 20;
+                               rowLayout -numberOfColumns 4  -cw4 80 140 100 150
+                                          -columnAlign4 "center" "center" "center" "center" -ct4 "right" "right" "right" "right";
+                                
+                                text -label "";
+                                button -w 125 -label "Move Resource" -c onMoveResource;
+                                text -label "";
+                                button -w 125 -label "Close" -c "deleteUI ShotRenderUI";
+                       
+                                setParent ..;
+                                                                                         
+                        setParent ..;
+                  setParent ..;    // frameLayout
+      
+               text -label "";
+               button -w 80 -label "Show Layer List" -c onShowLayerbutton;
+//  Project Resource Setting
+
+               frameLayout -label "Project Resource Setting" -collapsable 0 -collapse 1 -vis 0 -w 560 seqframe2;
+		   columnLayout -adjustableColumn 1 ;
+  			    radioButtonGrp -numberOfRadioButtons 2 -label "Texture Maps List:"
+			                  -labelArray2 "All maps" "Invalid maps" -select 1
+							  -on1 ("listtexturemaps 1") -on2 ("listtexturemaps 0")
+							  listtypeCTL;
+
+                                textScrollList -numberOfRows 8 -allowMultiSelection 1  maplistCTL;
+                                popupMenu -parent maplistCTL  mappopCTL;
+				
+                                separator -style "in" -h 10  ;
+              
+                                textFieldGrp -cw2  150 300 -label "  Particle Cache:"   -text "" -editable 0 useparticleCTL;
+                                textFieldGrp -cw2  150 300 -label "  Source Cache Dir:" -text "" -editable 0 particlesrcCTL;
+                                textFieldGrp -cw2  150 300 -label "  Target Cache Dir:" -text "" -editable 0 particlestarCTL;
+
+                                separator -style "in" -h 10 ;
+
+//  Create Maya Cloth cache list UI
+
+                                columnLayout -adjustableColumn 1 clothlistcolumn;
+
+                                setParent ..;
+
+                                separator -style "in" -h 10  ;
+
+//  Project Resource Button
+                text -align "left"  -label ("Note: 1.You have to create a new local project, and make all resource locally before you\n" + 
+                                            "               submit the job.\n" + 
+                                            "           2.All resource must be ready.If not, you will not be able to submit it.");
+                                separator -style "in" -h 10 ;
+                                rowLayout -numberOfColumns 4  -cw4 140 140 140 150
+                                          -columnAlign4 "center" "center" "center" "center" -ct4 "right" "right" "right" "right";
+                                button -w 125 -label "Create New Project" -c create_newproject;
+
+                                button -w 125 -label "Move Resource" -c onMoveResource;
+                       
+                                setParent ..;
+
+                  setParent ..;
+                  setParent ..;
+
+//  Render Setting
+                     // ------------------------  HIDE UI  -----------------------------------
+                     
+                frameLayout -label "Render Setting" -collapsable 1 -vis 0 -collapse 1 -w 560 seqframe3;
+                     columnLayout -adjustableColumn true ;
+                                            
+                                 separator -style "in" -h 10;
+                                 separator -style "none" -h 10;
+			         
+			         rowLayout -numberOfColumns 5 -cw5  130 130 130 150 20;
+                                          intFieldGrp -label "Start Frame:"  -value1 0 -cw2 90 40 seqsfCTL0;
+                                          intFieldGrp -label "End Frame:"  -value1 10 -cw2 90 40 seqefCTL0;
+                                          intFieldGrp -label "By Frame:"  -value1 1 -cw2 80 40 seqbfCTL0;
+                                          optionMenu -label " Farm: "  seqpoolCTL0;
+					           menuItem -label "Renderfarm" -p seqpoolCTL0;
+					           menuItem -label "Renderfarm1" -p seqpoolCTL0;
+						   menuItem -label "temp" -p seqpoolCTL0;
+				   setParent ..;
+
+				   separator -style "none";
+
+			       //  Used to create mutil farm select UI;
+				   columnLayout mutilfarmcolumn;
+				   setParent ..;
+
+				   separator -style "in" -h 10;
+			
+				   columnLayout;
+
+                                        textFieldGrp -cw2 120 450 -label "Job Name:" -text  "" -editable 0 netjobCTL;
+                                        textFieldGrp -cw2 120 450 -label "Net Project Root:" -text  "" -editable 0 netprojectCTL;
+                                        textFieldGrp -cw2 120 450 -label "Net Output Path:" -text  "" -editable 0 netoutputCTL;
+                                      
+                                        separator -style "none" -h 10;
+                                        textFieldGrp -cw2 120 450 -label "Status:" -text  "" -editable 0 netstatusCTL;
+							 
+				   setParent ..;
+
+				   separator -style "in" -h 10;
+        
+                                   rowLayout -numberOfColumns 4 -cw4  80 150 150 150;
+                                         text -label "";
+                                         button -w 100 -en 0 -label "    Submit Job"  submitjobCTL;
+                                         button -w 100 -label "Close Window" -c "deleteUI ShotRenderUI";
+                                   setParent ..;
+
+                                   separator -style "none" -h 10;
+
+                        setParent ..;
+                 setParent ..;
+       setParent ..;
+
+   showWindow;
+   initUI();
+}
+
+// create the menu item
+
+global proc initUI()
+{
+    string $sceneName = `file -q -sn`;
+    string $tmpbuf[];
+    tokenize $sceneName "/" $tmpbuf;
+  
+//  init some global var
+    
+    global string $target_file_name;
+    global int $target_state;
+    if(!SceneNameCheck($tmpbuf[size($tmpbuf) -1])) $target_state = 0;
+ 
+    string $buf[];	
+    int $sz = `tokenize $tmpbuf[size($tmpbuf) -1] "_" $buf`;
+    if(!get_gLayerList($buf[0],$buf[1])) $target_state = 0;
+     
+     if(size($tmpbuf) != 0)
+    {
+       $target_file_name = $tmpbuf[size($tmpbuf) -1];
+    } 
+    
+
+    string $layerlist[] = `ls -type "renderLayer"`;
+    string $removelist[] = {"globalRender","defaultRenderLayer"};
+    $layerlist = stringArrayRemove($removelist,$layerlist);
+    global string $sLayer_list[];
+    $sLayer_list = $layerlist;
+    
+    //  Set Copy Image UI controls
+    int $i;
+    if(size($layerlist) == 0)
+    {
+    	textFieldButtonGrp -label " Source Image1:" -p selectSceneCLM
+    	                   -text "" 
+                           -buttonLabel "Browse.."
+                           -editable 0
+                           -cw3 120 360 80
+                           -buttonCommand ("onBrowseImage imgBrowseCTL0")
+                           imgBrowseCTL0;
+    	
+    }else{
+
+       for($i = 0; $i < size($layerlist); $i ++)
+       {
+       	  string $ctlName = "imgBrowseCTL" + ($i + 1);
+       	  textFieldButtonGrp -label (" Source Image" + ($i + 1) + ":") -p selectSceneCLM
+    	                     -text "" 
+                             -buttonLabel "Browse.."
+                             -editable 0
+                             -cw3 120 360 80
+                             -buttonCommand ("onBrowseImage " + $ctlName)
+                             $ctlName;    	  
+       }
+    }
+                  
+  //  change working dir   
+      chdir "C:/WINNT/system32";         
+      onCurrentScene;     
+}
+
+
+global proc onCurrentScene()
+{
+	
+	
+    string $filename = `file -q -sn`;
+    textFieldGrp -e -text $filename  browseCTL;
+    string $projpath = `workspace -q -act`;
+    
+    if($projpath == "default")
+    {
+        $projpath = `getenv USERPROFILE` + "/My Documents/maya/projects/default";
+    }
+    
+    textFieldButtonGrp -e -text $projpath -enableButton 1 -vis 1  projCTL;
+
+//  check if current project is the shot project
+
+    string $logname = $projpath + "/NR_log/ProjectInfo";
+    global string $target_IDMT_PROJECTS;
+    $target_IDMT_PROJECTS = "unknown";
+    if(`filetest -d $logname`)
+    {	
+        $target_IDMT_PROJECTS = $projpath;
+    }
+    
+// list all maps in project setting UI
+    listtexturemaps 1;
+
+// get particle cache info
+     
+    getparticleinfo;
+
+// get cloth cache info
+
+    listclothUI;
+}
+
+
+global proc int checkSelectedImage(string $filename)
+{
+        global int $target_state;
+        string $longbuf[];
+        int $pathnum = `tokenize $filename "/" $longbuf`;
+        string $shortbuf[];
+        int $namenum = `tokenize $longbuf[size($longbuf)-1] "." $shortbuf`;
+        int $reval = 1;
+ //  check if some frame missed.       
+        
+        int $startframe = $shortbuf[1];
+        int $endframe = `intFieldGrp -q -value1 SelectendframeCTL`;
+     
+        if($startframe > $endframe) error ("End frame less than start frame! ----" + $filename);
+        
+        int $missed = 0;
+        int $i;
+        for($i = $startframe; $i <= $endframe ; $i++)
+        {
+           string $tname = getSeqImagename($i,$filename);
+               
+           if(!`filetest -f $tname`)
+           {
+               if($missed == 0) print ("------------------------------------------------\n");
+               warning ("Missed Frame: " + $tname );
+               $missed = 1;             
+           }                    
+        }      
+        
+        if($missed == 1) $reval = 0;
+
+//   check naming detail:
+
+     global string $gLayer_list[];
+     global string $sLayer_list[];
+       
+     string $namebuf[];
+     int $sz = `tokenize $shortbuf[0] "_" $namebuf`;
+     
+     if($sz != 6) 
+     {
+     	 string $tmp = "Wrong images Name: " + $longbuf[size($longbuf)-1] + "\n";
+         WarningMsg("Error",$tmp);
+         return 0;
+     }  
+  
+// check if match scene file name
+
+    string $prefix = $namebuf[0] + "_" + $namebuf[1] + "_" + $namebuf[2]  + "_" + $namebuf[3] + "_" + $namebuf[4];  
+    global string $target_file_name; 
+    string $tprefix = `substring $target_file_name 1 (size($target_file_name) - 3)`;
+    if($prefix != $tprefix)
+    {
+      string $tmp = "Image prefix doesn't match the file name!";
+      WarningMsg("Error",$tmp);
+      return 0; 
+    }
+     
+// check if match shot layerlist
+     
+     int $inLayer = 0;
+     
+     for($tmpstr in $gLayer_list)
+     {
+     	 if($tmpstr == $namebuf[$sz -1]) $inLayer = 1;       
+     }
+     
+     if(!$inLayer)  
+     {
+     	 string $tmp = "Can not find Layer " + $namebuf[$sz -1] + " in Shot Layer List!\n";
+         WarningMsg("Error",$tmp);
+         return 0;
+     }
+
+//  Check if match the renderlayer name
+     if(size($sLayer_list) != 0)
+     {
+     	$inLayer = 0;
+        for($tmpstr in $sLayer_list)
+     	{
+           if($tmpstr == $namebuf[$sz -1]) $inLayer = 1;
+     	}
+     	
+         if(!$inLayer)
+         {
+     	     string $tmp = "Can not find Layer " + $namebuf[$sz -1] + " in current scene's render layer!\n";
+             WarningMsg("Error",$tmp);	     
+             return 0;
+         }
+     }
+     
+     
+     return $reval;
+}
+
+global proc string getSeqImagename(int $i,string $filename)
+{
+        string $longbuf[];
+        int $pathnum = `tokenize $filename "/" $longbuf`;
+        string $shortbuf[];
+        int $namenum = `tokenize $longbuf[size($longbuf)-1] "." $shortbuf`;
+
+        
+ //  check if some frame missed.       
+        
+        int $startframe = $shortbuf[1];
+        string $prefix = $shortbuf[0];
+        string $ext = $shortbuf[2];
+        string $path = `substring $filename 1 (size($filename) - size($longbuf[$pathnum -1]))`;  
+
+           string $tname;
+           
+           if($i < 10)
+           {           
+              $tname =  $path + $prefix + ".000" + $i + "." + $ext;
+           }else if($i < 100){
+              $tname =  $path + $prefix + ".00" + $i + "." + $ext;
+           }else if($i < 1000){
+              $tname =  $path + $prefix + ".0" + $i + "." + $ext;
+           }else{
+              $tname =  $path + $prefix + "." + $i + "." + $ext;
+           }       	
+           
+           return $tname;
+}
+
+// Move Images button command in Select image Mode
+
+global proc onMoveSelectedImage(string $fn,int $ef)
+{
+  
+     
+// 1. get the net scene path and image path
+     
+     string $bf[];
+     int $nm = `tokenize $fn "/" $bf`;
+     string $bf1[];
+     int $nm1 = `tokenize $bf[$nm -1] "." $bf1`;
+                    
+     string $jobname = `substring $bf[$nm -1] 1 (size($bf[$nm -1]) -9)`;
+     string $buf[];
+     int $num = `tokenize $jobname "_" $buf`;
+         
+     string $netoutput = "//file-cluster2/render/images/sc";
+     $netoutput = $netoutput + $buf[0] + "/" + $buf[1] + "/" + $buf[3] + "/" + $buf[5] + "/" + $buf[4];
+
+  
+// 2.  Create the target Folder
+
+        string $imgdir = substituteAllString($netoutput,"/","\\");
+        string $imgcmd = "mkdir "+ $imgdir;
+               
+        system($imgcmd);
+        
+// 3.  Move image files
+         
+        int $sf = $bf1[1];   
+                    
+        int $index = 1;
+        string $img;
+            for($sf;$sf <= $ef;$sf ++)
+            {
+               $img = getSeqImagename($sf,$fn);
+               string $cpcmd = "copy \"" + $img + "\" " + $imgdir;
+               $cpcmd = substituteAllString($cpcmd,"/","\\");
+               string $result = `system($cpcmd)`;
+               
+               if(`gmatch $result "*not*"` || `gmatch $result "*不*"`)
+               {
+                   error $result;
+                   return;
+               }
+               
+               int $percent =  100*(float)$index/(float)( 1 + $ef - $sf);
+               $index ++;
+               progressBar -e -pr $percent moveprogressCTL;
+            }
+            
+  
+
+// 5. Add record to database.
+        
+       global string $target_file_name; 
+        
+       string $mpath = ""; 
+       global string $scene_description;       
+       $file = `internalVar -userTmpDir` + "shotpub.txt";
+       $fileId=`fopen $file "w"`;    
+       fprint $fileId ("Scene@" + $buf[0] + "#\n");
+       fprint $fileId ("Shot@" + $buf[1] + "#\n");
+       fprint $fileId ("Layer@" + $buf[5] + "#\n");
+       fprint $fileId ("Group@" + $buf[3] + "#\n");
+       fprint $fileId ("Version@" + substring($buf[4],2,size($buf[4])) + "#\n");
+       fprint $fileId ("File@" + $target_file_name + "#\n");
+       fprint $fileId ("Member@" + `getenv USERNAME` + "#\n");
+       fprint $fileId ("Machine@" + `getenv COMPUTERNAME` + "#\n");
+       fprint $fileId ("Date@^#\n");
+       fprint $fileId ("State@finished#\n");
+       fprint $fileId ("sframe@" + $sf + "#\n");
+       fprint $fileId ("eframe@" + $ef + "#\n");
+       fprint $fileId ("comment@"+ $scene_description + "#\n");
+       fprint $fileId ("Backup@" + $mpath + "#\n");
+       fprint $fileId ("Rendertime@#\n");
+       fprint $fileId ("bk1@#\n");
+       fprint $fileId ("bk2@##\n");   
+       fclose $fileId;      
+    
+      string $cmd = "ShotRecord.exe \"" + $file + "\"";
+      string $result = system($cmd);
+      if(!`gmatch $result "*Success*"`)
+      {
+        confirmDialog -title "Error" -message ("Can not Add Record to Database!") -button "OK";
+        sysFile -delete $file;
+       
+      }else{      
+        sysFile -delete $file;
+      }
+                                     
+}
+
+
+global proc listtexturemaps(int $type)
+{
+//   $type =1 list all texture maps
+//   $type =0 list Invalid maps
+//
+    textScrollList -e -removeAll maplistCTL; 
+    string $texturelist[] = `ls -type "file"`;
+    string $tmptex;
+    string $tmpnode;
+    string $namelist[];
+    int $index = 0;
+	
+    for($tmpnode in $texturelist)
+    {
+        $tmptex = `getAttr ($tmpnode + ".fileTextureName")`;
+			  
+        if($tmptex == "")
+        {
+            $namelist[$index] = "[" + $tmpnode + "]   Empty map file";
+            $index ++;
+            continue;
+        }
+			  
+        if($type ==1)  
+        {
+            if(!`filetest -f $tmptex`)
+            {
+                $namelist[$index] = "[" + $tmpnode + "]   Can not find " + $tmptex;
+                $index ++;
+                continue;
+            }
+				 
+            $namelist[$index] = "OK:  " + $tmptex;
+            $index ++;
+        }
+			  
+        if($type ==0)
+        {
+            if(!`filetest -f $tmptex`)
+            {
+                $namelist[$index] = "[" + $tmpnode + "]   Can not find " + $tmptex;
+                $index ++;
+            }
+        }
+		      
+    }
+
+    $namelist = stringArrayRemoveDuplicates($namelist);
+
+    for($tmptex in $namelist)
+    {
+        textScrollList -e -append $tmptex maplistCTL;
+    }
+    
+    clear $namelist;
+    clear $texturelist;	    
+
+}
+
+
+// get the particle cache information
+
+global proc getparticleinfo()
+{
+    string $ptcache = `dynGlobals -q -a`;
+    if($ptcache != "")
+    {
+        if(`getAttr ($ptcache + ".useParticleDiskCache")`==1)
+        {
+            textFieldGrp -e -text "Enabled" useparticleCTL;
+        }else{
+            textFieldGrp -e -text "Disabled" useparticleCTL;
+            textFieldGrp -e -text "" particlesrcCTL;
+            textFieldGrp -e -text "" particlestarCTL;
+            return;
+        }
+        
+        string $sourcedir = `getAttr ($ptcache + ".cacheDirectory")`;
+        string $path = `textFieldButtonGrp -q -text projCTL` + "/particles/" + $sourcedir;
+
+        if(`filetest -d $path`)
+        {
+            textFieldGrp -e -text ("particles/" + $sourcedir) particlesrcCTL;
+        }else{
+            textFieldGrp -e -text "Can Not Find Cache Directory in Current Project " particlesrcCTL;
+        }
+
+        string $targetdir = `textFieldButtonGrp -q -text renameCTL`;
+        $targetdir = `substring $targetdir 1 (size($targetdir) -3)`;
+        textFieldGrp -e -text ("particles/" + $targetdir) particlestarCTL;
+    }
+}
+
+global proc listclothUI()
+{
+
+    string $allsolver[];
+
+//  check if the scene use maya cloth solver
+
+    if(`text -ex clothtextCTL`) deleteUI clothtextCTL;
+	
+    if(!`pluginInfo -q -l CpClothPlugin.mll`)
+    {
+        text -label "  Maya Cloth cpSolver list:  No Cloth Used" -p clothlistcolumn clothtextCTL;
+        return;
+    }else{
+        $allsolver = `ls -type "cpClothSolver"`;
+        if(size($allsolver)==0) 
+        {
+            text -label "  Maya Cloth cpSolver list:  No Cloth Used" -p clothlistcolumn clothtextCTL;
+            if(`textScrollList -ex clothlistCTL`) deleteUI clothlistCTL;
+    	    if(`popupMenu -ex clothpopCTL`) deleteUI clothpopCTL;
+            return;
+        }
+    }
+
+// the base UI	
+
+    if(`textScrollList -ex clothlistCTL`) deleteUI clothlistCTL;
+    if(`popupMenu -ex clothpopCTL`) deleteUI clothpopCTL;
+    text -label "  Maya Cloth cpSolver list: " -p clothlistcolumn clothtextCTL;
+    textScrollList -numberOfRows 5 -allowMultiSelection true 
+                   -p clothlistcolumn 
+                   clothlistCTL;
+                   
+    popupMenu -parent clothlistCTL  clothpopCTL;
+
+    string $tmpsolver;
+    for($tmpsolver in $allsolver)
+    {
+        if(`getAttr ($tmpsolver + ".solverEnabled")`==0) 
+        {
+            textScrollList -e -append ("[" + $tmpsolver + "] :  Solver Disabled") clothlistCTL;
+            continue;
+        }
+
+        if(`getAttr ($tmpsolver + ".cacheEnabled")` ==0)
+        {
+            textScrollList -e -append ("[" + $tmpsolver + "] :  Cache Disabled") clothlistCTL;
+            continue;
+        }
+
+        string $cachename = `getAttr ($tmpsolver + ".cacheName")`;
+        if($cachename == "")
+        {
+            textScrollList -e -append ("[" + $tmpsolver + "] :  Cache Empty") clothlistCTL; 
+            continue;
+        }
+
+// get the cache file name and check if it exist.
+
+        if(`substring $cachename 2 2` == ":" || `substring $cachename 1 2` == "//")
+        {
+            if(`filetest -f $cachename`)
+            {
+                textScrollList -e -append ("OK:  " + $cachename) clothlistCTL;
+            }else{
+                textScrollList -e -append ("[" + $tmpsolver + "] :  Cache Missed") clothlistCTL;
+            }
+            continue;
+        }else{
+            string $filename = `file -q -sn`;
+            string $buf[];
+            int $num = `tokenize $filename "/" $buf`;
+		
+            $cachename = `substring $filename 1 (size($filename) - size($buf[$num - 1]))` + $cachename; 
+			
+            if(`filetest -f $cachename`)
+            {
+                textScrollList -e -append ("OK:  " + $cachename) clothlistCTL;
+            }else{
+                textScrollList -e -append ("[" + $tmpsolver + "] :  Cache Missed") clothlistCTL;
+            }
+            clear $buf;
+        }
+
+}
+
+    clear $allsolver;
+}
+ 
+
+global proc createproj()
+{
+
+    global string $target_IDMT_PROJECTS;
+
+// check the log name, see if target project is already the shot project
+
+    string $projname = `textFieldGrp -q -text newprojnameCTL`;
+    int $size = size($projname);
+    string $name = `substring $projname 4 (size($projname))`;
+
+    string $logname = $projname + "/NR_log/ProjectInfo/" + $name + ".ini";
+    if(`filetest -f $logname`)
+    {
+        confirmDialog -title "Warning" -message "The Target project is the already the shot project."
+                      -button "Close" -defaultButton "Close";
+        $target_IDMT_PROJECTS = $projname;
+        return;
+    }
+
+//  call maya function to create new project
+
+    projectSetup 1;
+    np_resetDefaults;
+    textFieldButtonGrp -e -text $name np_wsName0;
+    textFieldGrp -e -text "mel" np_RenderLocationmel;
+    textFieldButtonGrp -e -fileName (`substring $projname 1 3`) wsLocation0;
+    if (np_createNewProjectCallback()) 
+    {
+         deleteUI newProjectWindow;
+         $target_IDMT_PROJECTS = `workspace -q -act`;
+    }else{
+         deleteUI newProjectWindw;
+         trace "\n\nFailed to create new project\n\n";
+         return;
+    }
+
+// create new folder to the project
+    
+    workspace -create ($projname + "/pre_render");
+    workspace -create ($projname + "/NR_log/SceneInfo");
+    workspace -create ($projname + "/NR_log/ProjectInfo");
+
+    
+//check and create project log file
+
+    $fileId = `fopen $logname "w"`;
+    fclose $fileId;
+
+// restore current project to previous setting
+    string $oldpath = `textFieldButtonGrp -q -text projCTL`;
+
+    workspace -o $oldpath;
+    
+}
+
+// get the new project name
+
+global proc onprojpath_change()
+{
+    string $newpj = `optionMenu -q -value projpathMU`;
+    $newpj = `substring $newpj 1 3`;
+    string $buf[];
+    global string $target_file_name;
+    tokenize $target_file_name "_" $buf;
+    $newpj = $newpj + $buf[0] + "_" + $buf[1];
+    clear $buf;
+    textFieldGrp -e -text $newpj newprojnameCTL;
+}
+
+
+//  Move Resource Button command, Create the UI 
+
+global proc onMoveResource()
+{
+    global int $target_state;
+    global string $scene_description;
+    
+    global string $sLayer_list[];
+    
+    int $sz = size($sLayer_list);
+       
+    if($sz == 0)
+    {
+        string $fn = `textFieldButtonGrp -q -text imgBrowseCTL0`;
+        if($fn == "")
+        {
+           error "Source Images not selected\n";
+        }
+        
+        if(!imgNamecheck($fn)) return;
+        if(!checkSelectedImage($fn)) return;
+        
+            	
+    }else{
+        
+        for($i=1; $i <= $sz; $i++)
+        {
+             string $fn = `textFieldButtonGrp -q -text ("imgBrowseCTL" + $i)`;
+             if( $fn == "")
+             {
+             	$target_state  = 0;
+                error "Source Images not selected\n";
+             }
+             
+             if(!imgNamecheck($fn)) return; 
+             if(!checkSelectedImage($fn)) return; 
+        }
+    }
+
+	
+    if(`window -ex MoveResourceWIN`) deleteUI MoveResourceWIN;
+    
+    window -title "Build New Project" -w 310 -h 380 -sizeable 1 MoveResourceWIN;
+        columnLayout;
+                        
+            separator -style "none" -h 10 -w 300;
+            textFieldGrp -cw2 100 200 -label "Project Name:" -text "" -editable 0 newprojnameCTL;
+            optionMenu -label "                     Path: "  -cc  onprojpath_change projpathMU;
+                menuItem -label "E:/     ";
+                menuItem -label "D:/     ";
+                menuItem -label "C:/     ";
+            separator -style "in" -h 20 -w 300;
+            
+            text -label ("Please write your scene description here:\n" +
+                         "(patched, problem fixed ...etc)");
+            scrollField -wordWrap true -w 300 -h 100 -text $scene_description scenedescCTL;
+            separator -style "in" -h 10 -w 300;                    
+		  
+            text -label "Progress..." porgresstextCTL;
+            progressBar -maxValue 100 -min 0 -width 300 -h 10 moveprogressCTL;
+		  
+            separator -style "in" -h 20 -w 300;
+            rowLayout -numberOfColumns 2 -w 300 -cw2 130 130  
+                      -columnAlign2 "center" "center" -ct2 "right" "right";
+                button -w 100 -label "Do it" -c onDoitbutton;
+                button -w 100 -label "Cancel" -c "$scene_description = `scrollField -q -text scenedescCTL`;deleteUI MoveResourceWIN";
+            setParent ..;
+        setParent ..;
+    showWindow;
+    onprojpath_change;
+}
+
+// move button command, move all resource to target project
+// reset the resource link
+
+global proc onDoitbutton()
+{
+// create project and move resource
+	
+   Move_project_resource;
+   
+// 
+    text -e -label "Progress...Copying project folder" porgresstextCTL;   
+    Move_project_folder;
+    
+//  
+
+    
+    
+
+    global string $sLayer_list[];
+    
+    int $sz = size($sLayer_list);
+    
+    int $ef = `intFieldGrp -q -value1 SelectendframeCTL`;
+       
+    if($sz == 0)
+    {
+        string $fn = `textFieldButtonGrp -q -text imgBrowseCTL0`;
+        text -e -label "Progress...copying Source Images" porgresstextCTL; 
+        onMoveSelectedImage($fn,$ef);           	
+    }else{
+        
+        for($i=1; $i <= $sz; $i++)
+        {
+             string $fn = `textFieldButtonGrp -q -text ("imgBrowseCTL" + $i)`;
+             text -e -label ("Progress...copying Source Images " + $i) porgresstextCTL;            	
+             onMoveSelectedImage($fn,$ef);           	
+        }
+    }
+    
+    deleteUI MoveResourceWIN;  
+    deleteUI ShotRenderUI;   
+	
+}
+
+global proc Move_project_folder()
+{
+   	
+   global string $target_IDMT_PROJECTS;
+   setjobinfo;
+//2. copy project entire project folder
+    
+    chdir "C:/WINNT/system32";
+    string $netproj = `textFieldGrp -q -text netprojectCTL`; 
+    workspace -create $netproj;
+
+    string $cmd =  $target_IDMT_PROJECTS + " " + $netproj;
+    $cmd = substituteAllString($cmd,"/","\\");
+    $cmd = "xcopy /E /I " + $cmd;
+
+    textFieldGrp -e -text "Copying Project Files, Please Wait for few minutes" netstatusCTL;
+    waitCursor -state on;
+    string $result = `system($cmd)`;
+    waitCursor -state off;
+  
+    if(`gmatch $result "*not*"` || `gmatch $result "*不*"`)
+    {
+        error "Error to copy project folder to net folder\n";
+        return;
+    }else{
+
+// write project log file, lock this project.
+        string $filename = $target_IDMT_PROJECTS + "/NR_log/ProjectInfo/" + 
+                          `substring $target_IDMT_PROJECTS 4 (size($target_IDMT_PROJECTS))` + ".ini";
+        $fileID = `fopen $filename "w"`;
+        fprint $fileID "Render state: Submitted\n";
+        fclose $fileID;
+    }
+   
+   
+}
+
+
+global proc Move_project_resource()
+{
+//  check description and save it
+    global string $scene_description;
+    string $desc = `scrollField -q -text scenedescCTL`;
+    $scene_description = $desc;
+
+    global string $target_IDMT_PROJECTS;
+    global string $target_file_name;
+
+    if(size($desc) < 10)
+    {
+        confirmDialog -title "Warning" -message "Scene description is too simple,please write some detail infomations"
+                      -button "Close" -defaultButton "Close";
+        warning "Scene description is too simple,please write some detail infomations";
+        return;
+    }else{
+    
+    
+    
+// Create New Project 
+
+   createproj;
+ 
+       
+// Get Render layer info
+    
+    string $layerlist[] = `ls -type "renderLayer"`;
+    int $num = size($layerlist) - 1;
+    string $removelist[] = {"globalRender","defaultRenderLayer"};
+    $layerlist = stringArrayRemove($removelist,$layerlist);
+   
+    
+// write description to sceneinfo folder
+
+        string $filename = $target_IDMT_PROJECTS + "/NR_log/SceneInfo/Description.txt"; 
+        $fileID = `fopen $filename "w"`;
+        string $user = `getenv USERNAME`;
+        fprint $fileID ("  User Name: " + $user + "\n\n");
+        string $computer = `getenv COMPUTERNAME`;
+        fprint $fileID ("   Computer: " + $computer + "\n\n");
+        string $date = `system("date /t")`;
+        fprint $fileID ("       Date: " + $date + "\n");
+        string $time = `system("time /t")`;
+        fprint $fileID ("       Time: " + $time + "\n");
+        fprint $fileID ("FileName: " + $target_file_name + "\n\n");
+        fprint $fileID ("Render Layers: \n" );
+        string $ly;
+        for($ly in $layerlist)
+        {
+           fprint $fileID ("\t\t" + $ly + "\n");
+        }
+        fprint $fileID ("\nDescription:\n  "  + $desc);
+        fclose $fileID;
+    }
+
+// move maps 
+
+    text -e -label "Progress...moving texture maps" porgresstextCTL;
+    progressBar -e -progress 0 moveprogressCTL;
+	
+    if(!`Move_maps`)
+    {
+        error "Error: Can not copy texture maps\n";      
+    }
+
+//  save current file
+
+    text -e -label "Progress...saving file" porgresstextCTL;
+    progressBar -e -progress 0 moveprogressCTL;
+
+    string $fullname = $target_IDMT_PROJECTS + "/scenes/" + $target_file_name;
+
+    file -rename $fullname;
+    workspace -o $target_IDMT_PROJECTS;	
+    file -f -save  -options "v=0;p=17" -type "mayaBinary";
+    
+// restore current project to previous setting
+    string $oldpath = `textFieldButtonGrp -q -text projCTL`;
+
+    workspace -o $oldpath;    
+
+}
+
+global proc int Move_maps()
+{
+    global string $target_IDMT_PROJECTS;
+    string $projpath = $target_IDMT_PROJECTS;
+ 
+    if($projpath == "unknown") return 0;
+ 
+
+    string $sourceimage = $projpath + "/sourceimages/";
+    string $buf[] = `ls -type "file"`;
+    int $size = size($buf);
+
+// if no texture map used
+
+    if($size == 0 ) return 1;
+   
+// replace map link
+
+    int $index = 1;
+    int $returnval = 1;
+    chdir "c:/";
+    string $tmpnode;
+    string $tmpmap;
+    for($tmpnode in $buf)
+    {
+        progressBar -e -progress (100*$index/$size) moveprogressCTL;
+        $index ++;
+        $tmpmap = `getAttr ($tmpnode + ".fileTextureName")`;
+        if(`gmatch $tmpmap ($sourceimage + "*")`)
+        {
+            trace ($tmpmap + " already in target location\n");
+            continue;
+        }
+//   copy file and check error
+
+        string $s1 = substituteAllString($sourceimage,"/","\\");
+        string $s2 = substituteAllString($tmpmap,"/","\\");
+        string $result = `system("copy \"" + $s2 + "\" " + $s1)`;
+        
+        if((`gmatch $result "*not*"`) ||(`gmatch $result "*不*"`)) 
+        {
+            error ($result +"\n");
+            $returnval = 0;
+        }else{
+           
+// change file link;
+			
+            string $buf1[];
+            int $buf1num = `tokenize $tmpmap "/" $buf1`;
+            string $newname = $s1 + $buf1[$buf1num -1];
+            $newname = substituteAllString($newname,"\\","/");
+            setAttr -type "string" ($tmpnode + ".fileTextureName") $newname;
+            clear $buf1;
+        }
+    }
+    clear $buf;
+    return $returnval;  
+}
+
+
+// get job informations when expand render setting framelayout.
+
+global proc setjobinfo()
+{
+    global string $target_file_name;
+    string $jobname = `substring $target_file_name 1 (size($target_file_name) -3)`;
+    textFieldGrp -e -text ("SHOT_" + $jobname) netjobCTL;
+
+    string $buf[];
+    int $num = `tokenize $jobname "_" $buf`;
+    
+    if($num != 5)
+    {
+        error "Wrong jobname";
+        return;
+    }
+    
+    string $netproj = "//file-cluster/netrender/Scenes/sc";
+    $netproj = $netproj + $buf[0] + "/" + $buf[1] + "/" + $buf[3] + "/" + $buf[2] + "/" + $buf[4];
+    textFieldGrp -e -text $netproj netprojectCTL;
+
+    string $netoutput = "//file-cluster2/render/images/sc";
+    $netoutput = $netoutput + $buf[0] + "/" + $buf[1] + "/" + $buf[3] + "/" + $buf[2] + "/" + $buf[4];
+
+    textFieldGrp -e -text $netoutput netoutputCTL;
+    clear $buf;
+	   
+}
+
+
+global proc int get_gLayerList(string $scene,string $shot)
+{    
+    global string $gLayer_list[];
+    clear $gLayer_list;
+    string $lfile = "//file-cluster/netrender/scenes/sc" + $scene + "/" + $shot + "/Scene_Info/Layer_List.ini";
+    int $index = 0;
+    if(`filetest -f $lfile`)
+    {
+    	$fileID = `fopen $lfile "r"`;
+    	string $nextline = `fgetline $fileID`;
+    	string $buf[];
+    	while(!`feof $fileID`)
+    	{
+    	    if(`gmatch $nextline "*//*"`)  
+    	    {
+    	        $nextline = `fgetline $fileID`;
+    	        continue;
+    	    }
+    	    if(`tokenize $nextline "#" $buf` > 1)
+    	    {
+    	        $gLayer_list[$index++] = $buf[0];
+    	    }
+    	    $nextline = `fgetline $fileID`;
+    	}
+    	
+    	fclose $fileID;
+    	clear $buf;
+    }else{
+       confirmDialog -title "Error" -message ("Can not find layer list file!" + $scene + "_" + $shot) -button "OK";
+       clear $gLayer_list;
+       return 0;
+    }
+    return 1;
+}
+
+
+
+global proc int SceneNameCheck(string $fn)
+{
+    string $buf[];	
+    int $sz = `tokenize $fn "_" $buf`;
+    if($sz != 5) 
+    {
+    	WarningMsg("Error", "Scene naming error (eg: 004_001_l0boat_lr_001.mb)");
+        return 0;
+    }
+
+// Layer Check
+
+    string $layerlist[] = `ls -type "renderLayer"`;
+    string $removelist[] = {"globalRender","defaultRenderLayer"};
+    $layerlist = stringArrayRemove($removelist,$layerlist);
+    
+    string $lr = "l" + size($layerlist);    
+    string $scenelr = `substring $buf[2] 1 2`;
+    if($lr != $scenelr)
+    {
+        WarningMsg("File Name Error",("Layernum incorrect,Should be \" " + $lr + " \"" )); 
+        warning ("Error: " + ("Layernum incorrect,Should be \" " + $lr + " \"" ));
+        return 0;
+    }
+    return 1;
+    
+}
+
+
+global proc WarningMsg(string $title,string $msg)
+{
+   confirmDialog -title $title -message $msg -button "OK";
+}
+
+
+global proc onBrowseImage(string $ctl)
+{
+ 
+   global int $target_state;
+   string $filename = `fileDialog -directoryMask "*.*"`;
+   
+   string $projpath;
+   if($filename != "")  
+   {
+        string $buf[];
+        int $num = `tokenize $filename "/" $buf`;       
+        textFieldButtonGrp -e -text $filename $ctl;         
+   }
+}
+
+global proc int imgNamecheck(string $fn)
+{
+ 
+// Not check the naming detail.
+ 
+   string $buf[];
+   int $lnum = `tokenize $fn "/" $buf`;
+   
+// .Ext Check
+   
+   string $ext = `substring $buf[$lnum - 1] (size($buf[$lnum -1]) -2) (size($buf[$lnum -1])) `;
+   $ext = `tolower $ext`;
+
+   if(!(($ext == "iff") || ( $ext == "tga") || ($ext == "jpg") ))
+   {
+      //warning "Select a supported format (IFF, TGA, JPG)";
+      WarningMsg("Error","Select a supported format (IFF, TGA, JPG)");
+      return 0;
+   }
+   
+// Padding Check
+
+   string $buf1[];
+   $lnum = `tokenize $buf[$lnum - 1] "." $buf1`;
+   if(($lnum != 3) || (size($buf1[1])!=4) )
+   {
+   	WarningMsg("Error","Wrong Image format (filename.####.ext)");
+        return 0;
+   }
+	
+   return 1;
+}
+
+
+global proc onShowLayerbutton()
+{
+
+    lr_layerlist();
+    string $fn = `file -q -sn`;	
+    string $buf[];
+    int $sz = `tokenize $fn "/" $buf`;
+    
+    string $buf1[];
+    tokenize $buf[$sz-1] "_" $buf1;
+    
+    setSceneShot($buf1[0],$buf1[1]);
+     	
+}

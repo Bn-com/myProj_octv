@@ -1,0 +1,350 @@
+
+//zwCopyTextureImage(3, {"file", "fileTextureName", $maps, "1", "1", $progress, $project, "0"});
+string $version = 3;
+string $args[] = {"file", "fileTextureName", $maps, "1", "1", $progress, $project, "0"};
+//
+//
+//global proc zwCopyTextureImage(string $version, string $args[])
+//{
+string $OCTV_PROJECTS = `getenv "OCTV_PROJECTS"`;	//production shared folder
+
+string $nodeType;	// 节点类型，例如：file、brush、imagePlane
+string $attr;		// 节点属性，例如：fileTextureName、leafImage、flowerImage、imageName
+string $destFolder_tx;	// 目标目录
+int $modifyPath;	// 修改贴图路经
+int $errorStop;		// 当出错时error 而不是warning
+int $percentage;	// 进度
+string $exceptFolder;	// 排除的目录
+string $project;
+int $selectionOnly = false;
+
+$nodeType	= $args[0];
+$attr		= $args[1];
+$destFolder_tx	= $args[2];
+$modifyPath	= $args[3];
+$errorStop	= $args[4];
+$percentage	= $args[5];
+$project	= $args[6];
+$selectionOnly	= $args[7];
+
+int $batchMode = `about -batch`;
+
+string $rs, $message, $iff, $all[], $buf2[], $buf4[];
+
+string $allnoSetNodePath[];
+clear $allnoSetNodePath;
+
+$destFolder_tx = `zwFullPath $destFolder_tx`;
+
+if (`match "OCTVRENDERFARM/" $destFolder_tx` != "")	// Netrender
+{
+    $exceptFolder = "//*";
+}
+string $nodes[];
+if ($selectionOnly)
+{
+    $nodes = `zwTextureNetwork`;
+}
+else
+{
+    catch($nodes = `ls -type $nodeType`);
+}
+int $max = `size $nodes`;
+int $progress = 0;
+//if ($max && !$batchMode)
+//    progressWindow -progress $progress -max $max -title "Copy Maps" -status ($progress + "/" + $max) -isInterruptable true;
+for ($node in $nodes)
+{
+
+// $node = $nodes[12]
+    print("++++++++++Start Process Node:" + $node + "++++++++++++++\n");
+    if (!$batchMode)
+    {
+        if (`progressWindow -query -isCancelled`)
+        {
+            progressWindow -endProgress;
+            error "";
+        }
+        $progress ++;
+//        progressWindow -edit -progress $progress -status ($progress + "/" + $max + "\t" + $node);
+    }
+
+    if (`reference -isNodeReferenced $node`)
+    {
+        print("The node from a reference file ===========" + $node + "\n");
+        continue;
+    }
+    //print ("\n---------------node:" + $node);
+    else{
+        print("+++++++ready copy file node contains texture file+++++++++++" + $node +"\n");
+        }
+    string $file = `getAttr ($node + "." + $attr)`;
+    if ($file == "")
+    {
+        continue;
+    }
+
+    $file = `workspace -expandName $file`;
+
+    if (!`filetest -f $file`)
+    {
+        if ($node == "brush")
+        {
+            if ($attr == "imageName")
+            {
+                if (!(`getAttr ($node + ".mapColor")` && `getAttr ($node + ".textureType")` == 4))
+                {
+                    continue;
+                }
+            }
+            if ($attr == "leafImage")
+            {
+                if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".leaves")` && !`getAttr ($node + ".leafUseBranchTex")`))
+                {
+                    continue;
+                }
+            }
+            if ($attr == "flowerImage")
+            {
+                if (!(`getAttr ($node + ".tubes")` && `getAttr ($node + ".flowers")` && !`getAttr ($node + ".flowerUseBranchTex")`))
+                {
+                    continue;
+                }
+            }
+        }
+
+
+        $message = "贴图/代理丢失：" + $node + "." + $attr + "\t" + $file;
+        if ($errorStop)
+        {
+//            if (!$batchMode)
+//                progressWindow -endProgress;
+            if ($percentage >= 100 && `nodeType $node` != "VRayMesh")
+                error $message;
+            else
+                warning $message;
+        }
+        else
+        {
+            warning $message;
+            continue;
+        }
+    }
+
+    $file = `zwFullPath $file`;
+    string $texture = $file;
+
+    print ("\n---------------texture:" + $texture);
+
+    int $except = false;
+    if (`gmatch (tolower($file)) (tolower($exceptFolder))`||`gmatch (tolower($texture)) (tolower($OCTV_PROJECTS  + "/" + $project + "/Project/sourceimages/*"))`||`gmatch (tolower($texture)) (tolower("${OCTV_PROJECTS}/" + $project + "/Project/sourceimages/*"))`)      /**/
+        $except = true;
+    print ("\n---------------except:" + $except);
+
+    clear $buf4;
+    //
+    string $filename_tx = `match "[^/\\]+$" $file`;
+    string $folder = `substring $file 1 (size($file) - size($filename_tx))`;
+    $texture = $destFolder_tx + "/" + $filename_tx;
+
+    if(!$except)	// 需要上传
+    {
+        print ("\n---------------desttexture:" + $texture);
+        $buf4[size($buf4)] = $file;
+        if (`attributeExists "useFrameExtension" $node`)
+        {
+            if (`getAttr ($node + ".useFrameExtension")`)
+            {
+                string $buf2[] = zwGetSequence($folder + "/" + $filename_tx);
+                for ($seq in $buf2)
+                {
+                    $buf4[size($buf4)] = $folder + "/" + $seq;
+                }
+            }
+        }
+
+        //
+
+        if (`attributeExists "uvTilingMode" $node`){
+
+            if(`getAttr ($node + ".uvTilingMode")` == 2 || `getAttr ($node + ".uvTilingMode")` == 3){
+                string $path = "//octvision.com/cg/Tech/maya_sixteen/scripts/checkin/zwGetUVSequence.mel";
+
+                eval ("source \"" + $path + "\"");
+
+                string $buf3[] = zwGetUVSequence($folder + "/" + $filename_tx);
+                for ($seq in $buf3)
+                {
+                    $buf4[size($buf4)] = $folder + "/" + $seq;
+                }
+                string $buf5[] = zwGetSequence($folder + "/" + $filename_tx);
+                for ($seq in $buf5)
+                {
+                    int $f = stringArrayContains($folder + "/" + $seq, $buf4);
+                    if($f != 1){
+                        $buf4[size($buf4)] = $folder + "/" + $seq;
+                    }
+                }
+            }
+        }
+
+        //
+
+        $modifyPath = 1;
+    }
+    else
+        $modifyPath = 0;
+
+    for ($source in $buf4)
+    {
+       // $source = $buf4[0]
+
+       if(`stringArrayCount $source $all`)
+            continue;
+
+        $all[size($all)] = $source;
+
+        string $filename_tx = `match "[^/\\]+$" $source`;
+        string $dest = $destFolder_tx;
+
+        print ("\n---------------dest:" + $dest);
+
+        while(true){
+            $rs = `zwSysFile "fcopy" $source $dest 0`;
+            if ($rs != "")
+            {
+                $message = "拷贝文件出错：" + $node + "." + $attr + "\n" + $rs + "\n" + $source + $dest+ "请检查网络？";
+                if ($errorStop)
+                {
+//                    if (!$batchMode)
+//                        progressWindow -endProgress;
+                    if ($percentage >= 100){
+                        error $message;
+                        break;
+                    }else{
+                       string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+                        if($result=="stop"){
+                            error $message;
+                            break;
+                        }
+                        //warning $message;
+                    }
+                }
+                else
+                {
+                    string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+                    if($result=="stop"){
+                         error $message;
+                         break;
+                    }
+                    //warning $message;
+                    //continue;
+                }
+            }
+            else{
+               print ($dest + "\n");
+               break;
+            }
+        }
+        pause -sec 3;
+    }
+
+    string $sourceUrl = `getAttr ($node + "." + $attr)`;
+    $sourceUrl = `substituteAllString $sourceUrl "\\" "/"`;
+    string $destUrl = $texture;
+
+    print ("\nmodifyPath:" + $modifyPath);
+    print("---------------------------\n");
+    //if ($modifyPath && `filetest -f $texture` && tolower($sourceUrl) != tolower($destUrl))
+
+    //2015.6.5
+    /*if (`filetest -f $texture`)
+    {
+            print("node:"+$node);
+            print("seting:"+$destUrl+"\n");
+
+            setAttr ($node + "." + $attr) -type "string" $destUrl;
+    }*/
+
+    //2016.12.14
+    if($modifyPath && `filetest -f $texture`){
+        print("node:"+$node);
+        print("seting:"+$destUrl+"\n");
+
+        $destUrl = `zwFullPath $destUrl`;
+        string $destUrl_tmp = `substitute "//octvision.com/CG/Themes" $destUrl "Z:/Themes"`;
+        $destUrl_tmp = `substituteAllString $destUrl_tmp "${OCTV_PROJECTS}" "Z:/Themes"`;
+
+        setAttr ($node + "." + $attr) -type "string" $destUrl_tmp;
+
+    }else if($modifyPath && (!`filetest -f $texture`)){
+        $allnoSetNodePath[size($allnoSetNodePath)] = $node;
+        $allnoSetNodePath[size($allnoSetNodePath)] = $attr;
+        $allnoSetNodePath[size($allnoSetNodePath)] = $destUrl;
+    }
+
+}
+string $allNodePath[];
+string $tempNode[];
+clear $allNodePath;
+clear $tempNode;
+$allNodePath=$allnoSetNodePath;
+
+string $infos = "";
+string $message = "";
+while(size($allNodePath)>0){
+    $infos = "";
+    for($i=0; $i<size($allNodePath); $i = $i+3){
+        if(`filetest -f $allNodePath[$i+2]`){
+
+            $dest_t = `zwFullPath $allNodePath[$i+2]`;
+            string $destPath_tmp = `substitute "//octvision.com/CG/Themes" $dest_t "Z:/Themes"`;
+            $destPath_tmp = `substituteAllString $destPath_tmp "${OCTV_PROJECTS}" "Z:/Themes"`;
+            setAttr ($allNodePath[$i] + "." + $allNodePath[$i+1]) -type "string" $destPath_tmp;
+            print("node:"+$allNodePath[$i]);
+            print("seting:"+$allNodePath[$i+2]+"\n");
+        }else{
+            $tempNode[size($tempNode)] = $allNodePath[$i];
+            $tempNode[size($tempNode)] = $allNodePath[$i+1];
+            $tempNode[size($tempNode)] = $allNodePath[$i+2];
+            $infos = $infos + $allNodePath[$i]+"."+$allNodePath[$i+1]+"\n贴图"+$allNodePath[$i+2]+"\n";
+        }
+    }
+    if($infos!= ""){
+        $message = "设置贴图出错：" + $infos +"请检查贴图是否存在或网络是否正常？";
+        string $result=`confirmDialog -title "警告" -message $message -button "Continue" -button "stop"`;
+        if($result=="stop"){
+            error $message;
+            break;
+        }
+    }
+    clear $allNodePath;
+    $allNodePath = $tempNode;
+    clear $tempNode;
+}
+//
+//if ($max && !$batchMode)
+//    progressWindow -endProgress;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

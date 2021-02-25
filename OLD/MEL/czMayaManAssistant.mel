@@ -1,0 +1,1102 @@
+//-----------------------------------------------------------------------
+//
+// Author: chenzhong
+// 
+// Creation Date: 2007/6/13
+// 
+// Script Name: 
+//	czMayaManAssistant.mel
+//
+// Description: 
+//	MayaMan Assistant
+// 
+// Usage:
+//	Automation
+//
+// Return Value: None.
+//
+// Note: None
+// 
+//----------------------------------------------------------------------
+
+global proc findAndReplace(string $sourceFile, string $thisAttr, string $newLine)
+{	
+// Usage:
+// Open $sourceFile, search a line which starts with a keywork: $sourceValue,
+// replace this line with a new line: $newValue
+// Creation Date: 2007/6/13
+
+	// open, search & modify
+	string $refileStr = "";
+	$fileId=`fopen $sourceFile "r"`;
+	string $nextLine = `fgetline $fileId`;
+	while ( size( $nextLine ) > 0 ) {
+		if(`gmatch $nextLine ($thisAttr + " *")`){
+			$refileStr += ($newLine+"\n");
+		}
+		else{$refileStr += $nextLine;}
+		$nextLine = `fgetline $fileId`;
+	}
+	// write it back
+	fclose $fileId;
+	$fileId=`fopen $sourceFile "w"`;
+	fwrite $fileId $refileStr;
+	fclose $fileId;
+}
+
+global proc string mmModifyFile(string $mod, string $thisAttr, string $replaceLine)
+{
+// Usage:
+// $mod could be "shdow" or "beauty",
+// "shdow" means modification on shadow qualilty,
+// "beauty" means modification on beauty pass.
+// Creation Date: 2007/6/13
+
+	// Variable definitions
+	int $curTime;
+	string $shortname, $project_dir, $ribOutput, $ribBase, $shdir, $batCmd, $beautyQual, $shadowQual;
+	string $buff[];
+	
+	// rib output directory
+	$project_dir = `workspace -query -rd`;
+	$project_dir = `substituteAllString $project_dir "/" "\\"`;
+	$ribOutput = `getAttr MayaManNugget.RibDir`;
+	if (`startsWith $ribOutput "$(PROJECTDIR)"`){
+		$ribOutput = $project_dir + `substring $ribOutput 15 (size($ribOutput))`;
+	}
+	if (`endsWith $ribOutput "$(SCENENAME)"`){
+		$shortname = `file -q -sceneName -shortName`;
+		$shortname = `substring $shortname 1 (size($shortname)-3)`;
+		$ribOutput = $project_dir + "mayaman\\"+ $shortname+"\\";
+	}
+
+	// Current time bat file
+	if (`filetest -d $ribOutput`){
+		$ribBase = `getAttr MayaManNugget.RibBase`;
+		// Current time bat file
+		$curTime = `currentTime -q`;
+		if (`filetest -r ($ribOutput + $ribBase + "."+ $curTime + ".bat")`){
+			$batCmd = $ribOutput + $ribBase + "."+ $curTime + ".bat";
+			// print ("\nCurrent time bat: " + $batCmd);
+		}else{
+			print("\nCant find the file specified!");
+			return "";
+			}
+	}
+	
+	// Search & update the file specified
+	switch ($mod)
+	{ 
+		case "shdow": 
+		{
+			// shadow quality definition files
+			$shdir = $ribOutput + "shadow_maps\\prman\\";
+			if (`filetest -d $shdir`){
+				$buff = `getFileList -folder $shdir`;
+				for ($each in $buff) {
+					if (`filetest -r ($shdir + $each+"\\" + $ribBase + ".qual")`){
+						$shadowQual = $shdir + $each+"\\" + $ribBase + ".qual";
+						// print ("\nShadow quality " + $shadowQual);
+						// modify this file here
+						findAndReplace($shadowQual, $thisAttr, $replaceLine);
+					}else{print("\nCant find the file specified!");}	
+				}		
+			}
+		}
+		break; 
+		case "beauty": 
+		{
+			// beauty pass quality definiton file
+			if (`filetest -d $ribOutput`){
+				$ribBase = `getAttr MayaManNugget.RibBase`;
+				if (`filetest -r ($ribOutput + $ribBase + ".qual")`){
+					$beautyQual =  $ribOutput + $ribBase + ".qual";
+					// print ("\nQuality control file: " + $beautyQual);
+					// modify this file here
+					findAndReplace($beautyQual, $thisAttr, $replaceLine);
+				}else{print("\nCant find the file specified!");}
+			}
+		}
+		break; 
+	}
+
+	return $batCmd;
+}
+
+global proc string czSceneCam()
+{
+// Description: Get the scene camera
+// Creation Date: 2007/07/23
+
+	int $flag = 0;
+	string $scam;
+	string $cams[] = `ls -cameras`;
+	for ($each in $cams)
+	{
+		if(`getAttr ($each + ".renderable")`){
+			$flag++;
+			$scam = $each;
+		}
+	}
+	switch ($flag){ 
+		case 0: {				
+			warning "No renderable camera in current scene!";
+			$scam = "";
+		}break; 
+		case 2: {
+			warning "multi-camera renderable in current scene!";
+			$scam = "";
+		}
+	}
+	return $scam;
+}
+
+global proc  czLookThrouhSceneCam()
+{
+// Description: Look throuh the scene camera
+// Creation Date: 2007/07/23
+	lookThroughModelPanel `czSceneCam` modelPanel4;
+}
+
+global proc czRenView()
+{
+// Description: View everything needed for hair rendering
+// Creation Date: 2007/08/09
+	modelEditor -e -allObjects 0 modelPanel4;
+	modelEditor -e -polymeshes 1 modelPanel4;
+	modelEditor -e -strokes 1 modelPanel4;
+	modelEditor -e -lights 1 modelPanel4;
+}
+
+global proc changeShadingRate()
+{
+	// query info needed from the UI & modify shading rate
+	float $shdingRate = `floatSliderGrp -q -v srRate`;
+	string $shadingRate = "ShadingRate " +  $shdingRate;
+	mmModifyFile("beauty", "ShadingRate", $shadingRate);
+}
+
+global proc changeShadingSample()
+{
+	// query info needed from the UI & modify shading rate
+	float $shadingSampleX = `floatSliderGrp -q -v sampX`;
+	float $shadingSampleY = `floatSliderGrp -q -v sampY`;
+	string $shadingSample = "PixelSamples " + $shadingSampleX + " " + $shadingSampleY;
+	mmModifyFile("beauty", "PixelSamples", $shadingSample);
+}
+
+global proc changeShadowSample()
+{
+	// query info needed from the UI & modify shading rate
+	float $shadowPixelX = `floatSliderGrp -q -v shdowPixelX`;
+	float $shadowPixelY = `floatSliderGrp -q -v shdowPixelY`;
+	string $shadowSample = "PixelSamples " + $shadowPixelX + " " + $shadowPixelY;
+	mmModifyFile("shdow", "PixelSamples", $shadowSample);
+}
+
+global proc reRender()
+{
+	// get the bat file
+	string $gBatCommand  = mmModifyFile("","","");
+	if ($gBatCommand!=""){
+		float $startTime = `timerX`;
+		system("call " + $gBatCommand);
+		float $endTime = `timerX`;
+		float $totalTime = ($endTime - $startTime)/60;
+		 print ("\nTotal Render Time: "+$totalTime+" minutes.");
+	}
+	else{
+		error("Render failed!");
+	}
+
+}
+
+global proc czMayaManPostRenderCleanup_update(int $del)
+{
+// Usage:
+// Clean up MayaMan cache files. etc
+// Creation Date: 2007/5/28
+
+	int $curTime = `currentTime -q`;
+	if($curTime==$del)
+	{
+		// Find the path to those directories
+		string $ribDir = `MayaManInfo -getvalue "RibDir" 0`;
+		string $texDir = `MayaManInfo -getvalue "TextureCache" 0`;
+		string $shadersTX = ($ribDir + "/shaders/");
+		string $geometryTX = ($ribDir + "/geometry/");
+		string $shadowMapsTX = ($ribDir + "/shadow_maps/");
+		string $reflectionMapsTX = ($ribDir + "/reflection_maps/");
+		string $tileRIBsTX  = ($ribDir + "/tile_rib/");
+		string $tileImageRIBsTX = ($ribDir + "/tile_img/");
+		string $texturesTX = ($texDir);
+		string $subsurfaceTX = ($ribDir + "/subsurface/");
+		string $furTX = ($ribDir + "/furFiles/");
+		string $pfxTX = ($ribDir + "/pfx/");
+
+		//  MayaMan Cache clean-up processing...
+		MayaManSetData -forcedeletedirectory $shadersTX;
+		MayaManSetData -forcedeletedirectory $geometryTX;
+		MayaManSetData -forcedeletedirectory $shadowMapsTX;
+		MayaManSetData -forcedeletedirectory $reflectionMapsTX;
+		MayaManSetData -forcedeletedirectory $tileRIBsTX;
+		MayaManSetData -forcedeletedirectory $tileImageRIBsTX;
+		MayaManSetData -forcedeletedirectory $texturesTX;
+		MayaManSetData -forcedeletedirectory $subsurfaceTX;
+		MayaManSetData -forcedeletedirectory $furTX;
+		MayaManSetData -forcedeletedirectory $pfxTX;
+		MayaManSetData -forcedeletedirectory $ribDir;
+	}
+}
+
+global proc czDeleteAllExtraPasses()
+{
+// Usage:
+// Delete all passes listed in Extra Pass panel in MayaMan Global,
+// Creation Date: 2007/4/11
+
+	int $passNum = `scriptTable -q -rows chansList`;
+	for ($index = $passNum-2; $index>=0; $index--)
+	{
+		MayaManSetData -delarrayelement "EPName"   $index;
+		MayaManSetData -delarrayelement "EPEnable" $index;
+		MayaManSetData -delarrayelement "EPCamera" $index;
+		MayaManSetData -delarrayelement "EPScript" $index;
+		MayaManSetData -delarrayelement "EPPostShellScript" $index;
+		scriptTable -e -deleteRow ($index+1) chansList;
+	}
+}
+
+global proc czMayaManMultiRenderLayerRendering()
+{
+// Usage:
+// Enable MayaMan's Multi-RenderLayer Rendering,
+// Creation Date: 2007/4/11
+// Update: 2007/7/20
+	
+	// initialize the UI
+	MayaManOptions;
+	textScrollList -e -selectItem "Extra Pass" theOptionsList;
+	optionListSelected;
+
+	if (!(`separator -q -exists "mayaManOptionsWindow|formLO|thePane|extrapassPane|extrapassCL|extrapassHeader"`)) {
+		setParent "mayaManOptionsWindow|formLO|thePane|extrapassPane|extrapassCL";
+		eval "source \"MayaManExtraPassGuts.mel\"";
+	}
+
+
+	// clear all extra passes before adding something
+	czDeleteAllExtraPasses;
+
+	// Enable and initialize multi-renderlayer rendering or not
+	// render layers processing...
+	string $l[] = `listConnections "renderLayerManager.renderLayerId"`;
+	int $i;
+	for($i = 1; $i < size($l); ++$i) 
+	{
+		if (`getAttr ($l[$i] + ".renderable")`)
+		{		
+			MayaManSetData -appendstring "EPName"      $l[$i];
+			MayaManSetData -appendbool   "EPEnable"    1;
+			MayaManSetData -appendstring "EPCamera"    "";
+			MayaManSetData -appendstring "EPScript"    ("MayaManSelectRenderLayer \""+$l[$i]+"\"");
+			MayaManSetData -appendstring "EPPostShellScript"    "";
+			int $noOfElements = `MayaManInfo -getarraysize "EPName"`;
+			scriptTable -e -insertRow $noOfElements chansList;			
+		}
+	}
+	setAttr MayaManNugget.EPScriptsSetVis 1;
+
+	// apply all the changes
+	mayaManExtraPassApplyChanges;
+}
+
+global proc czMayaManWorkflowFeedback(string $str)
+{
+	// start from a new line
+	if (`window -ex idmtWindow`) {
+		string $temp = `scrollField -q -text iDisplayWin`;
+		scrollField -e -text ($temp + $str) iDisplayWin;
+	}
+}
+
+
+global proc czMayaManRef2Import()
+{
+// Description: Import all ref file 
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $refs[] = `file -q -r`;
+	if (`size $refs`){
+		for ( $each in $refs ){
+			catch(`file -ir $each`);
+		}
+		// feedback
+		$str = "\n^OPE002: Import referenced file - Done!";
+	}else{
+		$str = "\n^OPE002: Import referenced file - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaDelMaterials()
+{
+// Description: Delete all Maya materials 
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $dels[] = `ls -materials`;
+	if (`size $dels`){
+		delete $dels;
+		$dels = `ls -type mesh`;
+		select -r $dels;
+		hyperShade -assign lambert1;
+		$str = "\n^OPE003: Delete Maya materials - Done!";
+	}else{
+		$str = "\n^OPE003: Delete Maya materials - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaDelSceneTexture()
+{
+// Description: Delete all Maya textures except that for hair 
+// Creation Date: 2007/7/22
+
+	string $str;
+	string $dels[] = `ls -textures`;
+	if (`size $dels`){
+		for ( $fil in $dels ){
+			if (!`gmatch $fil "*BLD*"`){
+				catch(`delete $fil`);
+			}
+		}
+		$str = "\n^OPE004: Delete Maya textures - Done!";
+	}else{
+		$str = "\n^OPE004: Delete Maya textures - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaDelPolySmoothFace()
+{
+// Description: Delete all Maya polySmoothFace
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $ko[] = `ls -type polySmoothFace`;
+	if (`size $ko`){
+		for($each in $ko)
+		{
+			select -r $each;
+			catch(`delete`);
+		}
+		// feedback
+		$str = "\n^OPE005: Delete polySmoothFace nodes - Done!";
+	}else{
+		$str = "\n^OPE005: Delete polySmoothFace nodes - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaManDelMayaManLightAtts()
+{
+// Description: Delete MayaManLightAtts
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $ko[] = `ls -type MayaManLightAtts`;
+	if (`size $ko`){
+		for($each in $ko){
+			select -r $each;
+			catch(`delete`);
+		}
+		$str = "\n^OPE006: Delete MayaManLightAtts - Done!";
+	}else{
+		$str = "\n^OPE006: Delete MayaManLightAtts - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaManDelMayaManAttributes()
+{
+// Description: Delete MayaManAttributes 
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $ko[] = `ls -type MayaManAttributes`;
+	if (`size $ko`){
+		for($each in $ko){
+			select -r $each;
+			catch(`delete`);
+		}
+		$str = "\n^OPE007: Delete MayaManLightAtts - Done!";
+	}else{
+		$str = "\n^OPE007: Delete MayaManLightAtts - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayaManModelPreset(int $flag)
+{
+// Description: MayaMan model atts settings for winx_club
+// Creation Date: 2007/7/12
+
+	string $str;
+	string $lo[] = `ls -type mesh`;
+	select -r $lo;
+	pickWalk -d up;
+	MayaManAddModelAttributes(1,0);
+	MayaManVerifyNugget;
+
+	// MayaMan model preset for winX
+	string $mmmas[] = `ls -type MayaManAttributes`;
+	if (`size $mmmas`){
+		for($each in $mmmas){
+			setAttr ($each + ".matteObjectMtl") 0;
+			setAttr ($each + ".mmma_MatteObject") 1;
+			if ($flag){
+				setAttr ($each + ".mmma_RenderSubdiv") 1;
+				setAttr ($each + ".mmma_SubdivVarying") 1;
+				setAttr ($each + ".mmma_SubdivBoundaryInterp") 0;
+				setAttr ($each + ".subdivUseLoop") 0;
+				setAttr ($each + ".mmma_SubdivSmoothTris") 1;
+			}
+		}
+		$str = "\n^OPE008: MayaMan Model Preset - Done!";
+	}else{
+		$str = "\n^OPE008: MayaMan Model Preset - Null!";
+	}
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+
+global proc czMayaManLightPreset(string $flag)
+{
+// Description: MayaMan light atts settings for winx_club
+// Creation Date: 2007/7/12
+
+	// see if the user sepecify lights to add attr to
+	// if not, use all light in current scene instead.
+	string $lg[] = `ls -sl`;
+	string $str = "\n*_*: MayaMan Light Preset - Null!";
+	if (!`size $lg`){
+		$lg = `ls -lights`;
+	}
+	if (`size $lg`){
+		// add MayaMan light atts
+		select -r $lg;
+		MayaManAddLightAttributes(true, true);
+
+		// MayaMan light preset for winX
+		string $mmlas[] = `ls -type MayaManLightAtts`;
+		if (`size $mmlas`){
+			for($each in $mmlas){
+				setAttr ($each + ".mmla_MapResX") 512;
+				setAttr ($each + ".mmla_MapResY") 512;
+				setAttr ($each + ".bucketSizeMode") 2;
+				setAttr ($each + ".bucketSizeX") 32;
+				setAttr ($each + ".bucketSizeY") 32;
+				setAttr ($each + ".mmla_DeepShadows") 1;
+				switch ($flag){ 
+					case "low": {				
+						setAttr ($each + ".mmla_ShadowMapSamples") 16;
+						setAttr ($each + ".mmla_ShadowMapFilter") 0;
+						setAttr ($each + ".mmla_PixelSamplesX") 1;
+						setAttr ($each + ".mmla_PixelSamplesY") 1;
+					}break; 
+					case "medium": {
+						setAttr ($each + ".mmla_ShadowMapSamples") 32;
+						setAttr ($each + ".mmla_ShadowMapFilter") 1;
+						setAttr ($each + ".mmla_PixelSamplesX") 4;
+						setAttr ($each + ".mmla_PixelSamplesY") 4;
+					}break; 
+					case "high": {
+						setAttr ($each + ".mmla_ShadowMapSamples") 64;
+						setAttr ($each + ".mmla_ShadowMapFilter") 1;
+						setAttr ($each + ".mmla_PixelSamplesX") 16;
+						setAttr ($each + ".mmla_PixelSamplesY") 16;
+					}
+				}
+			}
+			$str = "\n^OPE009: MayaMan Light Preset - Done!";
+		}else{
+			$str = "\n^OPE009: MayaMan Light Preset - Null!";
+		}
+	}
+
+	// feedback display
+	czMayaManWorkflowFeedback($str);
+}
+
+global proc czMayapfxHairHideTransformChannel()
+{
+// Description: Hide pfxHair's transform channels
+// Creation Date: 2007/7/28
+	
+	// get the transform node
+	string $l[] = `ls -type pfxHair`;
+	select -r $l;
+	pickWalk -d up;
+	$l = `ls -sl -long`;
+
+	// hide the transform channels
+	for ( $trans in $l ){		
+		setAttr -keyable false -channelBox false ($trans + ".tx");
+		setAttr -keyable false -channelBox false ($trans + ".ty");
+		setAttr -keyable false -channelBox false ($trans + ".tz");
+		setAttr -keyable false -channelBox false ($trans + ".rx");
+		setAttr -keyable false -channelBox false ($trans + ".ry");
+		setAttr -keyable false -channelBox false ($trans + ".rz");
+		setAttr -keyable false -channelBox false ($trans + ".sx");
+		setAttr -keyable false -channelBox false ($trans + ".sy");
+		setAttr -keyable false -channelBox false ($trans + ".sz");
+		setAttr -keyable false -channelBox false ($trans + ".v");	
+	}
+}
+
+global proc czMayaCustompfxHairChannel()
+{
+// Description: MayaMan light atts settings for winx_club
+// Creation Date: 2007/7/28
+
+	// get pfxHair nodes stand by
+	string $l[] = `ls -type pfxHair`;
+	select -r $l;
+	pickWalk -d up;
+	$l = `ls -sl -long`;
+
+	// loop
+	for ($each in $l){
+		// DISPLAY QUALITY		
+		if (!`objExists ($each + ".DisplayQuality")`){
+			// add custom attrs
+			addAttr -ln "DisplayQuality" -at long  -min 10 -max 50 -dv 20 $each;
+		}
+		
+		// make it visible in the channelbox
+		setAttr -e -keyable true ($each + ".DisplayQuality");
+		// get shape node
+		string $tmp[] = `ls -dag -s $each`;
+		// connect  custom attr to the shape node
+		connectAttr -f ($each + ".DisplayQuality") ($tmp[0] + ".displayQuality");
+	}
+}
+
+global proc czMayaManRenderCheck()
+{
+// Description: Check some items that may cause rendering faile
+// Creation Date: 2007/07/23
+
+	string $str;
+	string $temp = `file -q -sceneName -shortName`;
+	string $buff[];
+	int $numTokens = `tokenize $temp "_" $buff`;
+	$temp = "seq" + $buff[1] + "_" + "sce" + $buff[2] + "_" + `substring $buff[3] 3 (size($buff[3]))`;
+	
+	// 1. the defaultRenderGlobals.imageFilePrefix
+	//     this will be set automatically if file name is named as somthing like "wi_*hair_*";
+	string $outputImageName = `getAttr defaultRenderGlobals.imageFilePrefix`;
+	if($outputImageName!=$temp)
+	{
+		$str = "\n^INF001: DefaultRenderGlobals.imageFilePrefix problem!";
+		czMayaManWorkflowFeedback($str);
+		$str = "\n^OPE010: Default to scene name: " + $temp + "!";
+		setAttr -type "string" defaultRenderGlobals.imageFilePrefix $temp;
+		czMayaManWorkflowFeedback($str);
+	}
+	// 2. the camera clip
+	//	in order to include most situation that may happen, do the following setting
+	string $scam = `czSceneCam`;
+	if ($scam!=""){
+		if (`getAttr ($scam + ".nearClipPlane")`>0.1){
+			$str = "\n^INF002: " + $scam + "'s nearClipPlane seems too large!";
+			czMayaManWorkflowFeedback($str);
+		}	
+	}
+	// 3. the render layer
+	//	enable and initialize custom render layers if there's any
+	string $l[] = `ls -type renderLayer`;
+	if (`size $l`){
+		int $i;
+		for($i = 0; $i < size($l); $i++){
+			if (`getAttr ($l[$i] + ".renderable")`&&(!`gmatch $l[$i] "*defaultRenderLayer*"`)){
+				$str = "\n^INF004: Custom render layer found!";
+				czMayaManWorkflowFeedback($str);
+			}
+		}
+	}
+	// 4. pfxHair 
+	//	pfxHair nodes should not be matte
+	$l = `ls -type pfxHair`;
+	select -r $l;
+	pickWalk -d up;
+	$l = `ls -sl`;
+	select -clear;
+	for ( $each in $l ){
+		// MayaManAttributes
+		string $cons[] = `listConnections -source true -destination false -shapes true -type MayaManAttributes $each`;
+		if (`size $cons`&&`getAttr ($cons[0]+".mmma_MatteObject")`){
+			$str = "\n^INF005: pfxHair has been matte: " + $each + "!";
+			czMayaManWorkflowFeedback($str);
+			$str = "\n^OPE011: Cancel Matte option on " + $each + "!"; 
+			setAttr ($cons[0]+".mmma_MatteObject") 0;
+			czMayaManWorkflowFeedback($str);
+		}
+	}
+	// 5. display driver
+	//	use "file" to avoid some latent problems
+	if (`getAttr MayaManNugget.CustomDisplay`!="file"){
+		$str = "\n^INF006: Latent CustomDisplay problem!";
+		czMayaManWorkflowFeedback($str);
+		$str = "\n^OPE012: Default to \"file\"!";
+		setAttr -type "string" MayaManNugget.CustomDisplay "file";
+		czMayaManWorkflowFeedback($str);
+	}
+	if (`getAttr MayaManNugget.RenderDisplayDriver`!="file"){
+		$str = "\n^INF007: Latent RenderDisplayDriver problem!";
+		czMayaManWorkflowFeedback($str);
+		$str = "\n^OPE013: Default to \"file\"!";
+		setAttr -type "string" MayaManNugget.RenderDisplayDriver "file";
+		czMayaManWorkflowFeedback($str);
+	}	
+}
+
+global proc condictionApp()
+{
+// Description: None
+// Creation Date: 2007/08/06
+
+	if (`checkBoxGrp -q -v1 condiction`){
+		checkBoxGrp -e -v2 0 condiction;
+	}else{
+		checkBoxGrp -e -v2 1 condiction;
+	}
+}
+
+global proc enableAll()
+{
+// Description: None
+// Creation Date: 2007/08/09
+
+	intSliderGrp -e -en true disp;
+	intSliderGrp -e -en true sseg;
+	floatSliderGrp -e -en true thin;
+	floatSliderGrp -e -en true width;
+}
+
+global proc czHSEditor()
+{
+// Description: Hair System Editor
+// Creation Date: 2007/08/03
+
+	// variables
+	int $disp, $sseg, $disp_flag, $sseg_flag, $thin_flag, $width_flag;
+	float $thin, $width;
+	string $str;
+
+	// parameters query
+		if (`window -q -exists hsParam`){
+			$disp = `intSliderGrp -q -v disp`;
+			$sseg = `intSliderGrp -q -v sseg`;
+			$thin = `floatSliderGrp -q -v thin`;
+			$width = `floatSliderGrp -q -v width`;
+		
+			// Hair system list
+			$l = `ls -type hairSystem`;
+			if (`checkBoxGrp -q -v1 condiction`){
+				$l = `ls -sl -dag -s`;
+			}
+			for ( $each in $l ){
+				// if it is a hairSystem node
+				if (`nodeType $each` != "hairSystem"){
+					string $shadingEngine[] = `listConnections -source true -destination false -shapes true -type hairSystem $each`;
+					if (`size $shadingEngine`){
+						$each = $shadingEngine[0];
+					}
+				}
+				if (`nodeType $each` == "hairSystem"){
+					// break connections: DISPLAYQUALITY
+					if (`intSliderGrp -q -en disp`){
+						string $c[] = `listConnections -destination 0 -plugs true ($each + ".displayQuality")`;
+						if (`size $c`){
+							// break connection first
+							catch(`disconnectAttr $c[0] ($each + ".displayQuality")`);
+						}
+						setAttr ($each + ".displayQuality") $disp;
+						$disp_flag = 1;
+					}
+					// break connections: SUB SEGMENTS
+					if (`intSliderGrp -q -en sseg`){
+						string $c[] = `listConnections -destination 0 -plugs true ($each + ".subSegments")`;
+						if (`size $c`){
+							// break connection first
+							catch(`disconnectAttr $c[0] ($each + ".subSegments")`);
+						}
+						setAttr ($each + ".subSegments") $sseg;
+						$sseg_flag = 1;
+					}
+					// break connections: THINNING
+					if (`floatSliderGrp -q -en thin`){
+						string $c[] = `listConnections -destination 0 -plugs true ($each + ".thinning")`;
+						if (`size $c`){
+							// break connection first
+							catch(`disconnectAttr $c[0] ($each + ".thinning")`);
+						}
+						setAttr ($each + ".thinning") $thin;
+						$thin_flag = 1;
+					}
+					// break connections: HAIRWIDTH
+					if (`floatSliderGrp -q -en width`){
+						string $c[] = `listConnections -destination 0 -plugs true ($each + ".hairWidth")`;
+						if (`size $c`){
+							// break connection first
+							catch(`disconnectAttr $c[0] ($each + ".hairWidth")`);
+						}
+						setAttr ($each + ".hairWidth") $width;
+						 $width_flag = 1;
+					}
+				}	// end for loop
+				if ($disp_flag){
+					$str = "\n^OPE014: Set Hair System DisplayQuality - Done!";
+					czMayaManWorkflowFeedback($str);
+				}
+				if ($sseg_flag){
+					$str = "\n^OPE015: Set Hair System Sub Segments - Done!";
+					czMayaManWorkflowFeedback($str);
+				}
+				if ($thin_flag){
+					$str = "\n^OPE016: Set Hair System Thinning - Done!";
+					czMayaManWorkflowFeedback($str);
+				}
+				if ($width_flag){
+					$str = "\n^OPE017: Set Hair System Hair Width - Done!";
+					czMayaManWorkflowFeedback($str);
+				}
+			}
+	}
+}
+
+
+global proc czHSParameterUI()
+{
+// Description: Hair System Editor Window
+// Creation Date: 2007/08/03
+
+	if (`window -q -exists hsParam`)
+		deleteUI hsParam;
+
+	window -ip -mb 1 -title "Hair System Editor" -w 417 -h 140 -sizeable 1 hsParam;
+		menu -p hsParam -l "Edit";
+			menuItem -l "Enable All" -c "enableAll" disall;
+		setParent hsParam;	
+		columnLayout -adjustableColumn true;
+    			checkBoxGrp -numberOfCheckBoxes 2 
+				-label "Apple To:" -labelArray2 "Selection" "All" -value1 true -cc "condictionApp" condiction;
+			separator;
+			intSliderGrp -label "Display Quality" -field true
+			    -minValue 0 -maxValue 20
+			    -fieldMinValue -100 -fieldMaxValue 100
+			    -value 10 disp;
+				popupMenu disp_popupMenu;
+					menuItem -l "Disable" -c "intSliderGrp -e -en false disp";
+				setParent ..;
+			intSliderGrp -label "Sub Segments" -field true
+			    -minValue 0 -maxValue 5
+			    -fieldMinValue -100 -fieldMaxValue 100
+			    -value 1 sseg;
+				popupMenu sseg_popupMenu;
+					menuItem -l "Disable" -c "intSliderGrp -e -en false sseg";
+				setParent ..;
+			floatSliderGrp -label "Thinning" -field true
+			    -minValue 0.000 -maxValue 1.000
+			    -fieldMinValue -100.000 -fieldMaxValue 100.000
+			    -value .400 -s 0.01 thin;
+				popupMenu thin_popupMenu;
+					menuItem -l "Disable" -c "floatSliderGrp -e -en false thin";
+				setParent ..;
+			floatSliderGrp -label "Hair Width" -field true
+			    -minValue 0.000 -maxValue 1.000
+			    -fieldMinValue -100.000 -fieldMaxValue 100.000
+			    -value .135 -s 0.01 width;
+				popupMenu width_popupMenu;
+					menuItem -l "Disable" -c "floatSliderGrp -e -en false width";
+				setParent ..;
+			button -label "Apply" -c "czHSEditor" appl;
+	showWindow hsParam;
+}
+
+global proc czMayaManAssistant ( )
+{
+// Usage:
+// provide necessary info while using MayaMan,
+// with Maya UI support.
+// Creation Date: 2007/6/13
+
+	// ---------------------------------------------------------------------------------------------------------------------------------------
+	// Query Scene Info starts
+	// dir info
+	string $project_dir = `workspace -query -rd`;
+	$project_dir = `substituteAllString $project_dir "/" "\\"`;
+	string $scene_file = `file -q -sceneName`;
+	$scene_file = `substituteAllString $scene_file "/" "\\"`;
+	string $cache_dir;
+	string $hs[] = `ls -type diskCache`; 
+	for ($item in $hs)
+	{
+		string $cname = `getAttr  ($item + ".cacheName")`; 
+		if ($cname != ""&&`gmatch $cname "*.mchp"`){
+			string $buffer[];
+			clear($buffer);
+			tokenize $cname "/" $buffer;
+			string $fname = $buffer[size($buffer) - 1];
+			if (`file -q -exists ($project_dir + "data\\" + $fname)`){
+				$cache_dir = $project_dir + "data\\"; continue;
+			}
+			else{
+				$cache_dir = "Cache Error!";break;
+			}
+		}
+	}
+	
+	string $imageOutput_dir = `getAttr MayaManNugget.ImageOutputDir`;
+	if (`startsWith $imageOutput_dir "$(PROJECTDIR)"`){
+		$imageOutput_dir = $project_dir + `substring $imageOutput_dir 15 (size($imageOutput_dir))`;
+	}
+
+	// camera info
+	string $cam_name;
+	string $allCame[] = `ls -type camera`;
+	for ($cam in $allCame)	
+	{
+		if (`getAttr ($cam+".renderable")`){ $cam_name = $cam;}	
+	}
+	string $near_clip = `getAttr ($cam_name+".nearClipPlane")`;
+	string $far_clip =  `getAttr ($cam_name+".farClipPlane")`;
+	string $auto_clip =  `getAttr ($cam_name+".bestFitClippingPlanes")`;
+	if ($auto_clip == "1"){$auto_clip = "On";}else{$auto_clip = "Off";}
+
+	// material & texture info
+	string $mat_num = size(`ls -materials`);
+	string $tex_num = size(`ls -type "file"`);
+	string $light_num = size(`ls -lights`);
+
+	// extra pass info
+	string $layer_beauty = `MayaManInfo -get "EPName" 0`;
+	string $layer_zdepth = "";
+	if(`gmatch $layer_beauty "*_zdepth"`){
+		$layer_zdepth = `MayaManInfo -get "EPName" 0`;
+		$layer_beauty = `MayaManInfo -get "EPName" 1`;
+	}else{
+		$layer_zdepth = `MayaManInfo -get "EPName" 1`;
+		$layer_beauty = `MayaManInfo -get "EPName" 0`;
+	}
+
+	// MayaMan Control
+	float $mmSR = `getAttr "MayaManNugget.ShadingRate"`;
+	float $mmSampX = `getAttr "MayaManNugget.PixelSamplesX"`;
+	float $mmSampY = `getAttr "MayaManNugget.PixelSamplesY"`;
+	
+	// Query Scene Info ends
+	// ---------------------------------------------------------------------------------------------------------------------------------------
+
+	// ---------------------------------------------------------------------------------------------------------------------------------------
+	// UI starts
+	if (`window -ex idmtWindow`) 
+	{
+		// window -q -wh idmtWindow;
+		// windowPref -remove idmtWindow;	
+		deleteUI idmtWindow;
+	} 
+
+	// Create the window
+	window -ip -mb 1 -t "IDMT Man" -iconName "Long For" -sizeable true -wh 527 711 -maximizeButton 0 idmtWindow;
+
+	// Create the menu.
+	menu -p idmtWindow -l "Edit";
+		menuItem -l "1Import Reference Loaded" -c "czMayaManRef2Import";
+		menuItem -divider true;
+		menuItem -l "2Delete Scene Materials" -c "czMayaDelMaterials";
+		menuItem -l "3Delete Scene Textures" -c "czMayaDelSceneTexture";
+		menuItem -l "4Delete PolySmoothFace" -c "czMayaDelPolySmoothFace";
+		menuItem -divider true;
+		menuItem -l "5Delete MayaManLightAttrs" -c "czMayaManDelMayaManLightAtts";
+		menuItem -l "6Delete MayaManAttrs" -c "czMayaManDelMayaManAttributes";
+		menuItem -divider true;
+		menuItem -subMenu true -l "7MayaMan Model Preset";
+			menuItem -l "1Default Model Preset(Recommend)" -c "czMayaManModelPreset 0";
+			menuItem -l "2Subdiv Model Preset" -c "czMayaManModelPreset 1";
+		setParent -menu ..;
+		menuItem -subMenu true -l "8MayaMan Light Preset" -c "czMayaManLightPreset";
+			menuItem -l "1Low Quality" -c "czMayaManLightPreset low";
+			menuItem -l "2Medium Quality(Recommend)" -c "czMayaManLightPreset medium";
+			menuItem -l "3High Quality" -c "czMayaManLightPreset high";
+	menu -p idmtWindow -l "Tools";
+		menuItem -l "1Render Check" -c "czMayaManRenderCheck";
+		menuItem -l "2Hair System Attrs..." -c "czHSParameterUI";
+		menuItem -l "3Netrender..." -c "czMayaManMultiCPU";
+	menu -p idmtWindow -l "View";
+		menuItem -l "1Render View" -c "lookThroughModelPanel `czSceneCam` modelPanel4;czRenView";
+		menuItem -l "2Persp View" -c "lookThroughModelPanel persp modelPanel4";
+
+	// Create Window contents.
+	formLayout fileViewer;
+		image -image "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\icons\\winX_Idmt.bmp" -width 518 -height 88 logoImage;
+			popupMenu info_popupMenu;
+				menuItem -l "Render Check" -c "czMayaManRenderCheck";
+				menuItem -l "Hair System Attrs..." -c "czHSParameterUI";
+				menuItem -divider true;
+				menuItem -l "Import Reference Loaded" -c "czMayaManRef2Import";
+				menuItem -divider true;
+				menuItem -l "Delete Scene Materials" -c "czMayaDelMaterials";
+				menuItem -l "Delete Scene Textures" -c "czMayaDelSceneTexture";
+				menuItem -l "Delete PolySmoothFace" -c "czMayaDelPolySmoothFace";
+				menuItem -divider true;
+				menuItem -l "Delete MayaManLightAttrs" -c "czMayaManDelMayaManLightAtts";
+				menuItem -l "Delete MayaManAttrs" -c "czMayaManDelMayaManAttributes";
+				menuItem -divider true;
+				menuItem -subMenu true -l "MayaMan Model Preset";
+					menuItem -l "Default Model Preset(Recommend)" -c "czMayaManModelPreset 0";
+					menuItem -l "Subdiv Model Preset" -c "czMayaManModelPreset 1";
+				setParent -menu ..;
+				menuItem -subMenu true -l "MayaMan Light Preset" -c "czMayaManLightPreset";
+					menuItem -l "Low Quality" -c "czMayaManLightPreset low";
+					menuItem -l "Medium Quality(Recommend)" -c "czMayaManLightPreset medium";
+					menuItem -l "High Quality" -c "czMayaManLightPreset high";
+		setParent fileViewer;
+		scrollLayout  -cr 1 mainscrol;
+		columnLayout -adj 1 mainCol;
+		frameLayout -l "Maya & MayaMan Directory" -cll true -cl false fileInfoFrame;
+			formLayout fileInfoForm;
+				string $txtProj = `text -label "Project Directory" -align "right"`;
+				string $projDirTF = `textField -ed 0 -h 25 -tx $project_dir`;
+				string $sep1 = `separator -style "out" -height 10`;
+				string $txtScene = `text -label "Scene Directory" -align "right"`;
+				string $sceneDirTF = `textField -ed 0 -h 25 -tx $scene_file`;					
+				string $sep2 = `separator -style "out" -height 10`;
+				string $txtHairCache = `text -label "Cache Directory" -align "right"`;
+				string $hairCacheDirTF = `textField -ed 0 -h 25 -bgc 1.0 0 0 -tx $cache_dir`;
+				string $sep3 = `separator -style "out" -height 10`;
+				string $imgOutput = `text -label "Image Directory" -align "right"`;
+				string $imgOutputTF = `textField -ed 0 -h 25 -tx $imageOutput_dir`;
+		setParent mainCol;
+		frameLayout -l "Maya Camera" -cll true -cl true camInfoFrame;
+			formLayout camInfoForm;
+				string $txtCam = `text -label "Scene Camera" -align "right"`;
+				string $camTF = `textField -ed 0 -h 25 -tx $cam_name`;
+				string $txtCamNCP = `text -label "Near Clip Plane" -align "right"`;
+				string $camNCPTF = `textField -ed 0 -h 25 -tx $near_clip`;
+				string $txtCamFCP = `text -label "Far Clip Plane" -align "right"`;
+				string $camFCPTF = `textField -ed 0 -h 25 -tx $far_clip`;
+				string $txtCamAuto = `text -label "Auto Clip Plane" -align "right"`;
+				string $camAutoTF =`textField -ed 0 -h 25 -tx $auto_clip`;
+		setParent mainCol;
+		frameLayout -l "Maya Materials & Textures" -cll true -cl true matInfoFrame;
+			formLayout matInfoForm;
+				string $txtMat = `text -label "Num of Materials" -align "right"`;
+				string $matTF = `textField -ed 0 -h 25 -tx $mat_num`;
+				string $txtTex = `text -label "Num of Textures" -align "right"`;
+				string $texTF = `textField -ed 0 -h 25 -tx $tex_num`;
+				string $txtLight = `text -label "Num of Lights" -align "right"`;
+				string $lightTF = `textField -ed 0 -h 25 -tx $light_num`;
+		setParent mainCol;
+
+		frameLayout -l "MayaMan RenderLayer" -cll true -cl true layerInfoFrame;
+			formLayout layerInfoForm;
+				string $txtLayerB = `text -label "Beauty Layer" -align "right"`;
+				string $layerBTF = `textField -ed 0 -h 25 -tx $layer_beauty`;
+				string $txtLayerZ = `text -label "Zdepth Layer" -align "right"`;
+				string $layerZTF = `textField -ed 0 -h 25 -tx $layer_zdepth`;
+		setParent mainCol;
+
+		frameLayout -l "MayaMan Control - Bat" -cll true -cl true mmcInfoFrame;
+			formLayout mmcInfoForm;
+				$fmms = `MayaManInfo -mms "ShadingRate"`;
+				floatSliderGrp -l "Shading Rate" -field true -min $fmms[0] -max 8 -fmx $fmms[1] -s $fmms[2] -pre 2 -v $mmSR -cc "changeShadingRate" srRate;	
+				$fmms = `MayaManInfo -mms "PixelSamplesX"`;
+				floatSliderGrp -l "Shading SamplesX" -field true -min $fmms[0] -max 8 -fmx $fmms[1] -s $fmms[2] -v $mmSampX -cc "changeShadingSample" sampX;
+				$fmms = `MayaManInfo -mms "PixelSamplesY"`;
+				floatSliderGrp -l "Shading SamplesY" -field true -min $fmms[0] -max 8 -fmx $fmms[1] -s $fmms[2] -v $mmSampY -cc "changeShadingSample" sampY;
+				string $sep4 = `separator -style "out" -height 10`;
+				floatSliderGrp -label "Shadow SamplesX" -field true -minValue -10.0 -maxValue 10.0 -fieldMinValue -100.0 -fieldMaxValue 100.0 -value 16 -cc "changeShadowSample" shdowPixelX;
+				floatSliderGrp -label "Shadow SamplesY" -field true -minValue -10.0 -maxValue 10.0 -fieldMinValue -100.0 -fieldMaxValue 100.0 -value 16 -cc "changeShadowSample" shdowPixelY;
+		
+		setParent fileViewer;
+		scrollField -wordWrap true -text "UI initialize...Okay\n" -editable false -h 180 iDisplayWin;
+		 	popupMenu info_popupMenu;
+ 				menuItem -l "Clear" -c "scrollField -e -clear iDisplayWin";
+		button -label "Re-render" -align "center" -c "reRender" renderBtn;
+		button -label "Close" -align "center" -c "deleteUI idmtWindow" closeBtn;
+
+	formLayout -e 
+	-af $txtProj left 5 -af $txtProj top 10
+	-ac $projDirTF "left" 3 $txtProj -af $projDirTF top 5 -af $projDirTF right 5
+	-af $sep1 left 1 -af $sep1 right 1 -ac $sep1 "top" 10 $txtProj
+	-af $txtScene left 5 -ac $txtScene "top" 13 $sep1
+	-ac $sceneDirTF "left" 6 $txtScene -ac $sceneDirTF "top" 10 $sep1 -af $sceneDirTF right 5
+	-af $sep2 left 1 -af $sep2 right 1 -ac $sep2 "top" 10 $txtScene
+	-af $txtHairCache left 5 -ac $txtHairCache "top" 13 $sep2
+	-ac $hairCacheDirTF "left" 6 $txtHairCache -ac $hairCacheDirTF "top" 10 $sep2 -af $hairCacheDirTF right 5
+	-af $sep3 left 1 -af $sep3 right 1 -ac $sep3 "top" 10 $txtHairCache
+	-af $imgOutput left 5 -ac $imgOutput "top" 13 $sep3
+	-ac $imgOutputTF "left" 6 $imgOutput -ac $imgOutputTF "top" 10 $sep3 -af $imgOutputTF right 5
+	fileInfoForm;
+
+	formLayout -e
+	-af $txtCam left 5 -af $txtCam top 10
+	-ac $camTF "left" 7 $txtCam -af $camTF top 5 -af $camTF right 5
+	-af $txtCamNCP left 5 -ac $txtCamNCP "top" 13 $camTF
+	-ac $camNCPTF "left" 3 $txtCamNCP -ac $camNCPTF "top" 8 $camTF -af $camNCPTF right 5
+	-af $txtCamFCP left 5 -ac $txtCamFCP "top" 13 $camNCPTF
+	-ac $camFCPTF "left" 9 $txtCamFCP -ac $camFCPTF "top" 8 $camNCPTF -af $camFCPTF right 5
+	-af $txtCamAuto left 5 -ac $txtCamAuto "top" 13 $txtCamFCP
+	-ac $camAutoTF "left" 2 $txtCamAuto -ac $camAutoTF "top" 10 $txtCamFCP -af $camAutoTF right 5
+	camInfoForm;
+
+	formLayout -e
+	-af $txtMat left 5 -af $txtMat top 10
+	-ac $matTF "left" 7 $txtMat -af $matTF top 5 -af $matTF right 5
+	-af $txtTex left 5 -ac $txtTex "top" 13 $matTF
+	-ac $texTF "left" 7 $txtTex -ac $texTF "top" 8 $matTF -af $texTF right 5
+	-af $txtLight left 5 -ac $txtLight "top" 13 $texTF
+	-ac $lightTF "left" 20 $txtLight -ac $lightTF "top" 8 $texTF -af $lightTF right 5
+	matInfoForm;
+
+	formLayout -e
+	-af $txtLayerB left 5 -af $txtLayerB top 10
+	-ac $layerBTF "left" 7 $txtLayerB -af $layerBTF top 5 -af $layerBTF right 5
+	-af $txtLayerZ left 5 -ac $txtLayerZ "top" 13 $layerBTF
+	-ac $layerZTF "left" 7 $txtLayerZ -ac $layerZTF "top" 8 $layerBTF -af $layerZTF right 5
+	layerInfoForm;		
+
+	formLayout -e
+	-af srRate left 5 -af srRate top 10 -af srRate right 5
+	-af sampX "left" 5  -ac sampX "top" 8 srRate  -af sampX right 5
+	-af sampY "left" 5  -ac sampY "top" 8 sampX  -af sampY right 5
+	-af $sep4 left 1 -af $sep4 right 1 -ac $sep4 "top" 10 sampY
+	-af shdowPixelX "left" 5  -ac shdowPixelX "top" 8 $sep4  -af shdowPixelX right 5
+	-af shdowPixelY "left" 5  -ac shdowPixelY "top" 8 shdowPixelX  -af shdowPixelY right 5
+	mmcInfoForm;
+
+	formLayout -e 
+	-af logoImage top 1 -af logoImage left 0 -af logoImage right 0
+	-af mainscrol left 1 -af mainscrol right 0 -ac mainscrol top 2 logoImage -af mainscrol bottom 180
+	-af iDisplayWin left 1 -af iDisplayWin right 1 -ac iDisplayWin top 1 mainscrol -ac iDisplayWin bottom 10 renderBtn
+	-af renderBtn left 10 -af renderBtn right 250  -af renderBtn bottom 10
+	-ac closeBtn left 10 renderBtn -af closeBtn right 10 -af closeBtn bottom 10
+	fileViewer;
+	
+	showWindow idmtWindow;
+	// UI ends
+	// ---------------------------------------------------------------------------------------------------------------------------------------
+
+	// ---------------------------------------------------------------------------------------------------------------------------------------
+}

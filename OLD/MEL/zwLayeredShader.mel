@@ -1,0 +1,86 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ª∆÷ŸŒ¨
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwLayeredShader()
+{
+	global int $zwLayerShader;
+	$zwLayerShader = !$zwLayerShader;
+	symbolCheckBox -edit -value $zwLayerShader symbolCheckBoxZwLayeredShader;
+
+	string $buf[] = `ls -type layeredShader`;
+	for ($layeredShader in $buf)
+	{
+		string $buf1[] = `listConnections -type shadingEngine -source false -destination true ($layeredShader + ".outColor")`;
+		if (!size($buf1))
+			continue;
+		string $shadingEngine = $buf1[0];
+		$buf1 = `listConnections -type materialInfo -source false -destination true ($shadingEngine + ".message")`;
+		if (!size($buf1))
+			continue;
+		string $materialInfo = $buf1[0];
+		string $material = "";
+		if ($zwLayerShader)
+			$material = `zwLayeredShaderGetMaterial $layeredShader`;
+/*
+		{
+			float $min = 1;
+			$buf1 = `listConnections -source true -destination false ($layeredShader + ".inputs")`;
+			for ($i=0; $i<size($buf1); $i++)
+			{
+				if (`objExists ($buf1[$i] + ".transparency")`)
+				{
+					float $buf2[] = `getAttr ($buf1[$i] + ".transparency")`;
+					float $transparency = mag(<<$buf2[0], $buf2[1], $buf2[2]>>);
+					if ($transparency < $min)
+					{
+						$min = $transparency;
+						$material = $buf1[$i];
+					}
+				}
+			}
+		}
+*/
+		else
+			$material = $layeredShader;
+		if (`objExists $material`)
+		{
+			if (!`isConnected ($material + ".message") ($materialInfo + ".texture[0]")`)
+				connectAttr -force ($material + ".message") ($materialInfo + ".texture[0]");
+			if (!`isConnected ($material + ".message") ($materialInfo + ".material")`)
+				connectAttr -force ($material + ".message") ($materialInfo + ".material");
+		}
+	}
+	if ($zwLayerShader)
+		print "Custom Display Layer Shader On.\n";
+	else
+		print "Custom Display Layer Shader Off.\n";
+}
+
+global proc string zwLayeredShaderGetMaterial(string $layeredShader)
+{
+	string $buf1[] = `listConnections -source true -destination false ($layeredShader + ".inputs")`;
+	$buf1 = `stringArrayRemoveDuplicates($buf1)`;
+	for ($i=0; $i<size($buf1); $i++)
+	{
+		if (`nodeType $buf1[$i]` == "rampShader")
+			return $buf1[$i];
+		if (`objExists ($buf1[$i] + ".transparency")`)
+		{
+			float $buf2[] = `getAttr ($buf1[$i] + ".transparency")`;
+			float $transparency = mag(<<$buf2[0], $buf2[1], $buf2[2]>>);
+			string $buf3[] = `listConnections -source true -destination false ($buf1[$i] + ".transparency")`;
+			if ($transparency == 0 && !size($buf3))
+				return $buf1[$i];
+		}
+		else if (`nodeType $buf1[$i]` == "layeredShader")
+			return `zwLayeredShaderGetMaterial $buf1[$i]`;
+	}
+	return "";
+}

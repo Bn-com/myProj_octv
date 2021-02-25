@@ -1,0 +1,132 @@
+global proc slIKFKTranslate()
+{
+	string $fileName = `file -q -sceneName`;
+	string $buffer[];
+	int $num = `tokenize $fileName "\/" $buffer`;
+	tokenize $buffer[$num-1] "_" $buffer;
+	string $proj= $buffer[0];
+	string $wconl,$conl,$wconr,$conr;
+	if ($proj == "br")
+	{
+		$wconl = "_world_wristCon_l";
+		$conl = "_wristCon_l";
+		$wconr = "_world_wristCon_r";
+		$conr = "_wristCon_r";
+	}
+	else if ($proj == "ez")
+	{	
+		$wconl = "_IKWristCon_left";
+		$conl = "_FKWristCon_left";
+		$wconr = "_IKWristCon_right";
+		$conr = "_FKWristCon_right";
+	}
+
+	
+	string $master[] = `ls "*_MASTER" "*:*_MASTER" "*:*:*_MASTER"`;
+	string $char;
+	string $buff1[];
+	for ($tem in $master)
+	{
+		$char = `substring $tem 1 (size($tem)-7)`;
+		int $len = `tokenize $char ":" $buff1`;
+		
+		if (!`objExists ($buff1[$len-1] + "_IKFKTransExpression")` && startString($buff1[$len-1] , 1)!="p")
+		{
+			string $loc_la[] = `spaceLocator -p 0 0 0 `;
+			parent $loc_la[0] $tem;
+			string $loc_lb[] = `spaceLocator -p 0 0 0 `;
+			parent $loc_lb[0] $tem;
+			string $loc_ra[] = `spaceLocator -p 0 0 0 `;
+			parent $loc_ra[0] $tem;
+			string $loc_rb[] = `spaceLocator -p 0 0 0 `;
+			parent $loc_rb[0] $tem;
+
+			parentConstraint -mo -weight 1 ($char+$conl) $loc_la[0];
+			parentConstraint -mo -weight 1 ($char+$wconl) $loc_lb[0];
+			parentConstraint -mo -weight 1 ($char+$conr) $loc_ra[0];
+			parentConstraint -mo -weight 1 ($char+$wconr) $loc_rb[0];
+
+			string $loc[]= {$loc_la[0],$loc_lb[0],$loc_ra[0],$loc_rb[0]};
+			for ($tem in $loc)
+			{
+				setAttr -keyable false ($tem+".tx");	
+				setAttr -keyable false ($tem+".ty");	
+				setAttr -keyable false ($tem+".tz");	
+				setAttr -keyable false ($tem+".rx");	
+				setAttr -keyable false ($tem+".ry");	
+				setAttr -keyable false ($tem+".rz");	
+				setAttr -keyable false ($tem+".sx");	
+				setAttr -keyable false ($tem+".sy");	
+				setAttr -keyable false ($tem+".sz");
+				setAttr -keyable false ($tem+".visibility");
+				setAttr ($tem+".visibility") 0;
+			}
+
+			addAttr -ln ikfk -at double ($char+$wconl);
+			setAttr -e -keyable true ($char+$wconl+".ikfk");
+			addAttr -ln ikfk -at double ($char+$conl);
+			setAttr -e -keyable true ($char+$conl+".ikfk");
+
+			addAttr -ln ikfk -at double ($char+$wconr);
+			setAttr -e -keyable true ($char+$wconr+".ikfk");
+			addAttr -ln ikfk -at double ($char+$conr);
+			setAttr -e -keyable true ($char+$conr+".ikfk");
+
+			string $exp = slIKFKExp($char,$loc_la[0],$loc_lb[0],$loc_ra[0],$loc_rb[0],$wconl,$conl,$wconr,$conr);
+			expression -s $exp  -o "" -ae 1 -uc all -n ($buff1[$len-1] + "_IKFKTransExpression");
+		}
+	}
+	select -cl;
+
+}
+
+global proc string slIKFKExp(string $char, string $loc_la, string $loc_lb,string $loc_ra, string $loc_rb, string $wconl, string $conl, string $wconr, string $conr)
+{
+	
+
+	string $exp = "\n//IK/FK translate ,Create by wanshoulong\n";
+	
+	$exp += "\n//LeftArm\n\n";
+	$exp +=	$char+$conl+".ikfk="+$loc_la+".translateX+"+$loc_la+".translateY+"+$loc_la+".translateZ+"
+		+$loc_la+".rotateX+"+$loc_la+".rotateY+"+$loc_la+".rotateZ;\n";
+	$exp +=	$char+$wconl+".ikfk="+$loc_lb+".translateX+"+$loc_lb+".translateY+"+$loc_lb+".translateZ+"
+		+$loc_lb+".rotateX+"+$loc_lb+".rotateY+"+$loc_lb+".rotateZ;\n";
+	
+	$exp +=	"if ("+$char+$conl+".solverEnable == 0)\n";
+	$exp += "{\n";
+	$exp +=	"float $locConTR[] = `xform -q -ws -t "+$char+$conl+"`;\n";
+	$exp +=	"float $locConRO[] = `xform -q -ws -ro "+$char+$conl+"`;\n\n";
+	$exp +=	"xform -ws -t $locConTR[0] $locConTR[1] $locConTR[2] "+$char+$wconl+";\n";
+	$exp +=	"xform -ws -ro $locConRO[0] $locConRO[1] $locConRO[2] "+$char+$wconl+";\n";
+	$exp += "}\n";
+	$exp +=	"else \n";
+	$exp +=	"{\n";
+	$exp +=	"float $worConTR[] = `xform -q -ws -t "+$char+$wconl+"`;\n";
+	$exp +=	"float $worConRO[] = `xform -q -ws -ro "+$char+$wconl+"`;\n\n";
+	$exp +=	"xform -ws -t $worConTR[0] $worConTR[1] $worConTR[2] "+$char+$conl+";\n";
+	$exp +=	"xform -ws -ro $worConRO[0] $worConRO[1] $worConRO[2] "+$char+$conl+";\n";
+	$exp += "}\n";
+
+	$exp += "\n//RightArm\n\n";
+	$exp +=	$char+$conr+".ikfk="+$loc_ra+".translateX+"+$loc_ra+".translateY+"+$loc_ra+".translateZ+"
+		+$loc_ra+".rotateX+"+$loc_ra+".rotateY+"+$loc_ra+".rotateZ;\n";
+	$exp +=	$char+$wconr+".ikfk="+$loc_rb+".translateX+"+$loc_rb+".translateY+"+$loc_rb+".translateZ+"
+		+$loc_rb+".rotateX+"+$loc_rb+".rotateY+"+$loc_rb+".rotateZ;\n";
+	$exp +=	"if ("+$char+$conr+".solverEnable == 0)\n";
+	$exp += "{\n";
+	$exp +=	"float $locConTR[] = `xform -q -ws -t "+$char+$conr+"`;\n";
+	$exp +=	"float $locConRO[] = `xform -q -ws -ro "+$char+$conr+"`;\n\n";
+	$exp +=	"xform -ws -t $locConTR[0] $locConTR[1] $locConTR[2] "+$char+$wconr+";\n";
+	$exp +=	"xform -ws -ro $locConRO[0] $locConRO[1] $locConRO[2] "+$char+$wconr+";\n";
+	$exp += "}\n";
+	$exp +=	"else \n";
+	$exp +=	"{\n";
+	$exp +=	"float $worConTR[] = `xform -q -ws -t "+$char+$wconr+"`;\n";
+	$exp +=	"float $worConRO[] = `xform -q -ws -ro "+$char+$wconr+"`;\n\n";
+	$exp +=	"xform -ws -t $worConTR[0] $worConTR[1] $worConTR[2] "+$char+$conr+";\n";
+	$exp +=	"xform -ws -ro $worConRO[0] $worConRO[1] $worConRO[2] "+$char+$conr+";\n";
+	$exp += "}\n";
+
+
+	return $exp;
+}

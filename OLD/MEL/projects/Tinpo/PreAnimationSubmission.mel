@@ -1,0 +1,857 @@
+// PreAnimationSubmission.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	This is the new entry point for AnimationSubmission. Performs the following tasks
+	1. Put the job on the playblast que.
+	2. Examine the .ma file, and get an asset count, and asset weight.
+	3. Decide how the AnimationSubmission task should be distributed - i.e. how many times it should be split - for very heavy scenes.
+	4. Create a playlist that contains instructions on what assets to load for each AnimationSubmission task.
+	5. Launch a consolidation task that combines the output of the AnimationSubmission tasks.
+	6. Determine if point caching is needed for this shot group. And launch point caching tasks.
+Use:
+	PreAnimationSubmission argList
+Options:
+	type (string)	- What type of scene - ani, lay, or lit
+	
+Dependancies:
+
+	parseXML.mel
+	xml_parser plug-in
+	assetListFromMa
+	fileIO.mel
+	getAnimCacheStatus
+	buildExportPlaylist
+	submitPlayblast - new playblast mechanism.
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	Sample args from Insight
+	(\"doplayblast=1;versionnumber=0002;shotgroup=0595
+	0;sourcefilename=0016_05950_ani.ma;sequence=0016;host=insight;approved=0
+	;cache_email=kurt.futrell@reelfx.com;artistname=Kurt_Futrell;qubeJobName
+	=Insight_PreAnimationSubmission_0016-05950_TaskID_113671;
+	ReturnPath=/Insight.Net/ShotManagement/QubeService.asmx/QubeCallback;Arg
+	uments=QubeProcessID,376\")
+	
+
+Original:	09/06/05
+Revisions:	03/08/06	Rev 1.0
+		- Added choice of cluster to submit child processes to.
+		
+		
+		03/24/06	Rev 1.1
+		- Added choice of priority to submit child processes at
+		- Added the ability to skip point cache export if desired.
+
+		08/22/06	Rev 1.2
+		- Read farm.xml from projectGlobals to determine process cluster to submit to.
+
+		09/11/06	Rev 1.3
+		- Added code to create/update qubeJobHistory.xml file
+
+		09/15/06	Rev 1.4
+		- Generalized code so that this script may be called by LayoutSubmission and PostLayout
+		- Implemented config file for reading defaults. Distribution criteria is also read from here.
+		- Replaced build_playList with a call to the generalized procedure buildExportPlaylist that works for PointCachePreExport as well
+		- Updated cache validation call
+		- Moved call to saveQubeJobData so that the data is made available as early as possible (previously AnimationSubmission had to finish before it was written if the process
+		wasn't distributed)
+		- Switch to new naming convention for global variables.
+
+		09/21/06	Rev 1.5
+		- Hooking up new playblast mechanism (test mode for now, Socom 002_0004 only)
+
+		11/16/06	Rev 1.6
+		- Hooking up new arguments from Insight for playblasts. Temporary code for reading old args until Insight update is released
+
+		01/09/07	Rev 1.7
+		- Switched to submitMaya for maya process submission
+
+		01/16/07	Rev 1.8
+		- Removed submission to old playblast system
+
+		01/26/07	Rev 1.9
+		- Added support for updated rfxmaya, which allows specification of plug-in script/shader/plug-in paths per seq/shot
+
+		04/16/07	Rev 2.0
+		- Plugging in support for per sequence/per shot globals
+		
+		
+To-do's:
+		- Remove temporary code for reading old Insight args
+		
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source parseXML.mel;
+source fileIO.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// latest dev version:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/PreAnimationSubmission.2.0.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+// ---------------------------------------------------------------------------------------------------
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+// get the playblast que location. 
+// ---------------------------------------------------------------------------------------------------
+proc saveQubeJobData (int $pointCacheData[], int $animSubData[])
+{
+	// get data for this job
+	
+	global string $gQubeJobName;
+	global string $gSequence;		// The sequence
+	global string $gShot;		// The shot
+	global string $gTaskType;
+	global string $gCluster;
+	int $qubeJobId;
+	string $baseJobName = ($gTaskType == "AnimationSubmission")?"PreAnimationSubmission":$gTaskType;
+
+	if ($gQubeJobName == "")
+	{
+		string $searchName = $baseJobName+"*"+$gSequence+"*"+$gShot;	
+			
+		$qubeJobId = getQubeJobIdFromName($searchName,$gCluster,"--running",0);
+	}
+	else
+	{
+		$qubeJobId = getQubeJobIdFromName($gQubeJobName,$gCluster,"--running",1);
+	}
+
+	string $childJobTypes[];
+	int $childJobIds[];
+	int $childSubJobCounts[];
+	if (size($pointCacheData))
+	{
+		$childJobTypes[0] = "PointCacheExport";
+		$childJobIds[0] = $pointCacheData[0];
+		$childSubJobCounts[0] = $pointCacheData[1];
+	}
+	
+	if (size($animSubData))
+	{
+		int $c = size ($childJobTypes);
+		$childJobTypes[$c] = $gTaskType;
+		$childJobIds[$c] = $animSubData[0];
+		$childSubJobCounts[$c] = $animSubData[1];
+		
+		$childJobTypes[$c+1] = $gTaskType+"PostExport";
+		$childJobIds[$c+1] = $animSubData[2];
+		$childSubJobCounts[$c+1] = $animSubData[3];	// Should always be 1
+	}
+
+	// update the qubeJobHistory.xml file
+	updateQubeJobHistory ($gSequence, $gShot, $baseJobName, $qubeJobId,1, $childJobTypes, $childJobIds, $childSubJobCounts);
+	
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// get the playblast que location.
+// ---------------------------------------------------------------------------------------------------
+proc string getPsQue (string $arg)
+{
+	string $que;
+	$que = (`about -nt`)?"X:":"/diskx";
+	$que += "/queues/playblastQueue.txt";	
+	
+	if ($arg != "")
+	{
+		$que = $arg;
+		string $tmp;
+		for ($i = 1;$i <= size($que);$i++)
+		{
+			string $char = substring ($que,$i,$i);
+			if ($char == "\\")
+				$tmp += "/";
+			else
+				$tmp += $char;	
+		}
+		$que = $tmp;
+		if (`about -nt`)
+			$que = substitute ("/diskx/",$que,"X:/");
+		else
+			$que = substitute ("X:/",$que,"/diskx/");	
+		
+	}
+	return $que;
+}
+// ---------------------------------------------------------------------------------------------------
+// add to playblast que temporary - for transition period in switching between playblast mechs
+/*
+Example of what must be sent to playblast que
+x:\entertainment\15495_ninja_turtles\animation\showWork\seq1130\sg0040\1130_0040_ani.ma,x:\entertainment\15495_ninja_turtles\animation\showWork\seq1130\sg0040\playblasts\1130_0040_ani.0001.avi,1130_0040_D_ani.ma,Jim_Hull,movie,131015,live
+*/
+// ---------------------------------------------------------------------------------------------------
+global proc string createPsArgs ()
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gTaskType;
+	global string $gArtistName;		// Artist name from Insight
+	global string $gVersion;		// Version number from Insight
+	global string $gSourceFile;		// Source file the submission was from (only meaningful when artist is remote)
+	
+	string $shotDir = getPath ("ShotBase",{$gSequence,$gShot});
+	string $fileToPlayblast;
+	string $movieTarget;
+	string $suffix;
+
+	if ($gTaskType == "AnimationSubmission")
+	{
+		$suffix = "ani";
+	}
+	else if ($gTaskType == "LayoutSubmission")
+	{
+		$suffix = "lay";
+	}
+	$fileToPlayblast = $shotDir+"/"+$gSequence+"_"+$gShot+"_"+$suffix+".ma";
+	$movieTarget = $shotDir+"/playblasts/"+$gSequence+"_"+$gShot+"_"+$suffix+"."+$gVersion+".avi";
+
+	$fileToPlayblast = getPath ("WindowsPath",{$fileToPlayblast});
+	$movieTarget = getPath ("WindowsPath",{$movieTarget});
+	string $psArgs = $fileToPlayblast+","+$movieTarget+","+$gSourceFile+","+$gArtistName+",movie";
+
+
+	return $psArgs;	
+}
+// ---------------------------------------------------------------------------------------------------
+// add to playblast que .
+// ---------------------------------------------------------------------------------------------------
+proc int addToPsQue (string $que, string $args)
+{
+	global string $gTaskType;
+	string $baseJobName = ($gTaskType == "AnimationSubmission")?"PreAnimationSubmission":$gTaskType;
+
+	if (!size($args))
+	{
+		$args = createPsArgs();
+	}
+
+	if (!size($args))
+		return false;
+	if (!`filetest -d (dirname($que))`)
+		return false;
+	
+	// substitute forward for backslashes in the args
+	$args = substituteAll ("/",$args,"\\");
+	appendToFile ($que,($args+"\n"));
+	// give Wild playblasts a higher priority
+	//insertInFile ($que,($args+"\n"),1);
+	
+	print ($baseJobName+": Placing the following args on the playblast que: "+$args+"\n"); 
+	return true;	
+}
+// ---------------------------------------------------------------------------------------------------
+// check to see if the cache is already up-to-date 
+// ---------------------------------------------------------------------------------------------------
+proc int validateCache(string $aniFile, int $isValid[])
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gTaskType;
+	global string $gCompareAgainst;
+
+	$gCompareAgainst = ($gTaskType == "AnimationSubmission")?"ani":"lay";
+	
+	
+	int $insightFrameRangeData[];
+	clear $isValid;$isValid[0] = 0;
+	
+	int $success = getInsightShotGroupLength ($gSequence,$gShot,$insightFrameRangeData);
+	if (!$success)
+	{
+		return false;	
+	}
+
+	int $status = getAnimCacheStatus ($gSequence,$gShot,"",$insightFrameRangeData[0],$insightFrameRangeData[1],{});
+	
+	if ($status == 0)
+		$isValid[0] = 1;
+	else
+		$isValid[0] = 0;
+		
+	return true;	
+}
+// ---------------------------------------------------------------------------------------------------
+// find the globals file, depending on task type 
+// ---------------------------------------------------------------------------------------------------
+proc string getConfig ()
+{
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	global string $gTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	
+	// look in shot first
+	string $file = getPath ("ShotBase",{$gSequence,$gShot})+"/projectGlobals/"+$gTaskType+".xml";
+	if (`filetest -f $file`)
+		return $file;
+
+	// sequence
+	string $file = getPath ("SeqBase",{$gSequence})+"/projectGlobals/"+$gTaskType+".xml";
+	if (`filetest -f $file`)
+		return $file;
+
+	// project wide
+	
+	$file = getPath ("ProjectGlobals",{})+"/"+$gTaskType+".xml";
+
+	if (`filetest -f $file`)
+		return $file;
+	
+	return "";
+
+}
+// ---------------------------------------------------------------------------------------------------
+// Submit post export process
+// ---------------------------------------------------------------------------------------------------
+proc int submit_postAnimationSubmission (string $playlist, string $args, int $waitFor)
+{
+	global string $gHost;
+	global string $gSequence;
+	global string $gShot;
+	global string $gCluster;
+	global string $gTaskType;
+
+	
+	
+	int $jobNumber;
+	string $proj = `workspace -q -act`;
+	$proj = getPath ("LinuxPath",{$proj});
+	$playlist = getPath ("LinuxPath",{$playlist});
+	
+	// edit arguments sent to PostExport
+	$args = editArgList ($args,"playlist",$playlist);
+	$args = editArgList ($args,"usePlaylist","1");
+	// turn on asset linking callback to Insight 
+	$args = editArgList ($args,"updateInsightAssetLinking","1");
+	$args = editArgList ($args,"taskType",($gTaskType+"PostExport"));
+	$args = editArgList ($args,"parentTaskType",($gTaskType));
+
+	// routing the call the submitMaya
+	string $jobName = $gHost+"_"+$gTaskType+"PostExport_"+$gSequence+"_"+$gShot; 
+	int $priority = 1;
+
+	string $melCmd = "PostAnimationSubmission (\\\\\\\\\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\\\\\\\\\")";
+
+	string $mayaCmd = "-command \""+$melCmd+"\"";
+	string $extraQubeArgs = "--waitfor "+$waitFor;
+
+	// specify sequence and shot for rfxmaya
+	string $extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+
+	int $jobNumber = submitMaya (
+		$jobName,		// name of the job 
+		1,			// number of cpus to use - only meaningful if range is set to something
+		$priority,		// priority to submit at
+		"",			// range for jobs which have sub-jobs, e.g. Point Cache export
+		$gCluster,		// cluster to submit to
+		"",			// qube pre-exec callback
+		"",			// qube post-exec callback
+		$extraQubeArgs,		// any extra qube args to add
+		true,			// use rfxmaya?
+		false,			// use the maya Render command
+		$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+		$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+	);
+
+	print ($jobNumber+"\n");
+
+	/*
+	submitMaya args:
+	string $jobName,	// name of the job
+	int $numCpus,		// number of cpus to use - only meaningful if range is set to something
+	int $priority,		// priority to submit at
+	string $range,		// range for jobs which have sub-jobs, e.g. Point Cache export
+	string $cluster,	// cluster to submit to
+	string $preCallback,	// qube pre-exec callback
+	string $postCallback,	// qube post-exec callback
+	string $extraQubeArgs,	// any extra qube args to add
+	int $useRfxMaya,	// use rfxmaya?
+	int $mayaRender,	// use the maya Render command
+	string $extraRfxMayaArgs,// any extra args to send to rfxmaya
+	string $mayaArgs	// maya arg string including command, scene, but not including project, or -batch
+	*/
+	return $jobNumber;
+
+	/*
+	
+	string $melCmd = "PostAnimationSubmission (\\\"";
+	$melCmd += $args;
+	$melCmd += "\\\")";
+	
+	string $mayaCmd = "maya \"-batch\" ";
+	$mayaCmd +=	"\"-proj\" \"";
+	$mayaCmd += 	$proj+"\" ";
+	$mayaCmd += 	"\"-command\" \"";
+	$mayaCmd += 	$melCmd;
+	$mayaCmd += 	"\"";
+	
+	string $jobName = $gHost+"_"+$gTaskType+"PostExport_"+$gSequence+"_"+$gShot; 
+	int $priority = 1;
+	
+	//string $qbsubCmd = "/film/apps/pfx/qube-4.0-suse9.3/bin/qbsub ";
+	string $qbsubCmd = "qbsub ";
+	$qbsubCmd += "--name "+$jobName+" ";
+	$qbsubCmd += "--priority "+$priority+" ";
+	$qbsubCmd += "--user render ";
+	$qbsubCmd += "--waitfor "+$waitFor+" ";
+	
+	$qbsubCmd += "--requirements host."+$gCluster+"=1 --cluster /"+$gCluster+" ";
+	//$qbsubCmd += "--requirements host.process=1 --cluster /process ";
+	$qbsubCmd += $mayaCmd;
+	
+	print ($qbsubCmd+"\n");
+	string $jobNumberStr = system ($qbsubCmd);
+	$jobNumber = (int)match ("[0-9]+",$jobNumberStr);
+	print ($jobNumber+"\n");
+	
+	return $jobNumber;
+	*/
+}
+// ---------------------------------------------------------------------------------------------------
+//
+// ---------------------------------------------------------------------------------------------------
+proc int submit_animationSubmission (string $playlist, int $playlistNumItems, string $args)
+{
+	global string $gHost;
+	global string $gSequence;
+	global string $gShot;
+	global string $gCluster;
+	global int $gPriority;
+	global string $gTaskType;
+	
+	int $jobNumber;
+	string $proj = `workspace -q -act`;
+	$proj = getPath ("LinuxPath",{$proj});
+	$playlist = getPath ("LinuxPath",{$playlist});
+
+	// add task and parent info to export call
+	$args = editArgList ($args,"taskType",($gTaskType+"Export"));
+	$args = editArgList ($args,"parentTaskType",($gTaskType));
+	
+	if ($playlistNumItems > 0)
+	{
+		$args = editArgList ($args,"playlist",$playlist);
+		$args = editArgList ($args,"playlistItem","QB_FRAME_NUMBER");
+		$args = editArgList ($args,"usePlaylist","1");
+		// turn off playblasting. We will do it here.
+		$args = editArgList ($args,"doplayblast","0");
+		// turn off asset linking callback to Insight (it will be handled by PostAnimationSubmission
+		$args = editArgList ($args,"updateInsightAssetLinking","0");
+
+		// use submitMaya to submit job
+		string $jobName = $gHost+"_"+$gTaskType+"Export_"+$gSequence+"_"+$gShot; 
+		string $range = "0-"+($playlistNumItems-1);
+
+		string $melCmd = "AnimationSubmission (\\\\\\\\\\\"";
+		$melCmd += $args;
+		$melCmd += "\\\\\\\\\\\")";
+
+		string $mayaCmd = "-command \""+$melCmd+"\"";
+
+		// specify sequence and shot for rfxmaya
+		string $extraRfxMayaArgs = "--sequence "+$gSequence+" --shot "+$gShot;
+		
+		int $jobNumber = submitMaya (
+			$jobName,		// name of the job 
+			$playlistNumItems,	// number of cpus to use - only meaningful if range is set to something
+			$gPriority,		// priority to submit at
+			$range,			// range for jobs which have sub-jobs, e.g. Point Cache export
+			$gCluster,		// cluster to submit to
+			"",			// qube pre-exec callback
+			"",			// qube post-exec callback
+			"",			// any extra qube args to add
+			true,			// use rfxmaya?
+			false,			// use the maya Render command
+			$extraRfxMayaArgs,	// any extra args to send to rfxmaya
+			$mayaCmd		// maya arg string including command, scene, but not including project, or -batch
+		);
+
+		print ($jobNumber+"\n");
+		
+		/*
+		string $melCmd = "AnimationSubmission (\\\"";
+		$melCmd += $args;
+		$melCmd += "\\\")";
+		
+		string $mayaCmd = "maya \"-batch\" ";
+		$mayaCmd +=	"\"-proj\" \"";
+		$mayaCmd += 	$proj+"\" ";
+		$mayaCmd += 	"\"-command\" \"";
+		$mayaCmd += 	$melCmd;
+		$mayaCmd += 	"\"";
+		
+		string $jobName = $gHost+"_"+$gTaskType+"Export_"+$gSequence+"_"+$gShot; 
+		$priority = $gPriority;
+		string $range = "0-"+($playlistNumItems-1);
+		int $num_cpus = $playlistNumItems;
+
+		// edit qubeJobName arg, so that AnimationSubmission doesn't inherit this jobs version
+		$args = editArgList ($args,"qubeJobName",$jobName);
+		
+		string $qbsubCmd = "/film/apps/pfx/qube-4.0-suse9.3/bin/qbsub ";
+		$qbsubCmd += "--name "+$jobName+" ";
+		$qbsubCmd += "--priority "+$priority+" ";
+		$qbsubCmd += "--user render ";
+		$qbsubCmd += "--range "+$range+" ";
+		$qbsubCmd += "--cpus "+$num_cpus+" ";
+		$qbsubCmd += "--requirements host."+$gCluster+"=1 --cluster /"+$gCluster+" ";
+		//$qbsubCmd += "--requirements host.process=1 --cluster /process ";
+		$qbsubCmd += $mayaCmd;
+		
+		print ($qbsubCmd+"\n");
+		string $jobNumberStr = system ($qbsubCmd);
+		$jobNumber = (int)match ("[0-9]+",$jobNumberStr);
+		print ($jobNumber+"\n");
+
+		*/
+		
+		
+	}
+	else
+	{
+		Animationsubmission $args;	
+	}
+	return $jobNumber;
+}
+// ---------------------------------------------------------------------------------------------------
+proc performInsightCallback()
+{
+	global int $gPerformInsightCallback;			// Whether or not to call back to Insight
+	global string $gInsightCallbackPath;			// Path to web service to perform a callback to Insight through
+	global string $gInsightCallbackArgs;			// Args to send to web service
+	global string $gTaskType;
+	global string $gHost;			// Who is calling this process? "insight" or "maya"
+
+	if ($gHost == "insight" && $gPerformInsightCallback && $gTaskType == "PostLayout")
+	{
+		string $res = insightCallWebservice ($gInsightCallbackPath,$gInsightCallbackArgs);
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+global proc do_preAnimationSubmission(string $args, int $pointCacheJobData[], int $jobData[])
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlayblastQue;
+	global string $gPlayblastArgs;
+	global int $gDoPlayblast;
+	global int $gCacheMode;
+	global string $gTaskConfig;
+	global string $gTaskType;
+
+	string $baseJobName = ($gTaskType == "AnimationSubmission")?"PreAnimationSubmission":$gTaskType;
+	string $suffix = ($gTaskType == "AnimationSubmission")?"ani":"lay";
+
+	$args = editArgList ($args,"taskType",($gTaskType+"Export"));
+	$args = editArgList ($args,"parentTaskType",($gTaskType));
+
+	
+	string $aniFile;
+	string $sgRoot;
+	int $splitThreshold;
+	string $namespaces[], $refNodes[], $assets[];
+	int $deferred[]; 
+	int $assetWeights[];
+	int $totalAssetWeight;
+	string $playlistXML[];
+	int $numPlaylistItems;
+	string $playlistLocation;
+	// -------------------------------------------------
+	
+	// -------------------------------------------------	
+	$sgRoot = getPath ("ShotBase",{$gSequence,$gShot})+"/";
+	$aniFile = $sgRoot + $gSequence+"_"+$gShot+"_"+$suffix+".ma";
+	$playlistLocation = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gTaskType+"_playlist.xml";
+
+	// -------------------------------------------------
+	/*
+		Check for truncated ani/lay file (e.g. because of interrupted ftp transfer)
+	*/
+	// -------------------------------------------------
+	if (maIsTruncated($aniFile))
+	{
+		print ($baseJobName+": Truncated maya file: "+$aniFile+". Can't continue.\n");
+		return;
+	}
+
+	// -------------------------------------------------
+	/*
+		Get an asset list by directly parsing the .ma file.
+	*/
+	// -------------------------------------------------
+	global int $gMaxReferenceDepth;
+	$gMaxReferenceDepth = 1;
+	assetListFromMa( $aniFile,$namespaces, $refNodes, $deferred, $assets ); 
+
+
+	// -------------------------------------------------
+	/*
+		Check that all the references can be resolved
+	*/
+	// -------------------------------------------------
+	print ($baseJobName+": Pre-Checking references...\n"); 
+	string $unresolvable[];
+	for ($i=0;$i<size($assets);$i++)
+	{
+		if (!resolvedMayaPathExists($assets[$i]))
+			$unresolvable[size($unresolvable)] = $assets[$i];
+	}
+
+	if (size($unresolvable))
+	{
+		print ($baseJobName+": Maya file "+$aniFile+" contains unresolvable references. Can't continue.\n");
+		print $unresolvable;
+		return;
+	}
+	
+	// -------------------------------------------------
+	/*
+		Submit the playblast
+	*/
+	// -------------------------------------------------
+	if ($gDoPlayblast)
+	{
+// 		int $success = addToPsQue($gPlayblastQue,$gPlayblastArgs);
+// 		if (!$success)
+// 		{
+// 			print ($baseJobName+": Unable to send playblast.\n");	
+// 		}
+		// test new playblast mechanism - currently this mirrors the old playblast system, and puts files in a temp location.
+		string $pbArgs = editArgList ($args,"taskType",$gTaskType);
+		submitPlayblast ($pbArgs);
+	}
+	// -------------------------------------------------
+	/*
+		Check to see if the cache is already up-to-date
+	*/
+	// -------------------------------------------------
+	if ($gCacheMode == 0)
+	{
+		print ($baseJobName+": Checking the animation cache...\n"); 
+		
+		int $isValid[];
+		int $success = validateCache($aniFile,$isValid);
+		if (!$success)
+		{
+			print ($baseJobName+": Unable to contact Insight for frame range info. Can't continue.\n");
+			return;
+		}	
+		if ($isValid[0])
+		{
+			print ($baseJobName+": Animation Cache is already up-to-date (send \"forceCache=1\" to force a re-cache if necessary). Exiting.\n"); 
+			// if this is PostLayout, perform the Insight callback
+			performInsightCallback();
+			return;
+		}
+	}
+	if ($gCacheMode == 2)
+	{
+		print ($baseJobName+": None selected for Animation Cache Export. Skipping.\n");
+		// if this is PostLayout, perform the Insight callback
+		performInsightCallback();
+		return;	
+		// never mode selected for cache export (i.e. we must only be interested in point cache)
+	}
+	// -------------------------------------------------
+	/*
+		If no project globals file is found, pass the just call AnimationSubmission directly
+	*/
+	// -------------------------------------------------
+	if ($gTaskConfig == "")
+	{
+		// pass args to AnimationSubmission and return
+		print ($baseJobName+": No globals found for "+$gTaskType+". Calling "+$gTaskType+"Export directly...\n");
+		saveQubeJobData ($pointCacheJobData,$jobData); 
+		AnimationSubmission $args;
+		return;	
+	}
+	
+
+	// -------------------------------------------------
+	/*
+		project globals found. Call buildExportPlaylist
+	*/
+	// -------------------------------------------------
+	$numPlaylistItems = buildExportPlaylist(
+		$gSequence,
+		$gShot,
+		$gTaskType,
+		$gTaskConfig,
+		$assets,
+		$namespaces,
+		$refNodes,
+		$deferred,
+		$playlistXML
+	);
+	
+	// If there is only one item in the playlist, call AnimationSubmission directly.
+
+	if ($numPlaylistItems < 2)
+	{
+		// pass args to AnimationSubmission and return
+		print ($baseJobName+": Only one pass in playlist. Calling "+$gTaskType+"Export directly...\n");
+		saveQubeJobData ($pointCacheJobData,$jobData); 
+		AnimationSubmission $args;
+		return;	
+	}
+	
+	writeFile ($playlistLocation,$playlistXML[0]);
+	//print $playlistXML[0];
+	
+	// -------------------------------------------------
+	/*
+		Submit the animation submission jobs
+	*/
+	// -------------------------------------------------
+	print ($baseJobName+": Submitting "+$numPlaylistItems+" "+$gTaskType+"Export process(es).\n");
+	int $jobNum = submit_animationSubmission ($playlistLocation, $numPlaylistItems, $args);
+
+	// populate jobData
+	$jobData[0] = $jobNum;
+	$jobData[1] = $numPlaylistItems;
+
+	// submit the post animation submission job. This will run after animation submission completes
+	print ($baseJobName+": Submitting "+$gTaskType+"PostExport process.\n"); 
+	$jobNum = submit_postAnimationSubmission ($playlistLocation, $args, $jobNum);
+
+	$jobData[2] = $jobNum;
+	$jobData[3] = 1;
+
+	saveQubeJobData ($pointCacheJobData,$jobData); 
+
+}
+// ---------------------------------------------------------------------------------------------------
+global proc PreAnimationSubmission( string $args) 
+{
+	// load plugins and source scripts
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	loadPlugins;
+
+	// turn off undo queue
+	undoInfo -state off;
+
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;		// The sequence
+	global string $gShot;			// The shot
+	global string $gHost;			// Who is calling this process? "insight" or "maya"
+	global int $gDoPlayblast;		// Do a playblast?
+	global string $gPlayblastQue;		// Playblast que to send playblast to
+	global string $gPlayblastArgs;		// Args to send to playblast que
+	global int $gCacheMode;			// 0 = submit cache only if out-of-date, 1 = submit regardless, 2 = never submit
+	global string $gCluster;		// Cluster to submit jobs to
+	global int $gPriority;			// Priority to submit jobs at
+	global int $gPointCacheMode;		// Export point cache?  0 = none, 1 = all, 2 = selective
+	global string $gQubeJobName;		// Job name passed from calling process
+	global string $gTaskType;		// In what context is this process being called. "AnimationSubmission" (the default), "PostLayout", or "LayoutSubmission"
+	global int $gPerformInsightCallback;	// Whether or not to call back to Insight
+	global string $gInsightCallbackPath;	// Path to web service to perform a callback to Insight through
+	global string $gInsightCallbackArgs;	// Args to send to web service
+	global string $gArtistName;		// Artist name from Insight
+	global string $gArtistEmail;		// Artist email address from Insight
+	global string $gVersion;		// Version number from Insight
+	global string $gSourceFile;		// Source file the submission was from (only meaningful when artist is remote)
+	global int $gApproved;			// Sent by Insight to indicate a submission done when the shot is approved.
+
+	
+	global string $gTaskConfig;		// Config file for this task		
+
+
+	// ------------------------------------------------------
+	// get farm defaults
+	// ------------------------------------------------------
+	string $defaultCluster[];
+	int $defaultPriority[];
+
+	getFarmClusters ($defaultCluster,$defaultPriority);
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gTaskType = getArgValueDefault ($args,"taskType","AnimationSubmission");
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gTaskConfig = getArgValueDefault ($args,"taskConfig",getConfig());
+
+	print ($gTaskType+": Reading config from "+$gTaskConfig+"\n");
+	
+	$args = argListMergeWithConfig ($args,$gTaskConfig);	// embed default arg values in config into args
+
+	$gHost = getArgValue ($args,"host"); $gHost = tolower ($gHost);
+	$gDoPlayblast = (int)getArgValue ($args,"doplayblast");
+	$gPlayblastQue = getArgValue ($args,"psque");
+	$gPlayblastArgs = getArgValue ($args,"psargs");
+	$gCacheMode = (int)getArgValue ($args,"forceCache");
+	$gCluster = getArgValueDefault($args,"cluster",$defaultCluster[0]);
+	$gPriority = (int)getArgValueDefault ($args,"priority",(string)$defaultPriority[0]);
+	$gPointCacheMode = (int)getArgValue ($args,"exportPointCache");
+	$gPerformInsightCallback = (int)getArgValue ($args,"performInsightCallback");
+	$gInsightCallbackPath = getArgValue ($args,"returnpath");
+	$gInsightCallbackArgs = getArgValue ($args,"arguments");
+
+	$gArtistName = getArgValue ($args,"artistname");
+	$gArtistEmail = getArgValue ($args,"cache_email");;
+	$gVersion = getArgValue ($args,"versionnumber");
+	$gSourceFile = getArgValue ($args,"sourcefilename");
+	$gApproved = (int)getArgValueDefault ($args,"approved","0");
+	
+	$gQubeJobName = getArgValue ($args,"qubeJobName");
+	$gPlayblastQue = getPsQue ($gPlayblastQue);
+
+	
+	
+	
+	
+	
+	// update shot database. temporary until we have a PreAnimation maya call
+	buildShotdb($gSequence,$gShot);
+
+	// $gTaskType and $gTaskConfig - PointCachePreExport will modify them
+	string $taskType = $gTaskType;
+	string $taskConfig = $gTaskConfig;
+	
+	// pass control to PointCachePreExport to find out if we have any point caching to do.
+	string $pointCacheArgs = editArgList ($args,"parentTaskType",$gTaskType);
+	
+	int $pointCacheJobData[];
+	if ($gPointCacheMode)
+		$pointCacheJobData = PointCachePreExport ($pointCacheArgs);
+
+	// call furPreExport to take care of queing the fur export, if any
+	string $furPreExportArgs = editArgList ($args,"parentTaskType",$taskType);
+	$furPreExportArgs = editArgList ($furPreExportArgs,"pointCacheJob",$pointCacheJobData[0]);
+
+	FurPreExport ($furPreExportArgs);
+	
+
+	// restore $gTaskType and $gTaskConfig
+	$gTaskType = $taskType;
+	$gTaskConfig = $taskConfig;
+	
+	int $jobData[];
+	do_preAnimationSubmission ($args, $pointCacheJobData, $jobData);
+
+	
+	
+	
+}

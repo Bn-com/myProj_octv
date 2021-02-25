@@ -1,0 +1,89 @@
+global proc slRenderLayerEyes()
+{
+	source "ezRenderMainLayoutRenderLayer.mel";
+	source "ezRenderMainLayoutMaterial.mel";
+	
+	string $layer = "eyesSpec";
+	string $exists[] = `ls -type renderLayer $layer`;
+	if (!`objExists $exists[0]`)
+	{
+		createRenderLayer -name $layer -e -mc -number 1 -noRecurse;
+		ezRenderMainLayoutRenderLayerMRSeting("eyes");
+	}
+	editRenderLayerGlobals -currentRenderLayer $layer;
+
+	//currentTime -31;
+	string $eyes[] = `ls -sl`;
+	string $buffer[];
+
+	string $matte[];
+	if (`objExists $eyes[0]`)
+	{
+		tokenize $eyes[0] ":" $buffer;
+		string $pre = `substring $eyes[0] 1 (size($eyes[0]) - size($buffer[size($buffer)-1]))`;
+		string $mesh[] = `ls -geometry ($pre+"*")`;
+		string $eyename[]=`ls -geometry ( $pre + "*_eye_*")`;
+		$matte = stringArrayRemove($eyename,$mesh);
+		
+		editRenderLayerMembers  $layer $matte;
+		select -r $matte;
+		ezRenderMainLayoutMaterial_Assign("matte");
+
+		for ($i=0;$i<size($eyes);$i++)
+		{
+			string $eyeloc = $eyes[$i] + "_loc";
+			if (!`objExists $eyeloc`)
+				error "ÇëÏÈ´´½¨loc£¡";
+		
+			select -r $eyes[$i];
+			SelectLightsIlluminatingObject;
+			string $lights[] = `ls -sl`;
+			for ($light in $lights)
+			{
+				editRenderLayerMembers  $layer $lights;
+				if (`objExists ($light + ".emitSpecular")`)	
+				{
+					//print ($light + ".emitSpecular");
+					//editRenderLayerAdjustment ($light + ".emitSpecular");
+					setAttr ($light + ".emitSpecular") 0;
+				}
+			}
+
+			//defaultPointLight(0.8, 1,1,1, 0, 0, 0,0,0, 1, 0);
+			pointLight -i 0.8;
+
+			string $addLight[] = `ls -sl`;
+			setAttr ($addLight[0]+".scaleX") 1;
+			setAttr ($addLight[0]+".scaleY") 1;
+			setAttr ($addLight[0]+".scaleZ") 1;	
+
+			string $lightSet[] = `listConnections -type objectSet -p true $addLight[0]`;
+			disconnectAttr ($addLight[0]+".instObjGroups[0]") $lightSet[0];
+			select -r $addLight[0];select -add $eyes[$i];
+			zjMakeLightLinks();
+			setAttr ($addLight[0] + ".emitDiffuse") 0;
+			
+
+			string $pc[] = `pointConstraint -offset 0 0 0 -weight 1 $eyeloc $addLight[0]`;
+			delete $pc;
+			parent $addLight[0] $eyeloc;
+			move -r -wd -os 0 0 1 $addLight[0];
+
+			editRenderLayerMembers  $layer  $addLight[0] $eyes[$i] $eyeloc;
+			setAttr ($eyeloc+"Shape.v") 0;
+			select -cl;
+		}
+	}
+	select -cl;
+	setAttr "defaultRenderLayer.renderable" 0;
+}
+
+global proc slRenderLayerEyesLoc()
+{
+	string $buff[];
+	string $sl[] = `ls -sl`;
+	tokenize $sl[0] "." $buff;
+	
+	string $locname = `zxEdgeConstrain`;
+	rename $locname ($buff[0]+"_loc");
+}

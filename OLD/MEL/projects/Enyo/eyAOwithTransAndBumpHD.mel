@@ -1,0 +1,85 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2009-6-2
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc eyAOwithTransAndBumpHD()
+{
+
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -geometry`;
+	createRenderLayer -name "transAO" -makeCurrent -noRecurse $objShape;
+	
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	
+	editRenderLayerAdjustment "defaultResolution.width";
+	setAttr "defaultResolution.width" 1920;
+	editRenderLayerAdjustment "defaultResolution.height";
+	setAttr "defaultResolution.height" 1080;
+	
+	// AO shader
+	string $aoTex = `shadingNode -asTexture mib_amb_occlusion -name "aoTexture"`;
+	setAttr ($aoTex + ".samples" ) 128;
+	setAttr ($aoTex + ".max_distance" ) 100;
+	string $aoShader = `shadingNode -asShader surfaceShader -name "aoShader"`;
+	string $aoShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($aoShader+"SG")`;
+	connectAttr -force ($aoTex + ".outValue") ($aoShader + ".outColor");
+	connectAttr -force ($aoShader + ".outColor") ($aoShaderSG + ".surfaceShader");
+	
+	// Filtering material 
+	string $allSG[] = `ls -type shadingEngine`;
+	string $eliminate [] = {"lambert1", "particleCloud1", "shaderGlow1"};
+	//string $matArray[] = stringArrayRemove ($eliminate, $mats);
+	for($item in $allSG)
+	{	
+		string $sgObjs[] = `sets -q $item`;
+		if (size($sgObjs))
+		{
+			string $shader[] = `listConnections -s 1 -d 0 ($item+".surfaceShader")`;
+			if (size($shader) && stringArrayCount($shader[0],$eliminate)==0)
+			{
+				if((`objExists ($shader[0]+".normalCamera")`)||(`objExists ($shader[0]+".transparency")`))
+				{
+					print ($item+"\n");
+					
+					string $aoBumpTransShaderSG[] = `duplicate -un $item`;
+					string $aoBumpTransShader[] = `listConnections -s 1 -d 0 ($aoBumpTransShaderSG[0]+".surfaceShader")`;
+					
+					string $colorCNS[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($aoBumpTransShader[0]+".color")`;
+					for ($i=0;$i<size($colorCNS);$i=$i+2)
+					{
+						disconnectAttr $colorCNS[$i+1] $colorCNS[$i];
+					}
+					connectAttr -f ($aoTex+".outValue") ($aoBumpTransShader[0]+".color");
+					
+					sets -e -forceElement  $aoBumpTransShaderSG[0] $sgObjs;
+					select -cl;					 
+				}
+				else 
+				{
+					sets -e -forceElement  $aoShaderSG $sgObjs;
+					select -cl;					 
+				}
+			}
+		}
+	}
+	//ÑÛÇòµ¥¶À´¦Àí
+	string $allEyes[] = `ls -geometry "*eye*" "*:*_eye*"`;
+	sets -e -forceElement  $aoShaderSG $allEyes;
+
+}
+

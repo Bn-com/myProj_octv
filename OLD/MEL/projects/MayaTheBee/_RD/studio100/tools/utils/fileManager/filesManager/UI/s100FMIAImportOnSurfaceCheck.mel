@@ -1,0 +1,301 @@
+global proc s100FMIAImportOnSurfaceCheck()
+{
+string $var[] =  `ls -sl` ;
+	if(size($var) > 0)
+	{
+	$fullGrp = "full_grp";
+				if(`objExists $fullGrp`)
+				{
+
+				}else{
+				createNode -n $fullGrp  transform ;
+				lockAndHiddeAll($fullGrp) ;
+				}
+
+			$grpN =  "hidden_grp"  ;
+				if(`objExists $grpN`)
+				{
+
+				}else{
+				createNode -n $grpN -parent $fullGrp transform ;
+				setAttr ($grpN +".v" ) 0 ;
+				lockAndHiddeAll($grpN) ;
+				setAttr -k 1 -l 0 ($grpN +".v" )  ;
+
+
+				}
+
+	select $var ;
+		s100FMIAImportOnSurfaceExec;
+
+    }
+}
+
+global proc s100FMIAImportOnSurfaceExec()
+{
+string $var[] =  `ls -sl` ;
+string $varCheck[]  =  `ls -objectsOnly  -sl` ;
+
+string $path =`textField -q -text  s100FMIATEXTFIELDPATH `;
+string $name  ;
+string $nam[] = `textScrollList -q -selectItem s100FMIASLName `;
+
+int $en = `optionMenu -q -en s100FMIAoptRes `;
+string $suf = "";
+string $fullGrp = "full_grp";
+string $grpN =  "hidden_grp"  ;
+	if($en == 1 )
+	{
+	$suf = ("_" +	`optionMenu -q -v s100FMIAoptRes `);
+    }
+
+int $value = `intField -q -v   s100FMIAIntNumberOfReference`;
+
+string $name = $path + $nam[0] + $suf +".ma" ;
+	if(`filetest -e $name `)
+	{
+
+		if(size($varCheck) >0)
+		{
+		$ch = 0 ;
+			if(`nodeType $varCheck[0] `== "mesh" )
+			{
+			$ch = 1 ;
+			}else{
+			$list = `listRelatives -shapes $varCheck[0]` ;
+				if(`nodeType $list[0] `== "mesh" )
+				{
+					$ch = 1 ;
+				}
+			}
+
+			if($ch )
+			{
+
+			string $name =  "s100FMIAIOS_mSurface" ;
+			print ("\n$name : " + $name) ;
+			print ("\n$grpN : " + $grpN) ;
+
+			$surf = eval(" s100ROSDuplicateSurfaceAndNameItReturnName(\"" + $name + "\" ,\"" + $grpN + "\" )");
+			print ("\n$surf : " + $surf) ;
+			if(`objExists $surf`)
+			{
+				for($i = 0 ; $i < $value ; $i++)
+				{
+				$nameSpace = `s100FMIACreateRefSolo `;
+				$root = ($nameSpace +":root_ctrl") ;
+					if(`objExists $root `)
+					{
+
+					}else{
+					$root = ($nameSpace +":traj") ;
+
+					}
+
+
+					if(`objExists $root `)
+					{
+					s100FMIAIOGenerateAObject($root , $surf) ;
+					$ch= `checkBox -q -v   s100FMIABRotationCheck ` ;
+					$ch1 = `checkBox -q -v s100FMIABRandomCheck ` ;
+						if($ch == 1 || $ch1 == 0 )
+						{
+						setAttr ($root +".rx" ) 0 ;
+						setAttr ($root +".ry" ) 0 ;
+						setAttr ($root +".rz" ) 0 ;
+						}
+
+					}else{
+					warning "object don't contain any root_ctrl, import stopped" ;
+					break;
+					}
+
+
+
+				}
+
+			delete $surf ;
+
+					}
+
+			}else{
+			warning "object mush be a mesh" ;
+
+			}
+
+		}else{
+		warning "select a least one object to generate on surface" ;
+		}
+
+
+
+
+
+    } else{
+	warning ("file " + 	$name + " doesn't exists !" );
+    }
+
+
+
+}
+
+
+
+global proc string s100FMIAIOGenerateAObject(string $root , string $surf)
+{
+
+
+int $ch = `checkBox -q -v s100FMIABRandomCheck ` ;
+
+
+float $rU = rand(1) ;
+float $rV = rand(1) ;
+
+
+
+string $folN = "s100FMIAIO_tmpFol" ;
+
+	if(`objExists $folN`)
+		delete $folN ;
+
+
+	if(`objExists $folN`)
+	{
+ 	setAttr ($folN +"Shape.parameterU")  $rU;
+	setAttr ($folN +"Shape.parameterV")  $rV ;
+    }else{
+	$folT = s100ROScreaFol($folN , $rU, $rV ,$surf ) ;
+
+    }
+
+int  $chI = 0 ;
+$chF = s100ROSCheckObjectIsOnSurface($folN, $surf ) ;
+
+
+		while ($chI != 0)
+		{
+		float $rU = rand(1) ;
+		float $rV = rand(1) ;
+		setAttr ($folN +"Shape.parameterU")  $rU;
+		setAttr ($folN +"Shape.parameterV")  $rV ;
+		$chI = s100ROSCheckObjectIsOnSurface($folN, $surf ) ;
+
+
+		}
+	if($ch == 0  )
+	{
+	float $rU = .5  ;
+	float $rV = .5 ;
+	setAttr ($folN +"Shape.parameterU")  $rU;
+	setAttr ($folN +"Shape.parameterV")  $rV ;
+    }
+
+
+//print ("\n" + $chF) ;
+$fol = $folN ;
+$grp = "s100ROS_tmpFoltmp_grp" ;
+string $obj ;
+
+$grpT1 = `createNode transform` ;
+$grpT11 = `createNode -p $grpT1 transform` ;
+$grpT2 = `createNode -p $grpT11 transform` ;
+
+setAttr ($grpT11+".rx") 90 ;
+$pa = `parentConstraint $folN $root  `;
+delete $pa ;
+
+$pa = `parentConstraint $folN $grpT1  `;
+delete $pa ;
+
+	if($ch )
+	{
+	//randomize
+
+	float $FFTY1[]  = `floatFieldGrp  -q -v  s100FMIABRandomTY`;
+	float $FFTY = $FFTY1[0] ;
+
+	float $FFR[] = `floatFieldGrp  -q -v  s100FMIABRandomRotate `;
+	float $FFS[] = `floatFieldGrp  -q -v  s100FMIABRandomScale `;
+
+	float $FFRX = $FFR[0];
+	float $FFRY =  $FFR[1];
+	float $FFRZ =  $FFR[2];
+	float $FFSMin = $FFS[0];
+	float $FFSMax = $FFS[1];
+
+	float $vY = `getAttr ($root +".ty" ) ` ;
+
+	//$FFTY = $FFTY + $vY ;
+	//$FFTY = $vY ;
+
+	float $valueToRand[] = { $FFTY,$FFRX,$FFRY,$FFRZ} ;
+	string $attr[] ={".ty", ".rx",".ry",".rz"} ;
+	float $randOut[] ;
+
+		for($i  = 0 ; $i < size($valueToRand)  ; $i++)
+		{
+		//float $vt = `getAttr ($root + $attr[$i] )  `;
+		float $randF  = (`rand($valueToRand[$i]) ` * 2) - $valueToRand[$i] ;
+		$randOut[$i] = $randF ;
+		setAttr ($grpT2 + $attr[$i] ) $randF  ;
+		}
+
+	//setAttr ($grpT2 +".ty" )  ($vY + $randOut[0])  ;
+	$pa = `parentConstraint $grpT2 $root  `;
+	delete $pa ;
+	delete $grpT1 ;
+	string $attr[] ={".sx", ".sy",".sz"} ;
+
+	$mult = 1 ;
+	float $toRF ;
+	float $rdt ;
+
+	float $chF1 = rand(1) ;
+
+
+	$getLock = `getAttr -l ($root +".sx") ` ;
+
+		if($getLock == 0 )
+		{
+			if($chF1 > .5)
+			{
+				if($FFSMin < 1)
+				{
+				float $vR = 1 - $FFSMin ;
+				$rdt = 1 - (`rand($vR)`) ;
+				}else{
+				float $vR =  $FFSMax - 1 ;
+				$rdt = 1 + (`rand($vR)` ) ;
+				}
+
+			}else{
+				if($FFSMax > 1)
+				{
+				float $vR =  $FFSMax - 1 ;
+				$rdt = 1 + (`rand($vR)` ) ;
+				}else{
+				float $vR = 1 - $FFSMin ;
+				$rdt = 1 - (`rand($vR)`) ;
+				}
+
+			}
+
+
+
+
+		float $randF  = clamp( $FFSMin, $FFSMax, $rdt);
+			for($i  = 0 ; $i < size($attr)  ; $i++)
+			{
+			setAttr ($root + $attr[$i] ) $randF ;
+			}
+		}
+
+    }
+	if(`objExists $folN`)
+		delete $folN ;
+
+	if(`objExists $grpT1`)
+		delete $grpT1 ;
+
+return $obj;
+}

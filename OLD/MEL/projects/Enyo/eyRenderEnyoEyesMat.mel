@@ -1,0 +1,188 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2009-11-12
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc eyRenderEnyoEyesMat()
+{
+	if (`window -ex eyRenderEnyoEyesMatWin`)
+		deleteUI eyRenderEnyoEyesMatWin;
+	
+	window -t "Enyo Eyes          WHO" -in "Enyo Eyes" -mnb 0 -mxb 0 eyRenderEnyoEyesMatWin;
+		columnLayout -adj 1 -rs 3;
+			button -l "Day" -c "eyRenderEnyoEyesMatReplace \"day\"";
+			button -l "Night" -c "eyRenderEnyoEyesMatReplace \"night\"";
+			//button -l "default" -c "eyRenderEnyoEyesMatReplace \"default\"";
+	window -e -wh 180 80 eyRenderEnyoEyesMatWin;
+	showWindow;
+}
+
+/*global proc eyRenderEnyoEyesMatReplace(string $day)
+{
+	string $eyes[] = `ls ($day+":MSH_eye_R_")`;
+	string $enyoeyes[] = `ls "*:MSH_eye_?_" "*:*:MSH_eye_?_"`;
+	if (!size($eyes) && size($enyoeyes) && $day != "default")
+	{
+		file -import -type "mayaBinary" -ra true -namespace $day -options "v=0;p=17"  -pr -loadReferenceDepth "all" ("//file-cluster/GDC/Resource/Support/Maya/projects/Enyo/lightingStyles/greenspirit_"+$day+"_eye.mb");
+	}
+	for ($eye in $enyoeyes )
+	{
+		string $faces[];
+		if (`gmatch $eye "*_eye_L_*"`)
+		{
+			//$faces = eyRenderEnyoEyesMatTransfer("left");
+		}
+		else if (`gmatch $eye "*_eye_R_*"`)
+		{
+			//$faces = eyRenderEnyoEyesMatTransfer("right");
+		}
+
+		if ($day == "default")
+		{
+			$day = `substituteAllString $eye ":MSH_eye_L_" ""`;
+			$day = `substituteAllString $day ":MSH_eye_R_" ""`;
+		}
+		if (size($faces))
+		{
+			if ($day == "day" || $day == "night")
+				sets -e -forceElement ($day+":sclera:SHD_scleraSG")	($eye+".f"+$faces[0]);
+			else 
+				sets -e -forceElement ($day+":SHD_scleraSG")	($eye+".f"+$faces[0]);
+			
+			
+			sets -e -forceElement ($day+":SHD_nail1SG")			($eye+".f"+$faces[1]);
+			sets -e -forceElement ($day+":SHD_pupilSG")			($eye+".f"+$faces[2]);
+			sets -e -forceElement ($day+":SHD_eyeouterSG")		($eye+".f"+$faces[3]);
+		}
+	}
+}
+
+global proc string[] eyRenderEnyoEyesMatTransfer(string $side)
+{
+	string $faces[];
+	switch ($side)
+	{
+		case "left" :
+			$faces = {"[0:349]","[420:489]","[490:519]","[350:419]"};
+			break;
+		case "right" :
+			$faces = {"[30:379]","[450:519]","[0:29]","[380:449]"};
+			break;
+	}
+	
+	return $faces;
+}*/
+
+global proc eyRenderEnyoEyesMatReplace(string $day)
+{
+	string $select[] = `ls -sl`;
+	if (size($select) == 0)
+	{
+		//error "请选择需要替换眼睛材质的角色!";
+	}
+	string $char[];
+	for ($sel in $select)
+	{
+		string $buff[];
+		int $num = `tokenize $sel ":" $buff`;
+		string $pre = `substituteAllString $sel $buff[$num-1] ""`;
+		$char[size($char)] = $pre;
+	}
+	$char = stringArrayRemoveDuplicates($char);
+
+	//print $char;
+	
+	string $neweyes[] = `ls ($day+":MSH_eye_R_")`;
+	if (!size($neweyes)  && $day != "default")
+	{
+		file -import -type "mayaBinary" -ra true -namespace $day -options "v=0;p=17"  -pr -loadReferenceDepth "all" ("//file-cluster/GDC/Resource/Support/Maya/projects/Enyo/lightingStyles/greenspirit_"+$day+"_eye.mb");
+	}
+	
+	string $materials[] = {":SHD_eyeouterSG",":SHD_pupilSG",":SHD_nail1SG",":sclera:SHD_scleraSG"};
+	for ($pre in $char)
+	{
+		string $oldeyes[] = `ls ($pre+"MSH_eye_L_") ($pre+"MSH_eye_L")`;
+		//print $oldeyes;
+		for ($eye in $oldeyes)
+		{
+			string $oldmate[] = {};
+			
+			string $shapes[] = `listHistory $eye`;
+			string $shadingEngines[] = `listConnections -type shadingEngine $shapes[0]`;
+			$shadingEngines = stringArrayRemoveDuplicates($shadingEngines);
+
+			int $replace = 0;//是否是已经替换过的材质序列
+			
+			//获得材质序列
+			for ($sg in $shadingEngines)
+			{
+				
+				string $mate[] = `listConnections  ($sg+".surfaceShader")`;
+				string $connects[] = `listConnections -s 1 -d 0 $mate[0]`;
+				if (size($connects) == 1)
+				{
+					string $trans[] = `listConnections ($mate[0]+".transparency")`;
+					
+					if (size($trans))
+						$oldmate[1] = $sg;
+					else
+						$oldmate[2] = $sg;
+				}
+				else if (size($connects) == 0)
+				{
+					$oldmate[1] = $sg;
+				}
+				else 
+				{
+					string $bump[] = `listConnections -type bump2d $mate[0]`;
+					if (size($bump))
+						$oldmate[3] = $sg;
+					else
+						$oldmate[0] = $sg;
+				}
+
+				if (gmatch($sg,"day:*") || gmatch($sg,"night:*") || gmatch($pre,"*enyo*"))
+				{
+					$replace = 1;
+				}
+			}
+			
+			
+			//替换过的材质序列
+			//print $replace;
+			if ($replace)
+			{
+				clear $oldmate;
+				for ($sg in $shadingEngines)
+				{
+					for ($i=0;$i<4;$i++)
+					{
+						if (gmatch($sg,("*"+$materials[$i])))
+						{
+							$oldmate[$i] = $sg;
+						}
+					}
+				}
+			}
+			
+			//print $oldmate;
+			
+			for ($i=0;$i<3;$i++)
+			{
+				string $faces[] = `sets -q $oldmate[$i]`;
+				sets -fe ($day+$materials[$i]) $faces;
+			}
+
+		}
+	}
+
+	select -r $select;
+	print "OK!";
+}

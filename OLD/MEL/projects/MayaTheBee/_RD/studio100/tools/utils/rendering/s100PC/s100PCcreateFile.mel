@@ -1,0 +1,361 @@
+global proc int s100CheckExistanteOfPassesIfScene()
+{
+int $ret = 0 ;
+string $passes[] = `s100PCgetAllPasses`;
+	if(size($passes) > 0)
+	{
+	$ret = 1;
+    }
+
+return $ret;
+}
+
+global proc int s100CheckExistanteOfLight()
+{
+$ch = 0 ;
+	if( `objExists "sunDirectionCharaFill"`)
+	{
+	$ch = 1 ;
+    }else if(`objExists "sunDirectionBg"`)
+	{
+	$ch = 1 ;
+
+    }else if(`objExists "envDirection" `)
+	{
+	$ch = 1 ;
+
+    }
+
+return $ch;
+}
+
+global proc s100PCcreateFolderForRendering()
+{
+$file = `file -q -sn  `;
+$rootFolder = `s100returnShotFolder( $file) `;
+
+
+$path = $rootFolder +"03_Rendering/";
+sysFile -md $path ;
+$path +=  "Render_pass/" ;
+sysFile -md $path ;
+$path += `s100ReturnTkName` +"/" ;
+ sysFile -md $path ;
+
+ string $passes[] = `s100PCgetAllPasses`;
+
+ 	for($tmp in $passes)
+	{
+	 sysFile -md ($path + $tmp +"/");
+
+    }
+
+
+}
+
+global proc int s100PCcreateFileCheck()
+{
+int $ch = 0;
+
+
+
+
+	if (`objExists "cForRigFaciale_grp"`)
+	{
+	delete "cForRigFaciale_grp" ;
+    }
+	if (`objExists "camForRigFaciale_grp"`)
+	{
+	delete "camForRigFaciale_grp" ;
+    }
+
+	if(`s100CheckExistanteOfPassesIfScene` == 0 )
+	{
+		if( `s100CheckExistanteOfLight` == 0)
+		{
+			if(`file -q -modified`)
+			{
+			$ch = `saveChanges("")`;
+				if($ch)
+				{
+					if(`file -q -sceneName ` =="")
+					{
+						$ch = 0;
+					warning  "save scene before creating passes scenes";
+					}
+				}
+			}else{
+			$ch = 1 ;
+			}
+
+        }else{
+		warning "delete light before creating scene" ;
+        }
+
+    }else{
+	warning "delete passes in scene before creating scene" ;
+    }
+
+
+
+
+
+return $ch ;
+}
+
+global proc s100PCcreateFile()
+{
+	if(`s100PCcreateFileCheck`)
+	{
+
+	string $path = `s100PCgetFolderPath`;
+	$path += `optionMenu -q -value  s100PCoptionMenuScene`;
+	s100PCcreateFileWithFile($path) ;
+
+    }else{
+	warning "check script editor for futher detail" ;
+    }
+}
+
+global proc s100PCcreateFileWithFile(string $path)
+{
+
+
+
+	$name = `file -q -sceneName `;
+	s100FMconformFolderForTypeSetProjet("shot");
+	string $camAll[] = `ls -type camera `;
+	string $cam[]=`s100ReturnCamInSceneWithDefaultCam`;
+		if(size($cam) > 0)
+		{
+		int $minT   = `playbackOptions -q -minTime `;
+		int $maxT   = `playbackOptions -q -maxTime `;
+
+		int $startT   = `playbackOptions -q -animationStartTime `;
+		int $endT   = `playbackOptions -q -animationEndTime `;
+		s100RenderSetParam ;
+		//file -f -o $path ;
+		//file -q -loadReferenceDepth "all"
+		file  -i -loadReferenceDepth all  -type "mayaAscii" -renamingPrefix "clashName" -options "v=0"  -pr   $path  ;
+/*
+			if(`checkBox -q -v   s100PCCBParticles`)
+		s100PCimportParticle($cam[0]) ;
+*/
+		//playbackOptions -e -minTime $minT -maxTime $maxT -animationStartTime $startT -animationEndTime $endT;
+		string $camN[]=`s100ReturnCamInSceneWithDefaultCam`;
+		string $camDiff[] = stringArrayRemove($cam, $camN) ;
+
+
+
+//connect newCamera on the old one
+		s100connectCameraOnAnother($cam[0],$camDiff[0]) ;
+
+//camera renderable
+		s100makeCameraRenderableWithArg($camAll,0) ;
+		s100makeCameraRenderableWithArg($camDiff,1) ;
+
+
+//smooth all
+
+		s100smoothRender(2,"all");
+
+//assign passes
+
+
+			if( !`checkBox -q -v s100PCIgnoreAssign`)
+				s100PCassignObjectToPasses(`s100PCgetAllPasses`);
+
+
+		s100PCUI ;
+		s100PCUIRefreshPass ;
+		int $startT   = `playbackOptions -q -minTime `;
+		int $endT   = `playbackOptions -q -maxTime `;
+
+
+		//switching Textures to High
+		python("import s100_switchTexture");
+		python("s100_switchTexture.s100_switchTexture().computeConvertToHigh()")  ;
+		print "\nok create passes and lights rig\n";
+
+        }else{
+		warning "no camera detected in scene";
+        }
+
+
+
+
+
+}
+
+global proc s100RenderSetParam()
+{
+int $minT   = `playbackOptions -q -minTime `;
+int $maxT   = `playbackOptions -q -maxTime `;
+
+int $startT   = `playbackOptions -q -animationStartTime `;
+int $endT   = `playbackOptions -q -animationEndTime `;
+setCurrentRenderer mentalRay ;
+setAttr "defaultResolution.width" 1280;
+setAttr "defaultResolution.height" 720;
+setAttr "defaultResolution.deviceAspectRatio" 1.777778 ;
+setAttr "defaultResolution.pixelAspect" 1;
+
+setAttr -type "string" defaultRenderGlobals.imageFilePrefix "<Version>/<RenderLayer>/<Scene>_<RenderLayer>";
+
+setAttr defaultRenderGlobals.outFormatControl 0;
+setAttr defaultRenderGlobals.animation 1;
+setAttr defaultRenderGlobals.putFrameBeforeExt 1;
+setAttr defaultRenderGlobals.extensionPadding 4;
+setAttr "defaultRenderLayer.renderable" 0;
+setAttr defaultRenderGlobals.imageFormat 32;
+
+
+//load pref
+string $path = `s100PCgetFolderPath`;
+$path += `optionMenu -q -value  s100PCoptionMenuScene`;
+string $pathS  = `s100PCgetFolderPath` ;
+
+string $subst = substituteAllString($path , $pathS , ($pathS +"Presets/") );
+string $subst = substituteAllString($subst , ".ma" , "/");
+
+	if( !`filetest -d $subst `)
+	{
+	$subst = $pathS + "Presets/scenebase_lighting/";
+    }
+
+string $file[] = `getFileList -folder $subst -filespec "*.mel" `;
+
+	for($i = 0 ; $i < size($file) ; $i++)
+	{
+	print ("\n " + $file[$i] +"\n" );
+	string $arr[] = stringToStringArray($file[$i], "_") ;
+	$substObj = substituteAllString($arr[0],"Preset" , "") ;
+	string $sel[] = `ls ("*" + $substObj+"*") ` ;
+
+		if(size($sel) == 0)
+		{
+		$substObj = substituteAllString($substObj,"mentalray" , "") ;
+		$sel = `ls ("*" + $substObj+"*") ` ;
+		}
+
+		if(size($sel) > 0)
+		{
+			if($sel[0] == "renderGlobalsList1")
+			{
+			$sel[0] = 	"defaultRenderGlobals";
+            }
+			select $sel;
+			string $mel = ("\"" +  $subst + $file[$i] +"\""  ) ;
+			eval ("source  "+  $mel );
+			print "\load";
+        }else{
+			print "\nnot load";
+        }
+    }
+setAttr "defaultRenderGlobals.startFrame" $startT;
+setAttr "defaultRenderGlobals.endFrame"  $endT;
+}
+
+global proc int s100connectCameraOnAnother(string $oldCamera,string $newCamera)
+{
+/*
+$oldCamera = "Cam_SQ06_SC112" ;
+$newCamera = "renderCam" ;
+print  $oldCamera ;
+*/
+$listAttr = `listAttr -keyable -write $oldCamera` ;
+string $listShapeOld[] = `listRelatives -shapes $oldCamera `  ;
+string $listShapeNew[] = `listRelatives -shapes $newCamera `  ;
+
+/*
+$listAttr = `listAttr -connectable -output -unlocked -settable  $oldCamera` ;
+
+	for($tmp in $listAttr)
+	{
+		if(`gmatch $tmp "**X"`||`gmatch $tmp "**Z"`||`gmatch $tmp "**Y"`)
+		{
+		print $tmp ;
+			if(`attributeExists $tmp $newCamera`)
+			{
+				if(!`getAttr -l  ($newCamera +"." + $tmp ) ` )
+				{
+					if(!`gmatch $tmp "transM*"`)
+						if(!`gmatch $tmp "boundingBox*"`)
+							s100connectSupAttr ( ($oldCamera  ),$newCamera,$tmp)  ;
+                }
+
+            }
+		}
+	}
+
+*/
+
+pointConstraint $oldCamera $newCamera ;
+orientConstraint  $oldCamera $newCamera ;
+
+scaleConstraint  $oldCamera $newCamera ;
+
+
+$listAttr = `listAttr -settable -hasData $oldCamera` ;
+
+
+
+
+/*hard connect (not good for offset !!!!)
+	for($tmp in $listAttr)
+	{
+	s100connectSupAttr(	$oldCamera, $newCamera, $tmp) ;
+    }
+*/
+$listAttr = `listAttr  -keyable   $listShapeOld[0]` ;
+	for($tmp in $listAttr)
+	{
+	s100connectSupAttr(	$listShapeOld[0], $listShapeNew[0] , $tmp) ;
+    }
+
+
+s100setattrcamera($listShapeOld[0] , $listShapeNew[0] ) ;
+
+
+
+return 1 ;
+}
+
+global proc string s100PCgetFolderPath()
+{
+global string $basePathToTools;
+global string $currentProdBank_path ;
+//print $currentProdBank_path ;
+string $path = ($currentProdBank_path  + "_commons/baseFiles/renderScenes/" );
+string $sub = substituteAllString($path , "//" ,"/" ) ;
+string $sub = substituteAllString($sub , ";" ,"" ) ;
+	if(! `filetest -e $sub `)
+	{
+	print ("\nWARNING :  No Base light scenes in these prod use the one in the RD folder\n" ) ;
+	$sub = 	($basePathToTools  + "studio100/reference_files/renderscene/" ) ;
+    }
+return $sub;
+}
+
+global proc string[] s100PCreturnFILERender()
+{
+string $fold = `s100PCgetFolderPath`;
+string $files[] = `getFileList -folder $fold -filespec "*.ma"`;
+return $files;
+}
+
+global proc string s100PCgetFilePath()
+{
+global string $basePathToTools;
+global string $currentProdBank_path ;
+//print $currentProdBank_path ;
+string $path = ($currentProdBank_path  + "_commons/baseFiles/renderScenes/scenebase_lighting.ma" );
+string $sub = substituteAllString($path , "//" ,"/" ) ;
+string $sub = substituteAllString($sub , ";" ,"" ) ;
+	if(! `filetest -e $sub `)
+	{
+	print ("\nWARNING :  No Base light scenes in these prod use the one in the RD folder\n" ) ;
+	$sub = 	($basePathToTools  + "studio100/reference_files/renderscene/scenebase_lighting.ma" ) ;
+    }
+return $sub;
+}

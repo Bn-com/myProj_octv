@@ -1,0 +1,307 @@
+
+global proc s100CHDcreateHeadDeformerRigUI()
+{
+$fenetre = "createHeadDeformRig";
+$nameFenetre = "create Head Deformer Rig";
+
+if ( `window -exists $fenetre` )
+ {
+ deleteUI $fenetre;
+}
+
+$parent =`window -t $nameFenetre -width 201 -height 100 $fenetre`;
+	s100CHDFrameUI($parent);
+showWindow $fenetre;
+
+window -e -resizeToFitChildren 1 $fenetre;
+}
+
+global proc s100CHDFrameUI(string $parent)
+{
+			formLayout -parent $parent chd_formLayout01;
+			$textFieldJoint = `textField -editable 0 chd_tfJoint`;
+			$btfJoint = `button -l "head joint" -c ("s100CHDSlBase(\"" + $textFieldJoint + "\")") chd_bJoint`;
+			$txShape = `text -font "boldLabelFont" -l "shape"`;
+			$tscList = `textScrollList -allowMultiSelection 1 chd_tscList`;
+			$badd = `button -l "add" -c ("s100CHDAddButton(\"" +$tscList + "\")") chd_badd`;
+			$brem = `button -l "del" -c ("s100CDHdelButton(\"" +$tscList + "\")") chd_brem`;
+			$bCreate = `button -l "valid" -c ("s100CHDcreateRig(\"" + $tscList + "\",\"" + $textFieldJoint + "\")") chd_createRig`;
+		setParent ..;
+
+if(`objExists "FKXHead_M"`)
+	$textFieldJoint = `textField -e -tx "FKXHead_M" chd_tfJoint`;
+
+
+	formLayout -e -numberOfDivisions 100 -height 200
+ 	-attachForm $textFieldJoint "top" 5
+	-attachForm $textFieldJoint "left" 5
+	-attachForm $btfJoint "top" 5
+	-attachControl $btfJoint "left" 5 $textFieldJoint
+	-attachForm $btfJoint "right" 5
+	-attachPosition $textFieldJoint "right" 0 70
+
+	-attachControl $txShape "top" 5 $textFieldJoint
+	-attachForm $txShape "left" 5
+	-attachForm $txShape "right" 5
+
+	-attachControl $tscList "top" 5 $txShape
+	-attachPosition $tscList "right" 0 70
+	-attachForm $tscList "left" 5
+	-attachForm $tscList "bottom" 35
+
+	-attachControl $badd "top" 5 $txShape
+	-attachControl $badd "left" 5 $tscList
+	-attachForm $badd "right" 5
+
+	-attachControl $brem "top" 2 $badd
+	-attachControl $brem "left" 5 $tscList
+	-attachForm $brem "right" 5
+
+	-attachControl $bCreate "top" 5 $tscList
+	-attachForm $bCreate "bottom" 5
+		-attachForm $bCreate "left" 5
+		-attachForm $bCreate "right" 5
+
+	chd_formLayout01;
+
+}
+
+
+
+global proc s100CHDSlBase(string $textField)
+{
+	$sl = `ls -sl`;
+	if(size($sl) > 0)
+	{
+	//$objectTyp = ``;
+	if(`objectType -i "joint" $sl[0]`)
+		textField -e -tx $sl[0] $textField;
+	else
+		warning "select joint as base object";
+
+    }
+	else
+	warning "no object match selected";
+}
+
+
+global proc s100CHDAddButton(string $txList)
+{
+$sl = `ls -sl`;
+for($obj in $sl)
+	{
+	string $tab[];
+	$tab = `textScrollList -q -allItems $txList`;
+	if(!`stringArrayContains $obj $tab`)
+		{
+		string $shape[];
+		$shape = `listRelatives -type "shape" $obj`;
+
+		if(size($shape)>0)
+			textScrollList -e -append $obj $txList;
+		else
+			warning ($obj + "//has no shape \n");
+		}
+	}
+
+}
+
+global proc s100CDHdelButton(string $txList)
+{
+string $tab[];
+$tab = `textScrollList -q -selectItem $txList`;
+for($obj in $tab)
+	{
+		textScrollList -e -removeItem $obj $txList;
+    }
+
+}
+
+global proc s100CHDcreateRig(string $txList, string $txf)
+{
+
+	$txf = `textField -q -tx $txf`;
+string $tab[];
+	$tab = `textScrollList -q -allItems $txList`;
+
+string $bs[];
+$grpBS = `createNode "transform" -n "headBS_grp"`;
+
+
+for($i = 0; $i < size($tab); $i++)
+	{
+		if(`objExists $tab[$i]`)
+		{
+			int $bsExist = 0;
+			//string $bsName;
+			string $blendShape[];
+			$duplicate = `duplicate -name ($tab[$i] + "_mbs") $tab[$i]`;
+			$shapeO = `listRelatives -s $tab[$i]`;
+
+			$bsValid = `listHistory $tab[$i]`;
+
+			for($obj in $bsValid)
+				{
+					if(`objectType -isType "blendShape" $obj`)
+					{
+						$bsExist = 1;
+						$blendShape[0] = $obj;
+					}
+
+				}
+
+			//print ("\n\n bsExist" + $bsExist);
+			if($bsExist == 0)
+			{
+			$blendShape = `blendShape -frontOfChain -name ($tab[$i] + "_headDeformRig_def") $duplicate[0] $tab[$i]`;
+			}
+			else
+			{
+			blendShape -e -t  $tab[$i] 1 $duplicate[0] 1 $blendShape[0];
+			}
+
+			parent $duplicate[0] $grpBS;
+			setAttr ($blendShape[0] + "." + $duplicate[0]) 1;
+			$bs[$i] = $duplicate[0];
+
+        }
+	}
+
+$grpDeform  = `createNode "transform" -n "deformHead_grp"`;
+$ctr = `curve -n "head_squash_ctrl" -p 1 0 -1 -p 1 0 -1 -p 1 0 -1 -p -1 0 -1 -p -1 0 -1 -p -1 0 -1 -p -1 0 1 -p -1 0 1 -p -1 0 1 -p 1 0 1 -p 1 0 1 -p 1 0 1 -p 1 0 -1 -p 1 0 -1 -p 1 0 -1`;
+
+		$attr = `addAttr -ln "factor" -at double  -min 1 -max 10 $ctr`;
+		setAttr -e -keyable 1 -lock 0 ( $ctr + ".factor");
+
+		$attrAdj = `addAttr -ln "adjustable" -at double  -min 0 -max 1 $ctr`;
+		setAttr -e -keyable 1 -lock 0 ( $ctr + ".adjustable");
+		setAttr ( $ctr + ".adjustable") 1;
+
+		setAttr ( $ctr + ".factor") 1;
+
+		setAttr -lock true -keyable false -channelBox false ($ctr + ".rx");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".ry");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".rz");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".sx");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".sy");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".sz");
+		setAttr -lock true -keyable false -channelBox false ($ctr +".v");
+
+$grpCtr = `group -n "head_squash_grp" $ctr`;
+
+$grpBendX = `createNode "transform" -n "axeBendX_trs"`;
+$grpBendZ = `createNode "transform" -n "axeBendZ_trs"`;
+$grpSquachY = `createNode "transform" -n "axeSquashY_trs"`;
+$grpHbound = `createNode "transform" -n "axeHbound_grp"`;
+
+$lctHi = `spaceLocator -n "hiboundDefinition_lct"`;
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".tx");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".tz");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".rx");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".ry");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".rz");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".sx");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".sy");
+		setAttr -lock true -keyable false -channelBox false ($lctHi[0] +".sz");
+		//setAttr -lock true -keyable false -channelBox false ($lct1 +".v");
+
+
+$lctMEP = `spaceLocator -n "maxExpandPosition_lct"`;
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".tx");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".tz");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".rx");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".ry");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".rz");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".sx");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".sy");
+		setAttr -lock true -keyable false -channelBox false ($lctMEP[0] +".sz");
+
+parent $lctMEP[0] $lctHi[0] $grpHbound;
+
+parent $grpHbound $grpCtr $grpBendX $grpBendZ $grpSquachY $grpDeform;
+setAttr ($grpCtr + ".translateY") 5;
+
+
+
+
+$bendX = `nonLinear -type bend  -lowBound 0 -highBound 1 -curvature 0 $bs`;
+$bendZ = `nonLinear -type bend  -lowBound 0 -highBound 1 -curvature 0 $bs`;
+$squachY = `nonLinear -type squash  -lowBound 0 -highBound 1 -startSmoothness 0 -endSmoothness 0 -maxExpandPos 0.5 -expand 1 -factor 0 $bs`;
+//$squachY = ``;
+
+parent $bendX[1] $grpBendX;
+parent $bendZ[1] $grpBendZ;
+parent $squachY[1] $grpSquachY;
+setAttr ($lctHi[0] + ".ty") 1;
+setAttr ($lctMEP[0] + ".ty") 0.5;
+connectAttr -f ($lctHi[0] + ".ty") ($bendX[0] + ".highBound");
+connectAttr -f ($lctHi[0] + ".ty") ($bendZ[0] + ".highBound");
+connectAttr -f ($lctHi[0] + ".ty") ($squachY[0] + ".highBound");
+$mdvHi = `createNode "multiplyDivide" -n "headDeformHiBound_mdv_nde"`;
+	connectAttr -f ($lctHi[0] + ".ty") ($mdvHi + ".input2X");
+	connectAttr -f ($lctMEP[0] + ".ty") ($mdvHi + ".input1X");
+	setAttr ($mdvHi + ".operation") 2;
+connectAttr -f ($mdvHi + ".outputX") ($squachY[0] + ".maxExpandPos");
+connectAttr -f ( $ctr + ".adjustable") ($grpHbound + ".visibility");
+
+setAttr ($grpBendZ + ".rotateY") 90;
+
+$pConst = `parentConstraint $txf $grpDeform`;
+delete $pConst;
+
+$mdv = `createNode "multiplyDivide" -n "headDeform_mdv_nde"`;
+$mdv2 = `createNode "multiplyDivide" -n "headDeform_mdv02_nde"`;
+
+
+
+	connectAttr -f ($ctr + ".tx") ($mdv + ".input1X");
+	connectAttr -f ($ctr + ".ty") ($mdv + ".input1Y");
+	connectAttr -f ($ctr + ".tz") ($mdv + ".input1Z");
+
+	connectAttr -f ($ctr + ".factor") ($mdv2 + ".input1X");
+	connectAttr -f ($ctr + ".factor") ($mdv2 + ".input1Y");
+	connectAttr -f ($ctr + ".factor") ($mdv2 + ".input1Z");
+
+	connectAttr -f ($mdv + ".outputX") ($mdv2 + ".input2X");
+	connectAttr -f ($mdv + ".outputY") ($mdv2 + ".input2Y");
+	connectAttr -f ($mdv + ".outputZ") ($mdv2 + ".input2Z");
+
+			setAttr ($mdv + ".operation") 1;
+			setAttr ($mdv + ".input2X") 0.1;
+			setAttr ($mdv + ".input2Y") 1;
+			setAttr ($mdv + ".input2Z") - 0.1;
+
+	connectAttr -f ($mdv2 + ".outputX") ($bendX[0] +".curvature");
+	connectAttr -f ($mdv2 + ".outputY") ($squachY[0] +".factor");
+	connectAttr -f ($mdv2 + ".outputZ") ($bendZ[0] +".curvature");
+
+	$baseGrp = `createNode "transform" -n "headDeformRig_grp"`;
+	parent $grpDeform $grpBS $baseGrp;
+
+	setAttr ($grpBendX + ".v") 0;
+	setAttr ($grpBendZ + ".v") 0;
+	setAttr ($grpSquachY + ".v") 0;
+	setAttr ($grpBS + ".v") 0;
+
+	string $maj[];
+	$maj[0] = $bendX[1];
+	$maj[1] = $bendZ[1];
+	$maj[2] = $squachY[1];
+		for($obj in $maj)
+			{
+				setAttr ($obj + ".translateX") 0;
+				setAttr ($obj + ".translateY") 0;
+				setAttr ($obj + ".translateZ") 0;
+				setAttr ($obj + ".rotateX") 0;
+				setAttr ($obj + ".rotateY") 0;
+				setAttr ($obj + ".rotateZ") 0;
+				setAttr ($obj + ".scaleX") 1;
+				setAttr ($obj + ".scaleY") 1;
+				setAttr ($obj + ".scaleZ") 1;
+            }
+
+}
+
+//s100CHDcreateHeadDeformerRigUI;
+
+

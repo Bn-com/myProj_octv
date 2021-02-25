@@ -1,0 +1,67 @@
+global proc zwOptimizeUnderline(
+	string $searchString,
+	string $replaceString,
+	string $onString)
+{
+	if ($searchString == $replaceString) {
+		return;
+	}
+
+	string $getObjCmd = "ls";
+	if ($onString == "all") {
+		// nothing
+	} else if ($onString == "selected") {
+		$getObjCmd += " -sl";
+	} else if ($onString == "hierarchy") {
+		$getObjCmd += " -sl -dag";		
+	} else {
+		string $errMsg = ("Invalid argument: "+$onString+".");
+		$errMsg += ("Valid settings are: all, selected, hierarchy.");
+		error($errMsg);
+	}
+
+	string $nameList[];
+	string $allNames[] = `eval $getObjCmd`;
+
+	int $count = 0;
+	int $renamedCount = 0;
+	for ($name in $allNames) {
+		// strip off any path and namespace info
+		//
+		string $pathless = match("[a-zA-Z0-9_]*$",$name);
+
+		if (! `objExists $name`) {
+			// renaming must have modified the parent names
+			//
+			$nameList = `eval $getObjCmd`;
+			$name = $nameList[$count];
+		}
+
+		if (`reference -q -isNodeReferenced $name`) {
+			// referenced nodes cannot be renamed
+			//
+			$count++;
+			continue;
+		}
+
+		string $newName = `substitute $searchString $pathless $replaceString`;
+		while (true)
+		{
+			string $str = `substitute $searchString $newName $replaceString`;
+			if ($str == $newName)
+			{
+				break;
+			}
+			$newName = $str;
+		}
+		$newName = `substitute "^_" $newName ""`;
+		$newName = `substitute "_$" $newName ""`;
+		if ($newName != $pathless) {
+			rename $name $newName;
+			$renamedCount++;
+		}
+		$count++;		
+	}
+
+	print("// Replaced "+$renamedCount+" names.\n");
+}

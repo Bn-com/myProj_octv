@@ -1,0 +1,179 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/04/20
+///
+/// Description: 
+///
+
+
+global proc slCheckSyncTxt()
+{
+	if(`window -exists sync_CST`)
+		deleteUI sync_CST;
+	window -title "Check sync txt files v1.0" sync_CST;
+		string $form = `formLayout`;
+			textFieldButtonGrp -label "SyncFilePath" -text "" -buttonLabel "Browse" -cw 1 90 -buttonCommand "slFindFilePath" -adjustableColumn 2 _syncListPath_CST;
+//			textFieldButtonGrp -label "ReportTo" -text "c:" -buttonLabel "Browse" -cw 1 90 -buttonCommand "slWriteFilePath"  -adjustableColumn 2 _shotFrameTxtFile_CST;
+			string $checkButton = `button -l "Check" -w 100 -command "slCheckSync()"`;
+//			string $reportButton = `button -l "SaveReport" -w 100 -command "slSaveReport()"`;
+		setParent ..;
+		formLayout -edit
+				-attachForm		_syncListPath_CST					"top" 5
+				-attachForm		_syncListPath_CST					"left" 10
+				-attachForm		_syncListPath_CST					"right" 20
+
+//				-attachForm		_shotFrameTxtFile_CST					"left" 10
+//				-attachForm		_shotFrameTxtFile_CST					"right" 20
+//				-attachControl		_shotFrameTxtFile_CST					"top" 5 _syncListPath_CST
+
+				-attachControl		$checkButton						"top" 5 _syncListPath_CST
+				-attachForm		$checkButton						"left" 20 
+				-attachForm		$checkButton						"right" 20
+
+//				-attachControl		$reportButton						"top" 5 _shotFrameTxtFile_CST
+//				-attachControl		$reportButton						"left" 10 $checkButton
+//				-attachPosition		$reportButton						"right" 0 95
+		$form;
+	showWindow sync_CST;
+}
+
+global proc string slFindFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4 -fileCommand "slLoadSyncFile"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+global proc slLoadSyncFile(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _syncListPath_CST;
+}
+
+global proc string slWriteFilePath()
+{
+	string $filePath = `fileBrowserDialog -mode 4  -fileCommand "slWriteShotReport"  -actionName "select_folder" -operationMode "Reference"`;
+	return $filePath;
+}
+
+global proc slWriteShotReport(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _shotFrameTxtFile_CST;
+}
+
+global proc slCheckSync()
+{
+	source "slOutputWindow.mel";
+	slOutputWindow("错误口型文件及错误类型");
+	string $path = `textFieldButtonGrp -q -text _syncListPath_CST`;
+
+//	scriptEditorInfo -edit -clearHistory;
+
+	string $fileExt = $path+"/*.txt";
+	string $listFiles[] = `getFileList -filespec $fileExt`;
+	if(`size $listFiles` != 0)
+	{
+		for($f in $listFiles)
+		{
+			string $fileName = $path+"/"+$f;
+			$fileId = `fopen $fileName "r"`;
+			string $nextLine = `fgetline $fileId`;
+			int $lineNum = 1;
+			int $factor = 0;
+			string $buffer[];
+			while(size($nextLine)>0)
+			{
+
+				$nextLine = `fgetline $fileId`;
+				$lineNum++;
+				string $removeLineEnter = `substitute "\n" $nextLine ""`;
+				if ($lineNum == 3 && startString($nextLine,1)!="P")
+				{
+					if ($factor == 0)
+					{
+						slOutput ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;						
+					}
+					slOutput ("第"+$lineNum+"行:"+"文件格式错误"+$nextLine+"被发现\n");	
+				}
+				else if ($lineNum <4 && startString($nextLine,1) == "[")
+				{
+					if($factor == 0)
+					{
+						slOutput ($f+" error reports:______________________________________________________________\n");
+						$factor = 1;						
+					}
+					slOutput ("第"+$lineNum+"行:"+"文件格式错误"+$nextLine+"被发现\n");	
+				}
+				else if ($lineNum > 4 && isValidString($removeLineEnter,"([0-9_ ]+)([A-IR])") == 0 &&  isValidString($removeLineEnter,"([0-90-9_ ]+)([A_IR])") == 0  && startString($nextLine,1) != "[" && $nextLine != "")
+				{
+					if (!(startString($nextLine,1)=="P" && `tokenize $nextLine " " $buffer` != 2))
+						{
+						if($factor == 0)
+						{
+							slOutput ($f+" error reports:______________________________________________________________\n");
+							$factor = 1;
+						}
+						if ($nextLine == "\n")
+						{
+							$nextLine = "回车符";
+						}
+						slOutput ("第"+$lineNum+"行:"+"非法数据"+$nextLine+"被发现\n");	
+					}
+				}
+
+			}
+			fclose $fileId;
+		}
+	}
+}
+
+global proc slSaveReport()
+{
+	string $sourceFilePrefix = `textFieldButtonGrp -q -text _syncListPath_CST`;
+	string $destinFilePath = `textFieldButtonGrp -q -text _shotFrameTxtFile_CST`;
+	string $reportFileName = $destinFilePath + "/syncReport.txt";
+	slPrintShotFrames($reportFileName,$sourceFilePrefix);
+}
+
+global proc slPrintShotFrames(string $txtFile,	string $sourcePath )
+{
+	string $fileExt ="*.txt";
+	string $syncFiles[] = `getFileList -filespec ($sourcePath+"/"+$fileExt)`;
+	string $txt = "";
+	$fileId = `fopen $txtFile "w"`;
+	fprint $fileId "scene";
+	fprint $fileId "\tshot\r\n";
+	for($f in $syncFiles)
+	{
+		string $nextLine = slPrintFrames($sourcePath+"/"+$f);
+		fprint $fileId $nextLine;
+		fprint $fileId "\r\n";
+	}
+	fclose $fileId;
+}
+
+global proc string slPrintFrames(string $fileName)
+{
+	string $buffer[];
+	$fileId = `fopen $fileName "r"`;
+	string $nextLine = `fgetline $fileId`;
+	int $lineNum = 1;
+	string $txt = "";
+	while($lineNum < 3)
+	{
+		if($lineNum == 1)
+			{tokenize $nextLine "\n" $buffer;$txt = $buffer[0];}
+		else if ($lineNum == 2)
+			{tokenize $nextLine "\n" $buffer;$txt += "\t" + $buffer[0] ;}
+		$nextLine = `fgetline $fileId`;
+		$lineNum ++;
+	}
+	fclose $fileId;
+	return $txt;
+}
+
+
+
+
+

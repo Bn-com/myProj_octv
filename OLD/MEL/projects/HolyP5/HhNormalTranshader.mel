@@ -1,0 +1,90 @@
+global proc HhNormalTranshader()
+{
+	string $done[];
+	clear $done;
+	string $Selectobj[] = `ls-sl`;
+	//设置参数
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+
+	//
+	for ($i=0; $i<size($Selectobj); $i++)
+	{
+		string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+		if (size($NodeShape) == 0)
+		{
+			continue;
+		}
+		string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+		if (size($ShadingEngine) == 0)
+		{
+			continue;
+		}
+		string $Shader[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+		string $Str =$Shader[0]+".transparency";
+		if (!`objExists $Str`)
+		{
+			select $Selectobj[$i];
+			hhNormalShader();
+			continue;
+		}
+		string $cons[]=`listConnections -plugs true -connections true -destination false $Str`;
+		if (size($cons)==0)
+		{
+			select $Selectobj[$i];
+			hhNormalShader();
+		}
+		else
+		{
+			string $trN=`match "[^.]+$" $cons[0]`;
+			string $tro=`match "[^_]+" $cons[1]`;
+			string $tr=`match "[^.]+" $tro`;
+			if(!`objExists HhNormalTexture`)
+			{
+				string $HhNormalTex = `shadingNode -asTexture mib_amb_occlusion -name "HhNormalTexture"`;
+				setAttr ($HhNormalTex+".samples") 64;
+				setAttr ($HhNormalTex+".output_mode") 3;
+			}
+			if(!`objExists ($tr+"_HhTrtrShaderSG")`)
+			{
+			    string $HhTrtrShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($tr+"_HhTrtrShaderSG")`;
+			}
+			
+			if(!`objExists ($tr+"_HhTrNormalShader")`)
+			{
+				string $HhTrtrShader = `shadingNode -asShader lambert -name ($tr+"_HhTrNormalShader")`;
+				connectAttr -f $cons[1] ($HhTrtrShader+"."+$trN) ;
+				setAttr ($HhTrtrShader+".ambientColor") -type double3 1 1 1 ;
+				setAttr ($HhTrtrShader+".diffuse") 0;
+				connectAttr -f ($HhTrtrShader+".outColor") ($tr+"_HhTrtrShaderSG.surfaceShader");
+		        connectAttr -f ("HhNormalTexture.outValue") ($HhTrtrShader+".color");
+				
+			}
+			select $Selectobj[$i];
+			catch(`sets -e -forceElement ($tr+"_HhTrtrShaderSG")`);
+		}
+	}
+	select -cl;
+}
+global proc hhNormalShader()
+{
+	string $Selectobj[] = `ls-sl`;
+	//设置参数
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	if(!`objExists HhNormalTexture`)
+	{
+	    string $HhNormalTex = `shadingNode -asTexture mib_amb_occlusion -name "HhNormalTexture"`;
+	    setAttr ($HhNormalTex+".samples") 64;
+	    setAttr ($HhNormalTex+".output_mode") 3;
+	}
+	if(!`objExists HhNormalShader`)
+	{
+		string $HhNormalShader = `shadingNode -asShader lambert -name "HhNormalShader"`;
+		string $HhNormalShaderSG = `sets -renderable true -noSurfaceShader true -empty -name "HhNormalShaderSG"`;
+		connectAttr -f "HhNormalShader.outColor" "HhNormalShaderSG.surfaceShader";
+		connectAttr -f "HhNormalTexture.outValue" "HhNormalShaderSG.miMaterialShader";
+	}
+	select $Selectobj;
+	catch(`sets -e -forceElement HhNormalShaderSG`);
+}

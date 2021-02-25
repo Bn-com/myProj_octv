@@ -1,0 +1,303 @@
+global proc iRenderSwitchRenderView(string $cam)
+{
+	RenderViewWindow;
+	renderWindowRenderCamera snapshot renderView $cam;
+}
+
+global proc iRenderSwitchCameraView(string $cam)
+{
+	lookThru $cam;
+}
+
+global proc iRenderVSwitchPM(string $proc)
+{
+		string $default[] = {"top","front","side"};
+		string $shapes[] = `ls -type camera`;
+		string $cams[]={};
+
+		string $str = "";
+		if ($proc == "iRenderSwitchCameraView"){
+			setParent -menu west_idmtRCM;
+			$str = "menuItem -parent west_idmtRCM -label \"";
+		}
+		if ($proc == "iRenderSwitchRenderView"){
+			setParent -menu south_idmtRCM;
+			$str = "menuItem -parent south_idmtRCM -label \"";
+		}		
+		for ($cam in $shapes){
+			$trans = `listRelatives -p $cam`;
+			if (stringArrayCount($trans[0],$default) == 0){
+				string $cmd =  $str 
+						+ $trans[0] 
+						+ "\" -command \"" 
+						+ $proc 
+						+ "(\\\""+$trans[0] 
+						+ "\\\")\";";
+				eval $cmd;
+				//print ("\n"+$cmd);
+			}
+		}	
+}
+
+global proc string[] getBratzHairSystem()
+{
+	string $grps[] = `ls "*group"`;
+	string $hsystem[];
+	int $i = 0;
+	for ($grp in $grps){
+		string $childsofGrp[] = `listRelatives -fullPath -children $grp`;
+		for($chi in $childsofGrp){
+			if(`gmatch $chi "*_HAIRSYSTEM"`){
+				$hsystem[$i++] = $chi;
+			}
+		}
+	}
+	return $hsystem;
+}
+global proc string[] getBratzMasters()
+{
+	string $grps[] = `ls "*group"`;
+	string $braster[];
+	int $i = 0;
+	for ($grp in $grps){
+		string $childsofGrp[] = `listRelatives -fullPath -children $grp`;
+		for($chi in $childsofGrp){
+			if(`gmatch $chi "*_MASTER"`){
+				$braster[$i++] = $chi;
+			}
+		}
+	}
+	return $braster;
+}
+
+global proc string iRenderEnterObjectName(string $objTitle, string $msg)
+{
+
+	string $text;
+	string $result = `promptDialog 
+		-title $objTitle
+		-message $msg
+		-button "OK" -button "Cancel"
+		-defaultButton "OK" -cancelButton "Cancel"
+		-dismissString "Cancel"`;
+ 
+	if ($result == "OK") {
+		$text = `promptDialog -query -text`;
+	}
+	return $text;
+}
+
+global proc string[] iRenderFileNameAnalysis(string $sceneName)
+{
+	string $buffer[];
+	int $k = `tokenize $sceneName "\\" $buffer`;
+	$sceneName = $buffer[$k-1];
+	clear $buffer;
+	tokenize $sceneName "_" $buffer;
+	return $buffer;
+}
+
+global proc string iRenderFileNameKeyword()
+{
+	string $sceneName = `file -q -sceneName -shortName`;
+	string $buffer[] = `iRenderFileNameAnalysis($sceneName)`;
+	string $layerName = "newLayer";
+	if ($buffer[0]=="br"){
+		if (size($buffer)==6){
+			$layerName = `substring $buffer[3] 3 (size($buffer[3]))`;
+		}
+	}
+	return $layerName;
+}
+
+global proc string iRenderStepCountNum(string $str)
+{
+	int $i = `size($str)`;
+	$i = `substring $str 2 ($i-3)`;
+	++$i;
+	if ($i<10){
+		$str = "c00" + $i;
+	}else if(9<$i<100){
+		$str = "c0" + $i;
+	}
+	return $str;
+}
+
+global proc int iRenderFileExistOrNot(string $f)
+{
+	int $flag=0;
+	if (`filetest -f $f`){
+		$flag=1;
+	}
+	return $flag;
+}
+
+global proc string iRenderExportAsFile(string $f)
+{
+	string $fb=`file -op "v=0" -typ "mayaBinary" -pr -es $f`;
+	return $fb;
+}
+
+global proc int iRenderArrayCheckItem(string $item, string $list[])
+{
+	int $flag=0;
+	for ($i in $list){
+		if ($i==$item){
+			$flag=1;
+		}
+	}
+	return $flag;
+}
+
+global proc iRenderStepSaveAs()
+{
+	string $scname = `file -q -sceneName -shortName`;
+	string $sceneN = "";
+	string $buffer[];
+	clear $buffer;
+	$buffer = `iRenderFileNameAnalysis($scname)`;
+	if (`size($buffer)`==6){
+		string $ver = `iRenderStepCountNum($buffer[5])`;
+		$sceneN = $buffer[0]+"_"+$buffer[1]+"_"+$buffer[2]+"_"+$buffer[3]+"_"+$buffer[4]+"_"+$ver+".mb";				
+	}else{
+		$sceneN = `substring $scname 1 ((size($scname))-3)`;
+		$sceneN += "_c001.mb";
+	}
+	$temp = `file -q -sceneName`;
+	$temp = substituteAllString($temp, "/", "\\");
+	clear $buffer;
+	$n = `tokenize $temp "\\" $buffer`;
+	string $scdir = "";
+	for ($j=0;$j<$n-1;$j++ ){
+		$scdir += $buffer[$j] + "\\";
+	}
+
+	catch(`file -rename ($scdir + $sceneN)`);
+	catch(`file -force -s`);
+}
+
+global proc allRef2Import()
+{
+	string $str;
+	string $refs[] = `file -q -r`;
+	if (size($refs)>0){
+		for ( $each in $refs ){
+			catch(`file -ir $each`);
+		}
+		allRef2Import;
+	}else{
+		return;
+	}
+}
+global proc delMTS()
+{
+	// Delete all materials, textures and shading groups
+	string $dels[] = `ls -materials`;
+	if (`size $dels`){
+		catch(`delete $dels`);
+	}
+	$dels = `ls -textures`;
+	if (`size $dels`){
+		for ( $fil in $dels ){
+			catch(`delete $fil`);
+		}
+	}
+	$dels = `ls -type shadingEngine`;
+	if (`size $dels`){
+		for ( $fil in $dels ){
+			catch(`delete $fil`);
+		}
+	}
+}
+global proc iRenderSetHaircache()
+{
+	string $hs[] = `ls -type diskCache`; 
+	for ($item in $hs)
+	{
+		string $cname = `getAttr  ($item + ".cacheName")`; 
+		if ($cname != ""&&`gmatch $cname "*.mchp"`)
+		{
+			string $buffer[];
+			clear($buffer);
+			tokenize $cname "/" $buffer;
+			string $fname = $buffer[size($buffer) - 1];
+			setAttr ($item + ".cacheName") -type "string" $fname;
+		}
+	}
+}
+
+global proc string[] iRenderObjectFilter(string $objType, string $objArray[])
+{
+	string $temp[];
+	int $i = 0;
+	for ($each in $objArray){
+		string $nodeT = `nodeType $each`;
+		if (`gmatch $nodeT $objType`){
+			$temp[$i++] = $each;
+		}
+	}
+	return $temp;
+}
+
+global proc string[] iRenderKeywordObjArr(string $kword, string $objArray[])
+{
+	string $temp[];
+	int $i = 0;
+	for ($each in $objArray){
+		if (`gmatch $each $kword`){
+			$temp[$i++] = $each;
+		}
+	}
+	return $temp;	
+}
+global proc string[] iRenderSelectedObjsMaterials(string $objShapeArray[])
+{
+	string $objMaterial[];
+	int $j=0;
+	for ($i=0; $i<`size $objShapeArray`; $i++){
+		string $shaingEngine[] = `listConnections  -source false -destination true -type shadingEngine $objShapeArray[$i]`;
+		for($each in $shaingEngine){
+			string $connections[] = `listConnections -connections true -source true -destination false ($each+".surfaceShader")`;
+			if(`size $connections`==2){
+				$objMaterial[$j++] = $connections[1];
+			}
+		}
+	}
+	return $objMaterial;
+}
+
+global proc string[] iRenderLayersArray()
+{
+	int $i=0, $j=0;
+	string $layerArr[];
+	string $l[] = `ls -type renderLayer`;
+	for($i = 0; $i < size($l); ++$i) {
+		if (!`gmatch $l[$i] "*defaultRenderLayer*"`){		
+			 $layerArr[$j++] = $l[$i];
+		}
+	}
+	return $layerArr;
+}
+
+global proc string[] iRenderLayersLights(string $objArray[])
+{
+	string $temp1[], $temp2[];
+	$temp1 = `ls -dag -shapes $objArray`;
+	$temp2 = `ls -lights $temp1`;
+	return $temp2;
+}
+
+global proc string[] iRenderLayersGeometry(string $objArray[])
+{
+	string $temp1[], $temp2[];
+	$temp1 = `ls -dag -shapes $objArray`;
+	$temp2 = `ls -geometry $temp1`;
+	return $temp2;
+}
+
+global proc string iRenderFileCoper(string $targetFile, string $targetDirectory)
+{
+	string $cmd = "copy \"" + $targetFile + "\" " + $targetDirectory;
+	string $result = `system($cmd)`;
+	return $result;
+}

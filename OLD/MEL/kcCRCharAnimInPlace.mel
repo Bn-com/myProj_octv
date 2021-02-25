@@ -1,0 +1,170 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// change $dest's translate keyframe animation from world
+// position value to related value on animated $root
+global proc setRelatedKeyAnim( string $dest, string $root, string $attr, int $pad )
+{
+	int $count = 0;
+
+	float $finaltime = `findKeyframe -which last ( $dest + "." + $attr )`;
+	float $timeset = `findKeyframe -which first ( $dest + "." + $attr )`;
+
+//DEBUG
+//print ("ROOT = " + $root + "  DEST = " + $dest + "\n");
+//print ("START TIME = " + $timeset + " END TIME = " + $finaltime + "\n");
+
+
+	float $destvalue, $rootvalue, $root1val, $dnextf, $rnextf, $maxf;
+	int $keynum = 0;
+
+	$root1val = `getAttr -time 0 ( $root + "." + $attr )`;
+
+	float $keytime[], $keyval[];
+	do {
+		$rootvalue = `getAttr -time $timeset ( $root + "." + $attr )`;
+		$destvalue = `getAttr -time $timeset ( $dest + "." + $attr )`;
+		$keytime[$keynum] = $timeset;
+		$keyval[$keynum] = $destvalue + $root1val - $rootvalue;
+		$keynum ++;
+
+		$rnextf = `findKeyframe -time $timeset -which next ( $root + "." + $attr )`;
+		$dnextf = `findKeyframe -time $timeset -which next ( $dest + "." + $attr )`;
+		$maxf = $timeset + $pad;
+
+//		if ( $dnextf > $rnextf )
+//			$timeset = $rnextf;
+//		else
+//			$timeset = $dnextf;
+//		if ( $pad > 0 )
+//			if ( $timeset > $maxf )
+				$timeset = $maxf;
+
+//DEBUG
+//print ("$count = " + $count + " ");
+//print ("$timeset = " + $timeset + " ");
+//print ("$finaltime = " + $finaltime + " ");
+//print ("$rnextf = " + $rnextf + " $dnextf = " + $dnextf + " $maxf = " + $maxf);
+//print ("\n");
+
+	} while ( ($timeset < $finaltime) && (++$count < 1000) );
+
+	$rootvalue = `getAttr -time $timeset ( $root + "." + $attr )`;
+	$destvalue = `getAttr -time $timeset ( $dest + "." + $attr )`;
+	$keytime[$keynum] = $timeset;
+	$keyval[$keynum] = $destvalue + $root1val - $rootvalue;
+	$keynum ++;
+
+	cutKey -cl -t ":" -attribute $attr $dest;
+	int $i;
+	for( $i = 0; $i < $keynum; $i ++ )
+		setKeyframe -time $keytime[$i] -value $keyval[$i] -attribute $attr $dest;
+
+	setInfinity -preInfinite cycle -postInfinite cycle ($dest + "." + $attr);
+}
+
+// select any part of the character control then run this
+// param $pad: add keyframe if distance between 2 nearby keyframes is over $pad.
+// using qmCharAnimInPlace(1) will get new character animating data exactly as
+// before converting. if use $pad as 2 or higher, some differences may appear.
+//
+// global proc convCharAnimA ()
+// { convCharAnim(1); }
+//
+// global proc convCharAnimN ()
+// { convCharAnim(100); }
+//
+// it is only work for IDMT's character setup ( version avaluable around 2002.7 )
+// in this proc, only translateZ animation of some controls will be changed
+// affect: _footCon_l/r, _focalGroup, _torso
+//______________________________________________________________________________
+// NOTE (tran): U NEED TO CLEAN UP THE ANIMATION CURVES BEFORE APPLY THIS SCRIPT
+//		 + Open <GRAPH EDITOR>
+//		 + Delete all the redundant points and make sure the ani curves are 
+//		   w/i the range of interest.
+// HOWTO:
+//		+ modify the animation graph
+//		+ select a master (<name>_MASTER*) : only the group name should be selected
+//		+ apply the script
+//
+// CHANGE LOG:
+//		- 29.12.2003: [TRAN] 
+// kcCRCharAnimInPlace(2)
+global proc kcCRCharAnimInPlace( int $pad )
+{
+	if ( $pad <= 0 )
+		error ("Maximum frames distance between 2 nearby keyframes should be larger than zero!");
+	
+	string $selobj[] = `ls -sl`; // MUST SELECT A MASTER
+
+	if ((size($selobj) == 0) || (!`gmatch $selobj[0] "*_MASTER"`))
+	{
+		warning("Selected object not a MASTER node.");
+		return;
+	}
+
+	string $children[] = `listRelatives -children -path $selobj[0]`;
+	// print $children;
+	// 29.12.2003: [TRAN] re-structure related key animations.
+	string $torso;
+	string $related[]; //$leftFoot, $rightFoot, $eyeFocal; 
+
+	for ($item in $children)
+		if (`gmatch $item "*_Upper_Body"`)		// torso
+			$torso = $item;
+		else
+		if (`gmatch $item "*_footCon_r"`) // rightFoot
+			$related[size($related)] = $item;
+		else
+		if (`gmatch $item "*_footCon_l"`)  // leftFoot
+			$related[size($related)] = $item;
+/*
+		else
+		if (`gmatch $item "*_focalGroup"`)  // eyeFocal
+			$related[size($related)] = $item;
+		else
+		if (`gmatch $item "*_footCon_r1"`)  // animal (espar)
+			$related[size($related)] = $item;
+		else
+		if (`gmatch $item "*_footCon_l1"`)  // animal (espar)
+			$related[size($related)] = $item;
+
+	// change left foot control animation	
+	if (`objExists $leftFoot`)
+		setRelatedKeyAnim( $leftFoot, $torso, "translateZ", $pad );
+	else
+		warning ("can't find footCon_l");
+
+	// change right foot control animation
+	
+	if (`objExists $rightFoot`)
+		setRelatedKeyAnim( $rightFoot, $torso, "translateZ", $pad );
+	else
+		warning ("can't find footCon_r");
+
+	// change eyes focal control group animation
+
+	if (`objExists $eyeFocal`)
+		setRelatedKeyAnim( $eyeFocal, $torso, "translateZ", $pad );
+	else
+		warning ("can't find eye_focalGroup");
+*/
+
+	// CHANGE RELATED KEY ANIM
+	for($item in $related)
+		if (`objExists $item`)
+			setRelatedKeyAnim( $item, $torso, "translateZ", $pad );
+
+	// change "torso" animation to keep the character stay, remove X and Z animation.
+	// ** maybe we can create a new locator to keep these X and Z animation data **
+	$root1val = `getAttr -time 0 ( $torso + ".tz" )`; 
+	cutKey -cl -t ":" -at "tz" $torso;
+	setAttr ($torso + ".tz") $root1val;
+}

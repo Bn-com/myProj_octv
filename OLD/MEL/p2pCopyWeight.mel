@@ -1,0 +1,159 @@
+global proc p2pCopySkinWeights()
+{
+	string $cv = `text -q -label p2pCopyWeightText`;
+
+	if ($cv == "")
+	{
+		warning("Please select a source vertex first.");
+		return;
+	}
+
+	print ("CV: "+$cv+"\n");
+	string $name_parts[];
+	int $tok = tokenize($cv, ".", $name_parts);
+	string $shape[] = `listRelatives -f -c $name_parts[0]`;
+	string $pt = ($shape[0]+"."+$name_parts[1]);
+
+// 获得skinCluster 节点，2003-11-21黄仲维重写
+/*
+	string $cons[] = `listConnections -s 1 -d 0 $shape[0]`;
+	string $cluster;
+	for($con in $cons)
+	{
+		string $type[] = `ls -st $con`;
+		int $comp = `strcmp "skinCluster" $type[1]`;
+		if($comp==0)
+		{
+			$cluster = $con;
+			print ("SKIN CLUSTER: "+$cluster+"\n");
+			break;
+		}
+	}
+*/
+	string $cluster = `p2pCopyWeightGetSkinCluster $shape[0]`;
+
+// OKC: take away the -ib parameter because we want to copy also weights which are zero
+//
+//	string $trans[] = `skinPercent -ib 0.00001 -q -t $cluster $pt`;
+
+	string $trans[] = `skinPercent -q -t $cluster $pt`;
+	string $tran;
+	int $spacing = 0;
+	for($tran in $trans)
+	{
+		if(`size $tran`>$spacing)
+		{
+			$spacing = `size $tran`;
+		}
+	}
+	$spacing = $spacing + 5;
+	string $val_list[];
+	int $v = 0;
+	for($tran in $trans)
+	{
+		if(`size $tran`<$spacing)
+		{
+			float $val = `skinPercent -t $tran -q $cluster $pt`;
+		//	print ("JOINT: "+$tran);
+		//	for($i=`size $tran`;$i<$spacing;$i++)
+		//	{
+		//		print " ";
+		//	}
+		//	print ("WEIGHT: "+$val+"\n");
+			$val_list[$v] = $val;
+			$v++;
+		}
+	}
+
+// OKC
+// copy from source CV to ALL other selected CVs
+
+	$tmp = `ls -sl`;
+	string $cvs[] = `filterExpand -sm 31  -sm 28 $tmp`;
+
+	for ($ii = 0; $ii < size($cvs); $ii++)
+	{
+		string $cv1 = $cvs[$ii];
+		print ("COPYING WEIGHTS TO CV: "+$cv1+"\n");
+		string $name_parts1[];
+		int $tok = tokenize($cv1, ".", $name_parts1);
+		string $shape1[] = `listRelatives -f -c $name_parts1[0]`;
+		string $pt1 = ($shape1[0]+"."+$name_parts1[1]);
+
+// 获得skinCluster 节点，2003-11-21黄仲维重写
+/*
+		string $cons1[] = `listConnections -s 1 -d 0 $shape1[0]`;
+		string $cluster1;
+		for($con1 in $cons1)
+		{
+			string $type[] = `ls -st $con1`;
+			int $comp = `strcmp "skinCluster" $type[1]`;
+			if($comp==0)
+			{
+				$cluster1 = $con1;
+				print ("SKIN CLUSTER: "+$cluster1+"\n");
+				break;
+			}
+		}
+*/
+		string $cluster1 = `p2pCopyWeightGetSkinCluster $shape1[0]`;
+
+//		string $cmd = "skinPercent ";
+		string $cmd = "skinPercent -prw 0.001 ";
+		for($i=0;$i<$v;$i++)
+		{
+			$cmd = ($cmd+"-tv "+$trans[$i]+" "+$val_list[$i]+" ");
+		}
+		$cmd = ($cmd+$cluster1+" "+$cv1);
+
+//		print("p2pCopyWeight: " + $cmd + "\n");
+		eval $cmd;
+	}
+	print "p2pCopyWeight.";
+}
+
+global proc p2pCopyWeightSelSourceCmd()
+{
+	string $selected[] = `ls -selection`;
+	$selected = `filterExpand -sm 31 -sm 28 $selected`;
+
+	if (`size $selected` == 1)
+		text -edit -label $selected[0] p2pCopyWeightText;
+	else
+	{
+		text -edit -label "" p2pCopyWeightText;
+		warning("Please select only ONE vertex as source");
+	}
+}
+
+global proc p2pCopyWeight()
+{
+	if (`window -exists "p2pCopyWeightWnd"`)
+		return;
+
+	window -title "Vertex Copy Weight" -widthHeight 300 125 p2pCopyWeightWnd;
+		columnLayout -adjustableColumn true -rowSpacing 5;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on Vertex Copy Weight..." -command "zjHelpCallback p2pCopyWeight";
+				setParent ..;
+			button -label "Select Source" -command p2pCopyWeightSelSourceCmd;
+			text -label "" p2pCopyWeightText;
+			button -label "Copy Weight" -command p2pCopySkinWeights;
+		setParent ..;
+
+	showWindow;
+}
+
+// 获得skinCluster 节点，2003-11-21黄仲维重写
+global proc string p2pCopyWeightGetSkinCluster(string $skin)
+{
+	string $skinCluster;
+
+	string $buf[] = `listHistory $skin`;
+	$buf = `ls -typ "skinCluster" $buf`;
+	if (`size $buf`)
+		$skinCluster = $buf[0];
+
+	return $skinCluster;
+}

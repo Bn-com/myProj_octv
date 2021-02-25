@@ -1,0 +1,212 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddLegSetup
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: July 01 2004
+//	Changed Projcet Date: June 26 2006
+//	Last Updated: June 26 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note:Bratz 腿部设置
+//
+//////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////
+//Procedure Name: ddLegSetup
+// auto create leg part setup 腿部脚部的设置
+//
+/////////////////////////////////////////////
+
+global proc ddLegSetup(string $charName,string $side)
+{
+ float $temp[3],$tmp[3] ;
+ string $tmpString[] ;
+ source ddMath ;
+ //create ikHandle on leg part
+ ikHandle -solver ikRPsolver -sj ($charName + "_leg_" + $side) -ee ($charName + "_ankle_" + $side) -n ($charName + "_leg_ikHandle_" + $side) -s sticky ;
+ ikHandle -solver ikRPsolver -sj ($charName + "_ankle_" + $side) -ee ($charName + "_toe_" + $side) -n ($charName + "_ankle_ikHandle_" + $side) -s sticky ;
+ ikHandle -solver ikRPsolver -sj ($charName + "_toe_" + $side) -ee ($charName + "_toeTip_" + $side) -n ($charName + "_toe_ikHandle_" + $side) -s sticky ;
+ ikHandle -solver ikRPsolver -sj ($charName + "_ankle_" + $side) -ee ($charName + "_heel_" + $side) -n ($charName + "_heel_ikHandle_" + $side) -s sticky ;
+
+ //account poleVector position & create pole locator & pole vector control
+ $tempJointPosition = `xform -q -ws -t ($charName + "_leg_" + $side)` ;
+ $temp[0] = $tempJointPosition[0] + `getAttr ($charName + "_leg_ikHandle_" + $side + ".poleVectorX")` ;
+ $temp[1] = $tempJointPosition[1] + `getAttr ($charName + "_leg_ikHandle_" + $side + ".poleVectorY")` ;
+ $temp[2] = $tempJointPosition[2] + `getAttr ($charName + "_leg_ikHandle_" + $side + ".poleVectorZ")` ;
+
+ spaceLocator -p 0 0 0 -n ($charName + "_legPoleLoc_" + $side) ;
+ select -r ($charName + "_legPoleLoc_" + $side) ;
+ move -r $temp[0] $temp[1] $temp[2] ;
+ select -tgl ($charName + "_leg_" + $side) ;
+ parent ;
+ //spaceLocator -p 0 0 0 -n ($charName + "_legPoleCon_" + $side) ;
+ //select -r ($charName + "_legPoleCon_" + $side) ;
+ //move -r $temp[0] $temp[1] $temp[2] ;
+ //poleVectorConstraint -weight 1 ($charName + "_legPoleCon_" + $side) ($charName + "_leg_ikHandle_" + $side) ;
+ //parent ($charName + "_legPoleCon_" + $side) ($charName + "_leg_" + $side) ;
+
+ shadingNode -asUtility vectorProduct -n ($charName + "_vectorProduct_" + $side) ;
+ setAttr ($charName + "_vectorProduct_" + $side + ".operation") 3;
+ connectAttr -f ($charName + "_leg_ikHandle_" + $side + ".parentInverseMatrix") ($charName + "_vectorProduct_" + $side + ".matrix") ;
+
+ //crate toe group
+ $temp = `xform -q -ws -rp ($charName + "_toe_" + $side)` ;
+ select -r ($charName + "_toe_ikHandle_" + $side) ;
+ group -n ($charName + "_toeRotate_" + $side) ;
+ xform -os -piv $temp[0] $temp[1] $temp[2];
+
+ //crate ball group
+ $temp = `xform -q -ws -rp ($charName + "_toe_" + $side)` ;
+ select -r ($charName + "_leg_ikHandle_" + $side) ;
+ select -tgl ($charName + "_ankle_ikHandle_" + $side) ;
+ select -tgl ($charName + "_heel_ikHandle_" + $side);
+ group -n ($charName + "_ballRotate_" + $side) ;
+ xform -os -piv $temp[0] $temp[1] $temp[2];
+
+ //crate ankle group
+ $temp = `xform -q -ws -rp ($charName + "_ankle_" + $side)` ;
+ select -r ($charName + "_toeRotate_" + $side);
+ select -tgl ($charName + "_ballRotate_" + $side);
+ group -n ($charName + "_ankleRotate_" + $side) ;
+ xform -os -piv $temp[0] $temp[1] $temp[2];
+
+ //crate toetip group
+ $temp = `xform -q -ws -rp ($charName + "_toeTip_" + $side)` ;
+ select -r ($charName + "_ankleRotate_" + $side) ;
+ group -n ($charName + "_tipRotate_" + $side) ;
+ xform -os -piv $temp[0] $temp[1] $temp[2];
+
+ //crate footControl group
+ createNode transform -n ($charName + "_footCon_" + $side) ;
+ createNode nurbsCurve -n ($charName + "_footCon_" + $side + "Shape") -p ($charName + "_footCon_" + $side) ;
+	setAttr -k off ".v";
+	setAttr ".cc" -type "nurbsCurve" 
+		1 16 0 no 3
+		17 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
+		17
+		-0.5 0 0
+		0.5 0 0
+		0.5 0 1
+		-0.5 0 1
+		-0.5 0 0
+		-0.5 1 0
+		0.5 1 0
+		0.5 0 0
+		0.5 0 1
+		0.5 1 1
+		0.5 1 0
+		-0.5 1 0
+		-0.5 1 1
+		-0.5 0 1
+		0.5 0 1
+		0.5 1 1
+		-0.5 1 1
+		;
+ $temp = `xform -q -ws -rp ($charName + "_heel_" + $side)` ;
+ move -worldSpace -absolute $temp[0] $temp[1] $temp[2] ;
+ $tmp = `xform -q -ws -rp ($charName + "_toeTip_" + $side)` ;
+ setAttr ($charName + "_footCon_" + $side + ".sx") (`ddDistance $tmp $temp` /2) ;
+ setAttr ($charName + "_footCon_" + $side + ".sy") (`ddDistance $tmp $temp` /2) ;
+ setAttr ($charName + "_footCon_" + $side + ".sz") `ddDistance $tmp $temp` ;
+ makeIdentity -apply true -translate true -rotate true -scale true -jointOrient ($charName + "_footCon_" + $side) ;
+ parent -r ($charName + "_tipRotate_" + $side) ($charName + "_footCon_" + $side) ;
+ //xform -os -piv $temp[0] $temp[1] $temp[2];
+
+ //add attrib to footCon
+ addAttr -ln twist -at double ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".twist") ;
+
+ addAttr -ln ball -at double  ($charName + "_footCon_" + $side);
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".ball") ;
+
+ addAttr -ln toe -at double  ($charName + "_footCon_" + $side);
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".toe") ;
+
+ addAttr -ln ankle_X_rotate -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".ankle_X_rotate");
+
+ addAttr -ln ankle_Y_rotate -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".ankle_Y_rotate") ;
+
+ addAttr -ln ankle_Z_rotate -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".ankle_Z_rotate") ;
+
+ addAttr -ln tip_X_rotate -at double  ($charName + "_footCon_" + $side);
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".tip_X_rotate") ;
+
+ addAttr -ln tip_Y_rotate -at double  ($charName + "_footCon_" + $side);
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".tip_Y_rotate") ;
+
+ addAttr -ln tip_Z_rotate -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".tip_Z_rotate") ;
+
+ /*
+ addAttr -ln poleVectorX -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".poleVectorX") ;
+
+ addAttr -ln poleVectorY -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".poleVectorY") ;
+
+ addAttr -ln poleVectorZ -at double  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".poleVectorZ") ;
+ */
+
+ addAttr -ln ik_solver -at bool  ($charName + "_footCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_footCon_" + $side + ".ik_solver") 1 ;
+
+ //connect attrib to footCon
+ connectAttr -f ($charName + "_footCon_" + $side + ".tip_X_rotate") ($charName + "_tipRotate_" + $side + ".rx") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".tip_Y_rotate") ($charName + "_tipRotate_" + $side + ".ry") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".tip_Z_rotate") ($charName + "_tipRotate_" + $side + ".rz") ;
+
+ connectAttr -f ($charName + "_footCon_" + $side + ".ankle_X_rotate") ($charName + "_ankleRotate_" + $side + ".rx") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".ankle_Y_rotate") ($charName + "_ankleRotate_" + $side + ".ry") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".ankle_Z_rotate") ($charName + "_ankleRotate_" + $side + ".rz") ;
+
+ /*
+ connectAttr -f ($charName + "_footCon_" + $side + ".poleVectorX") ($charName + "_legPoleCon_" + $side + ".tx") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".poleVectorY") ($charName + "_legPoleCon_" + $side + ".ty") ;
+ connectAttr -f ($charName + "_footCon_" + $side + ".poleVectorZ") ($charName + "_legPoleCon_" + $side + ".tz") ;
+ */
+
+ connectAttr -f ($charName + "_footCon_" + $side + ".toe") ($charName + "_toeRotate_" + $side + ".rotateX") ;
+
+ connectAttr -f ($charName + "_footCon_" + $side + ".ball") ($charName + "_ballRotate_" + $side + ".rotateX") ;
+
+ connectAttr -f ($charName + "_footCon_" + $side + ".twist") ($charName + "_leg_ikHandle_" + $side + ".twist") ;
+
+ if(`ddGetMayaVersion` > 4)
+ {
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_leg_ikHandle_" + $side + ".ikBlend") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_ankle_ikHandle_" + $side + ".ikBlend") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_toe_ikHandle_" + $side + ".ikBlend") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_heel_ikHandle_" + $side + ".ikBlend") ;
+ }
+ else
+ {
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_leg_ikHandle_" + $side + ".solverEnable") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_ankle_ikHandle_" + $side + ".solverEnable") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_toe_ikHandle_" + $side + ".solverEnable") ;
+  connectAttr -f ($charName + "_footCon_" + $side + ".ik_solver") ($charName + "_heel_ikHandle_" + $side + ".solverEnable") ;
+ }
+
+ //display footConGroup selectHandle
+ toggle -state true -selectHandle ($charName + "_footCon_" + $side);
+
+ $temp = `xform -q -ws -rp ($charName + "_toeTip_" + $side)` ;
+ $tmp = `joint -q -p ($charName + "_heel_" + $side)` ;
+ $temp[2] = $temp[2] + ($temp[2] - $tmp[2]) * 0.5 ;
+ setAttr ($charName + "_footCon_" + $side + ".selectHandleZ") $temp[0] ;
+ setAttr ($charName + "_footCon_" + $side + ".selectHandleY") $temp[1] ;
+ setAttr ($charName + "_footCon_" + $side + ".selectHandleZ") $temp[2] ;
+
+ source ddStretchyIK ;
+ ddStretchyIK ($charName + "_leg_ikHandle_" + $side) ddSIK_x ;
+
+ parent ($charName + "_leg_ikHandle_" + $side + "Con") ($charName + "_ballRotate_" + $side) ;
+ 
+ select -clear ;
+}
+
+//End of file.

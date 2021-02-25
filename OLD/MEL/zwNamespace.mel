@@ -1,0 +1,292 @@
+global proc string zwGetNamespaceByPath(string $path)
+{
+	string $namespace = `match "[^/\\]+$" $path`;
+	$namespace = `match "[^.]+" $namespace`;
+
+	$path = `workspace -expandName $path`;
+	if (`match "/MC_[^/]+/scenes/" $path` != "")	// WinxClubII
+	{
+		$namespace = `substitute "^[^_]+_[^_]+_" $namespace ""`;
+		$namespace = `match "^[^_]+_[^_]+" $namespace`;
+	}
+	else if (`match "/vickytheviking/" (tolower($path))` != "")	// VickyTheViking
+	{
+	//	$namespace = `substitute "-[^-]+$" $namespace ""`;
+		$namespace = `substituteAllString $namespace "-" "_"`;
+	}
+	else
+	{
+	//	$namespace = `match "^[^_]+_[^_]+" $namespace` + "_#";
+		$namespace = `match "^[^_]+_[^_]+" $namespace`;
+	}
+
+	return $namespace;
+}
+
+global proc string zwValidateNamespace(string $name)
+{
+	string $namespace = $name;
+
+	catch(`zwRemoveUnusedNamespace ":"`);
+
+	namespace -setNamespace ":";
+
+	if (`namespace -exists $namespace` || size(`ls $namespace`) > 0 || size(`ls ($namespace + ":*")`) > 0)
+	{
+		for ($i=1; ; $i++)
+		{
+			$namespace = $name + "_" + $i;
+			if (!(`namespace -exists $namespace` || size(`ls $namespace`) > 0 || size(`ls ($namespace + ":*")`) > 0))
+			{
+				break;
+			}
+		}
+	}
+
+	return $namespace;
+}
+
+global proc zwCheckNamespace()
+{
+	string $err = "";
+
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $unresolvedName = `referenceQuery -unresolvedName -filename  -withoutCopyNumber $reference`;
+		string $path = `workspace -expandName $unresolvedName`;
+		if (`match "/MC_[^/]+/scenes/" $path` != "")	// WinxClubII
+		{
+			if (`match "/camera/" $path` != "" || `match "vehicle_galleon" $path` != "" || `match "galleon_barrel" $path` != "" || `match "galleon_woodenBox" $path` != "")
+			{
+				continue;
+			}
+		}
+		else if (`match "/Projects/[^/]+/Project/scenes/" $path` != "" && `match "/Animation/" $path` == "")
+		{
+		}
+		else
+		{
+			continue;
+		}
+
+		string $referenceNode = `file -query -referenceNode $reference`;
+
+		// namespace
+		string $namespace = `zwGetNamespaceByPath $reference`;
+		string $currentNamespace = `zwGetFullNamespace $reference`;
+		if (!($namespace == $currentNamespace || $namespace == `substitute "_[0-9]+$" $currentNamespace ""`))
+		{
+			$err += "\n" + $referenceNode + "\t错误：" + $currentNamespace + "\t正确：" + $namespace;
+			continue;
+		}
+
+		// referenceNode
+		if (`match "/MC_[^/]+/scenes/" $path` != "")	// WinxClubII
+		{
+			if (`match ("^" + $currentNamespace + "RN[0-9]*$") $referenceNode` == "")
+			{
+				$err += "\n" + $referenceNode;
+			}
+		}
+	}
+
+	if ($err != "")
+	{
+		$err = "以下参考的namespace没有设置正确，请在Reference Editor里通过namespace按钮来修正" + $err;
+		error $err;
+	}
+}
+
+global proc zwFixNamespace()
+{
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		int $isLoaded = `referenceQuery -isLoaded $reference`;
+		if (!$isLoaded)
+		{
+			string $referenceNode = `file -query -referenceNode $reference`;
+			string $unresolvedName = `referenceQuery -unresolvedName -filename -withoutCopyNumber $reference`;
+			catch(`file -loadReference $referenceNode $unresolvedName`);
+		}
+	}
+
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $unresolvedName = `referenceQuery -unresolvedName -filename -withoutCopyNumber $reference`;
+		string $path = `workspace -expandName $unresolvedName`;
+		if (!(`match "/Projects/[^/]+/Project/scenes/" $path` != "" && `match "/Animation/" $path` == ""))
+		{
+			continue;
+		}
+
+		string $referenceNode = `file -query -referenceNode $reference`;
+
+		int $isLoaded = `referenceQuery -isLoaded $reference`;
+		if (!$isLoaded)
+		{
+			catch(`file -loadReference $referenceNode $unresolvedName`);
+		}
+
+		// namespace
+		string $namespace = `zwGetNamespaceByPath $reference`;
+		string $currentNamespace = `zwGetFullNamespace $reference`;
+		string $withoutCopyNumber = `zwValidateNamespace $namespace`;
+		if (!($namespace == $currentNamespace || ($namespace == `substitute "_[0-9]+$" $currentNamespace ""` && $namespace != $withoutCopyNumber)))
+		{
+			$namespace = $withoutCopyNumber;
+
+			string $ref0 = "";
+			string $child = `match "[^:]+$" $currentNamespace`;
+			if ($child != $currentNamespace)
+			{
+				string $buf[] = `file -query -reference`;
+				for ($i=0; $i<size($buf); $i++)
+				{
+					if (`zwGetFullNamespace $buf[$i]` == $child)
+					{
+						$ref0 = $buf[$i];
+
+						string $temp = rand(10);
+						$temp = "zwFixNamespace" + `substitute "[.]" $temp ""`;
+						int $rs = catch(`zwReplaceNamespce $ref0 $temp`);
+						if ($rs)
+						{
+							$rs = catch(`zwReplaceNamespce $ref0 $temp`);
+						}
+						if ($rs)
+						{
+							return;
+						}
+
+						break;
+					}
+				}
+
+				string $objs[] = `ls ($child + ":*")`;
+				for ($obj in $objs)
+				{
+					if (!`reference -isNodeReferenced $obj`)
+					{
+						string $name = `substituteAllString $obj ":" "_"`;
+						if ($name != $obj)
+						{
+							catch(`evalEcho("rename \"" + $obj + "\" \"" + $name + "\"")`);
+						}
+					}
+				}
+			}
+
+			int $rs = catch(`zwReplaceNamespce $reference $namespace`);
+			if ($rs)
+			{
+				$rs = catch(`zwReplaceNamespce $reference $namespace`);
+			}
+			if ($rs)
+			{
+				return;
+			}
+
+		//	$namespace = `file -query -namespace $reference`;
+		//	string $child = `match "[^:]+$" $currentNamespace`;
+		//	if ($child != $currentNamespace)
+		//	{
+		//		string $objs[] = `ls ($currentNamespace + ":*")`;
+		//		for ($obj in $objs)
+		//		{
+		//			if (!`reference -isNodeReferenced $obj`)
+		//			{
+		//				int $lockNode[] = `lockNode -query $obj`;
+		//				if (!$lockNode[0])
+		//				{
+		//					rename $obj ($namespace + ":" + `match "[^:]+$" $obj`);
+		//				}
+		//			}
+		//		}
+		//	}
+
+			if ($ref0 != "")
+			{
+				int $rs = catch(`zwReplaceNamespce $ref0 $child`);
+				if ($rs)
+				{
+					$rs = catch(`zwReplaceNamespce $ref0 $child`);
+				}
+				if ($rs)
+				{
+					return;
+				}
+			}
+		}
+
+		// referenceNode
+		$referenceNode = `file -query -referenceNode $reference`;
+		$currentNamespace = `file -query -namespace $reference`;
+		if (`match ("^" + $currentNamespace + "RN[0-9]*$") $referenceNode` == "")
+		{
+			int $lockNode[] = `lockNode -query $referenceNode`;
+			if ($lockNode[0])
+			{
+				lockNode -lock false $referenceNode;
+			}
+			$referenceNode = `rename $referenceNode ($currentNamespace + "RN")`;
+			if ($lockNode[0])
+			{
+				lockNode -lock true $referenceNode;
+			}
+		}
+
+		if (!$isLoaded)
+		{
+		//	file -unloadReference $referenceNode;
+		}
+	}
+}
+
+global proc string zwGetFullNamespace(string $reference)
+{
+	string $namespace = `file -query -namespace $reference`;
+	string $buf[] = `referenceQuery -nodes $reference`;
+	if (size($buf) > 0)
+	{
+		$namespace = `match "[^|]+$" $buf[0]`;
+		$namespace = `substitute ":[^:]+$" $namespace ""`;
+	}
+
+	return $namespace;
+}
+
+global proc string zwGetParentNamespace(string $reference)
+{
+	string $buf[] = `referenceQuery -nodes $reference`;
+	string $namespace = `match "[^|]+$" $buf[0]`;
+	$namespace = `substitute "[^:]+:[^:]+$" $namespace ""`;
+	$namespace = `substitute ":$" $namespace ""`;
+	if ($namespace == "")
+	{
+		$namespace = ":";
+	}
+	return $namespace;
+}
+
+global proc zwReplaceNamespce(string $reference, string $namespace)
+{
+	if (!catch(`file -edit -namespace (zwValidateNamespace($namespace)) $reference`))
+	{
+		return;
+	}
+
+	string $parentNamespce = zwGetParentNamespace($reference);
+	namespace -setNamespace ":";
+	namespace -setNamespace $parentNamespce;
+
+	string $temp = rand(10);
+	$temp = "zwFixNamespace" + `substitute "[.]" $temp ""`;
+
+	file -edit -namespace $temp $reference;
+	namespace -setNamespace ":";
+	file -edit -namespace (zwValidateNamespace($namespace)) $reference;
+	namespace -setNamespace ":";
+}

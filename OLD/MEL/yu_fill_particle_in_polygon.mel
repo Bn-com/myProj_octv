@@ -1,0 +1,71 @@
+global proc fillParticle()
+{
+	string $mySelectedMeshArray[] = `ls -sl`;
+	string $mySelectedMesh = $mySelectedMeshArray[0];
+	string $mySelectedMeshShapeArray[] = `listRelatives -shapes $mySelectedMesh`;
+	string $mySelectedMeshShape = $mySelectedMeshShapeArray[0];
+	float $bb[]=`xform -q -ws -bb $mySelectedMeshArray[0]`;
+	float $sizeX=$bb[3]-$bb[0];
+	float $sizeY=$bb[4]-$bb[1];
+	float $sizeZ=$bb[5]-$bb[2];
+	float $translate[]=`xform -q -ws -rotatePivot $mySelectedMeshArray[0]`;
+
+
+	string $myClosestPointOnMeshNode = `createNode closestPointOnMesh`;
+	connectAttr -f ($mySelectedMeshShape+".worldMesh[0]") ($myClosestPointOnMeshNode+".inMesh");
+	connectAttr -f ($mySelectedMeshShape+".worldMatrix[0]") ($myClosestPointOnMeshNode+".inputMatrix");
+
+	//create Emitter Volume
+	string $myEmitterArray[] = `emitter -pos $translate[0] $translate[1] $translate[2] -type volume -r 100 -sro 0 -nuv 0 -cye none -cyi 1 -spd 1 -srn 0 -nsp 1 -tsp 0 -mxd 0 -mnd 0 -dx 1 -dy 0 -dz 0 -sp 0 -vsh cube -vof 0 0 0 -vsw 360 -tsr 0.5 -afc 1 -afx 1 -arx 0 -alx 0 -rnd 0 -drs 0 -ssz 0`;
+	setAttr ($myEmitterArray[0]+".scaleX") ($sizeX/2);
+	setAttr ($myEmitterArray[0]+".scaleY") ($sizeY/2);
+	setAttr ($myEmitterArray[0]+".scaleZ") ($sizeZ/2);string $myEmitter = $myEmitterArray[0];
+	string $myParticleSystemArray[] = `particle`;
+	string $myParticleSystem = $myParticleSystemArray[0];
+	connectDynamic -em $myEmitter $myParticleSystem;
+
+
+
+	setAttr ($myEmitter+".awayFromCenter") 0;
+	setAttr ($myParticleSystem+".lifespanMode") 3;
+
+	// creation expression
+	string $expression = "float $fallOffDist = 2;\n";
+	$expression += "\n";
+	$expression += "vector $particlePos = "+$myParticleSystem+".position;\n";
+	$expression += "\n";
+	$expression += "setAttr "+$myClosestPointOnMeshNode+".inPositionX ($particlePos.x);\n";
+	$expression += "setAttr "+$myClosestPointOnMeshNode+".inPositionY ($particlePos.y);\n";
+	$expression += "setAttr "+$myClosestPointOnMeshNode+".inPositionZ ($particlePos.z);\n";
+	$expression += "\n";
+	$expression += "float $n[] = `getAttr "+$myClosestPointOnMeshNode+".normal`;\n";
+	$expression += "float $pointPos[] = `getAttr "+$myClosestPointOnMeshNode+".position`;\n";
+	$expression += "vector $pointPosVec = <<$pointPos[0],$pointPos[1],$pointPos[2]>>;\n";
+	$expression += "\n";
+	$expression += "vector $difference = "+$myParticleSystem+".position - $pointPosVec;\n";
+	$expression += "\n";
+	$expression += "vector $normal = <<$n[0],$n[1],$n[2]>>;\n";
+	$expression += "\n";
+	$expression += "float $test = rad_to_deg(angle($normal,unit($difference)));\n";
+	$expression += "\n";
+	$expression += "if ($test > 90)\n";
+	$expression += "{\n";
+	$expression += "	float $dist = mag($particlePos - $pointPosVec);\n";
+	$expression += "	float $luck = $dist/$fallOffDist;\n";
+	$expression += "\n";
+	$expression += "	if($luck > rand(1))\n";
+	$expression += "	{\n";
+	$expression += "		"+$myParticleSystem+".lifespanPP = 1000000;\n";
+	$expression += "	}\n";
+	$expression += "	else\n";
+	$expression += "	{\n";
+	$expression += "		"+$myParticleSystem+".lifespanPP = 0;\n";
+	$expression += "	}\n";
+	$expression += "}\n";
+	$expression += "else\n";
+	$expression += "{\n";
+	$expression += "	"+$myParticleSystem+".lifespanPP = 0;\n";
+	$expression += "}\n";
+
+	dynExpression -s $expression -c $myParticleSystem;
+}

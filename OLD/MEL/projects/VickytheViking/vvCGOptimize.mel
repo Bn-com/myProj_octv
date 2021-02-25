@@ -1,0 +1,273 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc vvCGOptimize()
+{
+	
+	//string $sel[] = `ls -sl -l `;
+	string $sel[] = `sets -q "vvExtraTrees_sl"`;
+	if (!size($sel))
+	{
+		warning "没有保留的物体，请选择需要保留的物体，然后点SEL工具!";
+		return ;
+	}
+	
+	string $selGroup[]={};
+	for ($item in $sel)
+	{
+		string $mesh=$item;
+		if (objectType($item) != "mesh")
+		{
+			string $child[] = `listRelatives -fullPath -children $item`;
+			$mesh = $child[0];
+		}
+		string $parents[] = `listRelatives -fullPath -allParents $mesh`;
+		string $transform[]={};
+		if (size($parents) >1)
+		{
+			string $p1[] = `listRelatives -f -p $mesh`;
+			$transform = `listRelatives -f -p $p1[0]`;
+		}
+		else 
+			$transform = `listRelatives -f -p $mesh`;
+		
+		$selGroup[size($selGroup)] = $transform[0];
+		
+	}
+
+	string $allMesh[] = `ls -type mesh -l`;
+	string $allGroup[]={};
+	for ($item in $allMesh)
+	{
+		if (!`referenceQuery -inr $item`)
+		{
+			string $transform[]={};
+			string $parents[] = `listRelatives -fullPath -allParents $item`;
+			if (size($parents) >1)
+			{
+				//string $p1[] = `listRelatives -f -p $item`;
+				for ($p in $parents)
+				{
+					$transform = `listRelatives -f -p $p`;
+					$allGroup[size($allGroup)] = $transform[0];
+				}
+			}
+			else 
+			{
+				$transform = `listRelatives -f -p $item`;
+				$allGroup[size($allGroup)] = $transform[0];
+			}
+		}
+		else 
+		{
+			string $referenceFile = `referenceQuery -f $item`;
+			if (match("/locations/",$referenceFile) != "")
+			{
+				string $transform[]={};
+				string $parents[] = `listRelatives -fullPath -allParents $item`;
+				if (size($parents) >1)
+				{
+					//string $p1[] = `listRelatives -f -p $item`;
+					for ($p in $parents)
+					{
+						$transform = `listRelatives -f -p $p`;
+						$allGroup[size($allGroup)] = $transform[0];
+					}
+				}
+				else 
+				{
+					$transform = `listRelatives -f -p $item`;
+					$allGroup[size($allGroup)] = $transform[0];
+				}
+			}
+
+		}
+	}
+	$allGroup = stringArrayRemoveDuplicates($allGroup);
+
+	string $delGroup[] = stringArrayRemove($selGroup,$allGroup);
+	
+	//select -r $delGroup;
+	//delete $delGroup;
+	//delete "vvExtraTrees_sl";
+	if (`objExists "vvExtraTrees_del"`)
+		delete "vvExtraTrees_del";
+	string $displayLayer = `createDisplayLayer -name "vvExtraTrees_del" -number 1 -empty`;
+	editDisplayLayerMembers -noRecurse $displayLayer $delGroup;
+	setAttr ($displayLayer+".visibility") 0;
+}
+
+
+global proc vvCGOptimizeAddSet()
+{
+	if (`objExists "vvExtraTrees_sl"`)
+		delete "vvExtraTrees_sl";
+	
+	sets -name "vvExtraTrees_sl";
+
+	string $sel[] = `ls -sl -l `;
+	if (!size($sel))
+	{
+		warning "没有选择任务物体，请选择需要保留的物体!";
+		return ;
+	}
+	sets -add "vvExtraTrees_sl" $sel;
+}
+
+global proc string vvCGOptimizeGetNonInstanceGroup(string $obj)
+{
+	string $nonIG;
+	string $allParents[] = `listRelatives -f -ap $obj`;
+	if (size($allParents) > 1)
+	{
+		string $parent[] = `listRelatives -f -p $obj`;
+		$nonIG=vvCGOptimizeGetNonInstanceGroup($parent[0]);
+	}
+	else 
+	{
+		$nonIG=$obj;
+	}
+	return $nonIG;
+}
+
+global proc vvCGOptimizeHideNonSelected()
+{
+	string $sel[] = `ls -sl -l`;
+	vvCGOptimizeUnloadNonSelectedRef();
+	string $vis[]={};
+	for ($obj in $sel)
+	{
+		//if (!`referenceQuery -inr $obj` )
+		//{
+			string $NIG = vvCGOptimizeGetNonInstanceGroup($obj);
+			$vis[size($vis)]=$NIG;
+		//}
+	}
+
+	string $all[] = `ls -l -type mesh -type nurbsSurface -type subdiv -v -ni -dag`;
+	string $hids[]={};
+	string $checked[]={};
+	for ($obj in $all)
+	{
+		//string $NIG = vvCGOptimizeGetNonInstanceGroup($obj);
+		//$hids[size($hids)]=$NIG;
+		
+		//if (!`referenceQuery -inr $obj` )
+		//{
+			string $ap[] = `listRelatives -f -ap $obj`;
+			if (size($ap)>1)
+			{
+				string $check[] = stringArrayRemove($checked,$ap);
+				for ($item in $check)
+				{
+					if (stringArrayCount($item,$sel) == 0)
+					{
+						string $NIG = vvCGOptimizeGetNonInstanceGroup($item);
+						$hids[size($hids)]=$NIG;
+					}
+				}
+				$checked=stringArrayCatenate($checked,$ap);
+			}
+			else
+			{
+				string $trans[] = `listRelatives -f -p $obj`;
+				if (stringArrayCount($trans[0],$sel) == 0)
+				{
+					string $NIG = vvCGOptimizeGetNonInstanceGroup($trans[0]);
+					$hids[size($hids)]=$NIG;
+				}
+			}
+		//}
+		/*else 
+		{
+			string $refFile = `referenceQuery -f $obj`;
+			//if (match("locations",$refFile)!="")
+			{
+				string $ap[] = `listRelatives -f -ap $obj`;
+				if (size($ap)>1)
+				{
+					for ($item in $ap)
+					{
+						if (stringArrayCount($item,$sel) == 0)
+						{
+							string $NIG = vvCGOptimizeGetNonInstanceGroup($item);
+							$hids[size($hids)]=$NIG;
+						}
+					}
+				}
+				else
+				{
+					string $trans[] = `listRelatives -f -p $obj`;
+					if (stringArrayCount($trans[0],$sel) == 0)
+					{
+						string $NIG = vvCGOptimizeGetNonInstanceGroup($trans[0]);
+						$hids[size($hids)]=$NIG;
+					}
+				}
+			}
+		}*/
+	}
+	$hids = stringArrayRemove($vis,$hids);
+	//print $hids;
+	//select -r $hids;
+	
+	if (`objExists "vvExtraTrees_del"`)
+		delete "vvExtraTrees_del";
+	string $displayLayer = `createDisplayLayer -name "vvExtraTrees_del" -number 1 -empty`;
+	for ($h in $hids)
+	{
+		float $adj = catchQuiet(`editDisplayLayerMembers -noRecurse $displayLayer {$h}`);
+		if ($adj)
+		{
+			print $h;
+			print "\n";
+		}
+	}
+	//editDisplayLayerMembers -noRecurse $displayLayer $hids;
+	setAttr ($displayLayer+".visibility") 0;
+}
+
+
+global proc vvCGOptimizeUnloadNonSelectedRef()
+{
+	string $filename = `file -q -sn -shn`;
+	
+	
+	string $sel[] = `ls -sl -l`;
+	string $selRfn[]={};
+	for ($s in $sel )
+	{
+		if (`referenceQuery -inr $s`)
+		{
+			string $rfn = `referenceQuery -rfn $s`;
+			$selRfn[size($selRfn)] = $rfn;
+		}
+	}
+	$selRfn = stringArrayRemoveDuplicates($selRfn);
+
+	string $allRfnFiles[] = `file -q -r`;
+	for ($rf in $allRfnFiles)
+	{
+		string $rfn = `referenceQuery -rfn $rf`;
+		if (!stringArrayCount($rfn,$selRfn))
+		{
+			file -ur $rfn; 
+			
+			if (match("^[vV][vV]_",$filename)!="")
+			{
+				file -rr $rf;
+			}
+		}
+	}
+
+}

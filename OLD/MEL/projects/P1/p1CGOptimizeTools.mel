@@ -1,0 +1,85 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc p1CGDeleteAllRenderlayer()
+{
+	string $rls[]  =`ls -type renderLayer`;
+	for ($rl in $rls)
+	{
+		if (!`referenceQuery -inr $rl` && `match "defaultRenderLayer" $rl` == "")
+		{
+			delete $rl;
+		}
+		else
+		{
+			setAttr ($rl+".renderable") 0;
+		}
+	}
+}
+
+global proc p1CGFixBeforeRendering()
+{
+	source "channelBoxCommand.mel";
+
+//	1.导入渲染用摄像机，修改摄像机可渲染属性。
+	//source "//file-cluster/GDC/Resource/Support/Maya/projects/Ninjago/nj_ImportRenderCam.mel";nj_ImportRenderCam();	
+	string $filename = `file -q -sn -shn`;
+	string $buff[] = stringToStringArray($filename,"_");
+	string $camera = "cam_"+$buff[1]+"_";
+	string $cams[] = `ls -type camera ($camera+"*") ("*:*"+$camera+"*")`;
+	for ($c in $cams)
+	{
+		setAttr ($c+".renderable") 1;
+	}
+	select -r $cams;
+	
+//	2.设置 raytrace 精度
+	miLoadMayatomr();
+	miCreateDefaultNodes();
+	
+	setAttr "defaultRenderGlobals.currentRenderer" -type "string" "mentalRay";	
+	zzjSetMentalrayQuality("production"); 
+	setAttr 	"miDefaultOptions.maxReflectionRays" 1; 
+	setAttr 	"miDefaultOptions.maxRefractionRays" 1; 
+	setAttr "miDefaultOptions.maxRayDepth" 2;
+
+	setMayaSoftwareFrameExt 3 1;
+	setAttr defaultRenderGlobals.extensionPadding 4;
+	setAttr defaultResolution.lockDeviceAspectRatio 1;
+	setAttr "miDefaultOptions.finalGather" 0;
+
+
+//	4.将默认的输出图片格式改成iff
+	setAttr defaultRenderGlobals.imageFormat 7;	
+	
+//	5.修改mentalray的bsp，改善occ渲染速度	
+	setAttr "mentalrayGlobals.accelerationMethod" 4;
+	
+//	6.删除QSK_panel.ma
+	string $rfn[]=`file -q -r`;
+	for ($r in $rfn)
+	{
+		if (`gmatch $r "*_panel.ma*"`)
+		{
+			file -removeReference $r;
+		}
+	}
+
+//	7.设置渲染帧数，动画起始帧
+	zwQueryCameraTime "defaultRenderGlobals";
+	int $startFrame=`getAttr "defaultRenderGlobals.startFrame"`;
+	int $endFrame=`getAttr "defaultRenderGlobals.endFrame"`;
+	playbackOptions -min $startFrame;
+	playbackOptions -max $endFrame;
+	
+}
+

@@ -1,0 +1,226 @@
+
+proc string[] hjpathlist()
+{
+	//素材路径 判断名字格式 name.0043.iff 或是 name.iff.0043
+	string 	$imagefull[];
+	string 	$imagels[]	;
+	string 	$frompath 	=`textFieldButtonGrp -q -tx fromFieldBGrp1`;
+	
+	string 	$iamgelist	=`tokenize $frompath "." $imagels`;
+	int     $imageint	=`size $imagels`;
+	switch (`gmatch $imagels[$imageint-1] "*[0-9]"`)
+	{
+	case 0:
+	$imagefull={$imagels[0],$imagels[2]};
+	
+	return $imagefull;
+	break;
+	case 1:
+	$imagefull={$imagels[0],$imagels[1]};
+	return $imagefull;
+	break;
+	}
+	
+}
+
+
+proc string[] hjpicname()
+{
+	string $name[]=`hjpathlist`;
+	string $imgs[] = `getFileList -fs ($name[0] + ".*."+$name[1])`;
+	if (!`size $imgs`)
+	{
+	string $listpath[]={$name[0],("."+$name[1]),".*"};
+	
+	return $listpath;
+	}else
+	{
+	string $listpath[]={$name[0],".*.",$name[1]};
+	return $listpath;
+	}
+	
+}
+
+
+ proc string[] hjcommandname()
+{
+	string $name[]=`hjpathlist`;
+	string $imgs[] = `getFileList -fs ($name[0] + ".*."+$name[1])`;
+	string $start=`textFieldGrp -q -text  Hintfield`;
+	string $end  =`textFieldGrp -q -text  Hinfielda`;
+	
+	if (!`size $imgs`)
+	{
+	string $listpath[]={$name[0],("."+$name[1]),"."+$start+"-"+$end+"#"};
+	return $listpath;
+	}else
+	{
+	string $listpath[]={$name[0],"."+$start+"-"+$end+"#.",$name[1]};
+	return $listpath;
+	}
+	
+}
+
+proc hjimgcvt()
+{
+	string $path[]=`hjpathlist`;
+	string $imgs[] = `getFileList -fs ($path[0] + ".*."+$path[1])`;
+	string $jamayalocation =`getenv "MAYA_LOCATION"`;
+	string $pathlist[];
+	string $pathls=`tokenize $path[0] "/" $pathlist`;
+	int    $size =`size $pathlist`-1;
+	string $s1 = `substitute $pathlist[$size] $path[0] ""`;
+	string $imagsls;
+	for ($imagsls in $imgs)
+	{
+	string $pathlista[];
+	string $pathls=`tokenize $imagsls "." $pathlista`;
+	string $outiamer=$pathlista[0]+"FF."+$pathlista[1]+"."+$pathlista[2];
+	string $jacmd ="\""+$jamayalocation + "/bin/imgcvt.exe\""+" "+($s1+$imagsls)+" "+($s1+$outiamer);
+	
+	system ($jacmd);
+	sysFile -delete ($s1+$imagsls);
+	
+	}
+	
+}
+
+proc string[] hjstartframe()
+{
+	string $listnumber[]=`hjpicname`;
+	string $imgs[] = `getFileList -fs ($listnumber[0] +$listnumber[1]+$listnumber[2])`;
+    int    $size   =`size $imgs`-1;
+	string $startframe=endString($imgs[0], 8);
+	string $endframe  =endString($imgs[$size], 8);
+	string $framelist[]={`match "[0-9]+" $startframe`,`match "[0-9]+" $endframe`};
+    if (`gmatch $framelist[0] "0"`==0&&`gmatch $framelist[0] "00"`==0)
+	{
+		string $start=endString ($framelist[0],2);
+		string $end  =endString ($framelist[1],2);
+		string $frame[]={$start,$end};
+		return $frame;
+	} else if (`gmatch $framelist[0] "0"`==0&&`gmatch $framelist[0] "00"`!=0)
+	{
+		string $start=endString ($framelist[0],3);
+		string $end  =endString ($framelist[1], 3);
+		string $frame[]={$start,$end};
+		return $frame;
+	}else if (`gmatch $framelist[0] "0"`!=0&&`gmatch $framelist[0] "00"`!=0)
+	{
+		string $start=endString ($framelist[0],4);
+		string $end  =endString ($framelist[1],4);
+		string $frame[]={$start,$end};
+		return $frame;
+		
+	}
+    
+	
+}
+global proc string hjcomfixer()
+{
+string $namelist[]=`hjcommandname`;
+string $command="\\\\File-cluster\\GDC\\Resource\\Support\\framefixer\\FrameFixer.exe -a -ng "+($namelist[0]+$namelist[1]+$namelist[2]);
+string $syscommand=`system 	($command)`;
+print  $syscommand;
+hjimgcvt;
+return $syscommand;
+}
+
+global proc string HjFileToPath()
+{
+	string $filePath = `fileBrowserDialog -mode 0  -fileCommand "HjLoadToPath"  -actionName "select_folder" `;
+
+	return $filePath;
+}
+
+global proc HjLoadToPath(string $filename,string $filetype)
+{
+	textFieldButtonGrp -e -text $filename fromFieldBGrp1;
+	string $frame[]=`hjstartframe`;
+	string $start=`textFieldGrp -e -text $frame[0]  Hintfield`;
+	string $end  =`textFieldGrp -e -text $frame[1] Hinfielda`;
+}
+
+
+global proc Hjfixer()
+{
+	if(`window -ex HjfixerUI`) deleteUI HjfixerUI;
+    string $window 		= `window -title "HJ FixerFrame" HjfixerUI`;
+ 	string $form 		= `formLayout `;
+	string $c1          =`columnLayout -adjustableColumn true`;
+	string $f1			=`textFieldButtonGrp -label "素材路径" -columnWidth 1 90 -buttonLabel "Browse" -buttonCommand "HjFileToPath" -adjustableColumn 2 fromFieldBGrp1`;
+   setParent ..;
+setParent ..;
+	string $column 		= `frameLayout -label "素材信息" -labelAlign "top" -cll true -borderStyle "etchedIn"  imgType`;
+ 	string $form1 		= `formLayout `;
+	string $m1=`optionMenuGrp 	-label "图片格式"-columnWidth 1 100 -columnAlign 1 "right" -adjustableColumn 2 fromMenuGrp`;
+	menuItem -label "iff";
+	menuItem -label "tif";
+	menuItem -label "jpg";
+	menuItem -label "tga";
+	menuItem -label "bmp";
+	menuItem -label "gif";	
+	string $bx1=`textFieldGrp -label "开始帧" Hintfield`;
+    string $bx2=`textFieldGrp -label "结束帧" Hinfielda`;
+	setParent ..;
+setParent ..;
+	string $form2 			=`formLayout `;
+    string $b1           	=`button -label Ok -c hjcomfixer -w 50`;
+	string $b2           	=`button -label Close -c "deleteUI HjfixerUI" -w 500 `;
+	setParent ..;
+setParent ..;
+
+formLayout -edit
+ 		-attachForm     	$c1     "top"    		5
+ 		-attachForm     	$c1     "left"   		5
+		-attachForm     	$c1     "right"  		5 
+ 		-attachControl  	$c1     "bottom" 		5 $column
+ 		
+		-attachNone     	$column "top"    
+ 		-attachForm      	$column "left"   	5
+ 		-attachForm     	$column "right"  	5
+		-attachControl  	$column "bottom"  	5 $form2
+		
+		-attachNone     	$form2 	"top"    
+ 		-attachForm      	$form2 	"left"   	5
+ 		-attachForm     	$form2 	"right"  	5
+		-attachForm  		$form2 	"bottom"  	5 
+		
+ 	$form;
+
+    formLayout -edit
+ 		-attachForm     	$m1     "top"    	5
+ 		-attachForm     	$m1     "left"   	5
+		-attachForm    		$m1     "bottom"  	5 
+ 		-attachControl  	$m1     "right" 	5 $bx1
+ 		
+		-attachNone     	$bx1 	"left"    
+ 		-attachForm      	$bx1 	"bottom"   	5
+ 		-attachForm     	$bx1 	"top"  		5
+		-attachControl  	$bx1 	"right"  	5 $bx2
+		
+		-attachNone     	$bx2 "left"    
+ 		-attachForm      	$bx2 "left"   		5
+ 		-attachForm     	$bx2 "right"  		5
+		-attachForm  		$bx2 "bottom"  		5 
+		
+ 	$form1;
+	
+	formLayout -edit
+ 		-attachForm     	$b1     "top"    	5
+ 		-attachForm     	$b1     "left"   	5
+		-attachForm    		$b1     "bottom"  	5 
+ 		-attachControl  	$b1     "right" 	5 $b2
+ 		
+		-attachNone     	$b2 	"left"    
+ 		-attachForm      	$b2 	"bottom"   	5
+ 		-attachForm     	$b2 	"top"  		5
+		-attachForm  		$b2 	"right"  	5 
+		
+	$form2;
+
+ 	
+
+
+ 	showWindow $window;
+}

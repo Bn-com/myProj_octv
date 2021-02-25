@@ -1,0 +1,1084 @@
+// FurExport.mel (c) 2007 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	
+Use:
+	FurExport args
+
+Arguments:
+	args (string)	- semicolon delimited list of arguments
+
+Returns:
+	
+Dependancies:
+
+	getPath
+	getVersion
+	argList.mel
+	parseXML.mel
+	fileIO.mel
+	xml_parser plug-in
+	pointCache plug-in
+	shaveNode
+	padNumber
+	getFileMTime
+	pointCacheInfo plug-in
+	shave_fur_export plug-in
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	01/29/07
+Revisions:	02/07/07	Rev 1.1
+		- Implemented versioning of the fur files
+		02/09/07	Rev 1.2
+		- Updated data written to shaveTranslate to work with new fur_export_and_translate.py
+		02/12/07	Rev 1.3
+		- Adding support for exporting the fur in single frame mode (from an asset)
+		- Hooked up auto-creation of uvs in color shader
+
+		02/15/07	Rev 1.4
+		- Added a debugging option to save the fur export file
+
+		02/16/07	Rev 1.5
+		- Breaking any previously existing connections to pointCache .inTime attribute
+
+		02/19/07	Rev 1.6
+		- Switching to shaveFurExport plug-in to export the fur directly to the .fur files.
+
+		03/05/07	Rev 1.8
+		- Updating to accomodate versioned pointCache
+
+		03/07/07	Rev 1.9
+		- Hooking up smart fur export
+
+		03/08/07	Rev 2.0
+		- Plugging in support for pfxHair and stroke nodes
+
+		03/12/07	Rev 2.1
+		- Plugging in pfxHair version of uv in color shader
+
+		03/12/07	Rev 2.2
+		- Adding synching of animation cache
+
+		03/16/07	Rev 2.3
+		- Updating to sync to versioned cloth cache
+		- Updating checkExport (smartExport) to work with versioned cloth cache
+
+		03/29/07	Rev 2.4
+		- Addressed unitToTimeConversion issue when keying pointCache nodes
+
+		04/02/07	Rev 2.5
+		- Fixed error that crept in where pre and pst weren't getting set to extrapolate on pointCache nodes
+
+		04/07/07	Rev 2.6
+		- Pre-build final output directory if different from version output directory.
+		
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// latest dev version of this script:
+// source "/film/apps/reelfx/maya/scripts/pipelineScripts/FurExport.2.6.mel";
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadDependencies() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+	if (!`pluginInfo -q -l "pointCache"`)
+		loadPlugin "pointCache";
+	if (!`pluginInfo -q -l "shave_fur_export"`)
+		loadPlugin "shave_fur_export";
+	if (!`pluginInfo -q -l "pointCacheInfo"`)
+		loadPlugin "pointCacheInfo";
+	if (!`pluginInfo -q -l "pfx_hair_export"`)
+		loadPlugin "pfx_hair_export";
+	if (!`pluginInfo -q -l "animCache"`)
+		loadPlugin "animCache";
+
+	eval ("source \"argList.mel\"");
+	eval ("source \"parseXML.mel\"");
+	eval ("source \"fileIO.mel\"");
+}
+// ---------------------------------------------------------------------------------------------------
+// getFurNodes - return all the fur nodes in the scene. Avoids ls -type
+// ---------------------------------------------------------------------------------------------------
+global proc string[] getFurNodes()
+{
+	// fur exporting nodes
+	string $exportTypes[] = {"shaveHair", "pfxHair", "stroke"};
+	string $nodes[];
+
+	string $allShapes[] = `ls -type shape`;
+	for ($shape in $allShapes)
+	{
+		string $type = `nodeType $shape`;
+		if (stringArrayFindIndex ($type,$exportTypes) != -1)
+			$nodes[size($nodes)] = $shape;
+	}
+	return $nodes;
+}
+// ---------------------------------------------------------------------------------------------------
+// gotShave
+// ---------------------------------------------------------------------------------------------------
+proc int gotShave (string $furNodes[])
+{
+	for ($i=0;$i<size($furNodes);$i++)
+	{
+		if (`nodeType $furNodes[$i]` == "shaveHair")
+			return true;
+	}
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+// gotPfxHair
+// ---------------------------------------------------------------------------------------------------
+proc int gotPfxHair (string $furNodes[])
+{
+	for ($i=0;$i<size($furNodes);$i++)
+	{
+		if (`nodeType $furNodes[$i]` == "pfxHair")
+			return true;
+	}
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+// create a shader that puts the uv coords in the color channels and attach to all shave nodes
+// ---------------------------------------------------------------------------------------------------
+global proc createUVInColorShaderShave ()
+{
+	string $samplerInfo = `createNode samplerInfo`;
+	string $checker = `createNode checker`;
+	setAttr ($checker+".color1") 1 1 1;
+	setAttr ($checker+".color2") 1 1 1;
+	setAttr ($checker+".colorGain") 0 0 0;
+	setAttr ($checker+".defaultColor") 0 0 0;
+
+	connectAttr ($samplerInfo+".uCoord") ($checker+".colorGainR");
+	connectAttr ($samplerInfo+".vCoord") ($checker+".colorGainG");
+	connectAttr ($checker+".message") ":defaultTextureList1.textures" -nextAvailable;
+	connectAttr ($samplerInfo+".message") ":defaultRenderUtilityList1.utilities" -nextAvailable;
+
+	string $shaveNodes[] = `ls -type shaveHair`;
+	for ($i=0;$i<size($shaveNodes);$i++)
+	{
+		if (`nodeType $shaveNodes[$i]` != "shaveHair")
+			continue;
+
+		setAttr ($shaveNodes[$i]+".hairColor") -type double3 1 1 1;
+		setAttr ($shaveNodes[$i]+".specular") 0;
+		setAttr ($shaveNodes[$i]+".amb/diff") 0;
+		setAttr ($shaveNodes[$i]+".gloss") 0;
+		setAttr ($shaveNodes[$i]+".hueVariation") 0;
+		setAttr ($shaveNodes[$i]+".valueVariation") 0;
+		setAttr ($shaveNodes[$i]+".rootColor") -type double3 1 1 1;
+		setAttr ($shaveNodes[$i]+".mutantHairColor") -type double3 1 1 1;
+		setAttr ($shaveNodes[$i]+".percentMutantHairs") 0;
+		connectAttr -f ($checker+".outColor") ($shaveNodes[$i]+".rootHairColorTexture");
+		connectAttr -f ($checker+".outColor") ($shaveNodes[$i]+".hairColorTexture");
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+// create a shader that puts the uv coords in the color channels and attach to all pfxHair nodes
+// ---------------------------------------------------------------------------------------------------
+global proc createUVInColorShaderPfxHair ()
+{
+	// get hairSystem shapes
+	string $shapes[] = `ls -type hairSystem`;
+
+	// create the shading network
+	
+	// red -> black ramp
+	string $ramp_rb = `createNode ramp`;
+	// get rid of third multi-instance
+	removeMultiInstance ($ramp_rb+".colorEntryList[2]");
+
+	setAttr ($ramp_rb+".colorEntryList[0].position") 0;
+	setAttr ($ramp_rb+".colorEntryList[0].color") -type "float3" 0 0 0 ;
+	setAttr ($ramp_rb+".colorEntryList[1].position") 1;
+	setAttr ($ramp_rb+".colorEntryList[1].color") -type "float3" 1 0 0 ;
+
+	setAttr ($ramp_rb+".type") 1;	// U ramp
+
+	// green -> black ramp
+	string $ramp_gb = `createNode ramp`;
+	// get rid of third multi-instance
+	removeMultiInstance ($ramp_gb+".colorEntryList[2]");
+
+	setAttr ($ramp_gb+".colorEntryList[0].position") 0;
+	setAttr ($ramp_gb+".colorEntryList[0].color") -type "float3" 0 0 0 ;
+	setAttr ($ramp_gb+".colorEntryList[1].position") 1;
+	setAttr ($ramp_gb+".colorEntryList[1].color") -type "float3" 0 1 0 ;
+
+	setAttr ($ramp_gb+".type") 0;	// V ramp
+
+	// make connections...
+	connectAttr ($ramp_rb+".outColor") ($ramp_gb+".colorOffset");
+	connectAttr ($ramp_gb+".message") ":defaultTextureList1.textures" -nextAvailable;
+	connectAttr ($ramp_rb+".message") ":defaultTextureList1.textures" -nextAvailable;
+
+	// connect to each hairSystem
+	string $otherAttrs[] = {
+		"opacity",
+		"translucence",
+		"specularColor",
+		"specularColorR",
+		"specularColorG",
+		"specularColorB",
+		"specularPower",
+		"castShadows",
+		"diffuseRand",
+		"specularRand",
+		"hueRand",
+		"satRand",
+		"valRand"
+	};
+	for ($i=0;$i<size($shapes);$i++)
+	{
+		evalEcho ("connectAttr -f "+$ramp_gb+".outColor "+$shapes[$i]+".hairColor");
+		
+		// set the hairColor scale to pure white - this a ramp so we have to loop through each entry
+		string $attrs[] = `listAttr -m ($shapes[$i]+".hairColorScale")`;
+		for ($j=0;$j<size($attrs);$j++)
+		{
+			if (endsWith ($attrs[$j],"hairColorScale_Color"))
+			{
+				evalEcho ("setAttr -type float3 "+$shapes[$i]+"."+$attrs[$j]+" 1 1 1");
+			}
+		}
+
+		
+		for ($j=0;$j<size($otherAttrs);$j++)
+		{
+			string $plug = $shapes[$i]+"."+$otherAttrs[$j];
+			string $type = `getAttr -type $plug`;
+			int $isLocked = `getAttr -l $plug`;
+			string $in[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+
+			if ($isLocked)
+			{
+				evalEcho ("setAttr -lock false "+$plug);
+			}
+			if (size($in))
+			{
+				evalEcho ("disconnectAttr "+$in[0]+" "+$plug);
+			}
+			if ($type != "float3" && $type != "double3")
+			{
+				if ($otherAttrs[$j] == "opacity")
+					evalEcho ("setAttr "+$plug+" 1");
+				else
+					evalEcho ("setAttr "+$plug+" 0");
+			}
+		}
+	}
+
+	// make sure colorBlend is at 0 on all follicles
+	string $follicles[] = `ls -type follicle`;
+	for ($i=0;$i<size($follicles);$i++)
+	{
+		string $plug = $follicles[$i]+".colorBlend";
+
+		string $in[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+		if (`getAttr -l $plug`)
+			evalEcho ("setAttr -lock false "+$plug);
+
+		if (size($in))
+			evalEcho ("disconnectAttr "+$in[0]+" "+$plug);
+
+		evalEcho ("setAttr "+$plug+" 0"); 
+	}
+
+}
+// ---------------------------------------------------------------------------------------------------
+// create a shader that puts the uv coords in the color channels and attach to all fur nodes
+// ---------------------------------------------------------------------------------------------------
+global proc createUVInColorShader ()
+{
+
+	string $furNodes[] = getFurNodes();
+	if (gotShave($furNodes))
+		createUVInColorShaderShave();
+	
+	if (gotPfxHair($furNodes))
+		createUVInColorShaderPfxHair();	
+
+}
+// ---------------------------------------------------------------------------------------------------
+proc int setupScene ()
+{
+	global string $gTaskType;
+	global int $gUVsInColor;	// create and apply the shader that puts the uv's in the color channels.
+	global int $gFurExportWithMotionVectors;
+	
+
+	string $globals = getPath ("ProjectGlobals",{})+"/project.xml";
+	if (!`filetest -f $globals`)
+	{
+		print ($gTaskType+": "+$globals+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+	string $xml = readXML ($globals,0);
+	string $node[] = xml_getTag ($xml,"frameRate");
+	string $rate = xml_getVar ($node[0],"name");
+	$node = xml_getTag ($xml,"linearUnit");
+	string $linearUnit = xml_getVar ($node[0],"name");
+
+	currentUnit -l $linearUnit -t $rate;
+
+	print ($gTaskType+": Set time units to "+$rate+"...\n");
+	print ($gTaskType+": Set linear units to "+$linearUnit+"...\n");
+
+	// set render globals to motion blur
+	print ($gTaskType+": Set Motion Blur OFF.\n");
+	setAttr -l 0 defaultRenderGlobals.motionBlur;
+	setAttr "defaultRenderGlobals.motionBlur" 0;
+	if (`objExists miDefaultOptions`)
+		setAttr miDefaultOptions.motionBlur 0;
+
+	if ($gUVsInColor)
+	{
+		print ($gTaskType+": Applying UVs in Color shader to all shaveHair nodes.\n");
+		createUVInColorShader();
+	}
+	
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+// getPointCacheTransformAndShape
+// ---------------------------------------------------------------------------------------------------
+proc int getPointCacheTransformAndShape(string $node,string $xform[], string $shape[])
+{
+	clear $xform;
+	clear $shape;
+
+	string $future[] = `listHistory -f 1 $node`;
+	$future = `ls -type mesh -type subdiv -type nurbsSurface -type nurbsCurve $future`;
+
+	if (!size($future))
+		return false;
+	$shape[0] = $future[0];
+	$xform = `listRelatives -p -pa $shape`;
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+// hookupPointCache - 
+// ---------------------------------------------------------------------------------------------------
+proc hookupPointCache (string $node, string $path, int $frame)
+{
+	// break any existing connections to .inTime attribute
+	string $in[] = `listConnections -s 1 -d 0 -p 1 ($node+".inTime")`;
+	if (size($in))
+		evalEcho ("disconnectAttr "+$in[0]+" "+$node+".inTime");
+
+	evalEcho ("setAttr "+$node+".envelope 1");
+
+	evalEcho ("setAttr -type \"string\" "+$node+".cacheFile \""+$path+"\"");
+
+	evalEcho ("setAttr "+$node+".inTime "+$frame);
+
+	evalEcho ("setAttr "+$node+".mode 2");	// geometry
+
+	evalEcho ("setAttr "+$node+".pre 3");	// extrapolate
+
+	evalEcho ("setAttr "+$node+".pst 3");
+	
+}
+// ---------------------------------------------------------------------------------------------------
+// getVersionData - get the pointCache version data for the specified namespace
+// ---------------------------------------------------------------------------------------------------
+proc string getVersionData (string $namespace, string $clothNames[], string $clothVersions[])
+{
+	// globals
+	global string $gSequence;
+	global string $gShot;
+	global string $gTaskType;
+	string $ver = "0000";
+
+	string $file = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot+"_pointCacheExport.xml";
+	if (!`filetest -f $file`)
+	{
+		print ($gTaskType+": Warning: "+$file+" doesn't exist.\n\n");
+		return "0000";
+	}
+
+	string $xml = readXML ($file,0);
+	string $nodes[] = xml_getTag ($xml,"Asset");
+ 
+	// put a version with each namespace
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $ns = xml_getVar ($nodes[$i],"namespace");
+		if ($ns == $namespace)
+		{
+			$ver = xml_getVar ($nodes[$i],"pointCacheVersion");
+			break;
+		}
+		
+	}
+	// get cloth versioning data
+	clear $clothNames;
+	clear $clothVersions;
+
+	$nodes = xml_getTag ($xml,"Cloth");
+	if (size($nodes))
+		$nodes = xml_getTag ($nodes[0],"Object");
+
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $clothNs = xml_getVar ($nodes[$i],"namespace");
+		if ($clothNs == $namespace)
+		{
+			int $c = size($clothNames);
+			$clothNames[$c] = xml_getVar ($nodes[$i],"name");
+			$clothVersions[$c] = xml_getVar ($nodes[$i],"version");
+		}
+	}
+
+	return $ver;
+}
+// ---------------------------------------------------------------------------------------------------
+// syncNodes - set the point cache nodes. filename is the pointCacheGeo.xml
+// ---------------------------------------------------------------------------------------------------
+global proc int syncNodes (
+	string $filename, 
+	string $pointCachePath, 
+	string $namespace, 
+	int $frame, 
+	string $pointCacheVersion, 
+	string $clothNames[], 
+	string $clothVersions[], 
+	string $resultPaths[]
+)
+{
+	global string $gTaskType;
+	global string $gSequence;
+	global string $gShot;
+
+	clear $resultPaths;
+
+	// sync animCache
+	string $cachePath = getPath ("ShotBase",{$gSequence,$gShot})+"/cache/animation/cache.bcf";
+	int $s = `eval ("animCache -q -cs -c \""+$cachePath+"\"")`;
+	int $e = `eval ("animCache -q -ce -c \""+$cachePath+"\"")`;
+	evalEcho ("animCache -s "+$s+" -e "+$e+" -bk -c \""+$cachePath+"\" -r \""+$namespace+":\" \":\" -itt \"linear\" -ott \"linear\" -pre \"linear\" -pst \"linear\"");
+	
+	// if we have pfxHair, set the current time (we are possibly getting the "sleepy time" problems)
+	//
+	string $furNodes[] = getFurNodes();
+	if (gotPfxHair($furNodes))
+	{
+		string $nodes[] = `ls -type hairSystem`;
+		for ($node in $nodes)
+		{
+			string $plug = $node+".currentTime";
+			if (`getAttr -l $plug`)
+				setAttr -lock false $plug;
+			string $in[] = `listConnections -s 1 -d 0 -p 1 $plug`;
+			if (size($in))
+				disconnectAttr $in[0] $plug;
+			//evalEcho ("setAttr "+$plug+" "+$frame);
+			evalEcho ("setAttr "+$plug+" 0");
+		}
+	}
+	//
+
+	// read the pointCacheGeo.xml to get a list of transforms and shapes
+	string $xml = readXML ($filename,0);
+	string $nodes[] = xml_getTag ($xml,"Object");
+
+	if (!size($nodes))
+	{
+		print ($gTaskType+": "+$filename+" is empty. Can't continue.\n\n");
+		return false;
+	}
+	string $transforms[],$shapes[];
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		$transforms[$i] = xml_getVar ($nodes[$i],"transform");
+		$shapes[$i] = xml_getVar ($nodes[$i],"shape");
+	}
+
+	// get all the pointCache nodes in the scene and iterate through
+	string $pointCacheNodes[] = `ls -type pointCache`;
+	if (!size($pointCacheNodes))
+	{
+		print ($gTaskType+": Scene contains no pointCache nodes. Can't continue.\n\n");
+		return false;
+	}
+	
+	string $pc_xform[], $pc_shape[];
+	for ($i=0;$i<size($pointCacheNodes);$i++)
+	{
+		if (getPointCacheTransformAndShape($pointCacheNodes[$i],$pc_xform,$pc_shape))
+		{
+			// look up the transform in the pointCache list
+			int $index = stringArrayFindIndex ($pc_xform[0],$transforms);
+			if ($index == -1)
+				continue;
+			
+			// try cloth
+			string $path = "";
+			for ($j=0;$j<size($clothNames);$j++)
+			{
+				if ($clothNames[$j] == $shapes[$index])
+				{
+					$path = $pointCachePath+"/cloth/"+$namespace+"/"+$shapes[$index]+"/"+$shapes[$index]+"."+$clothVersions[$j]+".pc";
+					break;
+				}
+			}
+			// try unversioned cloth (backward compatibility)
+			if (!`filetest -f $path`)
+			{
+				$path = $pointCachePath+"/cloth/"+$namespace+"/"+$shapes[$index]+".pc";
+			}
+			if (!`filetest -f $path`)
+			{
+				// try point
+				if ($pointCacheVersion == "0000")
+					$path = $pointCachePath+"/point/"+$namespace+"/"+$shapes[$index]+".pc";
+				else
+					$path = $pointCachePath+"/point/"+$namespace+"/versions/"+$pointCacheVersion+"/"+$shapes[$index]+".pc";
+			}
+			// if the file still doesn't exist, then we are missing point cache
+			if (!`filetest -f $path`)
+			{
+				print ($gTaskType+": Missing pointCache "+$path+". Can't continue.\n\n");
+				return false;
+			}
+			// hook it up
+			hookupPointCache ($pointCacheNodes[$i],$path,$frame);
+			$resultPaths[size($resultPaths)] = $path;
+		}
+	}
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+proc int exportShave (string $location, string $ver_location, string $final_location, string $namespace, int $frame, int $needsExport, string $preVersion)
+{
+	global string $gTaskType;
+	float $exportTime, $convertTime, $copyTime,$startTime;
+	global string $gSequence;
+	global string $gShot;
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global int $gIncrementVersion;
+	global int $gFurExportWithMotionVectors;	// Is there a motion vector pass after this?
+
+	// needs export - if set to false, it's been determined that we don't need to export fur for this frame.
+	// there is one check still to do - make sure the previous fur still exists. If so, rather than exporting,
+	// create a sym-link to the previous fur. This is done so that there is a clean sequence of fur files for this version.
+
+	// make directories if they don't exist
+	for ($dir in {$ver_location,$location, $final_location})
+	{
+		if (!`filetest -d $dir`)
+		{
+			sysFile -md $dir;
+			system ("chmod 777 "+$dir);
+		}
+	}
+
+	string $tempExport = "/usr/tmp/shaveExport.fur";	// files are exported locally here, then copied to final location
+	string $fur_file;					// live location for fur file - this is a sym link to $ver_file
+	string $ver_file;					// final location for fur file
+	float $exportTime,$copyTime,$st,$elapsed;		// timing stats
+	int $copy_max_tries = 5;				// max times we will try to copy the file
+
+	//string $shaveNodes[] = `ls -type shaveHair`;
+	string $furNodes[] = getFurNodes();
+	print ($gTaskType+": Exporting...\n\n");
+
+	// if temp file exists from before, delete it
+	if (`filetest -f $tempExport`)
+		system ("rm "+$tempExport);
+
+	for ($i=0;$i<size($furNodes);$i++)
+	{
+		if ($gFurSingleFrameMode)
+		{
+			$fur_file = $location+"/"+$furNodes[$i]+".fur";
+			string $version = getVersion ("FromFilenameGeneric",{$fur_file});
+			int $newVer = ((int)$version)+($gIncrementVersion>0 || $version == "0000");
+			$ver_file = $ver_location+"/"+$furNodes[$i]+"."+padNumber($newVer,4)+".fur";
+		}
+		else
+		{
+			$fur_file = $location+"/"+$furNodes[$i]+"."+padNumber($frame,4)+".fur";
+			if ($gFurExportWithMotionVectors)
+				$ver_file = $ver_location+"/"+$furNodes[$i]+"."+padNumber($frame,4)+".fur.tmp";	
+			else
+				$ver_file = $ver_location+"/"+$furNodes[$i]+"."+padNumber($frame,4)+".fur";	
+		}
+		// export locally
+
+		// if needsExport is set to false, check to see if the previous fur version is still there!
+		if (!$needsExport)
+		{
+			$preFur = $location+"/versions/"+$preVersion+"/"+$furNodes[$i]+"."+padNumber($frame,4)+".fur";
+			if (`filetest -f $preFur`)
+			{
+				string $final = $ver_location+"/"+$furNodes[$i]+"."+padNumber($frame,4)+".fur";
+				if ($gFurExportWithMotionVectors)
+					$final += ".tmp";
+				system ("ln -s "+$preFur+" "+$final);
+				// explain what we are doing!
+				print ($gTaskType+": Fur for "+$furNodes[$i]+" is up-to-date at frame "+$frame+". Skipping export and created a sym-link instead.\n");
+				continue;
+			}
+			else
+			{
+				print ($gTaskType+": Smart export said the fur was up-to-date, but the previous fur file "+$preFur+" doesn't exist anymore. Continuing with export.\n");
+			}
+		}
+
+		evalEcho ("currentTime "+$frame);	// this must be done inside the for loop. Shave leaves the frame at frame + .2, causing the frame to increment by .2 for each shaveHair
+		
+
+		$st = `timerX`;
+		string $type = `nodeType $furNodes[$i]`;
+		if ($type == "shaveHair")
+		{
+			evalEcho ("shaveFurExport \""+$furNodes[$i]+"\" \""+$tempExport+"\"");
+		}
+		else if ($type == "pfxHair" || $type == "stroke")
+		{
+			evalEcho ("pfxHairExport \""+$furNodes[$i]+"\" \""+$tempExport+"\"");
+		}
+		$elapsed = `timerX -st $st`;
+		$exportTime += $elapsed;
+		print ($gTaskType+": Done exporting fur for "+$furNodes[$i]+". Elapsed time: "+$elapsed+" seconds.\n");
+		
+		// copy to network
+		// if a file already exists from before, delete it
+		if (`filetest -f $ver_file`)
+			system ("rm "+$ver_file);
+		// if fur file already exists, delete or else link will fail
+		// this is only done in single frame mode. In multi-frame mode, PostExport process handles making the links
+		if (`filetest -f $fur_file` && $gFurSingleFrameMode)
+			system ("rm "+$fur_file);
+
+		int $success = false;
+
+
+		// do a loop to make sure it got there
+		for ($j=0;$j<$copy_max_tries;$j++)
+		{
+			if ($j)
+			{
+				print ($gTaskType+": Copy FAILED! Waiting 5 secs and retrying.\n");
+				pause -sec 5;
+			}
+			
+			print ("cp "+$tempExport+" "+$ver_file+"\n");
+			$st = `timerX`;
+			system ("cp "+$tempExport+" "+$ver_file);
+			$elapsed = `timerX -st $st`;
+			$copyTime += $elapsed;
+
+			if (`filetest -f $ver_file`)
+			{
+				print ($gTaskType+": Done copying fur to "+$ver_file+". Elapsed time: "+$elapsed+" seconds.\n");
+				system ("chmod 777 "+$ver_file);
+				
+				// links are only made in single-frame mode. PostExport handles links when doing multi-frame
+				if ($gFurSingleFrameMode)
+				{
+					print ("ln -s "+$ver_file+" "+$fur_file+"\n");
+					system ("ln -s "+$ver_file+" "+$fur_file);
+				}
+				$success = true;
+				break;
+			}
+		}
+		// if temp file exists from before, delete it
+		if (`filetest -f $tempExport`)
+			system ("rm "+$tempExport);
+
+		if (!$success)
+		{
+			print ($gTaskType+": Copy FAILED, even after "+$copy_max_tries+"! Bailing!.\n");
+			return false;
+		}
+	}
+
+	// print some time stats:
+	print ("\n"+$gTaskType+": DONE exporting fur.\n");
+	print ("------------------------------------\n");
+	print ("Total for fur export: "+$exportTime+" seconds.\n");
+	print ("Total for file transfer: "+$copyTime+" seconds.\n");
+	print ("Total: "+($exportTime+$copyTime)+" seconds.\n");
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+// checkExport - checks to see whether the fur needs to be exported for this frame
+// ---------------------------------------------------------------------------------------------------
+proc int checkExport (
+	int $frame,
+	string $assetFilename,
+	string $namespace,
+	string $currentPaths[],
+	string $preVersion[]
+)
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gTaskType;
+
+	// furExport file for the shot
+	string $furExportFile = getPath ("ShotInfoDir",{$gSequence,$gShot})+"/"+$gSequence+"_"+$gShot+"_furExport.xml";
+	string $fe_namespaces[], $fe_furVersion[], $fe_pointCacheVersion[], $fe_exportFilenames[], $fe_exportFileVersions[], $fe_exportStamps[]; // data from this file
+	string $fe_clothNames[], $fe_clothVersions[];
+	
+	// Check number 1, does furExport.xml exist. If not, that's a definate yes for exporting the frame
+	if (!`filetest -f $furExportFile`)
+	{
+		print ($gTaskType+": Smart Export. No previous "+$furExportFile+". Exporting fur for frame "+$frame+"\n");
+		return true;
+	}
+
+	// parse the furExport data
+	/*
+		<FurExport>
+			<Asset namespace="donkey" furVersion="0003" pointCacheVersion="0001" exportFilename="/diskx/entertainment/15730_shrek_marketing/animation/cpsv/characters/donkey/donkey_furExport.ma" exportVersion="0001" />
+		</FurExport>
+	*/
+	
+	string $xml = readXML ($furExportFile,0);
+	string $node[] = xml_getTag ($xml,"Asset");
+	for ($i=0;$i<size($node);$i++)
+	{
+		$fe_namespaces[$i] = xml_getVar ($node[$i],"namespace");
+		$fe_furVersion[$i] = xml_getVar ($node[$i],"furVersion");
+		$fe_pointCacheVersion[$i] = xml_getVar ($node[$i],"pointCacheVersion");
+		$fe_exportFilenames[$i] = xml_getVar ($node[$i],"exportFilename");
+		$fe_exportFileVersions[$i] = xml_getVar ($node[$i],"exportVersion");
+		$fe_exportStamps[$i] = xml_getVar ($node[$i],"exportStamp");
+	}
+	$node = xml_getTag ($xml,"Cloth");
+	if (size($node))
+	{
+		$node = xml_getTag ($node[0],"Object");
+		for ($i=0;$i<size($node);$i++)
+		{
+			string $curNs = xml_getVar ($node[$i],"namespace");
+			if ($curNs == $namespace)
+			{
+				int $c = size ($fe_clothNames);
+				$fe_clothNames[$c] = xml_getVar ($node[$i],"name");
+				$fe_clothVersions[$c] = xml_getVar ($node[$i],"version");
+			}
+		}
+	}
+
+	// Check number 2 - Has an asset in this namespace been exported before?
+	int $idx = stringArrayFindIndex ($namespace,$fe_namespaces);
+	if ($idx == -1)
+	{
+		print ($gTaskType+": No fur has been exported from an asset in namespace "+$namespace+" before. Exporting fur for frame "+$frame+".\n");
+		return true;
+	}
+
+	// Check #3 - Has the asset changed
+	if ($assetFilename != $fe_exportFilenames[$idx])
+	{
+		print ($gTaskType+": Fur export asset has changed from "+$fe_exportFilenames[$idx]+" to "+$assetFilename+". Exporting fur for frame "+$frame+".\n");
+		return true;
+	}	
+
+	// Check #4 - Has the version changed?
+	string $curAssetVersion = getVersion ("FromFilenameGeneric",{$assetFilename});
+	if ($curAssetVersion != $fe_exportFileVersions[$idx])
+	{
+		print ($gTaskType+": Fur export asset version has changed from "+$fe_exportFileVersions[$idx]+" to "+$curAssetVersion+". Exporting fur for frame "+$frame+".\n");
+		return true;
+	}
+
+	// Check #5 - Has the fur export asset timestamp changed?
+	int $curStamp = getFileMTime ($assetFilename);
+	if ($curStamp != $fe_exportStamps[$idx])
+	{
+		print ($gTaskType+": Timestamp of fur export asset has changed. Exporting fur for frame "+$frame+".\n");
+		return true;
+	}
+
+	// Check #6 - Make sure there is a record of the pointCache version used for the last export
+	if ($fe_pointCacheVersion[$idx] == "" || $fe_pointCacheVersion[$idx] == "0000")
+	{
+		print ($gTaskType+": No record of last pointCache version found. Exporting fur for frame "+$frame+".\n");
+		return true;
+	}
+
+	// That does it for general checks. Next diff the pointCaches to see if this frame has changed.
+	string $oldPathBase = getPath ("ShotBase",{$gSequence,$gShot})+"/cache/point/"+$namespace+"/versions/"+$fe_pointCacheVersion[$idx];
+	for ($i=0;$i<size($currentPaths);$i++)
+	{
+		// rebuild path to get pointCache from last export
+		string $basename = basename ($currentPaths[$i],"");
+		string $shapeName = substitute ("\.pc$",$basename,"");
+		$shapeName = substitute ("\.[0-9][0-9][0-9][0-9]$",$shapeName,"");
+
+		string $oldPath = "";
+		// look in cloth data first
+		for ($j=0;$j<size($fe_clothNames);$j++)
+		{
+			if ($fe_clothNames[$j] == $shapeName)
+			{
+				$oldPath = getPath ("ShotBase",{$gSequence,$gShot})+"/cache/cloth/"+$namespace+"/"+$shapeName+"/"+$shapeName+"."+$fe_clothVersions[$j]+".pc";
+				break;
+			}
+		}
+		if ($oldPath == "")
+			$oldPath = $oldPathBase+"/"+$basename;
+
+		// if the old pointCache doesn't exist, we must export the fur
+		if (!`filetest -f $oldPath`)
+		{
+			print ($gTaskType+": Old pointCache "+$oldPath+" doesn't exist anymore. Exporting fur for frame "+$frame+".\n");
+			return true;
+		}
+
+		// do the diff
+		int $off = eval ("pointCacheInfo -fo \""+$currentPaths[$i]+"\"");
+		int $data[] = eval ("pointCacheInfo -d \""+$oldPath+"\" \""+$currentPaths[$i]+"\"");
+
+		/*
+			if frame is before the beginning of the pointCache, we have to do things a bit differently. In this case we have to diff the first and second frames of the 
+			point cache because this will result in the same extrapolation for frames before the beginning.
+		*/
+		if ($frame < $off)
+		{
+			if (size($data)<2)
+			{
+				print ($gTaskType+": Current frame is before the beginning of the pointCache and pointCache is less than two frames long. Exporting fur for frame "+$frame+".\n");
+				return true;
+			}
+			if ($data[0] == 1 || $data[1] == 1)
+			{
+				print ($gTaskType+": pointCache has changed since last export. Exporting fur for frame "+$frame+".\n");
+				return true;
+			}
+		}
+		else
+		{
+			$off = $frame - $off;
+			if ($data[$off] == 1)
+			{
+				print ($gTaskType+": pointCache has changed since last export. Exporting fur for frame "+$frame+".\n");
+				return true;
+			}
+		}
+	}
+
+	$preVersion[0] = $fe_furVersion[$idx];
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+proc int do_furExport()
+{
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global int $gPlaylistItem;
+	global string $gTaskType;
+	global int $gFurSingleFrameMode;	// Do a single frame of an misc file (probably an asset)
+	global string $gSaveFurExportScene;	// For debugging, save out the file when done
+	global int $gFurSmartExport;		// If set, figure out whether the fur needs to be exported.
+
+	// -------------------------------------------------
+	/*
+		Confirm that the playlist exists
+	*/
+	// -------------------------------------------------
+	if (!`filetest -f $gPlaylist`)
+	{
+		print ($gTaskType+": Playlist "+$gPlaylist+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+	// -------------------------------------------------
+	/*
+		Parse the playlist, and make sure that the playlist item is in range
+	*/
+	// -------------------------------------------------
+	string $xml = readXML ($gPlaylist,0);
+	string $jobs[] = xml_getTag ($xml,"Job");
+	if ($gPlaylistItem >= size($jobs))
+	{
+		print ($gTaskType+": Playlist item "+$gPlaylistItem+" is out of range in "+$gPlaylist+" Can't continue.\n\n");
+		return false;
+	}
+	// now parse the data for the job that this sub-job is assigned to.
+	string $thisJob = $jobs[$gPlaylistItem];
+	int $frame = (int)xml_getVar ($thisJob,"frame");
+	string $node[] = xml_getTag ($thisJob,"CacheOutput");
+	string $location = xml_getVar ($node[0],"location");
+	$node = xml_getTag ($thisJob,"VersionOutput");
+	string $ver_location = xml_getVar ($node[0],"location");
+	$node = xml_getTag ($thisJob,"FinalOutput");
+	string $final_location = $ver_location;
+	if (size($node))
+		$final_location = xml_getVar ($node[0],"location");
+	$node = xml_getTag ($thisJob,"Asset");
+	string $assetName = xml_getVar ($node[0],"name");
+	string $assetType = xml_getVar ($node[0],"type");
+	string $assetFilename = xml_getVar ($node[0],"filename");
+	string $namespace = xml_getVar ($node[0],"namespace");
+	string $pointCacheGeo = getPath ("AssetInfoDir",{$assetType,$assetName})+"/pointCacheGeo.xml";
+	string $pointCachePath = getPath ("ShotBase",{$gSequence,$gShot})+"/cache";	// base path - add namespace, try cloth then point
+	string $synchedPointCachePaths[], $preFurVersion[];
+	int $needsExport = true;	// if we are doing smart export
+
+	// -------------------------------------------------
+	/*
+		Confirm that the fur export file and the pointCacheGeo.xml exists
+	*/
+	// -------------------------------------------------
+	if (!`filetest -f $assetFilename`)
+	{
+		print ($gTaskType+": Fur export file "+$assetFilename+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+	if (!`filetest -f $pointCacheGeo` && !$gFurSingleFrameMode)
+	{
+		print ($gTaskType+": "+$pointCacheGeo+" doesn't exist. Can't continue.\n\n");
+		return false;
+	}
+
+	// -------------------------------------------------
+	/*
+		Open the file
+	*/
+	// -------------------------------------------------
+	print ($gTaskType+": Opening "+$assetFilename+"...\n");
+	catch (`file -f -o $assetFilename`);
+
+	// -------------------------------------------------
+	/*
+		Set time and linear units to match project settings
+	*/
+	// -------------------------------------------------
+	print ($gTaskType+": Setting scene units...\n");
+	if (!setupScene())
+		return false;
+
+	// -------------------------------------------------
+	/*
+		Sync the pointCache nodes
+	*/
+	// -------------------------------------------------	
+	if (!$gFurSingleFrameMode)
+	{
+		print ($gTaskType+": Reading pointCache version data...\n");
+		string $clothNames[],$clothVersions[];
+		string $pointCacheVersion = getVersionData($namespace,$clothNames,$clothVersions); 
+
+		print ($gTaskType+": Synching pointCache nodes...\n");
+		if (!syncNodes ($pointCacheGeo, $pointCachePath, $namespace, $frame, $pointCacheVersion,$clothNames,$clothVersions,$synchedPointCachePaths))
+			return false;
+	}
+
+	// -------------------------------------------------
+	/*
+		Debugging - save out the scene if so desired
+	*/
+	// -------------------------------------------------
+	if ($gSaveFurExportScene != "")
+	{
+		print ($gTaskType+": Saving file to "+$gSaveFurExportScene+"...\n");
+		string $dir = dirname ($gSaveFurExportScene);
+		if (!`filetest -d $dir`)
+			sysFile -md $dir;
+
+		file -rename $gSaveFurExportScene;
+		file -f -save;
+	}
+
+	// -------------------------------------------------
+	/*
+		Smart export - figure out if the fur really needs to be exported again for this frame
+	*/
+	// -------------------------------------------------	
+	if (!$gFurSingleFrameMode && $gFurSmartExport)
+	{
+		print ($gTaskType+": Running smart export checks...\n");
+		$needsExport = checkExport ($frame,$assetFilename,$namespace,$synchedPointCachePaths, $preFurVersion);
+	}
+
+
+	// -------------------------------------------------
+	/*
+		Export
+	*/
+	// -------------------------------------------------
+	exportShave ($location, $ver_location, $final_location, $namespace, $frame, $needsExport, $preFurVersion[0]);
+
+
+	// -------------------------------------------------
+	/*
+		Done
+	*/
+	// -------------------------------------------------
+	print ($gTaskType+": DONE.\n");
+
+	return true;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc FurExport(string $args) 
+{
+	loadDependencies();
+	// ------------------------------------------------------
+	// global variables
+	// ------------------------------------------------------
+	global string $gSequence;
+	global string $gShot;
+	global string $gPlaylist;
+	global int $gPlaylistItem;
+	global int $gFurSingleFrameMode;	// Do a single frame of a misc file (probably an asset)
+	global int $gIncrementVersion;	// increment version? This only applies to single frame mode, in shot mode, the version, incremented or not, is already written
+					// into the playlist by FurPreExport
+	global int $gUVsInColor;	// create and apply the shader that puts the uv's in the color channels.
+	global int $gFurExportWithMotionVectors;	// Is there a motion vector pass after this?
+	global string $gSaveFurExportScene;	// For debugging, save out the file when done
+	global int $gFurSmartExport;		// If set, figure out whether the fur needs to be exported.
+
+	global string $gTaskType = "FurExport";
+
+	// ------------------------------------------------------
+	// parse the command line
+	// ------------------------------------------------------
+	$gSequence = getArgValue ($args,"sequence");
+	$gShot = getArgValue ($args,"shotgroup");
+	$gPlaylist = getArgValue ($args,"playlist");
+	$gPlaylistItem = getArgValue ($args,"playlistItem");
+	$gFurSingleFrameMode = (int)getArgValueDefault ($args,"fursingleframemode","0");
+	$gIncrementVersion = (int)getArgValueDefault ($args,"furincrementVersion","1");
+	$gUVsInColor = (int)getArgValueDefault ($args,"furuvsincolor","1");
+	$gSaveFurExportScene = getArgValue ($args,"savefurexportscene");
+	$gFurExportWithMotionVectors = (int)getArgValueDefault($args,"furexportmotionvectors","1");
+	$gFurSmartExport = (int)getArgValueDefault($args,"fursmartexport","0");
+
+
+	// do the work
+	do_furExport ();
+	
+}

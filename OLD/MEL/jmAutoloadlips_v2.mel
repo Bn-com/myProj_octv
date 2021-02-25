@@ -1,0 +1,309 @@
+//Auto set keyframes for character lip sync according to a data .txt file which derived from x-sheet.
+//For DOD project.
+//Update 03-10-2006.Amplitude function works now.
+
+proc string[] ALLGetFilename()
+{
+	string $fileName = `file -q -sceneName`;
+	string $buffer[];
+	int $num = `tokenize $fileName "\/" $buffer`;
+	int $num2 = `tokenize $buffer[$num-1] "_" $buffer`;
+	int $sFrame = `playbackOptions -q -min`;
+	int $eFrame = `playbackOptions -q -max`;
+	int $tFrame = $eFrame - $sFrame + 1;
+	string $char[] = {$buffer[1],$buffer[2],$sFrame,$eFrame,$tFrame};
+	return $char;
+}
+
+proc string[] ALLGetCharName()
+{
+	string $charName[];
+	string $objs[] = `ls "*_MASTER"`;
+	for($o in $objs)
+	{
+		string $buffer[];
+		tokenize $o "_" $buffer;
+		$charName[`size $charName`] = $buffer[0];
+	}
+	
+	return $charName;
+}
+
+global proc jmAutoloadlips_v2()
+{
+	string $sceneShot[] = ALLGetFilename();
+	int $sceneNum = $sceneShot[0];
+	string  $shotNum = $sceneShot[1];
+	int $startFrame = $sceneShot[2];
+	int $endFrame = $sceneShot[3];
+	string $lipFilePath = "Z:/Projects/DOD/Production/Animation/episode_" + $sceneNum + "/scene_" + $shotNum + "/sync/";
+	string $sceneChars[] = ALLGetCharName();
+
+	if(`window -exists w_JM_ALL_win`)
+		deleteUI w_JM_ALL_win;
+	window -title "Auto Load Character Lips" w_JM_ALL_win;
+		string $form = `formLayout`;
+			intFieldGrp -label "Episode" -value1 $sceneNum -cw2 100 40 _Value_ALL_Shot_Input;
+			textFieldGrp -label "Scene" -text $shotNum -cw2 50 40 _Value_All_Scene_Input;
+			intFieldGrp -numberOfFields 2 -label "startFrame" -extraLabel "endFrame" -value1 $startFrame -value2  $endFrame -cw4 80  40 40 100 _Value_ALL_Start_Input;
+			radioButtonGrp -numberOfRadioButtons 2 -label "Load LipSync To" -labelArray2 "selected" "all" -sl 2 _Value_ALL_Object_Input;
+			text -label "Character List" _Name_ALL_Char;
+			floatSliderGrp -label "amplitude" -height 20 -field true -min 0.0 -max 1.0 -fmn 0.0 -fmx 1.0 -s 0.01 -v 0.8 -cw3 80 60 300 _Value_ALL_Amplitude_Input;
+			textScrollList -numberOfRows 4 -allowMultiSelection true -w 100 _List_ALL_Char_Input;
+			textFieldButtonGrp -label "sync file path" -text $lipFilePath -buttonLabel "Browse" -cw3 90 200 100 -buttonCommand "findFilePath" _syncListPath;
+			string $loadButton = `button -l "Load" -w 80 -command "JM_LoadLipSyncButton"`;
+			string $cleanButton = `button -l "Clean sync" -w 80 -command "deleteSyncKeys"`;
+			string $loadSound = `button -l "Sound" -w 80 -command "loadSoundTrack"`;
+			string $abortButton = `button -l "Edit txt file" -w 80 -command "editSyncTxt"`;
+			
+			textScrollList -e -removeAll _List_ALL_Char_Input;
+			for($i=0;$i<`size $sceneChars`;$i++)
+				textScrollList -e -append ($sceneChars[$i]) _List_ALL_Char_Input;
+		setParent ..;
+		formLayout -edit
+				-attachForm  _Value_ALL_Shot_Input         			"top" 5
+				-attachForm  _Value_ALL_Shot_Input				"left" 5				
+				-attachForm  _Value_ALL_Start_Input         			"top" 5
+				-attachForm  _Value_ALL_Start_Input				"right" 5
+				-attachForm _Value_All_Scene_Input				"top" 5
+				-attachControl _Value_All_Scene_Input			"left" 5 _Value_ALL_Shot_Input 
+				-attachControl  _Value_ALL_Object_Input			"top" 5 _Value_ALL_Start_Input
+				-attachControl _Name_ALL_Char					"top" 5 _Value_ALL_Object_Input			
+				-attachControl _List_ALL_Char_Input				"top" 5 _Name_ALL_Char
+				-attachControl _Value_ALL_Amplitude_Input		"top" 5 _Value_ALL_Object_Input	
+				-attachControl _Value_ALL_Amplitude_Input		"left" 80 _Name_ALL_Char
+				-attachControl _syncListPath						"top" 5 _Name_ALL_Char
+				-attachControl _syncListPath						"left" 80 _Name_ALL_Char
+				-attachControl  $loadButton 						"top" 5 _syncListPath
+				-attachControl $loadButton						"left" 80 _Name_ALL_Char
+				-attachControl $cleanButton						"top" 5 _syncListPath
+				-attachControl $cleanButton						"left" 5 $loadButton
+				-attachControl $loadSound						"left" 5 $cleanButton	
+				-attachControl $loadSound						"top" 5 _syncListPath
+				-attachControl  $abortButton 						"top" 5 _syncListPath
+				-attachForm  $abortButton 						"right" 5
+		$form;
+				
+	showWindow w_JM_ALL_win;
+	
+}
+
+global proc loadSyncFile(string $filename,string $fileType)
+{
+	textFieldButtonGrp -e -text $filename _syncListPath;
+}
+
+global proc string findFilePath()
+{
+	string $filePath = `fileBrowserDialog -m 4 -fc "loadSyncFile" -an "select_folder"`;
+	return $filePath; 
+}
+
+proc loadLipsync(string $char)
+{
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `intFieldGrp -q -value1 _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	float $getAmplitude = `floatSliderGrp -q -value _Value_ALL_Amplitude_Input`;
+	string $charSyncFile = $getSyncFolder + "/" + $getEpisodeNum+"_"+$getSceneNum + ".txt";
+	if(`file -q -ex $charSyncFile`)
+	{
+		$fileId = `fopen $charSyncFile "r"`;
+		string $nextLine = `fgetline $fileId`;
+		int $lineNum = 1;
+		int $frameNum = 1;
+		int $dataNum = 0;
+		string $target1Name = "";
+		string $target2Name = "";
+		string $keySwitch = "off";
+		while(size($nextLine)>0)
+		{
+			if($lineNum > 3)
+			{
+				string $charInTxt = pickCharInTxt($nextLine);
+
+				if($charInTxt == $char)
+				{
+					$keySwitch = "on";
+					$nextLine = `fgetline $fileId`;
+					$lineNum ++;
+					$dataNum ++;					
+				}
+				else if ( $charInTxt != "")
+				{
+					$keySwitch = "off";
+					$dataNum = 0;
+				}
+				if($keySwitch == "on")
+				{
+					if( $dataNum%2 == 1)
+					{
+						if($target1Name != "")
+						{
+							$target2Name = $target1Name;
+						}					
+						$target1Name = mapTarget($char,$nextLine);	
+						$nextLine = `fgetline $fileId`;	
+						$lineNum ++;
+						$dataNum ++;
+					}
+					else
+					{
+						$frameNum = (int)$nextLine+$getStartFrame-1;
+						if($target2Name != "" )
+							eval ("setKeyframe -v 0 -t ("+$frameNum+") -at translateY "+$target2Name+";\n");	
+						else if($target2Name == $target1Name)
+							eval ("setKeyframe -v "+$getAmplitude+" -t ("+$frameNum+") -at translateY "+$target2Name+";\n");	
+						eval ("setKeyframe -v "+$getAmplitude+" -t ("+$frameNum+") -at translateY "+$target1Name+";\n");	
+						$lineNum ++;
+						$dataNum ++;
+						$nextLine = `fgetline $fileId`;
+						$target2Name = mapTarget($char,$nextLine);
+						if($target2Name != "")
+							eval ("setKeyframe -v 0 -t ("+$frameNum+") -at translateY "+$target2Name+";\n");	
+					}
+				}
+				else
+				{
+					$nextLine = `fgetline $fileId`;
+					$lineNum ++;
+				}
+			}
+			else
+			{
+					$nextLine = `fgetline $fileId`;
+					$lineNum ++;					
+			}
+		}	
+		fclose $fileId;
+		print ("Successfully load lip file to:"+$char+"\n");
+	}
+	else
+		print ("No lip file match the character:"+$char+"\n");
+}
+
+global proc JM_LoadLipSyncButton()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+	for($char in $getChar)
+		loadLipsync($char);	
+}
+
+global proc string mapTarget(string $char,string $text)
+{
+	string $targetName = "";
+	string $setupCurveName = $char +"_Facial_Curve|";
+	switch($text)
+	{
+		case "a\n":
+		case "A\n":
+			$targetName = $setupCurveName+"phonemes_mb_sli|mb";
+			break;
+		case "b\n":
+		case "B\n":
+			$targetName = $setupCurveName+"phonemes_eet_sli|eet";
+			break;
+		case "c\n":
+		case "C\n":
+			$targetName = $setupCurveName+"phonemes_i_sli|i";
+			break;
+		case "d\n":
+		case "D\n":
+			$targetName = $setupCurveName+"phonemes_extremeopen_sli3|extremeopen";
+			break;
+		case "e\n":
+		case "E\n":
+			$targetName = $setupCurveName + "phonemes_o_sli|o";
+			break;
+		case "f\n":
+		case "F\n":
+			$targetName = $setupCurveName + "phonemes_ooqu_sli|ooqu";
+			break;
+		case "g\n":
+		case "G\n":
+			$targetName = $setupCurveName + "phonemes_vf_sli|vf";
+			break;
+		case "h\n":
+		case "H\n":
+			$targetName = $setupCurveName + "phonemes_l_sli|l";
+			break;
+		case "i\n":
+		case "I\n":
+			$targetName = $setupCurveName + "phonemes_ch_sli|ch";
+			break;
+		case"\n":
+			$targetName = "";
+			break;
+	}
+	return $targetName;
+}
+
+global proc string pickCharInTxt(string $lineTxt)
+{
+	if(`substring $lineTxt 1 1` == "[")
+	{
+		string $buffer[];
+		tokenize $lineTxt "[]" $buffer;
+		return $buffer[0];
+	}
+	else
+		return "";
+}
+
+global proc editSyncTxt()
+{
+	string $getSyncFolder = `textFieldButtonGrp -q -text _syncListPath`;
+	string $getEpisodeNum = `intFieldGrp -q -value1 _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	string $charSyncFile = $getSyncFolder + "/" + $getEpisodeNum+"_"+$getSceneNum + ".txt";
+	system ("load" +$charSyncFile);
+}
+
+global proc deleteSyncKeys()
+{
+	int $num =`radioButtonGrp -q -sl _Value_ALL_Object_Input`;
+	string $getChar[] = {};
+	if($num == 1)
+		$getChar = `textScrollList -q -si _List_ALL_Char_Input`;
+	else
+		$getChar = `textScrollList -q -ai _List_ALL_Char_Input`;
+	string $texts[] = {"a\n","b\n","c\n","d\n","e\n","f\n","g\n","h\n","i\n"};
+	for($char in $getChar)
+	{
+		for($t in $texts)
+		{
+			string $curveName = mapTarget($char,$t);
+			string $keyAttrAnimCurve[] = `keyframe -q -name ($curveName + ".ty")`;
+			if($keyAttrAnimCurve[0] != "")
+				delete $keyAttrAnimCurve[0];
+			setAttr ($curveName+".ty") 0;
+		}
+	}
+}
+
+global proc loadSoundTrack()
+{
+	string $audioTrack[] = `ls -type audio`;
+	if(`size $audioTrack` != 0)
+		delete $audioTrack;
+	string $getEpisodeNum = `intFieldGrp -q -value1 _Value_ALL_Shot_Input`;
+	string $getSceneNum = `textFieldGrp -q -text _Value_All_Scene_Input`;
+	int $getStartFrame = `intFieldGrp -q -value1 _Value_ALL_Start_Input`;
+	string $soundFolder = "Z:/Projects/DOD/Reference/"+$getEpisodeNum+"/shot_sound/";
+	string $soundFile = $soundFolder +"do*_"+$getEpisodeNum+"_"+$getSceneNum+"*.wav";
+	string $catchAudioFiles[] = `getFileList -filespec $soundFile`;
+	if(`size $catchAudioFiles` != 0)
+	{
+		$soundFile = $soundFolder + $catchAudioFiles[0];
+		timeControl -e -ds true -s `sound -o $getStartFrame -file $soundFile` timeControl1;		
+	}
+	else
+		print ("Sorry,not wav file found.\n");
+
+}

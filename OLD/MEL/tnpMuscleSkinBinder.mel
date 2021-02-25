@@ -1,0 +1,162 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// Date: 2004.06.18
+// ChangeLog:
+//
+/* 
+global proc tnpMusclePruneSet(string $skin, string $muscle, float $dropoffDistance, int $option){
+
+// $option = 1 : first, rebuild the set, then apply pruning
+// $option = 2 : bind and empty deformer set only
+// $option = 0 : do nothing
+	
+	// rebuild the deformer set to contain points within the $maxDistance
+	// -Scan thru all the vertices of the skin
+	// -Compute the closest distance from the current vertex to the muscle
+	// -If the distance is greater than $maxDistance, then remove this vertex out of the set		
+	string $sl[] = `ls -dag -type shape $muscle`; // get the shape name
+	$sl = `listConnections -s 0 -d 1 -type "tnpSkinDeformer" $sl[0]`; // get the deformer name
+	if(size($sl)==0){
+		warning($muscle + " hasn't been bound to " + $skin + " yet!");
+		return;
+	}
+
+	string $deformerNode = $sl[0];
+	string $deformerSet = $deformerNode + "Set";
+	
+	int $count[] = `polyEvaluate -vertex $skin`;
+	string $cmd;
+	if($option==1){
+		waitCursor -state on;	
+		int $prunedVertices[] = `tnpMusclePruneMembership -skin $skin -muscle $muscle -maxDistance $dropoffDistance`;
+		waitCursor -state off;
+
+		if(size($prunedVertices)!=0){
+			$cmd = "sets -add " + $deformerSet + " " + $skin + ".vtx[0:" + $count[0] + "]";
+			evalEcho($cmd); // reset the membership
+			string $vtx = " ";
+			for($item in $prunedVertices) $vtx += $skin + ".vtx[" + $item + "] ";
+			$cmd = "sets -rm " + $deformerSet + $vtx;
+			evalEcho($cmd);
+		}
+	}else if($option==2){ // empty deformer set only		
+		$cmd = "sets -remove " + $deformerSet + " " + $skin;
+		evalEcho($cmd);
+	}
+}
+*/
+//////////////////////////////////////////////////////////////////////////
+global proc string[] tnpFindRelatedSkinDeformer(string $surface){
+	string $nodes[];
+	if(kcIsType($surface, "mesh")){
+		string $history[] = `listHistory -future false $surface`;
+		$nodes = `ls -type "tnpSkinDeformer" $history`;
+		/*
+		int $i=0;
+		for($item in $history)
+			if(`nodeType $item`== "tnpSkinDeformer")
+				$nodes[$i++] = $item;
+		*/
+	}		
+	return $nodes;
+}
+/////////////////////////////////////////////////////////////////////////////
+global proc string[] tnpFindRelatedMuscleList(string $deformerNode){
+	string $muscleList[] = `listConnections ($deformerNode + ".muscleList")`;
+	return $muscleList;
+}
+///////////////////////////////////////////////////////////////
+global proc int tnpMuscleGetIndex(string $muscle){
+// the muscle must be connected to a skin deformer
+// and only one-to-one relationship is supported
+// 	
+	string $skinDeformers[] = `listConnections -type "tnpSkinDeformer" ($muscle + ".worldSpace")`;
+	if(size($skinDeformers)==0){
+		warning($muscle + " is not bound to any skin deformer");
+		return -1;
+	}
+	
+	string $dests[] = `connectionInfo -destinationFromSource ($muscle + ".worldSpace")`;
+	string $temp[];
+	for($dest in $dests){
+		tokenize $dest "." $temp;
+		if($temp[size($temp)-2] == $skinDeformers[0]){
+			tokenize $temp[size($temp)-1] "[" $temp;
+			tokenize $temp[1] "]" $temp;
+			// now get the index
+			return $temp[0];
+		}
+	}	
+	return -1;
+}
+///////////////////////////////////////////////////////////////
+global proc tnpMuscleAdd(string $skin, string $muscle, 
+								   float $dropoff, 
+								   float $deformMode,  
+								   float $fattyOffset,
+								   int	$bindMode){
+// There's only one skinDeformer for each skin
+// Therefore, if a skin deformer already exists, add the muscle to the deformer
+// Otherwise, create a new skin deformer for the skin
+
+	if(!kcIsType($skin,"mesh") || !kcIsType($muscle, "nurbsSurface"))
+		error( "skin or muscle is not of supported type"); 
+	if(size(`listConnections -type "tnpSkinDeformer" ($muscle + ".worldSpace")`)!=0)
+		error($muscle + " is already connected to a skinDeformer! ");
+
+	string $history[] = `listHistory -future false $skin`;
+	string $skinDeformers[] = `ls -type "tnpSkinDeformer" $history`;
+	
+	if(size($skinDeformers)==0){ 
+		// create a new skinDeformer for the mesh
+		$skinDeformers[0] = $skin + "SkinDeformer";
+		$skinDeformers = `deformer -name $skinDeformers[0] -type tnpSkinDeformer $skin`;
+	}
+	
+	// connect the muscle to the highest index
+	string $muscleList[] = `listConnections ($skinDeformers[0] + ".muscleList")`;
+	int $muscleIdx = -1;
+	if(size($muscleList)==0) 
+		$muscleIdx = 0;
+	else{
+		$muscleIdx = `tnpMuscleGetIndex ($muscleList[size($muscleList)-1])`;			
+		$muscleIdx += 1; // advance to next highest index
+	}
+	if($muscleIdx == -1)
+		error "AddMuscle::Unknown error";
+		
+	// make new connection
+	connectAttr ($muscle + ".worldSpace") ($skinDeformers[0] + ".muscleList[" + $muscleIdx + "]");
+	setAttr	($skinDeformers[0] + ".enableList[" + $muscleIdx + "]") 1;
+	setAttr	($skinDeformers[0] + ".dropoffDistanceList[" + $muscleIdx + "]") $dropoff;
+	setAttr	($skinDeformers[0] + ".deformModeList[" + $muscleIdx + "]") $deformMode;
+	setAttr	($skinDeformers[0] + ".fattyOffsetList[" + $muscleIdx + "]") $fattyOffset;
+	setAttr	($skinDeformers[0] + ".keepPositionAtBindList[" + $muscleIdx + "]") $bindMode;
+	setAttr	($skinDeformers[0] + ".reCompute") 1;
+}
+////////////////////////////////////////////////////////////////
+global proc tnpMuscleRemove(string $muscle){
+// remove the $muscle from the $skin
+	string $skinDeformers[] = `listConnections -type "tnpSkinDeformer" ($muscle + ".worldSpace")`;
+	if(size($skinDeformers)==0){
+		warning($muscle + " is not bound to any skinDeformer");
+		return;
+	}
+	
+	// break connection to the muscleList
+	int $muscleIdx = `tnpMuscleGetIndex $muscle`;
+	if($muscleIdx == -1)
+		error("RemoveMuscle::Unknown Error");
+	
+	disconnectAttr ($muscle + ".worldSpace") ($skinDeformers[0] + ".muscleList[" + $muscleIdx + "]");
+	setAttr ($skinDeformers[0] + ".removeMuscleIndex") $muscleIdx;
+}

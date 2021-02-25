@@ -1,0 +1,69 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: hb
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc hbBlendShapeFix ()
+{
+	string $select[] = `ls -sl`;
+	string $BSnode = $select[size($select)-1];
+	//string $temp[];
+	//tokenize $select[0] "|" $temp;
+	string $name = $select[0];
+	string $tem[];
+	string $ln[] = `ls -l $name`;
+	tokenize $ln[0] "|" $tem;
+	string $groupName = $tem[0];
+	string $fixBlendShape = $name + "_fixBlendShape";
+	int $BScount = `blendShape -q -weightCount $BSnode`;
+	//if (`objExists $pxBlendShape`)
+	//	delete $pxBlendShape;
+	blendShape -n $fixBlendShape $name;
+
+	for ($i = 0; $i < $BScount; $i++ )
+	{
+		string $bsAttr = ($BSnode + ".weight[" + $i + "]");
+		string $pxAttr = ($fixBlendShape + ".weight[" + $i + "]");
+		string $sAttr = `connectionInfo -sourceFromDestination $bsAttr`;
+		if ($sAttr != "")
+			disconnectAttr $sAttr $bsAttr;
+		setAttr $bsAttr 1;
+		duplicate -rr -n ($name + "_target" + $i) $name;
+		setAttr $bsAttr 0;
+		if ($sAttr != "")
+			connectAttr $sAttr $bsAttr;
+
+		blendShape -e -t  $name $i ($name + "_target" + $i) 1 ($fixBlendShape);
+		connectAttr $bsAttr $pxAttr;
+		//setAttr $pxAttr 0;
+		string $tgName = `aliasAttr -q $bsAttr`;
+		if ($tgName != "")
+			aliasAttr $tgName $pxAttr;
+		delete ($name + "_target" + $i);
+	}
+	
+	string $history[] = `listHistory $name`;
+	string $skinCluster;
+	for ($item in $history)
+	{
+		if (`nodeType $item` == "skinCluster")
+		{
+			$skinCluster = $item; 
+			break;
+		}
+	}
+	reorderDeformers $skinCluster $fixBlendShape $name;
+	setAttr ($BSnode + ".envelope") 0;
+	string $defset[] = `listConnections -type objectSet ($fixBlendShape + ".msg")`;
+	string $curve = `curve -d 3 -p 0 0 0 -p 0.333333 0 0 -p 0.666667 0 0 -p 1 0 0 -k 0 -k 0 -k 0 -k 1 -k 1 -k 1 `;
+	setAttr ($curve + ".visibility" ) 0;
+	parent $curve $groupName;
+	sets -add $defset[0] $curve;
+	select -cl;
+
+}

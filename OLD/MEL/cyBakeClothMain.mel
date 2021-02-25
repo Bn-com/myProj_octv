@@ -1,0 +1,236 @@
+global proc cyBakeCloth()
+{
+	string $frameNum ;
+	string $temp[];
+		
+	string $clothObj[] = `ls -selection -transforms`;
+	if ($clothObj[0] == "")
+	{
+		string $whatShouldiDo = `confirmDialog 
+					-title "Nothing is selected!" 
+					-message "You must first select your geometry before running this script.\nIf you would like the script to select the object named cloth, then click \"AutoSelect\""
+					-button "AutoSelect" -button "Cancel" -defaultButton "AutoSelect"
+					-cancelButton "Cancel" -dismissString "Cancel"`;
+
+		if ($whatShouldiDo == "Cancel")
+		{
+			print ("AutoSelect canceled. Select the cloth geometry first, then execute the script.");
+			//return;
+		}
+		
+		else if ($whatShouldiDo == "AutoSelect")
+		{
+			select "cloth\*";
+		}
+	}
+
+	// catch(`ungroup`);
+
+	int $minTime= int(`playbackOptions -query -minTime`);
+	int $maxTime= int(`playbackOptions -query -maxTime`);
+
+	int $index = 0;
+	string $blendShape, $base, $target, $buf[];
+
+	currentTime $minTime;
+	refresh;
+// -----------------------------------------------------------------
+//
+/* Modification:
+
+	Add support for referenced nodes	August 22nd, 2006 CZ
+
+*/
+//
+// -----------------------------------------------------------------
+	string $nspace="";
+	string $mayVer= `about -v`;
+//	source "channelBoxCommand.mel";
+	for ($obj in $clothObj)
+	{
+		if (!size(`listRelatives -shapes $obj`))
+		{
+			continue;
+		}
+
+		string $name = `match "[^|]+$" $obj`;
+
+		// check if the $obj is a referenced node
+		if (`referenceQuery -isNodeReferenced $obj`)
+		{
+			string $temp[];
+			tokenize $obj ":" $temp;
+			if (!`namespace -exists $temp[0]`)
+			{
+				namespace -add $temp[0];
+
+			}
+			$nspace = $temp[0];
+			$buf = `duplicate $obj`;
+			$base = `rename $buf[0] ($name + "_BAKED")`;
+			$blendShape = $name + "_BlendShape";
+			if (`objExists $blendShape`)
+				delete $blendShape;
+			blendShape -name $blendShape $base;
+			
+			myCBdeleteConnection  ($obj +".v");	
+			//hide $obj;
+		}
+		else
+		{
+			$buf = `duplicate $obj`;
+			$base = `rename $buf[0] ($name + "_BAKED")`;
+			$blendShape = $name + "BS";
+			if (`objExists $blendShape`)
+				delete $blendShape;
+			blendShape -name $blendShape $base;
+
+			myCBdeleteConnection  ($obj +".v");	
+			//hide $obj;
+
+		}
+
+	}
+
+	// select -clear;
+
+	for ($i=$minTime; $i<($maxTime+1); $i++)
+	{
+		currentTime $i;
+		refresh;
+		for ($each in $clothObj)
+		{
+			if (!size(`listRelatives -shapes $each`))
+			{
+				continue;
+			}
+
+			string $name = `match "[^|]+$" $each`;
+
+			// check if the $obj is a referenced node
+			if (`referenceQuery -isNodeReferenced $each`)
+			{
+				$buf = `duplicate $each`;
+				$base = $each + "_BAKED";
+
+				$target = `match "[^|:]+$" $name` + "_baked_frame_" + $i;
+				$target = `rename $buf[0] $target`;
+				$blendShape = $name + "_BlendShape";
+				print ("\n $base "+$base);
+				print ("\n $index "+$index);
+				print ("\n $target "+$target);
+				print ("\n $blendShape "+$blendShape);
+																
+				blendShape -edit -target $base $index $target 1.0 $blendShape;
+
+				delete $target;
+ 
+			}
+			else
+			{
+				$buf = `duplicate $each`;
+		
+				$base = $each + "_BAKED";
+				$target = `match "[^|:]+$" $name` + "baked_frame_" + $i;
+				$target = `rename $buf[0] $target`;
+				$blendShape = $name + "BS";
+				blendShape -edit -target $base $index $target 1.0 $blendShape;
+
+				delete $target;
+
+
+			}
+			if ($i != $minTime)
+				setKeyframe -time ($i-1) -value 0 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+			setKeyframe -time $i -value 1 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+			if ($i != $maxTime)
+				setKeyframe -time ($i+1) -value 0 -inTangentType "flat" -outTangentType "flat" ($blendShape + "." + $target);
+		}
+		$index ++;
+		flushUndo;
+	}
+/*
+	for ($obj in $clothObj)
+		catch(`rename $obj ("ORIGINAL_" + $obj)`);
+*/
+	flushUndo;
+	refresh;
+	for ($each in $clothObj)
+	{
+		hide $each;
+	}
+}
+
+global proc string cyJudge(float $i)
+{
+	string $num;
+
+	if ($i < 0)
+		$num = "_" + `abs $i`;
+	else
+		$num = $i;
+
+	return $num;
+}
+
+global proc cyBakeClothMain()
+{
+	if(`window -exists NWbakeClothWin`)
+		deleteUI NWbakeClothWin;
+
+	window  -title "Bake Deform Object" -menuBar true -resizeToFitChildren true NWbakeClothWin;
+		menu -label "Help";
+			menuItem -label "Help on Bake Deform Object..." -command "zjHelpCallback cyBakeClothMain";
+		string $formLayot = `formLayout`;
+    		string $text = `text -label "Select a deformed object to bake."`;
+		string $button1 = `button -label "OK" -command "cyBakeCloth; deleteUI NWbakeClothWin"`;
+		string $button2 = `button -label "Apply" -command "cyBakeCloth"`;
+		setParent ..;
+
+	formLayout -edit
+			-attachForm	$text		"left"		5
+			-attachForm	$text		"top"		5
+			-attachForm	$text		"right"		5	
+
+			-attachControl	$button1	"top"		5	$text
+			-attachForm	$button1	"left"		5
+			-attachPosition	$button1	"right"		0	50
+
+			-attachControl	$button2	"top"		5	$text
+			-attachControl	$button2	"left"		0	$button1
+			-attachForm	$button2	"right"		5
+	$formLayot;
+
+	showWindow NWbakeClothWin;
+}
+
+// added by huangzhongwei@idmt.com.cn
+global proc myCBdeleteConnection( string $destName )
+{
+	if ( `connectionInfo -isDestination $destName` ){
+		string $destination = `connectionInfo -getExactDestination $destName`;
+
+		// When deleting a src connection from a character, you must remove
+		// the item from the character set or the character will no longer
+		// work consistently: bug 127212
+		//
+		string $srcConn[] = `listConnections -s 1 -d 0 -type character $destination`;
+		if (size($srcConn)) {
+		//	string $warnMsg = (uiRes("m_generateChannelMenu.kRemovedWarn"));
+		//	string $warnDisplay = `format -s $destination -s $srcConn[0] $warnMsg`;
+		//	warning($warnDisplay);
+			character -e -rm $srcConn[0] $destination;
+		}
+		
+		// delete -icn doesn't work if destination attr is readOnly 
+		// so use disconnectAttr in this case
+		//
+		string $sArr[1] = `ls -ro $destination`;
+		if (size($sArr)) {
+			string $src = `connectionInfo -sourceFromDestination $destination`;
+			disconnectAttr $src $destination;
+		} else {
+			delete -icn $destination;
+		}
+	}
+}

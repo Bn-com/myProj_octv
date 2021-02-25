@@ -1,0 +1,519 @@
+/*
+<doc>
+-----------------------------------------createHairIK----------------------------------------------------------------------------
+script de HairIk de bat
+
+usage: selectionner un joint lancer l'interface choisir un systeme de hair si il y en a deja dans la scene sinon
+un nouveau systeme sera crée.voila!
+
+mise en place dans le reste du setup:
+	- pour raccorder le tout à un squellette, parenter le joint avec le préfixe "T_CTR_" au squellette ex:
+	si le premier joint de la chaine que vous avez passé en dynamique s'appelait "joint1" parenter "T_CTR_joint1" au reste du 	 squelette.
+	-le groupe "DynStuff"(dans notre exemple "joint1_DynStuff") contient tout le nécéssaire à la dynamique et doit juste etre  parenter à un objet qui ne bougera jamais pendant l'anim. L'ideal est de le parenter directement au groupe qui contient tout le  setup.
+
+utilisation des contraintes:
+	-le script utilise les contraintes de base du hair et les met juste en temps réel.
+	-pour créer une contrainte selectionner la courbe dynamique (toujours dans notre exemple ce sera la courbe 	 "joint1dynCurve qui se trouve sous le groupe "joint1_DynStuff").Lancer l'interface et double cliquer sur la contrainte 	voulue.
+	-note: pour faire des contraintes entre de chaines de joints dynamique ("genre HairToHair") celles ci doivent faire partie  du meme hairSystem.(de même que si vous voulez des collisions entre plusieures chaines de joint).
+
+et les attributs kesCeKiFont?
+	-bah c marqué dans la doc de maya sur le hair...:)
+
+---------------------------------------------------------------------------------------------------------------------------------
+</doc>
+*/
+
+
+
+//______________________________________procédure qui crée l'UI______________________________________________
+global proc createHairIK()
+{
+if (`window -ex createHairIKUI`==1)
+deleteUI createHairIKUI;
+string $createHairIKwindow=`window  -resizeToFitChildren 1 -w 200 -h 200 -s on -title "createHairIK" createHairIKUI`;
+string $form0 = `scrollLayout -bgc 0.694 0.636 0.572`;
+string $form1 = `columnLayout -bgc 0.694 0.636 0.572`;
+
+string $listHair[]=`ls -type "hairSystem"`;
+string $textSCROLL= ("textScrollList -numberOfRows 8 -allowMultiSelection false -append "+"\""+"None"+"\"");
+for ($i=0;$i<`size($listHair)`;$i++) 
+	{
+ 		$textSCROLL+= (" -append "+$listHair[$i]);
+	}
+if (`size($listHair)`==0)
+	$textSCROLL+=(" -en 0");
+$textSCROLL+=(" -selectItem "+"\""+"None"+"\""+" -showIndexedItem 4 createHairIKtextSCROLLUI;");
+
+string $sep=`separator -height 5 -w 300 -style "double"`;
+string $text1=`text -label "select an existing HairSystem" -bgc 0.694 0.636 0.572 `;
+string $sep=`separator -w 300 -style "in" -bgc 0.694 0.636 0.572`;
+string $b1=`eval $textSCROLL`;
+string $sep=`separator -w 300 -style "out" -bgc 0.694 0.636 0.572`;
+string $b1=`button -w 300 -h 20 -l"REFRESH!" -bgc 0.694 0.636 0.572 -c createHairIK`;
+string $b1=`button -w 300 -h 100 -l"GO!" -bgc 0.694 0.636 0.572 -c doCreateHairIK`;
+string $sep=`separator -height 5 -w 300 -style "double"`;
+string $text1=`text -label "create Constrain (double click)" -bgc 0.694 0.636 0.572 `;
+string $b1=`textScrollList -numberOfRows 7 -dcc "doCreateHairIKConstrain" -allowMultiSelection false  -append "RubberBand" -append   "Transform"
+	-append "Stick" -append "Hair to Hair"
+	-append "Hair Bunch" -append "Collide Sphere"
+	-append "Collide Cube" createHairIKConstrainSCROLLUI `;
+
+
+showWindow $createHairIKwindow;
+
+};
+
+
+
+//_______________________procédure qui met en place le systeme d'IK dynamique_______________________________
+
+global proc doCreateHairIK()
+{
+
+//hairSystem selection(determine a quel hairsystem associer la nvelle chaine dynamique)
+string $destinationSystem[]=`textScrollList -q -selectItem createHairIKtextSCROLLUI`;
+
+// creation chaines
+string $selection[]=`ls -sl`;
+string $duplicate[]=`duplicate -rc`;
+select -r -hi $duplicate[0];
+string $OrigJoint[]=`ls -sl -tr`;
+
+
+select -r -hi  $selection[0];
+string $baseJoint[]=`ls -sl -tr`;
+//desactive le skinCluster pour eviter le bordel....si les joints sont places n importe comment et en plus skinne (shame on you...)
+for ($jointDeMerde in $baseJoint)
+{
+	if (`attributeExists "lockInfluenceWeights" $jointDeMerde`)
+	{
+		string $skinC[]=`listConnections -d 1 ($jointDeMerde+".lockInfluenceWeights")`;
+		if (`size ($skinC)`>0)
+			{
+			for ($skinCluster in $skinC)
+				skinCluster -e -mjm 1 $skinCluster;
+			}
+	}
+}
+//
+
+for ($i=0; $i<size($OrigJoint);$i++)
+	{ 
+	rename $OrigJoint[$i] ("CTR_"+$baseJoint[$i]);
+
+	string $baseJointShape[]=`listRelatives -s $baseJoint[$i]`;
+		for ($j=0; $j<size($baseJointShape);$j++)
+			{
+			delete $baseJointShape[$j];
+			}
+	clear $baseJointShape;
+	}
+
+select -r -hi ("CTR_"+$baseJoint[0]);
+string $CTRJoint[]=`ls -sl -tr`;
+select -r -hi $baseJoint[0];
+string $targetJoint[]=`ls -sl -tr`;
+
+//creation courbe
+string $createCurve="curve -d 1";
+for ($i=0; $i<size($CTRJoint);$i++)
+	{
+	float $transform[]=`xform -q -ws -t $CTRJoint[$i]`;
+	$createCurve+= (" -p "+ $transform[0]+" "+$transform[1]+" "+$transform[2]+" ");
+	}
+$createCurve += (" -n "+$targetJoint[0]+"_baseC");
+print ("creation egal"+$createCurve+"\n");
+string $baseCurve=`eval $createCurve`;
+
+//skinning de courbe
+select -r $CTRJoint[0];
+for ($i=1; $i<size($CTRJoint);$i++)
+	{
+select -add $CTRJoint[$i];
+	}
+select -add  $baseCurve;
+newSkinCluster "-tsb -mi 1 -omi true -dr 4 -rui true";
+
+//creation du groupe T
+select -r $CTRJoint[0];
+TmakerJoint;
+parent $targetJoint[0] ("T_"+$CTRJoint[0]);
+
+
+//creation courbe dynamique
+if ($destinationSystem[0]=="None")
+	select -r $baseCurve;
+else 
+	select -r $baseCurve $destinationSystem;
+
+makeCurvesDynamicHairs 0 0 0;
+string $hairSystem[]=`pickWalk -d up`;
+if ($destinationSystem[0]=="None")
+
+$hairSystem[0]=`rename $hairSystem[0] ($targetJoint[0]+"hairSystem")`;
+convertHairSelection "follicles";
+
+
+string $follicle[]=`ls -sl`;
+int $sizefFollicles=`size ($follicle)`;
+$sizefFollicles-= 1;
+select -r $follicle[$sizefFollicles];
+string $stupid[]=`pickWalk -d up`;
+parent -w $follicle[$sizefFollicles];
+delete $stupid[0];
+$follicle[0]=`rename $follicle[$sizefFollicles] ($targetJoint[0]+"follicle")`;
+convertHairSelection "current";
+string $dynCurve[]=`ls -sl`;
+$dynCurve[0]=`rename $dynCurve[0] ($targetJoint[0]+"dynCurve")`;
+string $stupid[]=`pickWalk -d up`;
+parent -w $dynCurve[0];
+delete $stupid[0];
+select -r $hairSystem[0];
+displayHairCurves "currentAndStart" 1;
+
+//conversion de la courbe Dynamique en IKspline
+int $size=`size($targetJoint)`;
+$size-=1;
+select -r $targetJoint[0] $targetJoint[$size] $dynCurve[0];
+ikHandle -sol ikSplineSolver -ccv false -pcv false -ns 2 -n ($targetJoint[0]+"handle");
+
+//creation attributs de control 
+
+if ($destinationSystem[0]=="None")
+{
+	addAttr -ln ___GLOBAL___ -at bool  $CTRJoint[0];
+	setAttr -e -keyable true -l true ($CTRJoint[0]+".___GLOBAL___");
+	addAttr -ln ___START___ -at bool  $CTRJoint[0];
+	setAttr -e -keyable true -l true ($CTRJoint[0]+".___START___");
+	addAttr -ln startFrame -at long $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".startFrame");
+
+	addAttr -ln ___DYNAMIC___ -at bool  $CTRJoint[0];
+	setAttr -e -keyable true -l true ($CTRJoint[0]+".___DYNAMIC___");
+	addAttr -ln iteration -at long  -min 0 -dv 10 $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".iteration");
+	addAttr -ln stifness -at double  -min 0.0001 -dv 0.2 $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".stifness");
+	addAttr -ln damping -at double  -min 0 -dv 0.3 $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".damping");
+	addAttr -ln gravity -at double  $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".gravity");
+
+
+	addAttr -ln __COLLISION__ -at bool  $CTRJoint[0];
+	setAttr -e -keyable true -l true ($CTRJoint[0]+".__COLLISION__");
+	addAttr -ln collideNeighboors-at bool  $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".collideNeighboors");
+	addAttr -ln drawCollideWidth -at bool  $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".drawCollideWidth");
+	addAttr -ln collideGround -at bool  $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".collideGround");
+	addAttr -ln groundHeight -at double  $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".groundHeight");
+
+
+}
+else
+{
+	addAttr -ln ___DYNAMIC___ -at bool  $CTRJoint[0];
+	setAttr -e -keyable true -l true ($CTRJoint[0]+".___DYNAMIC___");
+	addAttr -ln stifness -at double  -min 0.0001 -dv 0.2 $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".stifness");
+	addAttr -ln damping -at double  -min 0 -dv 0.3 $CTRJoint[0];
+	setAttr -e -keyable true ($CTRJoint[0]+".damping");
+}
+
+addAttr -ln FOLLICLE -at bool  $CTRJoint[0];
+setAttr -e -keyable true -l true ($CTRJoint[0]+".FOLLICLE");
+addAttr -ln ___start___ -at bool  $CTRJoint[0];
+setAttr -e -keyable true -l true ($CTRJoint[0]+".___start___");
+addAttr -ln isDynamic -at double  -min 0 -max 1 -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".isDynamic");
+addAttr -ln attach -at "enum" -en "none:base:end:both:"  $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".attach");
+setAttr ($CTRJoint[0]+".attach") 1;
+addAttr -ln degree -at long  -min 1 -max 3 -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".degree");
+addAttr -ln sampleDensity -at double -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".sampleDensity");
+
+addAttr -ln ___collision___ -at bool  $CTRJoint[0];
+addAttr -ln collide -at bool  $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".collide");
+setAttr -e -keyable true -l true ($CTRJoint[0]+".___collision___");
+addAttr -ln widthScale -at double   -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".widthScale");
+addAttr -ln hairWidth -at double  -min 0 -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".hairWidth");
+addAttr -ln widthBase -at double   -dv 1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".widthBase");
+addAttr -ln widthEnd -at double   -dv 0.1 $CTRJoint[0];
+setAttr -e -keyable true ($CTRJoint[0]+".widthEnd");
+
+
+//connect 
+
+select -r $hairSystem[0];
+string $hairSystemShape[]=`pickWalk -d down`;
+if ($destinationSystem[0]=="None")
+{
+	connectAttr -f ($CTRJoint[0]+".startFrame") ($hairSystemShape[0]+".startFrame");
+	connectAttr -f ($CTRJoint[0]+".iteration") ($hairSystemShape[0]+".iterations");
+	connectAttr -f ($CTRJoint[0]+".gravity") ($hairSystemShape[0]+".gravity");
+	connectAttr -f ($CTRJoint[0]+".drawCollideWidth") ($hairSystemShape[0]+".drawCollideWidth");
+	connectAttr -f ($CTRJoint[0]+".collideGround") ($hairSystemShape[0]+".collideGround");
+	connectAttr -f ($CTRJoint[0]+".groundHeight") ($hairSystemShape[0]+".groundHeight");
+	connectAttr -f ($CTRJoint[0]+".collideNeighboors") ($hairSystemShape[0]+".selfCollide");
+
+
+}
+
+connectAttr -f ($CTRJoint[0]+".isDynamic") ($targetJoint[0]+"handle.ikBlend");
+connectAttr -f ($CTRJoint[0]+".attach") ($follicle[0]+"Shape.pointLock");
+connectAttr -f ($CTRJoint[0]+".degree") ($follicle[0]+"Shape.degree");
+connectAttr -f ($CTRJoint[0]+".sampleDensity") ($follicle[0]+"Shape.sampleDensity");
+
+setAttr ($follicle[0]+".overrideDynamics") 1;
+connectAttr -f ($CTRJoint[0]+".stifness") ($follicle[0]+".stiffness");
+connectAttr -f ($CTRJoint[0]+".damping") ($follicle[0]+".damp");
+connectAttr -f ($CTRJoint[0]+".widthScale")  ($follicle[0]+".clumpWidthMult");
+connectAttr -f ($CTRJoint[0]+".hairWidth")  ($follicle[0]+"Shape.clumpWidth");
+connectAttr -f ($CTRJoint[0]+".widthBase")  ($follicle[0]+"Shape.clumpWidthScale[0].clumpWidthScale_FloatValue");
+connectAttr -f ($CTRJoint[0]+".widthEnd")   ($follicle[0]+"Shape.clumpWidthScale[1].clumpWidthScale_FloatValue");
+connectAttr -f ($CTRJoint[0]+".collide") ($follicle[0]+".collide");
+
+
+
+//expression
+if ($destinationSystem[0]=="None")
+{
+	disconnectAttr time1.outTime ($hairSystemShape[0]+".currentTime");
+	setAttr ($CTRJoint[0]+".drawCollideWidth") 1;
+	setAttr ($hairSystemShape[0]+".widthDrawSkip") 0;
+}
+string $expression=("if(frame> "+$hairSystemShape[0]+".startFrame)\n	{\n");
+string $pointOnC=`pointOnCurve -ch on -pr 0.5 $baseCurve`;
+string $pointOnC=`rename $pointOnC ($targetJoint[0]+$pointOnC)`;
+if ($destinationSystem[0]=="None")
+{
+$expression+=("	   "+$hairSystemShape[0]+".currentTime+=1;\n");
+$expression+= ("float $refresh = "+$pointOnC+".positionX +"+$CTRJoint[0]+".widthBase  +"+$CTRJoint[0]+".widthEnd       +"+$CTRJoint[0]+".hairWidth;\n");
+$expression+="	}\n";
+$expression+= ("else \n	"+$hairSystemShape[0]+".currentTime = "+ $hairSystemShape[0]+".startFrame;\n");
+}
+else
+{
+$expression+= ("float $refresh = "+$pointOnC+".positionX +"+$CTRJoint[0]+".widthScale;\n");
+$expression+="	}\n";
+}
+
+if ($destinationSystem[0]=="None")
+{
+	expression -s $expression -n ($targetJoint[0]+"_DynIK");
+}
+else
+{
+	select -r $destinationSystem[0];
+	pickWalk -d up;
+	string $tempName[]=`pickWalk -d up`;
+	string $buffer1[];
+ 	$numTokens = `tokenize $tempName[0] "_" $buffer1`;
+	string $oldExpressionName=$buffer1[0]; 
+	for($i=1;$i<($numTokens-1);$i++)
+	{
+		$oldExpressionName+=("_"+$buffer1[$i]);
+	}
+	$oldExpressionName+="_DynIK";
+	string $oldExpression=`expression -q -s $oldExpressionName`;
+	expression -e -s ($oldExpression+$expression) $oldExpressionName;
+}
+
+
+//connection des deux chaines de joints en rotate
+for ($i=0; $i<size($CTRJoint);$i++)
+{
+connectAttr ($CTRJoint[$i]+".rotate") ($targetJoint[$i]+".rotate");
+}
+
+//menage
+if ($destinationSystem[0]=="None")
+{
+select -r $follicle[0] $hairSystem[0] $dynCurve[0] ($targetJoint[0]+"handle");
+}
+else
+{
+select -r $follicle[0]  $dynCurve[0] ($targetJoint[0]+"handle");
+}
+group -n ($targetJoint[0]+"_DynStuff"); xform -os -piv 0 0 0;
+select -r $CTRJoint[0];
+setAttr ($targetJoint[0]+"handle.visibility") 0;
+
+//resactive le fucking skinCluster 
+for ($jointDeMerde in $baseJoint)
+{
+
+	if (`attributeExists "lockInfluenceWeights" $jointDeMerde`)
+	{
+		string $skinC[]=`listConnections -d 1 ($jointDeMerde+".lockInfluenceWeights")`;
+		if (`size ($skinC)`>0)
+			{
+			for ($skinCluster in $skinC)
+				skinCluster -e -mjm 0 $skinCluster;
+			}
+	}
+
+}
+//
+
+print (" done! \n");
+
+}
+
+
+
+
+
+//_____________________Procédure  qui met en place les contraintes de hair et l'expression qui fait que c en temp réel_________
+
+global proc doCreateHairIKConstrain()
+{
+string $sel[]=`ls -sl`;
+convertHairSelection "hairSystems";
+string $hairSystems[]=`ls -sl`;
+
+pickWalk -d up;
+string $tempName[]=`pickWalk -d up`;
+string $buffer1[];
+$numTokens = `tokenize $tempName[0] "_" $buffer1`;
+string $prefixe=$buffer1[0]; 
+for($i=1;$i<($numTokens-1);$i++)
+	{
+		$prefixe+=("_"+$buffer1[$i]);
+	}
+
+
+int $CONSTYP[]=`textScrollList -q -sii createHairIKConstrainSCROLLUI`;
+string $CONSTYPName[]=`textScrollList -q -si createHairIKConstrainSCROLLUI`;
+
+
+$CONSTYP[0]-=1;
+select -r $sel;
+
+createHairConstraint $CONSTYP[0];
+
+string $const[]=`ls -sl`;
+string $newShapeName=`rename $const[0] ($prefixe+"_"+$CONSTYPName[0]+"Shape")`;
+string $transfo[]=`pickWalk -d up`;
+string $newName=`rename $transfo[0] ($prefixe+"_"+$CONSTYPName[0])`;
+
+//Modif Expression
+string $expression=("if(frame!= "+$hairSystems[0]+".startFrame)\n	{\n");
+$expression+= ("float $refresh = "+$newName+".boundingBoxSizeX;\n");
+$expression+="	}\n";
+
+$oldExpressionName=($prefixe+"_DynIK");
+string $oldExpression=`expression -q -s $oldExpressionName`;
+expression -e -s ($oldExpression+$expression) $oldExpressionName;
+print "done!";
+
+
+}
+
+
+//+++++++++++++++++++++++++++++++script Tmaker++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//en + pour compatibilité 
+//(crée des groupe ou joint avec le préfixe "T_" pour enlever les transformations sur un joint animable...)
+//(....comprenne qui pourra...)
+
+
+
+
+global proc TmakerJoint()
+{
+string $selection[]=`ls-sl`;		
+duplicate -rc -n  ("T_"+$selection[0]);
+string $children[]=`listRelatives -c`;
+if (`size ($children)`>0)
+	for ($i=0;$i<`size ($children)`;$i++)
+		{
+		select $children[$i];
+		delete;
+		}
+string $shape[]=`listRelatives -s`;
+if (`size ($shape)`>0)
+	for ($i=0;$i<`size ($shape)`;$i++)
+		{
+		select $shape[$i];
+		delete;
+		}
+parent  $selection[0] ("T_"+$selection[0]);
+}
+
+
+global proc Tmaker()
+{
+string $sel[]=`ls -sl`;
+string $grpe=`group -n ("T_"+$sel[0])`;
+xform -os -piv 0 0 0;
+
+if (`getAttr -se ($sel[0]+".translateX")`>0)
+{
+float $tampon=` getAttr ($sel[0]+".translateZ")`;
+setAttr ($grpe+".translateZ") $tampon;
+setAttr ($sel[0]+".translateZ") 0;
+float $tampon=` getAttr ($sel[0]+".translateX")`;
+setAttr ($grpe+".translateX") $tampon;
+setAttr ($sel[0]+".translateX") 0;
+float $tampon=` getAttr ($sel[0]+".translateY")`;
+setAttr ($grpe+".translateY") $tampon;
+setAttr ($sel[0]+".translateY") 0;
+}
+else 
+	warning "translate is locked so Tmaker forgot about it..\n";
+
+
+if (`getAttr -se ($sel[0]+".rotateX")`>0)
+{
+float $tampon=` getAttr ($sel[0]+".rotateX")`;
+setAttr ($grpe+".rotateX") $tampon;
+setAttr ($sel[0]+".rotateX") 0;
+float $tampon=` getAttr ($sel[0]+".rotateY")`;
+setAttr ($grpe+".rotateY") $tampon;
+setAttr ($sel[0]+".rotateY") 0;
+float $tampon=` getAttr ($sel[0]+".rotateZ")`;
+setAttr ($grpe+".rotateZ") $tampon;
+setAttr ($sel[0]+".rotateZ") 0;
+}
+else 
+	warning "rotate is locked so Tmaker forgot about it..\n";
+
+if (`getAttr -se ($sel[0]+".scaleX")`>0)
+{
+float $tampon=` getAttr ($sel[0]+".scaleX")`;
+setAttr ($grpe+".scaleX") $tampon;
+setAttr ($sel[0]+".scaleX") 1;
+float $tampon=` getAttr ($sel[0]+".scaleY")`;
+setAttr ($grpe+".scaleY") $tampon;
+setAttr ($sel[0]+".scaleY") 1;
+float $tampon=` getAttr ($sel[0]+".scaleZ")`;
+setAttr ($grpe+".scaleZ") $tampon;
+setAttr ($sel[0]+".scaleZ") 1;
+}
+else 
+	warning "scale is locked so Tmaker forgot about it..\n";
+}
+
+
+
+global proc TmakerWindow()
+{
+if (`window -ex Tmaker`==1)
+deleteUI Tmaker;
+string $Tmakerwindow=`window -s on -title "Tmaker" Tmaker`;
+string $form = `columnLayout`;
+string $b1 = `button -l "GROUP" -c Tmaker groupBut`;
+string $b2 = `button -l "JOINT" -c TmakerJoint jointBut`;
+showWindow $Tmakerwindow;
+}
+
+

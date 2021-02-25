@@ -1,0 +1,181 @@
+
+global proc nj_BakeToolsCMD_TransferUV()
+{
+//	传UV 由第一个选择的物体传给其他物体
+	string $sl[]=`ls -sl`;
+	for ($a in $sl)
+	{
+		if ($a==$sl[0])	continue;
+		transferAttributes -transferPositions 0 -transferNormals 0 -transferUVs 2 -transferColors 2 -sampleSpace 4  -searchMethod 3-flipUVs 0 -colorBorders 1 $sl[0] $a;
+	}
+	
+}
+
+global proc nj_BakeToolsCMD_ExtendUV()
+{
+//	print "xxx";return;
+	//	移动UV，调整$moveU和$moveV来控制需要移动的范围。
+	float $moveU = `floatSliderGrp -q -v zzjExtendUVWindow_U`   ;
+	float $moveV = `floatSliderGrp -q -v zzjExtendUVWindow_V`   ;
+	
+	string $sl[]=`ls -sl`;
+	float $u = 0;
+	float $v = 0;
+	for ($a in $sl)
+	{
+		if (`gmatch $a "*.map*"`)	select $a;
+		else    select ($a+".map[*]");
+	    polyEditUV -u $u -v $v ;
+	    $u+=$moveU;
+	    $v+=$moveV;
+	}
+	select $sl;
+}
+
+global proc nj_BakeToolsCMD_ExtendUV_Window()
+{
+	if (`window -exists zzjExtendUVWindow`)    deleteUI zzjExtendUVWindow;
+	window -title "distance" -widthHeight 200 55 zzjExtendUVWindow;
+	
+	columnLayout -adjustableColumn true;
+	floatSliderGrp -label "move U" -field true
+		-max 1
+		-s 0.001
+	    -columnWidth 1 43 
+	    -columnWidth 2 53
+		zzjExtendUVWindow_U   
+	;
+	floatSliderGrp -label "move V" -field true
+		-max 1
+		-s 0.001
+	    -columnWidth 1 43 
+	    -columnWidth 2 53
+	    zzjExtendUVWindow_V   
+	;
+	button -l "move" -c "nj_BakeToolsCMD_ExtendUV";
+	setParent ..;
+	window -e -widthHeight 300 70 zzjExtendUVWindow;
+	showWindow zzjExtendUVWindow;
+
+}
+
+global proc nj_BakeToolsCMD_IlrSetup()
+{
+	int $nj_BakeTools_IlrBakeSize =`textField -q -tx nj_BakeTools_IlrBakeSize`;
+	string $sn = `file -q -sn -shn`;
+	string $sn_split[]=stringToStringArray($sn,"_");
+	
+	if (`size $sn_split`<2)  error "Maya 文件名错误";
+//	if (!`gmatch  $sn_split[1] "s059*"`)  error "Maya 文件名错误";
+	
+	string $sl[]=`ls -type ilrBakeLayer`;
+	for ($a in $sl)
+	{
+	    setAttr ($a+".tbResX") $nj_BakeTools_IlrBakeSize;
+	    setAttr ($a+".tbResY") $nj_BakeTools_IlrBakeSize;
+	    setAttr ($a+".tbImageFormat") 6;
+	    setAttr ($a+".tbMerge") 1;
+	    setAttr -type "string" ($a+".tbFileName") ("AO_"+$sn_split[1]+"_"+$a+"_$s_2k.$e");
+	    setAttr ($a+".tbVisualize") 1;
+	}
+	
+	string $files[]=`ls -type file`;
+	for ($f in $files)
+	{
+	  AEfileTextureReloadCmd ($f+".fileTextureName");  
+	}
+	
+}
+global proc nj_BakeToolsCMD_BatchRenderIlr()
+{
+	string $ilrBakeLayers[]=`ls -sl -type ilrBakeLayer`;
+//	string $ilrBakeLayers[]={"Turtle_house_De3","Turtle_house_De4","Turtle_house_De5","Turtle_house_De6"};
+	for ($a in $ilrBakeLayers)
+	{
+	//    if ($a == "TurtleDefaultBakeLayer")    continue;
+	    ilrSetCurrentBakeLayer($a);
+	    ilrBakeCallback(640, 480, 1, 1, "persp", " -layer defaultRenderLayer");
+	}
+
+}
+
+global proc nj_BakeToolsCMD_IlrCreateShade()
+{
+	string $ShadeName =`textField -q -tx nj_BakeTools_IlrCreateShade`;
+	$TurtleName= "Turtle_"+$ShadeName;
+	$ShadeName= "SHD_"+$ShadeName;
+	
+	string $sl[]=`ls -sl `;
+	string $newLambert = `shadingNode -asShader lambert`;
+	$newLambert = `rename $newLambert $ShadeName`;
+	select $sl;
+	hyperShade -assign $newLambert;
+
+	string $newTurtleName = ilrCreateBakeLayer($TurtleName, false);
+	ilrAddTargetSurfaces($sl);
+	
+	setAttr "TurtleRenderOptions.aaMinSampleRate" 2;
+	setAttr "TurtleRenderOptions.aaMaxSampleRate" 4;
+	setAttr "TurtleRenderOptions.aaFilter" 3;
+	setAttr "TurtleRenderOptions.aaFilterSizeX" 3;
+	setAttr "TurtleRenderOptions.aaFilterSizeY" 3;
+	setAttr "TurtleRenderOptions.renderer" 1;
+
+}
+
+global proc nj_BakeToolsCMD_CreateAO()
+{
+	string $sl[]=`ls -sl `;
+	string $AO_Shader[]=`ls -type ilrOccSampler`;
+	string $AO ="";
+	if (`size $AO_Shader`==0)	$AO =	 `shadingNode -asShader ilrOccSampler`;
+	else $AO =	$AO_Shader[0];
+	select $sl;
+	hyperShade -assign $AO;
+
+	setAttr ($AO+".minSamples") 256;
+	setAttr ($AO+".maxSamples") 1024;
+	setAttr ($AO+".maxDistance") 5;
+	setAttr ($AO+".accuracy") 5;
+
+}
+
+global proc nj_BakeToolsCMD_ShadeComeBack()
+{
+	string $sl[]=`ls -sl`;
+	string $ilrBakeLayers[]=`ls -type ilrBakeLayer`;
+	for ($a in $ilrBakeLayers)
+	{
+		if ($a=="TurtleDefaultBakeLayer")	continue;
+		string $obj[]=`sets -q $a`;
+		
+		string $shade=`substitute "Turtle_" $a "SHD_"`;
+		
+		setAttr ($shade+".color") -type double3 1 1 1 ;
+		setAttr ($shade+".diffuse") 0;
+		
+		select $obj;
+		hyperShade -assign $shade;
+		
+		string $file = "";
+		string $relatives[]=`listHistory $shade`;
+		print $relatives;
+		for ($r in $relatives)
+		{
+			if (`nodeType $r`=="file")	
+			{
+				$file =$r;
+				break;	
+			}
+		}
+		if ($file!="")
+		{	
+			if (`isConnected ($file+".outColor") ($shade+".ambientColor")`==0)
+			{
+				connectAttr -force ($file+".outColor") ($shade+".ambientColor");
+			}	
+			
+		}
+	}
+	select $sl;
+}

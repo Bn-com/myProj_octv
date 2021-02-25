@@ -1,0 +1,48 @@
+// Create self shadow render layer 
+global proc ysSshadowRenderLayer()
+{
+			// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	createRenderLayer -name "selfshadow";
+	// Put All geometry into render layers
+	string $allLayers[] = `ls -type renderLayer`;
+	string $defaultLayer[] = {"defaultRenderLayer"};
+	string $layers[] = stringArrayRemove($defaultLayer, $allLayers);
+	string $objShape[] = `ls -geometry`;
+
+	int $i = 0;
+	int $layerCount = size($layers);
+	print $layerCount;
+
+	for($i; $i<$layerCount; $i++)
+	{
+		editRenderLayerMembers -noRecurse $layers[$i] $objShape `ls -lights`;
+	}
+	editRenderLayerGlobals -currentRenderLayer "selfshadow";
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+
+	// selfshadow shader
+	if(!(`objExists "sShadow"`))
+	{
+		string $sShadow = `shadingNode -asShader p_shadow -name "sShadow"`;
+		string $sShadowSG = `sets -renderable true -noSurfaceShader true -empty -name ($sShadow+"SG")`;
+		connectAttr ($sShadow +".outValue") ( $sShadowSG +".miMaterialShader");
+		string $lights[] = `ls -lights "Key*"`;
+		string $lights[] = `listRelatives -parent $lights`;
+		int $i;
+		for($i=0;$i<(size($lights));$i++)
+		{
+			editRenderLayerAdjustment ($lights[$i] + ".intensity");
+			setAttr ($lights[$i] + ".intensity") 1.5;
+			editRenderLayerAdjustment ($lights[$i] +".shadowColor");
+			setAttr ($lights[$i] +".shadowColor") -type double3 0 0 0 ;
+			connectAttr -force ($lights[$i] + ".message") ($sShadow + ".lights["+$i+"]");
+		}
+		layerEditorHandleNodeDrop "selfshadow" $sShadow;
+	}	
+}

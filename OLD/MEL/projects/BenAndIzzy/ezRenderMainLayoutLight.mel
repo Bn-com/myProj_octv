@@ -1,0 +1,423 @@
+/// Copyright (C) 2000-2007 IDMT. All rights reserved.
+///
+/// Author: 万寿龙
+///
+/// Creation Date: 2007/09/26
+///
+/// Description: 
+////			Ben&Izzy项目渲染环节灯光面板（综合工具面板子面板）
+///				主要功能：列出场景中的所有灯光及其相关的常用属性供修改（按照要求分类列出）
+///
+
+global proc ezRenderMainLayoutLight()
+{
+	string $pointLights[] = `ls -l -type pointLight`;
+	string $eyesLight[];
+	for ($light in $pointLights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		string $head[] = `listRelatives -p $parent[0]`;
+		if (`objExists $head[0]` && endsWith($head[0],"head") )
+			$eyesLight[size($eyesLight)] = $parent[0];
+	}
+
+	string $lights[] = `ls -l -type light`;
+	string $sceneLight[];
+	for ($light in $lights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		if (stringArrayCount($parent[0],$eyesLight) == 0)
+			$sceneLight[size($sceneLight)] = $parent[0];
+	}
+
+	if(`window -exists ez_render_mainLayout_light`)
+		deleteUI ez_render_mainLayout_light;
+	window -title "Light List" -mb true  -mxb false -s true  ez_render_mainLayout_light;
+		menu -label "Update";
+			menuItem -label "更新灯光列表" -command "ezRenderMainLayoutLightUpdateTab";
+		
+		tabLayout -cc "ezRenderMainLayoutLightChangeTab" ez_render_mainLayout_light_tab;
+
+			if ( `selectionConnection -exists sceneLights` )
+				deleteUI sceneLights;
+			select -r $sceneLight;
+			selectionConnection  -act sceneLights;
+			string $scene = `columnLayout -adjustableColumn true ez_render_mainLayout_light_tab_scene`;
+				frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false ;
+					rowColumnLayout  -numberOfColumns 10 -cw 1 480 -cw 2 340 -cw 3 150;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							spreadSheetEditor -fal {"in","dms","urs","lr","shr"} -mlc sceneLights -lck -showShapes true -ln true -keyableOnly false;
+							setParent ..;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							columnLayout -adjustableColumn true;
+								rowColumnLayout  -numberOfColumns 7 -columnWidth 1 5 -columnWidth 2 55  -columnWidth 3 55 -columnWidth 4 55
+										 -columnWidth 5 55 -columnWidth 6 55 -columnWidth 7 55 ;
+									text -l "";
+									button -label "Visibility"   -h 16 -al left    -c ("ezRenderMainLayoutLightChangeToSame(\"vis\")");
+									button -label "Color"        -h 16 -al center  -c ("");
+									button -label "Illuminates"  -h 16 -al left    -c ("ezRenderMainLayoutLightChangeToSame(\"ill\")");
+									button -label "EmitDiffuse"  -h 16 -al left    -c ("ezRenderMainLayoutLightChangeToSame(\"emt\")");
+									button -label "EmitSpecular" -h 16 -al left    -c ("ezRenderMainLayoutLightChangeToSame(\"ems\")");
+									button -label "ShadowColor"  -h 16 -al left    -c ("");
+								setParent ..;
+								for ($light in $sceneLight)
+								{
+									string $buff[];
+									tokenize $light "|" $buff;	
+									string $layout ;
+									if (size($buff) == 1)
+										$layout= $buff[0];
+									else
+										$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+									
+									rowColumnLayout  -numberOfColumns 8 -columnWidth 1 26 -columnWidth 2 28  -columnWidth 3 80 -columnWidth 4 55
+											 -columnWidth 5 55 -columnWidth 6 30 ;
+										
+										text -l "";
+										//attrFieldSliderGrp -l ""  -h 16 -cw 3 1 -cw 2 50 -cw 1 10 -hideMapButton true -attribute ($light + ".visibility");
+										int $vis = `getAttr ($light + ".visibility")`;
+										checkBox -label "" -al left -h 16 -value  $vis 
+											-onc ("setAttr "+$light+".visibility 1")
+											-ofc ("setAttr "+$light+".visibility 0")
+											("ez_render_mainLayout_light_vis_"+$layout);
+										
+										attrColorSliderGrp -l ""  -h 16 -cw 3 1 -cw 2 50 -cw 1 10 -sb false -at ($light+".color");
+										
+										//intField  -h 16 -value  $illby -cc ("ezRenderMainLayoutLightChangeIlluminates(\""+$light+"\")") ("ez_render_mainLayout_light_ill_"+$light);
+										string $lightset[] = `listConnections ($light+".instObjGroups")`;
+										int $illby = 0;
+										if (`objExists $lightset[0]`)
+											$illby = 1;
+										checkBox -label "" -al right -h 16 -value  $illby 
+											-onc ("ezRenderMainLayoutLightChangeIlluminates(\""+$light+"\")") 
+											-ofc ("ezRenderMainLayoutLightChangeIlluminates(\""+$light+"\")") 
+											("ez_render_mainLayout_light_ill_"+$layout);
+
+										//attrFieldSliderGrp -l ""  -h 16 -cw 3 1 -cw 2 60 -cw 1 10 -hideMapButton true -attribute ($light + ".emitDiffuse");
+										int $emt;
+										int $adj = `objExists ($light+".emitDiffuse")`;
+										if ($adj)
+											$emt = `getAttr ($light + ".emitDiffuse")`;
+										checkBox -label ""  -h 16 -enable $adj -value  $emt
+											-onc ("setAttr "+$light+".emitDiffuse 1")
+											-ofc ("setAttr "+$light+".emitDiffuse 0")
+											("ez_render_mainLayout_light_emt_"+$layout);
+
+										//attrFieldSliderGrp -l ""  -h 16 -cw 3 1 -cw 2 70 -cw 1 10 -hideMapButton true -attribute ($light + ".emitSpecular");
+										int $ems;
+										int $adj = `objExists ($light+".emitSpecular")`;
+										if ($adj)
+											$ems = `getAttr ($light + ".emitSpecular")`;
+										checkBox -label "" -h 16 -enable $adj -value  $ems
+											-onc ("setAttr "+$light+".emitSpecular 1")
+											-ofc ("setAttr "+$light+".emitSpecular 0")
+											("ez_render_mainLayout_light_ems_"+$layout);
+
+										attrColorSliderGrp -l ""  -h 16 -cw 3 1 -cw 2 50 -cw 1 10 -sb false -at ($light+".shadowColor");
+									setParent ..;
+								}
+								setParent ..;
+							setParent ..;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							columnLayout -adjustableColumn true;
+								button  -label "update" -h 16 -c "ezRenderMainLayoutLightUpdateSelectLight";
+								for ($light in $sceneLight)
+								{
+									string $buff[];
+									tokenize $light "|" $buff;	
+									string $layout;
+									if (size($buff) == 1)
+										$layout= $buff[0];
+									else
+										$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+									rowColumnLayout  -numberOfColumns 2 -columnWidth 1 135 -columnWidth 2 30 ;
+										button -l ($buff[size($buff)-1]) -al right -h 16 -w 150 -c ("select -r "+$light+";ezRenderMainLayoutLightUpdateSelectLight;") ;
+										checkBox -label "" -h 16  -value  0
+											-onc ("select -tgl "+$light+";")
+											-ofc ("select -d "+$light+";")
+											("ez_render_mainLayout_light_select_"+$layout);
+									setParent ..;
+								}
+								setParent ..;
+							setParent ..;
+					setParent ..;
+				setParent ..;
+			setParent ..;
+
+			
+			if ( `selectionConnection -exists eyeLights` )
+				deleteUI eyeLights;
+			select -r $eyesLight;
+			selectionConnection  -act eyeLights;
+			string $eyes = `columnLayout -adjustableColumn true ez_render_mainLayout_light_tab_eyes`;
+				frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false ;
+					rowColumnLayout  -numberOfColumns 10 -cw 1 160 -cw 2 70 -cw 3 150;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							spreadSheetEditor -fal {"in"} -mlc eyeLights -lck -showShapes true -ln true -keyableOnly false;
+							setParent ..;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							columnLayout -adjustableColumn true;
+								button -label "Color" -h 17 -c ("ezRenderMainLayoutLightChangeColor(\""+$eyesLight[0]+"\")");
+								for ($light in $eyesLight)
+								{
+									attrColorSliderGrp -l ""  -h 17 -cw 3 1 -cw 2 60 -cw 1 10 -sb false -at ($light+".color");
+								}
+								setParent ..;
+							setParent ..;
+						frameLayout -label "" -labelAlign "top"   -collapsable false -borderStyle "etchedIn" -bv false;
+							columnLayout -adjustableColumn true;
+								button  -label "update" -h 17 -c "ezRenderMainLayoutLightUpdateSelectLight";
+								for ($light in $eyesLight)
+								{
+									string $buff[];
+
+									tokenize $light "|" $buff;
+									string $layout;
+									if (size($buff) == 1)
+										$layout= $buff[0];
+									else
+										$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+									string $lightsh = $buff[size($buff)-1];
+
+									string $parent[] = `listRelatives -p  $light`;
+									tokenize $parent[0] ":" $buff;
+									tokenize $buff[size($buff)-1] "_" $buff;
+
+									rowColumnLayout  -numberOfColumns 2 -columnWidth 1 135 -columnWidth 2 30 ;
+										button -l ($buff[0]+"_"+$lightsh) -al right -h 17 -w 100 -c ("select -r "+$light+";ezRenderMainLayoutLightUpdateSelectLight;");
+										checkBox -label "" -h 16  -value  0
+											-onc ("select -tgl "+$light+";")
+											-ofc ("select -d "+$light+";")
+											("ez_render_mainLayout_light_select_"+$layout);
+									setParent ..;
+								}
+								setParent ..;
+							setParent ..;
+					setParent ..;
+				setParent ..;
+		tabLayout -edit
+			-tabLabel	$scene				Scenelight
+			-tabLabel	$eyes				Eyelight
+		ez_render_mainLayout_light_tab;
+	//window -edit -w 400 -h (105+(size($eyesLight)+1)*17) ez_render_mainLayout_light;
+	showWindow ez_render_mainLayout_light;
+	ezRenderMainLayoutLightChangeTab;
+	//tabLayout -edit -selectTab  $eyes ez_render_mainLayout_light_tab;
+	select -cl;
+}
+
+global proc ezRenderMainLayoutLightUpdateTab()
+{
+	string $curTab = `tabLayout -q -selectTab ez_render_mainLayout_light_tab`;
+	ezRenderMainLayoutLight;
+	tabLayout -edit -selectTab $curTab ez_render_mainLayout_light_tab;
+	ezRenderMainLayoutLightChangeTab;
+}
+global proc ezRenderMainLayoutLightChangeToSame(string $type)
+{
+	string $pointLights[] = `ls -l -type pointLight`;
+	string $eyesLight[];
+	for ($light in $pointLights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		string $head[] = `listRelatives -p $parent[0]`;
+		if (`objExists $head[0]` && endsWith($head[0],"head") )
+			$eyesLight[size($eyesLight)] = $parent[0];
+	}
+
+	string $lights[] = `ls -l -type light`;
+	string $sceneLight[];
+	for ($light in $lights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		if (stringArrayCount($parent[0],$eyesLight) == 0)
+			$sceneLight[size($sceneLight)] = $parent[0];
+	}
+
+	
+
+	int $adj =  0;
+	int $val;
+	for ($light in $sceneLight)
+	{
+		string $buff[];
+		tokenize $light "|" $buff;
+		string $layout ;
+		if (size($buff) == 1)
+			$layout= $buff[0];
+		else
+			$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+
+		switch ($type)
+		{
+			case "vis" :
+				$adj = `checkBox -q -v ("ez_render_mainLayout_light_vis_"+$layout)`;
+				break;
+			case "ill" :
+				$adj = `checkBox -q -v ("ez_render_mainLayout_light_ill_"+$layout)`;
+				break;
+			case "emt" :
+				$adj = `checkBox -q -v ("ez_render_mainLayout_light_emt_"+$layout)`;
+				break;
+			case "ems" :
+				$adj = `checkBox -q -v ("ez_render_mainLayout_light_ems_"+$layout)`;
+				break;
+		}
+		if ($adj == 1)
+			break;
+	}
+
+	if ($adj)
+		$val = 0;
+	else 
+		$val = 1;
+	for ($light in $sceneLight)
+	{
+		string $buff[];
+		tokenize $light "|" $buff;
+		string $layout ;
+		if (size($buff) == 1)
+			$layout= $buff[0];
+		else
+			$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+		switch ($type)
+		{
+			case "vis" :
+				setAttr ($light+".visibility") $val; 
+				checkBox -e -v $val ("ez_render_mainLayout_light_vis_"+$layout);
+				break;
+			case "ill" :
+				checkBox -e -v $val ("ez_render_mainLayout_light_ill_"+$layout);
+				ezRenderMainLayoutLightChangeIlluminates($light);
+				break;
+			case "emt" :
+				if (`checkBox -q -enable ("ez_render_mainLayout_light_emt_"+$layout)`)	
+				{
+					setAttr ($light+".emitDiffuse") $val; 
+					checkBox -e -v $val ("ez_render_mainLayout_light_emt_"+$layout);
+				}
+				break;
+			case "ems" :
+				if (`checkBox -q -enable ("ez_render_mainLayout_light_ems_"+$layout)`)	
+				{
+					setAttr ($light+".emitSpecular") $val; 
+					checkBox -e -v $val ("ez_render_mainLayout_light_ems_"+$layout);
+				}
+				break;
+		}
+	}
+}
+
+global proc ezRenderMainLayoutLightChangeIlluminates(string $light)
+{
+	string $buff[];
+	tokenize $light "|" $buff;
+	string $layout ;
+	if (size($buff) == 1)
+		$layout= $buff[0];
+	else
+		$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+
+	string $shape[] = `listRelatives -f -c $light`;
+	int $val = `checkBox -q -v ("ez_render_mainLayout_light_ill_"+$layout)`;
+	if ($val)
+		connectAttr -nextAvailable ($light+".instObjGroups") defaultLightSet.dagSetMembers;
+	else 
+	{
+		string $con[] = `listConnections -plugs true ($light+".instObjGroups")`;
+		if (`objExists $con[0]`)
+			disconnectAttr ($light+".instObjGroups[0]") $con[0];
+	}
+}
+
+
+global proc ezRenderMainLayoutLightChangeColor(string $flight)
+{
+	string $child[] = `listRelatives -f -c $flight`;
+	float $cr = getAttr ($child[0]+".cr");
+	float $cg = getAttr ($child[0]+".cg");
+	float $cb = getAttr ($child[0]+".cb");
+	
+	string $pointLights[] = `ls -l -type pointLight`;
+	string $eyesLight[];
+	for ($light in $pointLights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		string $head[] = `listRelatives  -p $parent[0]`;
+		if (`objExists $head[0]` && endsWith($head[0],"head") )
+			$eyesLight[size($eyesLight)] = $light;
+	}
+
+	for ($light in $eyesLight)
+	{
+		setAttr ($light+".cr") $cr;
+		setAttr ($light+".cg") $cg;
+		setAttr ($light+".cb") $cb;
+	}
+}
+
+global proc ezRenderMainLayoutLightChangeTab()
+{
+	string $pointLights[] = `ls -l -type pointLight`;
+	string $eyesLight[];
+	for ($light in $pointLights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		string $head[] = `listRelatives -p $parent[0]`;
+		if (`objExists $head[0]` && endsWith($head[0],"head") )
+			$eyesLight[size($eyesLight)] = $parent[0];
+	}
+
+	string $lights[] = `ls -l -type light`;
+	string $sceneLight[];
+	for ($light in $lights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		if (stringArrayCount($parent[0],$eyesLight) == 0)
+			$sceneLight[size($sceneLight)] = $parent[0];
+	}
+	
+	
+	string $curTab = `tabLayout -q -selectTab ez_render_mainLayout_light_tab`;
+	if ($curTab == "ez_render_mainLayout_light_tab_eyes")
+		window -edit -w 400 -h (105+(size($eyesLight)+1)*17) ez_render_mainLayout_light;
+	if ($curTab == "ez_render_mainLayout_light_tab_scene")
+		window -edit -w 990 -h (105+(size($sceneLight)+1)*17) ez_render_mainLayout_light;
+}
+
+global proc ezRenderMainLayoutLightUpdateSelectLight()
+{
+	string $selectLight[] = `ls -l -sl`;
+
+	string $select[] = `ls -l -sl`;
+	for ($temp in $select)
+	{
+		if (nodeType($temp) != "transform")
+		{
+			string $parent[] = `listRelatives -f -p $temp`;
+			$selectLight[size($selectLight)] = $parent[0];
+		}
+		else
+			$selectLight[size($selectLight)] = $temp;
+	}
+
+	string $lights[] = `ls -l -type light`;
+	for ($light in $lights)
+	{
+		string $parent[] = `listRelatives -f -p  $light`;
+		
+		string $buff[];
+		tokenize $parent[0] "|" $buff;
+		string $layout ;
+		if (size($buff) == 1)
+			$layout= $buff[0];
+		else
+			$layout = $buff[size($buff)-2]+"_"+$buff[size($buff)-1];
+
+		if (stringArrayCount($parent[0],$selectLight))
+			checkBox -e  -value  1	("ez_render_mainLayout_light_select_"+$layout);
+		else
+			checkBox -e  -value  0	("ez_render_mainLayout_light_select_"+$layout);
+	}
+
+}

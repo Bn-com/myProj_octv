@@ -1,0 +1,180 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 马昊
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mhMirrorInfluence()
+{
+	if(`window -exists mirrorInfluenceWindow`)
+		deleteUI mirrorInfluenceWindow;
+	$win=`window -t mirrorInfluence -menuBar true mirrorInfluenceWindow`;
+			columnLayout -adjustableColumn true -rs 4;
+				menu -label "Help";
+				menuItem -label "Help on Mirror influence..." -command "zjHelpCallback mhMirrorInfluence";
+
+				string $radioGroup = `radioButtonGrp -cc "mirrorInfluenceWinRadio" -select 1   -numberOfRadioButtons 2 -label "Mirror" -labelArray2 "self" "other object" radGrp`;
+				rowLayout -numberOfColumns 2 -cw 1 170 -cw 2 240 -cal 1 "right" -cal 2 "center" -cat 1 right 5;
+					text -label "target Object";
+					string $textFieldName=`textField -w 200 -en no textFieldName`;
+				setParent..;
+				rowLayout -numberOfColumns 2 -cw 1 170 -cw 2 240 -cal 1 "right" -cal 2 "center" -cat 1 right 5;
+					checkBox -v 0 -cc  "int $state = #1;textField -e -en $state customparentField;"  -label "custom infulence's parent"  customparentchck;
+					textField -w 200 -en 0 customparentField;
+				setParent..;
+				button  -al "center" -rs 1 -label "mirror" -c mirrorInfluence;
+		showWindow $win;
+}
+
+global proc mirrorInfluenceWinRadio()
+{
+	int $flag =`radioButtonGrp -q -sl radGrp`;
+
+	if ($flag == 1)
+	{
+		// "Self"
+
+		textField -e -enable false textFieldName;
+	}
+	else
+	{
+		// "Other obj
+
+		textField -e -enable true textFieldName;
+	}
+}
+
+	
+
+global proc mirrorInfluence()
+{
+	int $condition =`radioButtonGrp -q -sl radGrp`;
+	$currentSel = `ls -sl`;
+	$tsf = `xform -q -t -ws $currentSel[0]`;
+	string $targetObjParent;
+	if (`textField -q -en customparentField`== 1)
+	{
+		if (`textField -q -tx customparentField`== "") error "plz input influ object's parent";
+		else $targetObjParent = `textField -q -tx customparentField`;
+	}
+	else
+	{
+		$sourceObjParent = `listRelatives -p $currentSel[0]`;
+		string $sourceObjParentName = $sourceObjParent[0];
+		
+		string $end = `substring $sourceObjParentName (size($sourceObjParentName)-1)  (size($sourceObjParentName))`;
+		if ( $end == "_l" )
+		{
+			$targetObjParent = `substring $sourceObjParentName 1 (size($sourceObjParentName)-2)`+"_r";
+		}
+		else if ($end == "_r" )
+		{
+			$targetObjParent = `substring $sourceObjParentName 1 (size($sourceObjParentName)-2)`+"_l";
+		}else 
+		{
+			$targetObjParent = $sourceObjParent[0];
+		}
+	}
+
+
+	if ($condition == 2)
+	{
+		string $tarObj=`textField -q  -tx textFieldName`;
+		if ($tarObj == "") error "plz input target object "; 
+		$tarObjShape = `listRelatives -s $tarObj`;
+		// mirror influ object,haven't skin   
+		$newInfluName = `duplicate -rr  $currentSel[0]`;
+		parent -w $newInfluName;
+		makeIdentity -apply true -t 1 -r 1 -s 1 $newInfluName;
+		xform -s -1 1 1 -sp 0 0 0 -cp $newInfluName;
+		parent $newInfluName $targetObjParent;
+		catch (`makeIdentity -apply true -t 1 -r 1 -s 1 $newInfluName`);
+
+		$bindedSkinNode = `listConnections -type skinCluster $tarObjShape`;
+		skinCluster -e  -dr 4 -ai $newInfluName -wt 0 -lw true $bindedSkinNode[0];
+		$skin = `listConnections -d on -s off ($bindedSkinNode[0]+".outputGeometry[0]")`;
+		$numOfVtxSkin = `polyEvaluate -v $skin[0]`;
+
+		$bindedSkinNodeSource = `listConnections -d on -s off ($currentSel[0]+".liw")`;
+		$skinSource = `listConnections -d on -s off ($bindedSkinNodeSource[0]+".outputGeometry[0]")`;
+		$numOfVtxSkinSource = `polyEvaluate -v $skinSource[0]`;
+		for ($i=0;$i<$numOfVtxSkinSource[0];$i++ )
+		{
+			float $posOfVtxCurr[] = `pointPosition -w ($skinSource[0]+".vtx["+$i+"]")`;
+			$influName = `skinPercent  -ib 0.0001 -q -t $bindedSkinNodeSource[0] ($skinSource[0]+".vtx["+$i+"]")`;
+			$weightVal = `skinPercent  -ib 0.0001 -q -v $bindedSkinNodeSource[0] ($skinSource[0]+".vtx["+$i+"]")`;
+			int $weightValIndex,$inflN,$sw =0;
+			for ($inflN = 0;$inflN < size($influName); $inflN++) 
+			{
+				if ( $influName[$inflN] == $currentSel[0] )  {$weightValIndex = $inflN;break;}
+				else if ($inflN == (size($influName) -1) ) $sw =1 ;
+			}
+
+			if ($sw == 0)
+			{
+
+				for ($j=0;$j< $numOfVtxSkin[0];$j++ )
+				{
+					
+					float $posOfVtxComp[] = `pointPosition -w ($skin[0]+".vtx["+$j+"]")`;
+					if ( (abs($posOfVtxComp[0] + $posOfVtxCurr[0])<0.001) && (abs($posOfVtxComp[1] - $posOfVtxCurr[1])<0.001) && (abs($posOfVtxComp[2] - $posOfVtxCurr[2])<0.001) )//位置相镜像 
+					{
+						skinPercent -tv $newInfluName $weightVal[$weightValIndex] $bindedSkinNode[0] ($skin[0]+".vtx["+$j+"]");
+					}
+				}
+			}
+
+			continue;
+		}
+
+	}
+	else if ($condition == 1)
+	{
+		$newInfluName = `duplicate -rr  $currentSel[0]`;
+		parent -w $newInfluName;
+		makeIdentity -apply true -t 1 -r 1 -s 1 $newInfluName;
+		xform -s -1 1 1 -sp 0 0 0 -cp $newInfluName;
+		parent $newInfluName $targetObjParent;
+		makeIdentity -apply true -t 1 -r 1 -s 1 $newInfluName;
+
+		setAttr ($currentSel[0]+".liw") 1;
+		$bindedSkinNode = `listConnections -d on -s off ($currentSel[0]+".liw")`;
+		skinCluster -e  -dr 4 -ai $newInfluName -wt 0 -lw true $bindedSkinNode[0];
+		$skin = `listConnections -d on -s off ($bindedSkinNode[0]+".outputGeometry[0]")`;
+		$numOfVtxSkin = `polyEvaluate -v $skin[0]`;
+		for ($i=0;$i<$numOfVtxSkin[0];$i++ )
+		{
+			float $posOfVtxCurr[] = `pointPosition -w ($skin[0]+".vtx["+$i+"]")`;
+			$influName = `skinPercent  -ignoreBelow 0.0001 -q -t $bindedSkinNode[0] ($skin[0]+".vtx["+$i+"]")`;
+			$weightVal = `skinPercent  -ignoreBelow 0.0001 -q -v $bindedSkinNode[0] ($skin[0]+".vtx["+$i+"]")`;
+			int $weightValIndex,$inflN,$sw =0;
+			for ($inflN = 0;$inflN < size($influName); $inflN++) 
+			{
+				if ( $influName[$inflN] == $currentSel[0] )  {$weightValIndex = $inflN;break;}
+				else if ($inflN == (size($influName) -1) ) $sw =1 ;
+			}
+
+			if ($sw == 0)
+			{
+
+				for ($j=0;$j< $numOfVtxSkin[0];$j++ )
+				{
+					if ($j == $i) continue;
+					float $posOfVtxComp[] = `pointPosition -w ($skin[0]+".vtx["+$j+"]")`;
+					if ( (abs($posOfVtxComp[0] + $posOfVtxCurr[0])<0.001) && (abs($posOfVtxComp[1] - $posOfVtxCurr[1])<0.001) && (abs($posOfVtxComp[2] - $posOfVtxCurr[2])<0.001) )//位置相镜像 
+					{
+						skinPercent -tv $newInfluName $weightVal[$weightValIndex] $bindedSkinNode[0] ($skin[0]+".vtx["+$j+"]");
+					}
+				}
+			}
+
+			continue;
+		}
+
+	}
+
+}

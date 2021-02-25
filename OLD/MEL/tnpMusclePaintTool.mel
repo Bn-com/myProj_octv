@@ -1,0 +1,99 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc string tnpMusclePaintToolGetArrayAttr(string $influence, string $surface ){	
+
+	string $arrayAttributes = "";
+	
+	if(`nodeType $surface` == "mesh" && $influence != ""){
+		if(kcIsType($influence, "nurbsSurface")){
+			// get related deformer node
+			string $nodes[] = `listConnections -type "tnpSkinDeformer" ($influence + ".worldSpace")`;
+			if(size($nodes)<1) return "";
+			
+			$arrayAttributes = $nodes[0] + ".paintWeights";
+
+		}else if(kcIsType($influence, "mesh")){
+			// get related deformer node
+			string $nodes[] = `listConnections -type "tnpBoneSkinDeformer" ($influence + ".worldMesh")`;
+			if(size($nodes)<1) return "";
+			$arrayAttributes = $nodes[0] + ".paintWeights";
+		}
+	}
+	return $arrayAttributes;
+}
+global proc tnpMusclePaintToolSetup( string $context ){
+	// setup the paint tool
+	//	artUserPaintCtx -e -getArrayAttrCommand "tnpMusclePaintToolGetArrayAttr" $context;	
+	tnpMusclePaintToolCallback "";
+}
+global proc tnpMusclePaintToolCallback(string $influence){
+	global string $artUserPaintCtx;
+
+	if(!`window -exists tnpMuscleManagerWindow`)
+			tnpMuscleManager;
+
+	// force callback the getArrayAttr command
+//	artUserPaintCtx -e -getArrayAttrCommand "" tnpMusclePaint;
+//	artUserPaintCtx -e -getArrayAttrCommand ("tnpMusclePaintToolGetArrayAttr \"" + $influence + "\"") tnpMusclePaint;
+
+	if($artUserPaintCtx == "artUserPaintCtx"){
+		artUserPaintCtx -e -getArrayAttrCommand "" tnpMusclePaint;
+		artUserPaintCtx -e -getArrayAttrCommand ("tnpMusclePaintToolGetArrayAttr \"" + $influence + "\"") tnpMusclePaint;
+	}else{
+		userPaintCtx -e -getArrayAttrCommand "" tnpMusclePaint;
+		userPaintCtx -e -getArrayAttrCommand ("tnpMusclePaintToolGetArrayAttr \"" + $influence + "\"") tnpMusclePaint;
+	}
+}
+global proc tnpMusclePaintToolCleanup( string $context ){
+	// user exits Artisian Tool -> set clean to paintArrayDirty attr of all the skinDeformer
+	//								  -> delete connection to .paintMuscle attr
+	string $sl[] = `ls -sl`;
+	string $nodes[] = `tnpFindRelatedSkinDeformer $sl[0]`;	
+	for($node in $nodes){ 
+		setAttr ($node + ".paintArrDirty") 0;
+		setAttr ($node + ".paintMemberSetDirty") 0;
+		string $connection[] = `listConnections ($node + ".paintMuscle")`;
+		if($connection[0]!=""){
+			disconnectAttr ($connection[0] + ".message") ($node + ".paintMuscle");
+			hilite -u $connection;
+		}
+	}
+	// boneSkinDeformer
+	$nodes = `tnpFindRelatedBoneSkinDeformer $sl[0]`;
+	if(size($nodes)<1) return;
+	setAttr ($nodes[0] + ".paintArrDirty") 0;
+	setAttr ($nodes[0] + ".paintMemberSetDirty") 0;
+	string $connection[] = `listConnections ($nodes[0] + ".paintBone")`;
+	if($connection[0]!=""){
+		disconnectAttr ($connection[0] + ".message") ($nodes[0] + ".paintBone");
+		hilite -u $connection;
+	}	
+}
+global proc tnpMusclePaintToolCreateCtx(){
+	global string $artUserPaintCtx;
+	if(!eval($artUserPaintCtx + " -exists tnpMusclePaint")){
+		string $cmd = $artUserPaintCtx + " -i1 \"tnpMusclePaintTool.xpm\"";
+				$cmd += " -fullpaths true";
+				$cmd += " -colorfeedback true";
+				$cmd += " -toolCleanupCmd tnpMusclePaintToolCleanup";
+				$cmd += " -toolSetupCmd tnpMusclePaintToolSetup";
+				$cmd += " -getArrayAttrCommand \"\"";
+				$cmd += " tnpMusclePaint";
+		evalEcho($cmd);
+		// adjust to lower radius of the brush size
+		$cmd = $artUserPaintCtx + " -e -lowerradius 0.001 tnpMusclePaint";
+		evalEcho($cmd);
+	}
+}
+global proc tnpMusclePaintTool(){
+	tnpMusclePaintToolCreateCtx();
+	setToolTo tnpMusclePaint;
+}

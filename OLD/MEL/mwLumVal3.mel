@@ -1,0 +1,878 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwLumVal3(int $verbose, string $cam)
+{
+	// KC (27 June 2002)
+	// pass in the camera from mwShaderGui.mel rather than obtaining
+	// it from "modelPanel4"
+
+	if ($cam == "")
+	{
+		if (`modelEditor -exists modelPanel4`)
+		{
+			//GET CURRENT CAMERA IN PERSPECTIVE VIEW
+			$cam = `modelEditor -q -camera modelPanel4`;
+			print("\nCURRENT CAMERA (modelPanel4) : "+$cam+"\n");
+		}
+		else
+		{
+			// IF-ELSE statement added by KC. Otherwise using "Render" command will generate an error
+			// due to $cam being empty because modelPanel4 is undefined.
+
+			// when using "Render" command
+
+			string $cameras[] = `ls -cameras`;
+
+			for ($item in $cameras)
+			{
+				int $flag = `getAttr ($item + ".renderable")`;
+			
+				if ($flag)
+				{
+					string $parents[] = `listRelatives -path -parent $item`;
+					$cam = $parents[0];
+					break;
+				}
+			}
+		}
+	}
+
+	//GET ALL LIGHTS
+	float $total_lum = 0.0;
+	string $all_lights[] = `ls -type light`;
+
+	//GET ALL SURFACES
+	string $all_shapes[];
+	string $selected[] = `ls -sl`;
+	int $active = 0;
+	for($sel in $selected)
+	{
+		string $meshCheck[] = `listRelatives -c -type mesh $selected`;
+		string $nurbsCheck[] = `listRelatives -c -type nurbsSurface $selected`;
+		int $mSize = `size $meshCheck`;
+		int $nSize = `size $nurbsCheck`;
+		$active = $mSize+$nSize;
+	}
+	if($active==0)
+	{
+		print "DOING ALL SURFACES\n";
+		$all_shapes = `ls -type mesh -type nurbsSurface`;
+	}
+	else
+	{
+		print "DOING ACTIVE ONLY\n";
+		$all_shapes = `listRelatives -ad -type mesh $selected`;
+		string $all_shapesN[] = `listRelatives -ad -type nurbsSurface $selected`;
+		int $all = `size $all_shapes`;
+		int $allN = `size $all_shapesN`;
+		for($n=$all;$n<$all+$allN;$n++)
+		{
+			for($shape in $all_shapesN)
+			{
+				$all_shapes[$n] = $shape;
+			}
+		}
+	}
+
+	//GET SHAPES ASSIGNED TO SHADERS
+	string $shaderShapes[];
+	int $ss = 0;
+	for($sh=0;$sh<`size $all_shapes`;$sh++)
+	{
+		string $shader_check[] = `listConnections -type shadingEngine $all_shapes[$sh]`;
+		if(`size $shader_check`>0)
+		{
+			$shaderShapes[$ss] = $all_shapes[$sh];
+			$ss++;
+		}
+	}
+
+	//FILTER OUT REPEATS
+	string $shapes[], $dupCheck[];
+	int $dc = 0;
+	$shapes[0] = $shaderShapes[0];
+	string $tmp_parent[] = `listRelatives -parent -pa $shaderShapes[0]`;
+	$dupCheck[0] = $tmp_parent[0];
+	for($s=1;$s<`size $shaderShapes`;$s++)
+	{
+		int $found = 0;
+		string $tmp_node[] = `listRelatives -parent -pa $shaderShapes[$s]`;
+		for($dup in $dupCheck)
+		{
+			//print ("CHECKING: "+$tmp_node[0]+" AGAINST: "+$dup+"\n");
+			if(`strcmp $dup $tmp_node[0]`==0)
+			{
+				//print "\n";
+				$found = 1;
+				break;
+			}
+		}
+		if($found==0)
+		{
+			$dc++;
+			//print ("SHAPE: "+$shaderShapes[$s]+"\n");
+			$dupCheck[$dc] = $tmp_node[0];
+			$shapes[$dc] = $shaderShapes[$s];
+		}
+	}
+	clear $dupCheck;
+
+	//CHECK FOR GROUP LUMINANCE ATTRIBUTE
+	string $lum_groups[] = `ls "*.groupLum"`;
+	string $lum_sets[] = `ls -type objectSet "*_groupLum"`;
+
+	//CALCULATE THE LUM VAL FOR ALL SURFS
+	int $cg = 0;		//LUMINANCE GROUP COUNTER
+	int $cs = 0;		//LUMINANCE GROUP COUNTER
+	for($shape in $shapes)
+	{
+		//print ("CHECKING SHAPE: "+$shape+"\n");
+		//CHECK FOR INSTANCES
+		string $all_surfs[] = `listRelatives -allParents -pa $shape`;
+		for($surf in $all_surfs)
+		{
+			string $path[] = `ls -l $surf`;
+			string $surf_parts[];
+			int $tok = tokenize($path[0], "|", $surf_parts);
+			int $vis = 1;
+			for($part in $surf_parts)
+			{
+				// KC: to handle cases when more than 1 object has similar name
+
+				int $flag;
+
+				if (size(`ls $part`) == 1)
+					$flag = `getAttr ($part + ".visibility")`;
+				else
+				{
+					int $temp[] = `getAttr ($part + ".visibility")`; 					
+					$flag = $temp[0];
+				}
+
+				if ($flag == 0)
+				{
+					$vis = 0;
+					break;
+				}
+			}
+			int $template = 0;
+			for($part in $surf_parts)
+			{
+				// KC: to handle cases when more than 1 object has similar name
+
+				int $flag;
+
+				if (size(`ls $part`) == 1)
+					$flag = `getAttr ($part + ".template")`;
+				else
+				{
+					int $temp[] = `getAttr ($part + ".template")`; 					
+					$flag = $temp[0];
+				}
+
+				if ($flag == 1)
+				{
+					$template = 1;
+					break;
+				}				
+			}
+			if($vis&&$template==0)
+			{
+				float $lum_val = 0.0;
+				if($verbose==1)
+				{
+					print ("SURFACE: "+$surf+"\n");
+				}
+
+				//GET LINKED LIGHTS
+
+				// KC (27 June 2002)
+				// use lightlink on the shape node instead of the transform node
+				// because they sometimes give different results
+				//
+				// string $links[] = `lightlink -object $surf`;
+
+				string $links[];
+
+				string $surfShape[] = `listRelatives -path -shapes $surf`;
+				if (size($surfShape) > 0)
+				{
+				// Taz (27 June 2002)
+				//filter nodes named like "polySurfaceShape*"
+					if (!`gmatch $surfShape[0] "polySurfaceShape*"`)
+						catch($links = `lightlink -object $surfShape[0]`);
+				}
+				else
+					$links = `lightlink -object $surf`;
+				
+				/////////////////////////////////////////////////////////////
+
+				string $linked_lights[];
+				int $l = 0;
+				for($link in $links)
+				{
+					for($light in $all_lights)
+					{
+						if(`strcmp $link $light`==0)
+						{
+							string $parent[] = `listRelatives -parent -pa $link`;
+
+							// condition added by KC. If default lighting, there is no parent node 
+							// for the light, so just return.
+
+							if (size($parent) == 0)
+								// default light
+								return;
+
+							if(`getAttr ($parent[0]+".visibility")`)
+							{
+								$linked_lights[$l] = $link;
+								$l++;
+							}
+						}
+					}
+				}
+
+				//CHECK FOR GROUP LUMINANCE SET
+				int $groupSetFound = 0;
+				string $previousSetList[];
+				float $setValueList[], $setPivotX[], $setPivotY[], $setPivotZ[];
+				string $foundSet;
+				int $psl = 0;		//PREVIOUS SET LIST COUNTER
+				int $groupLum = 0;
+				int $checkSet = 0;
+				int $checkGroup = 0;
+				float $setPivot[3];
+				int $previousSetFound = 0;
+				
+				//CHECK IF SURFACE IS A SET MEMBER
+				string $memberList[];
+				for($set in $lum_sets)
+				{
+					$memberList = `sets -q $set`;
+					for($member in $memberList)
+					{
+						string $meshList[] = `listRelatives -ad -type mesh $member`;
+						for($mesh in $meshList)
+						{
+							string $parents[] = `listRelatives -ap $mesh`;
+							for($parent in $parents)
+							{
+								if(`strcmp $parent $surf`==0)
+								{
+									$groupSetFound = 1;
+									$groupLum = 1;
+									$foundSet= $set;
+									if($verbose==1)
+									{
+										print ("LUMINANCE SET FOUND: "+$foundSet+"\n");
+									}
+									break;
+								}
+							}
+						}
+						string $nurbsList[] = `listRelatives -ad -type nurbsSurface $member`;
+						for($nurbs in $nurbsList)
+						{
+							string $parents[] = `listRelatives -ap $nurbs`;
+							for($parent in $parents)
+							{
+								if(`strcmp $parent $surf`==0)
+								{
+									$groupSetFound = 1;
+									$groupLum = 1;
+									$foundSet= $set;
+									if($verbose==1)
+									{
+										print ("LUMINANCE SET FOUND: "+$foundSet+"\n");
+									}
+									break;
+								}
+							}
+						}
+					}
+					if($groupLum)
+					{
+						break;
+					}
+				}
+
+				//CHECK FOR SETS WITH VALUES ALREADY CALCULATED
+				if($groupSetFound)
+				{
+					for($checkSet=0;$checkSet<`size $previousSetList`;$checkSet++)
+					{
+						if(`strcmp $previousSetList[$checkSet] $foundSet`==0)
+						{
+							$previousSetFound = 1;
+							break;
+						}
+					}
+					if(`size $previousSetList`==0)
+					{
+						$previousSetList[0] = $foundSet;
+					}
+				}
+				if($groupSetFound&&$previousSetFound==0)
+				{
+					$previousSetList[$cs] = $foundSet;
+					//GET SET PIVOT
+					float $x = 0;float $y = 0;float $z = 0;
+					for($member in $memberList)
+					{
+						float $setP[3] = `objectCenter $member`;
+						$x = $x+$setP[0];
+						$y = $y+$setP[1];
+						$z = $z+$setP[2];
+					}
+					int $mSize = `size $memberList`;
+					$setPivotX[$cs] = $x/$mSize;
+					$setPivotY[$cs] = $y/$mSize;
+					$setPivotZ[$cs] = $z/$mSize;
+				}
+				clear $memberList;
+
+				//CHECK FOR GROUP LUMINANCE PARENT
+				string $parent[] = `ls -l $surf`;
+				string $name_parts[];
+				int $tok = tokenize($parent[0], "|", $name_parts);
+				string $foundGroup;
+				string $previousGroupList[];
+				float $groupValueList[];
+				int $groupLumFound = 0;
+				int $previousGroupFound = 0;
+
+				for($group in $lum_groups)
+				{
+					string $group_parts[];
+					int $gtok = tokenize($group, "|", $group_parts);
+					$group = $group_parts[$gtok-1];
+					if($verbose==1)
+					{
+						print ("CHECKING LUMINANCE GROUP: "+$group+"\n");
+					}
+					$group = `substitute ".groupLum" $group ""`;
+					for($t=0;$t<$tok;$t++)
+					{
+						//print ("CHECKING PARENT: "+$name_parts[$t]+"\n");
+						if(`strcmp $group $name_parts[$t]`==0)
+						{
+							$groupLum = 2;
+							$groupLumFound = 1;
+							$foundGroup = $group;
+							if($verbose==1)
+							{
+								print ("\n***LUMINANCE GROUP FOUND: "+$foundGroup+"***\n\n");
+								print ("USING GROUP LUMINANCE VALUE FOR: "+$surf+"\n");
+							}
+							break;
+						}
+					}
+					if($groupLumFound)
+					{
+						break;
+					}
+				}
+				if($groupLumFound)
+				{
+					for($checkGroup=0;$checkGroup<`size $previousGroupList`;$checkGroup++)
+					{
+						//print ("CHECKING GROUP: "+$foundGroup+" AGAINST: "+$previousGroupList[$checkGroup]+"\n");
+						if(`strcmp $previousGroupList[$checkGroup] $foundGroup`==0)
+						{
+							//print ("PREVIOUS GROUP: "+$foundGroup+"\n");
+							$previousGroupFound = 1;
+							break;
+						}
+					}
+					if(`size $previousGroupList`==0)
+					{
+						if($verbose==1)
+						{
+							print "SETTING GROUP 0\n";
+						}
+						$previousGroupList[0] = $foundGroup;
+					}
+				}
+				if($previousGroupFound==0)
+				{
+					if($verbose==1)
+					{
+						print ("SETTING GROUP "+$cg+"\n");
+					}
+					$previousGroupList[$cg] = $foundGroup;
+					$checkGroup = 0;
+				}
+				
+				if($verbose==1)
+				{
+					print ("GROUP LUM: "+$groupLum+"\n");
+					print ("CHECK GROUP: "+$checkGroup+"\n");
+					print ("CHECK SET: "+$checkSet+"\n");
+					print ("PREVIOUS GROUP: "+$previousGroupFound+"\n");
+					print ("PREVIOUS SET: "+$previousSetFound+"\n");
+				}
+				if($checkSet==0&&$checkGroup==0&&$previousGroupFound==0&&$previousSetFound==0)
+				{
+					//GET VECTOR FROM SURFACE TO CAMERA
+					float $cam_p[3] = `xform -q -ws -rp $cam`;
+					float $surf_p[3];
+					switch($groupLum)
+					{
+						case 0:
+							$surf_p = `objectCenter $surf`;
+							break;
+						case 1:
+							if($verbose==1)
+							{
+								print ("NEW LUMINANCE SET "+$cs+": "+$foundSet+"\n");
+							}
+							$surf_p[0] = $setPivotX[$cs];
+							$surf_p[1] = $setPivotY[$cs];
+							$surf_p[2] = $setPivotZ[$cs];
+							break;
+						case 2:
+							if($verbose==1)
+							{
+								print ("NEW LUMINANCE GROUP "+$cg+": "+$foundGroup+"\n");
+							}
+							$surf_p = `objectCenter $foundGroup`;
+							break;
+					}
+					float $cam_vectorX = $cam_p[0]-$surf_p[0];
+					float $cam_vectorY = $cam_p[1]-$surf_p[1];
+					float $cam_vectorZ = $cam_p[2]-$surf_p[2];
+
+					//GET LUMINANCE VALUE
+					for($light in $linked_lights)
+					{
+						if($verbose==1)
+						{
+							print ("LIGHT: "+$light+"\n");
+						}
+						string $light_transform[] = `pickWalk -d up $light`;
+
+						//CALCULATE THE LUMINANCE OF THE LIGHT COLOR
+						float $lightR = (`getAttr ($light+".colorR")`)*0.30;
+						float $lightG = (`getAttr ($light+".colorG")`)*0.59;
+						float $lightB = (`getAttr ($light+".colorB")`)*0.11;
+						float $lightLum = $lightR+$lightG+$lightB;
+						if($verbose==1)
+						{
+							print ("LIGHT LUMINANCE: "+$lightLum+"\n");
+						}
+
+						//CALCULATE THE INTENSITY OF THE LIGHT BASED ON CAMERA TO LIGHT ANGLE
+						float $lightInt = `getAttr ($light+".intensity")`;
+						if($verbose==1)
+						{
+							print ("LIGHT INTENSITY: "+$lightInt+"\n");
+						}
+
+						//GET CONE ANGLE
+						float $coneAngle;
+						if(`objExists ($light+".coneAngle")`)
+						{
+							$coneAngle = `getAttr ($light+".coneAngle")`;
+							if($verbose==1)
+							{
+								print ("CONE ANGLE: "+$coneAngle+"\n");
+							}
+						}
+
+						//GET VECTOR FROM LIGHT TO SURFACE
+						float $light_p[3];
+						string $type[] = `ls -st $light`;
+						if(`strcmp "directionalLight" $type[1]`==0)
+						{
+							//CREATE UNIT VECTOR CURVE
+							string $dCurve = `curve -d 1 -p 0 0 0 -p 0 0 1 -k 0 -k 1 `;
+							orientConstraint -weight 1 $light_transform[0] $dCurve;
+							move -a $surf_p[0] $surf_p[1] $surf_p[2] $dCurve;
+							$light_p = `xform -q -ws -translation ($dCurve+".cv[1]")`;
+							delete $dCurve;
+						}
+						else
+						{
+							$light_p = `xform -q -ws -rp $light_transform[0]`;
+						}
+						float $light_vectorX = $surf_p[0]-$light_p[0];
+						float $light_vectorY = $surf_p[1]-$light_p[1];
+						float $light_vectorZ = $surf_p[2]-$light_p[2];
+
+						//GET ANGLE FROM LIGHT DIRECTION TO SURF
+						//CREATE A UNIT VECTOR
+						string $curve = `curve -d 1 -p 0 0 0 -p 0 0 -1 -k 0 -k 1`;
+						orientConstraint -weight 1 $light_transform[0] $curve;
+						float $p[3] = `xform -q -ws -translation ($curve+".cv[1]")`;
+
+						string $ab = `createNode angleBetween`;
+						setAttr ($ab+".vector1X") $light_vectorX;
+						setAttr ($ab+".vector1Y") $light_vectorY;
+						setAttr ($ab+".vector1Z") $light_vectorZ;
+						setAttr ($ab+".vector2X") $p[0];
+						setAttr ($ab+".vector2Y") $p[1];
+						setAttr ($ab+".vector2Z") $p[2];
+
+						float $lightDirectionAngle = `getAttr ($ab+".angle")`;
+						if($verbose==1)
+						{
+							print ("LIGHT DIRECTION TO SURFACE ANGLE: "+$lightDirectionAngle+"\n");
+						}
+
+						//CALCULATE PENUMBRA FACTOR
+						float $penumbra_factor = 1.0;
+						float $pen = 0.0;
+						if(`objExists ($light+".penumbraAngle")`)
+						{
+							$pen = `getAttr ($light+".penumbraAngle")`;
+							if($verbose==1)
+							{
+								print ("PENUMBRA ANGLE: "+$pen+"\n");
+							}
+							if($pen<0.0)
+							{
+								if($lightDirectionAngle<$coneAngle/2.0&&$lightDirectionAngle>$coneAngle/2.0+$pen)
+								{
+									$penumbra_factor = abs((cosd((180/$pen)*(($coneAngle/2.0)-$lightDirectionAngle)))-1.0)/2.0;
+								}
+							}
+							if($pen>0.0)
+							{
+								if($lightDirectionAngle>$coneAngle/2.0&&$lightDirectionAngle<$coneAngle/2.0+$pen)
+								{
+									$penumbra_factor = (1.0+(cosd((180/$pen)*(($coneAngle/2.0)-$lightDirectionAngle))))/2.0;
+								}
+							}
+						}
+						if($verbose==1)
+						{
+							print ("PENUMBRA FACTOR: "+$penumbra_factor+"\n");
+						}
+
+						//CALCULATE DROPOFF FACTOR (x*x)+(ay*ay)-1=0
+						float $dropoffFactor = 1.0;
+						if(`objExists ($light+".dropoff")`)
+						{
+							float $dropoffAngle = $lightDirectionAngle/$coneAngle/2.0;
+							float $dropoffCoefficient = `getAttr ($light+".dropoff")`;
+							if($verbose==1)
+							{
+								print ("DROPOFF: "+$dropoffCoefficient+"\n");
+							}
+							float $tmp_val = (1.0 - pow(($dropoffCoefficient*($dropoffAngle)),2.0));
+							if($tmp_val>0.0)
+							{
+								$dropoffFactor = sqrt(1.0 - pow(($dropoffCoefficient*($dropoffAngle)),2.0));
+							}
+							else
+							{
+								$dropoffFactor = 0.0;
+							}
+						}
+						if($verbose==1)
+						{
+							print ("DROPOFF FACTOR: "+$dropoffFactor+"\n");
+						}
+
+						//CALCULATE DECAY FACTOR
+						float $decayFactor = 1.0;
+						if(`objExists ($light+".decayRate")`)
+						{
+							int $decay = `getAttr ($light+".decayRate")`;
+							if($verbose==1)
+							{
+								print ("DECAY RATE: "+$decay+"\n");
+							}
+							float $distance = sqrt(pow($light_vectorX,2)+pow($light_vectorY,2)+pow($light_vectorZ,2));
+							if($verbose==1)
+							{
+								print ("DISTANCE: "+$distance+"\n");
+							}
+							if($decay!=0)
+							{
+								//$decayFactor = 1.0-(pow((($distance/abs($lightInt))-1.0), $decay)/abs($lightInt));
+								//$decayFactor = 1.0-(pow($distance, $decay)*0.1);
+								$decayFactor = 1.0-(pow(($distance/$lightInt), $decay)*0.1);
+								if($decayFactor<0.0)
+								{
+									$decayFactor = 0.0;
+								}
+								if($decayFactor>1.0)
+								{
+									$decayFactor = 1.0;
+								}
+							}
+							else
+							{
+								$decayFactor = 1.0;
+							}
+							if($lightInt<0.0)
+							{
+								$decayFactor = -$decayFactor;
+							}
+						}
+						if($verbose==1)
+						{
+							print ("DECAY FACTOR: "+$decayFactor+"\n");
+						}
+
+						//CALCULATE LIGHT DIRECTION FACTOR WITH PENUMBRA DROPOFF AND DECAY
+						float $lightDirectionFactor = 1.0;
+						if(`objExists ($light+".coneAngle")`)
+						{
+							if($pen<0.0)
+							{
+								if($lightDirectionAngle<=$coneAngle/2.0&&$lightDirectionAngle>=$coneAngle/2.0+$pen)
+								{
+									$lightDirectionFactor = abs(`cosd ($lightDirectionAngle/2.0)`)*$penumbra_factor*$dropoffFactor*$decayFactor;
+								}
+								if($lightDirectionAngle<=$coneAngle/2.0+$pen)
+								{
+									$lightDirectionFactor = abs(`cosd ($lightDirectionAngle/2.0)`)*$dropoffFactor*$decayFactor;
+								}
+								if($lightDirectionAngle>$coneAngle/2.0)
+								{
+									$lightDirectionFactor = 0.0;
+								}
+							}
+							if($pen>0.0)
+							{
+								if($lightDirectionAngle>=$coneAngle/2.0&&$lightDirectionAngle<=$coneAngle/2.0+$pen)
+								{
+									$lightDirectionFactor = abs(`cosd ($lightDirectionAngle/2.0)`)*$penumbra_factor*$dropoffFactor*$decayFactor;
+								}
+								if($lightDirectionAngle<=$coneAngle/2.0)
+								{
+									$lightDirectionFactor = abs(`cosd ($lightDirectionAngle/2.0)`)*$dropoffFactor*$decayFactor;
+								}
+								if($lightDirectionAngle>$coneAngle/2.0)
+								{
+									$lightDirectionFactor = 0.0;
+								}
+							}
+							if($pen==0.0&&$lightDirectionAngle<=$coneAngle/2.0)
+							{
+								$lightDirectionFactor = abs(`cosd ($lightDirectionAngle/2.0)`)*$penumbra_factor*$dropoffFactor*$decayFactor;
+							}
+						}
+						else
+						{
+							//POINTLIGHT
+							$lightDirectionFactor = $decayFactor;
+						}
+						if($verbose==1)
+						{
+							print ("LIGHT DIRECTION TO SURFACE FACTOR: "+$lightDirectionFactor+"\n");
+						}
+
+						//GET VECTOR FROM SURFACE TO LIGHT
+						$light_vectorX = $light_p[0]-$surf_p[0];
+						$light_vectorY = $light_p[1]-$surf_p[1];
+						$light_vectorZ = $light_p[2]-$surf_p[2];
+
+						//GET ANGLE FROM CAMERA TO LIGHT
+						setAttr ($ab+".vector1X") $cam_vectorX;
+						setAttr ($ab+".vector1Y") $cam_vectorY;
+						setAttr ($ab+".vector1Z") $cam_vectorZ;
+						setAttr ($ab+".vector2X") $light_vectorX;
+						setAttr ($ab+".vector2Y") $light_vectorY;
+						setAttr ($ab+".vector2Z") $light_vectorZ;
+						float $camLightAngle = `getAttr ($ab+".angle")`;
+						float $camLightFactor = (1-(sind($camLightAngle/2.0)));
+						if($verbose==1)
+						{
+							print ("CAMERA TO LIGHT ANGLE: "+$camLightAngle+"\n");
+							print ("CAMERA TO LIGHT FACTOR: "+$camLightFactor+"\n");
+						}
+
+						//CALCULATE LUMINANCE VALUE OF SURFACE
+						float $lum_val1 = ($camLightFactor*$lightLum*$lightInt*$lightDirectionFactor);
+						if($lightInt<0.0)
+						{
+							$lum_val1 = (-$lum_val1);
+						}
+						if($verbose==1)
+						{
+							print ("LUM_VAL FOR LIGHT: "+$light+" IS: "+$lum_val1+"\n\n");
+						}
+
+						$lum_val = $lum_val+((1.0-$lum_val)*$lum_val1);
+						if($lum_val<0.0)
+						{
+							if($lightInt>0.0)
+							{
+								$lum_val = 0.0;
+							}
+						}
+						if($lum_val>1.0)
+						{
+							$lum_val = 1.0;
+						}
+
+						delete $ab;
+						delete $curve;
+						//delete $dCurve;
+					}
+					if($verbose==1)
+					{
+						print ("TOTAL LUM_VAL FOR SURF: "+$surf+" IS: "+$lum_val+"\n");
+					}
+					clear $linked_lights;
+				}
+
+				if($groupLum==1&&$previousSetFound==0)
+				{
+					$setValueList[$cs] = $lum_val;
+					if($verbose==1)
+					{
+						print ("SETTING VALUE LIST "+$cs+": "+$lum_val+"\n");
+					}
+					$cs++;
+				}
+				if($groupLum==1&&$previousSetFound)
+				{
+					$lum_val = $setValueList[$checkSet];
+					if($verbose==1)
+					{
+						print ("VALUE C:"+$checkSet+"\n");
+						print ("USING SET VALUE: "+$lum_val+"\n");
+					}
+				}
+
+				if($groupLum==2&&$previousGroupFound==0)
+				{
+					$groupValueList[$cg] = $lum_val;
+					if($verbose==1)
+					{
+						print ("SETTING VALUE LIST "+$cg+": "+$lum_val+"\n");
+					}
+					$cg++;
+				}
+				if($groupLum==2&&$previousGroupFound)
+				{
+					$lum_val = $groupValueList[$checkGroup];
+					if($verbose==1)
+					{
+						print ("VALUE C:"+$checkGroup+"\n");
+						print ("USING GROUP VALUE: "+$lum_val+"\n");
+					}
+				}
+
+				//CHECK FOR LUMINANCE RAMP AND SET RAMP
+				string $surf_ramp;
+				string $surf_parts[];
+				int $sTok = tokenize($surf, "|", $surf_parts);
+				if($sTok>1)
+				{
+					$surf_ramp = ($surf_parts[0]+"_"+$surf_parts[$sTok-1]);
+				}
+				else
+				{
+					$surf_ramp = $surf_parts[0];
+				}
+
+				//FIND SHADERS FOR LUMINANCE RAMP
+				string $sg[] = `listConnections -s 0 -d 1 -type shadingEngine $shape`;
+				string $shader_con[], $previousShaderList[];
+				string $shader;
+				int $previousShader = 0;
+				int $ps = 0;
+				for($sr=0;$sr<`size $sg`;$sr++)
+				{
+					for($pShader in $previousShaderList)
+					{
+						if(`strcmp $pShader $sg[$sr]`==0)
+						{
+							if($verbose==1)
+							{
+								print ("SHADER ALREADY COMPLETED: "+$sg[$sr]+" FOR SURFACE: "+$surf+"\n\n");
+							}
+							$previousShader = 1;
+							break;
+						}
+					}
+					if($previousShader==0)
+					{
+						$shader_con = `listConnections -s 1 -d 0 $sg[$sr]`;
+						if(`gmatch $shader_con[0] "*surfaceShader"`)
+						{
+							$shader = `substitute "_surfaceShader" $shader_con[0] ""`;
+							if($verbose==1)
+							{
+								print ("SHADER: "+$shader+"\n");
+								print ("CHECK FOR LUMINANCE RAMP: "+$surf_ramp+"_"+$shader+"_LUMINANCE_RAMP\n");
+							}
+							string $previousRampList[];
+							int $p = 0;
+							if(`objExists ($surf_ramp+"_"+$shader+"_LUMINANCE_RAMP")`)	
+							{
+								int $previous = 0;
+								for($previousRamp in $previousRampList)
+								{
+									if(`strcmp $previousRamp ($surf_ramp+"_"+$shader+"_LUMINANCE_RAMP")`==0)
+									{
+										$previous = 1;
+										break;
+									}
+								}
+								if($previous==0)
+								{
+									if ($lum_val < 0.0)
+										$lum_val = 0.0;
+									else
+										if ($lum_val > 1.0)
+											$lum_val = 1.0;
+									if($verbose==1)
+									{
+										print ("LUMINANCE VALUE FOR SURFACE RAMP: "+$surf_ramp+"_"+$shader+" TO: "+$lum_val+"\n\n");
+									}
+									string $ramp = ($surf_ramp+"_"+$shader+"_LUMINANCE_RAMP");
+									setAttr ($ramp+".colorEntryList[1].colorR") $lum_val;
+									setAttr ($ramp+".colorEntryList[1].colorG") $lum_val;
+									setAttr ($ramp+".colorEntryList[1].colorB") $lum_val;
+									$previousRampList[$p] = ($surf_ramp+"_"+$shader+"_LUMINANCE_RAMP");
+									$p++;
+								}
+								else
+								{
+									if($verbose==1)
+									{
+										print ("LUM VAL PREVIOUSLY SET FOR RAMP: "+$surf_ramp+"_"+$shader+"_LUMINANCE_RAMP\n\n");
+									}
+								}
+							}
+							else
+							{
+								if($verbose==1)
+								{
+									print "\n***********NO RAMP FOUND FOR LUM VAL************\n\n";
+								}
+							}
+							clear $previousRampList;
+						}
+						else
+						{
+							if($verbose==1)
+							{
+								print ("MATERIAL DOES NOT MATCH ????_surfaceShader NAMING CONVENTION: "+$shader_con[0]+"\n");
+							}
+						}
+						$previousShaderList[$ps] = $sg[$sr];
+						$ps++;
+					}
+				}
+				clear $previousShaderList;
+			}
+		}
+	}
+	print "ALL DONE\n";
+}

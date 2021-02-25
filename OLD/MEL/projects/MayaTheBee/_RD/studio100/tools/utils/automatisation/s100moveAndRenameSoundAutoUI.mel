@@ -1,0 +1,208 @@
+global proc s100moveAndRenameSoundAutoUI()
+{
+	if(`window -ex 	s100moveAndRenameSoundAutoUI`)
+			deleteUI s100moveAndRenameSoundAutoUI;
+
+		window -title "Relocating and Renaming sound by EP"  -h 400  s100moveAndRenameSoundAutoUI;
+		columnLayout -adjustableColumn true s100moveAndRenameSoundAutoUICLMain;
+
+
+	menuBarLayout s100moveAndRenameSoundAutoUIMLMain;
+
+
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100moveAndRenameSoundAutoUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+
+		setParent ..;
+$width = 250 ;
+
+			window -e -h 400 -w $width -sizeable 0  s100moveAndRenameSoundAutoUI;
+		showWindow;
+
+
+	formLayout -p s100moveAndRenameSoundAutoUICLMain s100moveAndRenameSoundAutoUIFLMain;
+
+
+
+$text ="this will copy all sound located in $EpFolder \"/_sound\" to local path for each scene folder and name them correctly.\n\nSelect a episode in this list" ;
+
+	$textField = `scrollField -en 0 -wordWrap 1 -text $text -w ($width -20) -h 110 `;
+
+	$txtField2 = `textScrollList -selectCommand s100moveAndRenameSoundAutoUIRefreshWhenEPSelected -w ($width -20) -h 200 s100moveAndRenameSoundAutoUIbtTxtField `;
+
+
+	$btRun = `button -en 0   -w ($width - 20 )-l "Run Script" -ann "scene must not be already a render scene(with light and passes)"  -c s100moveAndRenameSoundAuto s100moveAndRenameSoundAutoUIbtUpdate`;
+
+
+
+	formLayout -e
+
+	-attachForm $textField "top" 5
+	-attachForm $textField "left" 5
+
+	-attachControl $txtField2  "top" 5 $textField
+	-attachForm $txtField2 "left" 5
+
+
+	-attachControl $btRun  "top" 5 $txtField2
+	-attachForm $btRun "left" 5
+
+
+	s100moveAndRenameSoundAutoUIFLMain ;
+
+showWindow ;
+
+s100moveAndRenameSoundAutoUIRefreshEP ;
+
+}
+global proc s100moveAndRenameSoundAutoUIRefreshWhenEPSelected()
+{
+button -e -en 1   s100moveAndRenameSoundAutoUIbtUpdate ;
+}
+
+
+
+global proc s100moveAndRenameSoundAutoUIRefreshEP()
+{
+global string $currentProd_Name ;
+$folder = s100ASListEp($currentProd_Name) ;
+textScrollList -e -removeAll   s100moveAndRenameSoundAutoUIbtTxtField ;
+
+	for($tmp in $folder )
+	{
+	textScrollList -e -append $tmp   s100moveAndRenameSoundAutoUIbtTxtField ;
+
+    }
+}
+
+
+global proc s100moveAndRenameSoundAuto()
+{
+global string $currentProd_Name ;
+
+string $path = `s100moveAndRenameSoundAutoGetpath`;
+string $cleanP =  substituteAllString($path , "/_sound","")   ;
+int $chA[] ;
+
+	if(`filetest -d  $path`)
+	{
+  	string $allSounds[]  = `getFileList -filespec "*.wav" -folder $path ` ;
+	string $getAllShots[] = `s100returnAllSubRootSceneForShotsFolders({$cleanP}) `;
+	//print $getAllShots ;
+		for($i = 0 ; $i < size($allSounds) ; $i++)
+		{
+		$ch = 0 ;
+		$pathToCopy = "";
+			for($j = 0 ; $j < size($getAllShots) ; $j++)
+			{
+    		$arr = stringToStringArray($getAllShots[$j] , "/" ) ;
+			$last = $arr[size($arr)- 1 ] ;
+				if(`gmatch $allSounds[$i] ("*" + $last +"*")`)
+				{
+				$chA[$j]  = 1 ;
+
+				$ch = 1 ;
+				$pathToCopy= $getAllShots[$j] ;
+				break ;
+                }
+
+
+            }
+
+			if($ch == 1)
+			{
+			$pathToCopy += "_sound/" ;
+			$name = s100buildNameFromPath($pathToCopy,$currentProd_Name ) ;
+				$pathToCopyMaj = substituteAllString($pathToCopy ,"/_sound","/_Sound");
+
+
+				if(`filetest -d $pathToCopyMaj` != 1)
+				{
+				sysFile -md $pathToCopyMaj ;
+                }
+
+			$fullPath = $pathToCopyMaj + $name +".wav" ;
+
+			sysFile -copy $fullPath   ($path + $allSounds[$i] );
+			print ("\nfile " + ($path + $allSounds[$i] ) + " copied to " + $fullPath) ;
+
+
+            }
+
+
+
+        }
+		for($j = 0 ; $j < size($getAllShots) ; $j++)
+		{
+				if($chA[$j] == 0)
+				{
+					$pathToCopy = $getAllShots[$j] + "_Sound/" ;
+
+				print ("\n\nno sound for shot  "  + $getAllShots[$j]) ;
+
+
+
+						if(`filetest -d $pathToCopy` != 1)
+						{
+						sysFile -md $pathToCopy ;
+						}
+					$noFile = $pathToCopy +"no_sound_in_this_shot.txt";
+					$fileId=`fopen $noFile "w"`;
+					string $s =  ("No file for Shot "+ $pathToCopy +"  \n") ;
+					fwrite $fileId $s ;
+					fclose $fileId;
+				}
+
+        }
+
+    }else{
+	warning ("folder " + $path + "doesn't exists");
+    }
+
+
+
+}
+
+global proc string s100buildNameFromPath(string $pathSh,string $prod )
+{
+//$prod = $currentProd_Name ;
+//$pathSh = $pathToCopy
+string $suf ;
+	if($prod =="Maya" )
+	{
+	$suf = "MA" ;
+    }
+string $name = $suf ;
+string $base  = `s100assetManagerGetEpPath($prod) `;
+string $sub = substituteAllString($pathSh , $base ,"") ;
+
+string $array[] = stringToStringArray($sub ,"/") ;
+
+
+	for($i = 0 ; $i < size($array ) ; $i++)
+	{
+	string $array2[] = stringToStringArray($array[$i]  ,"_") ;
+	$name +="_" +$array2[0];
+
+
+    }
+
+return $name ;
+
+
+
+}
+
+global proc string  s100moveAndRenameSoundAutoGetpath()
+{
+global string $currentProd_Name ;
+string $base  = `s100assetManagerGetEpPath($currentProd_Name) `;
+string $textA[]  = `textScrollList -q -selectItem  s100moveAndRenameSoundAutoUIbtTxtField `;
+string $path = $base + $textA[0] +"/_sound/";
+
+
+return $path ;
+}
+//s100moveAndRenameSoundAutoUI;

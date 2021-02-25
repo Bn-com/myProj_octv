@@ -1,0 +1,380 @@
+// PreAnimation.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Move a shot from layout to animation
+Use:
+	PreAnimation argList
+Options:
+	argList (string)	- semicolon delimited list of arguments
+	
+Dependancies:
+
+	parseXML.mel
+	fileIO.mel
+	html_log.mel
+	argList.mel
+	insightGetShotXML
+	stringArrayFindIndex
+	
+	xml_parser plug-in
+	
+	swapAssets.php
+	layToAni.xml in project globals
+
+Documentation:
+
+Examples:
+
+Notes:
+	PreAnimation args
+	
+	arguments:
+		- sequence	(string) 	The sequence the shot group belongs to, e.g. "009"
+		- shotgroup	(string) 	The shot group letter
+		- host		(string)	Who is calling this process? "insight" or "maya"
+		- returnpath	(string)	The callback to execute when done
+		- arguments	(string)	The argument list to send to the callback
+		
+	Steps:
+	
+		1. Save the invoke file
+		2. Read the shot structure xml to determine what assets are needed in this shot.
+		3. Update the missing asset file, exit if there are missing assets.
+		4. Query the hold status, and exit if on hold.
+		5. Execute swapAssets.php with appropriate LUT to create the ani.
+		6. Update the shot database.
+		7. Perform a callback to Insight to let it know we are done.
+	
+	
+Bugs:
+
+Original:	03/30/06
+Revisions:	03/30/06	Rev 1.0
+		09/11/06	Rev 1.1
+		- Added code to create/update qubeJobHistory.xml file
+		
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// 
+source parseXML.mel;
+source fileIO.mel;
+source html_log.mel;
+source argList.mel;
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+proc string parseCBArgs (string $cbArgs)
+{
+
+	string $tokens[];
+	tokenize ($cbArgs,",",$tokens);
+	string $cb = "";
+	for ($i=0;$i<size($tokens);$i++)
+	{
+		$cb += $tokens[$i];
+		if ($i < size($tokens)-1)
+		{
+			if ($i % 2) $cb += " ";
+			else $cb += "=";
+		}
+	}
+	return $cb;
+	// send: arg1,value,arg2,value
+	// "arg1=value arg2=value"
+}
+// -----------------------------------------------------------------------------------------------
+proc string convertPath (string $inputPath)
+{
+	// get rid of backslashes
+	string $path = subAll ("\\",$inputPath,"/");	
+	
+	if (`about -nt`)
+		$path = substitute ("//datacenter/job_folders",$path,"X:");
+	else
+		$path = substitute ("//datacenter/job_folders",$path,"/diskx");
+		
+	return $path;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getShotGroupStrucFile (string $seq, string $shotGroup)
+{
+	return (getPath("ShotInfoDir",{$seq,$shotGroup})+$seq+"_"+$shotGroup+"_structure.xml");	
+}
+// -----------------------------------------------------------------------------------------------
+proc getAssetList (string $assetNames[], string $assetPaths[])
+{
+	global string $PA_sequence;
+	global string $PA_shotGroup;
+	
+	clear $assetNames;
+	clear $assetPaths;
+	
+	string $struc = getShotGroupStrucFile($PA_sequence,$PA_shotGroup);
+	
+	string $xml;
+	if (`filetest -f $struc`)
+	{
+		$xml = readXML ($struc,0);	
+	}
+	else
+	{
+		// get asset list from Insight
+		$xml = insightGetShotXML ($PA_sequence, $PA_shotGroup);
+	}
+	string $assetXML[] = xml_getTag ($xml,"Asset");
+	
+	
+	for ($i=0;$i<size($assetXML);$i++)
+	{
+		string $name = xml_getVar ($assetXML[$i],"Name");	
+		string $path = xml_getVar ($assetXML[$i],"Path");
+		
+		if (stringArrayFindIndex ($name,$assetNames) != -1)
+			continue;
+			
+		int $c = size ($assetNames);
+		$assetNames[$c] = $name;
+		$assetPaths[$c] = convertPath($path);
+	}	
+}
+// -----------------------------------------------------------------------------------------------
+proc string archive_ani ()
+{
+	global string $PA_sequence;
+	global string $PA_shotGroup;	
+	
+	string $shotBase = getPath ("ShotBase",{$PA_sequence,$PA_shotGroup});
+	string $ani = $shotBase+"/"+$PA_sequence+"_"+$PA_shotGroup+"_ani.ma";
+	string $archiveDir = $shotBase+"/archive";
+	
+	if (!`filetest -d $archiveDir`)
+	{
+		sysFile -md $archiveDir;
+		if (!`filetest -d $archiveDir`)
+		{
+			print ("PreAnimation: Couldn't create directory "+$archiveDir+".\n");
+			return "";	
+		}	
+	}
+	
+	string $archivedFile;
+	int $c = 1;
+	do
+	{
+		$archivedFile = $archiveDir+"/"+$PA_sequence+"_"+$PA_shotGroup+"_ani."+$c+".ma";
+		$c ++;
+	} while (`filetest -f $archivedFile`);
+	
+	
+	sysFile -cp $archivedFile $ani;
+	
+	if (!`filetest -f $archivedFile`)
+	{
+		print ("PreAnimation: Couldn't create file "+$archivedFile+".\n");
+		return "";
+	}
+	
+	return $archivedFile;
+}
+// -----------------------------------------------------------------------------------------------
+global proc int do_preAnimation ()
+{
+	global string $PA_sequence;
+	global string $PA_shotGroup;
+	global string $PA_host;
+	global string $PA_qubeJobName;
+	
+	string $shotBase = getPath ("ShotBase",{$PA_sequence,$PA_shotGroup});
+	string $ani = $shotBase+"/"+$PA_sequence+"_"+$PA_shotGroup+"_ani.ma";
+	string $lay = $shotBase+"/"+$PA_sequence+"_"+$PA_shotGroup+"_lay.ma";
+	int $qubeJobId;
+
+	// --------------------------------------------------------
+	// Get Qube Job ID, and update qubeJobHistory.xml
+	// --------------------------------------------------------
+	// we need to know what cluster to look on
+	string $clusters[];
+	getFarmClusters ($clusters,{});
+	if ($PA_qubeJobName == "")
+	{
+		string $searchName = "PreAnimation*"+$PA_sequence+"*"+$PA_shotGroup;
+		$qubeJobId = getQubeJobIdFromName($searchName,$clusters[0],"--running",0);
+	}
+	else
+	{
+		$qubeJobId = getQubeJobIdFromName($PA_qubeJobName,$clusters[0],"--running",1);
+	}
+	// update qubeJobHistory.xml
+	updateQubeJobHistory ($PA_sequence, $PA_shotGroup, "PreAnimation", $qubeJobId,1, {}, {}, {});
+
+	
+	// --------------------------------------------------------
+	// find out what assets are in this shot
+	string $assetNames[], $assetPaths[];
+	
+	getAssetList ($assetNames, $assetPaths);
+	
+	// Check that the assets exist.
+	string $missing[];
+	for ($i=0;$i<size($assetNames);$i++)
+	{
+		string $fullPath = $assetPaths[$i]+"/"+$assetNames[$i]+"_animProxyRig.ma";
+		print ("PreAnimation: Checking for "+$fullPath+"..\n");
+		if (!`filetest -f $fullPath`)
+		{
+			$missing[size($missing)] = $fullPath;
+			print ("Couldn't find "+$fullPath+"\n");	
+		} 	
+	}
+	
+	// if there are missing assets, update the missing asset file, and exit.
+	if (size($missing))
+	{
+		print ("PreAnimation: Couldn't complete due to the following assets which don't exist: \n\n");
+		print $missing;
+		
+		saveMissingAssets ("PreAnimation",$PA_sequence, $PA_shotGroup, $missing);
+		return false;	
+	}
+	
+	// Find out if the tech supe has put the shot on hold.
+	int $hold = queryHoldStatus ("PreAnimation",$PA_sequence,$PA_shotGroup,$assetNames);
+	
+	if ($hold)
+	{
+		print ("PreAnimation: This shot is on hold due to technical reasons. Exiting...\n\n");
+		return false;	
+	}
+	
+	// Make sure the layout file exists.
+	if (!`filetest -f $lay`)
+	{
+		print ("PreAnimation: Couldn't find layout file "+$lay+". Can't continue...\n\n");
+		return false;	
+	}
+	
+	// If the ani already exists, archive it.
+	if (`filetest -f $ani`)
+	{
+		string $archive = archive_ani ();
+		if ($archive == "")
+		{
+			print ("PreAnimation: ani file "+$ani+" already exists, and can't archive it. Exiting...\n\n");
+			return false;	
+		}	
+		print ("PreAnimation: Successfully archived ani file "+$ani+"\n\n");
+	}
+	
+	// We are ready to do the deed. 
+	string $swapTable = getPath ("ProjectGlobals",{})+"/layToAni.xml";
+	if (!`filetest -f $swapTable`)
+	{
+		print ("PreAnimation: Couldn't find "+$swapTable+". Can't continue...\n\n");
+		return false;	
+	}
+
+	string $php_dir = getPath ("ProjectPHPDir",{});
+	string $cmd = php()+" "+$php_dir+"/swapAssets.php ";
+	
+	$cmd += "-proj "+`workspace -q -act`+" ";
+	$cmd += "-sequence "+$PA_sequence+" ";
+	$cmd += "-shotgroup "+$PA_shotGroup+" ";
+	$cmd += "-task PreAnimation ";
+	$cmd += "-swaptable "+$swapTable+" ";
+	$cmd += "-infile "+$lay+" ";
+	$cmd += "-outfile "+$ani;
+	
+	string $res = system ($cmd);
+	print ("PreAnimation: swapAssets.php output:\n");
+	print ($res+"\n");
+	
+	// Check that the ani made it.
+	if (!`filetest -f $ani`)
+	{
+		print ("PreAnimation: Unable to create ani file "+$ani+"\n\n");
+		return false;	
+	}
+	else
+	{
+		print ("PreAnimation: Successfully created ani file "+$ani+"\n\n");	
+	}
+	
+	// Update shot data base.
+	print ("PreAnimation: Updating shot database...\n");
+	
+	buildShotdb($PA_sequence, $PA_shotGroup);
+	
+	return true;
+}
+// -----------------------------------------------------------------------------------------------
+global proc PreAnimation(string $argList) 
+{
+	loadPlugins();
+	
+	// -----------------------------------
+	// Parse the argList
+	// -----------------------------------
+	global string $PA_sequence;
+	$PA_sequence = getArgValue ($argList,"sequence");
+	
+	global string $PA_shotGroup;
+	$PA_shotGroup = getArgValue ($argList,"shotGroup");
+	
+	global string $PA_host;
+	$PA_host = getArgValueDefault ($argList,"host","maya");
+	
+	global string $PA_CB_Path;
+	$PA_CB_Path = getArgValue ($argList,"returnpath");
+	
+	global string $PA_CB_Args;
+	$PA_CB_Args = getArgValue ($argList,"arguments");
+	
+	
+	if (size($PA_CB_Args) && tolower($PA_host) == "insight") 
+	{
+		$PA_CB_Args = parseCBArgs($PA_CB_Args);
+	}
+
+	global string $PA_qubeJobName;
+	$PA_qubeJobName = getArgValue ($argList,"qubeJobName");
+	
+	// -----------------------------------
+	// Save the invoke file
+	// ----------------------------------- 
+	saveInvoke ("PreAnimation",$PA_sequence,$PA_shotGroup,0,$argList);
+	
+	// -----------------------------------
+	// Do it
+	// ----------------------------------- 
+	int $success = do_preAnimation();
+	
+	if (!$success)
+		return;
+		
+	// -----------------------------------
+	// If host is Insight perform the callback
+	// ----------------------------------- 
+	if (tolower($PA_host) == "insight")
+	{
+		insightCallWebservice ($PA_CB_Path,$PA_CB_Args);
+		
+	}
+	
+	print ("PreAnimation: DONE.\n\n");
+	
+}

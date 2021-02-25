@@ -1,0 +1,82 @@
+global proc zwUpdateAviBrowse(string $textFieldButtonGrp)
+{
+	string $buf[] = `idmtFileDialog -filter "avi (*.avi)|*.avi|All Files (*.*)|*.*||"`;
+	if (size($buf))
+	{
+		textFieldButtonGrp -edit -text $buf[0] $textFieldButtonGrp;
+	}
+}
+
+global proc zwUpdateAviProc(string $textFieldButtonGrp)
+{
+	string $source = `textFieldButtonGrp -query -text $textFieldButtonGrp`;
+	string $renderMime = `match "[^.]+$" $source`;
+	$renderMime = tolower($renderMime);
+//	if (!($renderMime == "avi" || $renderMime == "mov"))
+//	{
+//		error "只能更新avi或者mov";
+//	}
+	
+	string $str = `match "[^/\\]+$" $source`;
+	$str = `match "^[^.]+" $str`;
+	$str = `substitute "_[0-9][0-9][0-9]$" $str ""`;
+	$str = `substitute "_[cCvV][0-9][0-9][0-9]$" $str ""`;
+	string $folder = `zwGetPath "scene" ($str + "_001.mb")`;
+	if ($folder == "")
+	{
+		error "文件命名不规范";
+	}
+	string $buf[] = `getFileList -filespec ($folder + "/" + $str + "*.mb")`;
+	if (size($buf) == 0)
+	{
+		$buf = `getFileList -filespec ($folder + "/" + $str + "*.ma")`;
+	}
+	if (size($buf) == 0)
+	{
+		error "Maya文件尚未Checkin不能用本工具";
+	}
+	string $filename = $buf[0];
+
+	string $dest = $folder + "/" + `match "^[^.]+" $filename` + ".0001." + $renderMime;
+
+	print ("copy \"" + $source + "\" \"" + $dest + "\"\n");
+	string $rs = `zwSysFile "copy" $source $dest true`;
+	if ($rs == "")
+	{
+		string $project = `zwGetProject $dest`;
+		idmtService "UpdateAvi" ($project + "|" + $filename + "|" + $renderMime);
+		confirmDialog -message "更新成功" -button "OK";
+	}
+	else
+	{
+		error $rs;
+	}
+}
+
+global proc zwUpdateAvi()
+{
+	if(`window -exists "zwUpdateAvi"`)
+	{
+		deleteUI "zwUpdateAvi";
+	}
+
+	window -menuBar true -title "更新avi" -width 600 -height 100 "zwUpdateAvi";
+		string $formLayout = `formLayout`;
+			string $text = `text -label "更新网上的avi，目标文件根据文件名自动判断"`;
+			string $textFieldButtonGrp = `textFieldButtonGrp -label "本地avi:" -buttonLabel "Browse" -columnWidth 1 100 -columnWidth 3 50 -adjustableColumn 2`;
+			textFieldButtonGrp -edit -buttonCommand ("zwUpdateAviBrowse \"" + $textFieldButtonGrp + "\"") $textFieldButtonGrp;
+			string $button = `button -label "更新" -command ("zwUpdateAviProc \"" + $textFieldButtonGrp + "\"")`;
+	formLayout -edit
+		-attachForm	$text			"top"		10
+		-attachForm	$text			"left"		100
+
+		-attachControl	$button			"top"		10	$text
+		-attachForm	$button			"right"		10
+
+		-attachControl	$textFieldButtonGrp	"top"		10	$text
+		-attachControl	$textFieldButtonGrp	"right"		10	$button
+		-attachForm	$textFieldButtonGrp	"left"		0
+	$formLayout;
+
+	showWindow "zwUpdateAvi";
+}

@@ -1,0 +1,285 @@
+global proc s100CSIcreateSplineIkStretchRigUI()
+{
+$fenetre = "createSplineIkStretchRigRig";
+$nameFenetre = "create Spline IK Stretch Rig";
+
+if ( `window -exists $fenetre` )
+ {
+ deleteUI $fenetre;
+}
+
+$parent =`window -t $nameFenetre -w 536 $fenetre`;
+	s100CSIFrameUI($parent);
+showWindow $fenetre;
+
+window -e -resizeToFitChildren 1 $fenetre;
+}
+
+
+global proc s100CSIFrameUI(string $parent)
+{
+
+$formLayout = `formLayout -p $parent -numberOfDivisions 100 s100CSIFormLayout`;
+
+	$sep01 = `separator CSIsep01`;
+	$textAdvert = `text -align "center" -l "we consider joint AIM in aldready X" CSItextAdvert`;
+	$textAdvert02 = `text -align "center" -backgroundColor 1 0 0 -l "constraint your scale to the CTR group" CSItextAdvert02`;
+	$sep02 = `separator CSIsep02`;
+
+	$textFieldName = `textField -tx "objectName" CSItextFieldName`;
+	$textFieldBones = `textField CSItextFieldBones`;
+	$btTFbones = `button -l "sl base joint" -c ("s100CSISlBase(\"" + $textFieldBones + "\")") CSIbtTFBones`;
+	$numberOfControl = `intField -v 3 -minValue 3 -step 1 CSIinfFieldGrp`;
+	$buttonValid = `button -l "create rig" -c ("CSIcreateRig(\""+$textFieldBones +"\",\"" + $textFieldName +"\",\"" + $numberOfControl +"\")") CSIbuttonValid`;
+
+	$text = `text -l "number of controller :"`;
+setParent ..;
+
+formLayout -e
+-attachForm $sep01 "top" 5
+-attachForm $sep01 "left" 5
+-attachForm $sep01 "right" 5
+
+-attachControl $textAdvert "top" 5 $sep01
+-attachForm $textAdvert "left" 5
+-attachForm $textAdvert "right" 5
+
+-attachControl $textAdvert02 "top" 5 $textAdvert
+-attachForm $textAdvert02 "left" 5
+-attachForm $textAdvert02 "right" 5
+
+-attachControl $sep02 "top" 5 $textAdvert02
+-attachForm $sep02 "left" 5
+-attachForm $sep02 "right" 5
+
+-attachControl $textFieldName "top" 5 $sep02
+-attachForm $textFieldName "left" 5
+-attachForm $textFieldName "right" 5
+
+-attachControl $textFieldBones "top" 2 $textFieldName
+-attachForm $textFieldBones "left" 5
+-attachPosition $textFieldBones "right" 0 80
+
+-attachControl $btTFbones "top" 2 $textFieldName
+-attachForm $btTFbones "right" 5
+-attachControl $btTFbones "left" 2 $textFieldBones
+
+-attachControl $text "top" 2 $btTFbones
+-attachForm $text "left" 5
+-attachPosition $text "right" 0 50
+
+-attachControl $numberOfControl "top" 5 $btTFbones
+-attachForm $numberOfControl "right" 5
+-attachControl $numberOfControl "left" 2 $text
+
+
+-attachControl $buttonValid "top" 5 $numberOfControl
+-attachForm $buttonValid "left" 5
+-attachForm $buttonValid "right" 5
+-attachForm $buttonValid "bottom" 5
+
+$formLayout;
+
+}
+
+
+global proc s100CSISlBase(string $textField)
+{
+	$sl = `ls -sl`;
+	if(size($sl) > 0)
+	{
+	//$objectTyp = ``;
+	if(`objectType -i "joint" $sl[0]`)
+		textField -e -tx $sl[0] $textField;
+	else
+		warning "select joint as base object";
+
+    }
+	else
+	warning "no object match selected";
+}
+
+
+global proc CSIcreateRig(string $jointBase, string $name, string $intField)
+{
+
+
+
+string $tabJoint[];
+string $tabCTR[];
+string $tabUPV[];
+
+
+$jointBase = `textField -q -tx $jointBase`;
+select -hi $jointBase;
+$jointList = `ls -sl`;
+$jointList = sort($jointList);
+
+int $num = `intField -q -v $intField`;
+
+$name = `textField -q -tx $name`;
+	$grpBase = `createNode "transform" -n ($name + "Rig_grp")`;
+	$grpCTR = `createNode "transform" -n ($name + "CTR_grp")`;
+	$grpBDD = `createNode "transform" -n ($name + "BDD_grp")`;
+	$jntGrp = `createNode "transform" -n ($name + "Joint_grp")`;
+	$sclCTR = `createNode "transform" -n ($name + "_SCALE_FACTOR_trs")`;
+parent $grpCTR $sclCTR $jntGrp $grpBDD $grpBase;
+
+
+string $p;
+for($obj in $jointList)
+	{
+		if(`objectType -isType "joint" $obj`)
+		{
+		//print ($obj + "\n");
+		$position = `xform -q -worldSpace -t $obj`;
+		//print $position;
+		//$posText = stringArrayToString($position, " ");
+		$p += (" -p "  + $position[0] + " " + $position[1] + " " +$position[2]);
+		}
+	}
+
+$ik = `ikHandle -sol ikSplineSolver -pcv false -ccv 1 -sj $jointList[0] -endEffector $jointList[(size($jointList))-1] -tws "linear" -ns 4 -n ($name + "_spline_ik")`;
+print $ik[0];
+$curve = `ikHandle -q -c $ik[0]`;
+
+//$curve = "curve -n (\"" + $name + "_rig_cv\")" + $p;
+//$curve = eval($curve);
+$curve = `firstParentOf $curve`;
+$curve = `rename $curve ($name +"_rig_cv")`;
+
+rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 0 -kep 1 -kt 0 -s (size($jointList)) -d 3 -tol 0.01 $curve;
+
+	select $curve;
+		DeleteHistory;
+	select -clear;
+
+
+parent $ik[0] $curve $grpBDD;
+
+	for($i = 0; $i < $num; $i++)
+		{
+        //$posJoint = `pointOnCurve -pr ($i * (1 / $num)) -p $curve`;
+			float $float = ($i * (1.0 / ($num-1)));
+			string $infoNode = `pointOnCurve -turnOnPercentage 1 -ch on -pr $float $curve`;
+
+			$attrInfo = `getAttr ($infoNode + ".position")`;
+			delete $infoNode;
+				$padding = padNumber(($i + 1),2);
+		select -clear;
+		$joint = `joint -n ($name + "_sknCurve_" + $padding + "_jnt")`;
+		parent $joint $jntGrp;
+			setAttr ($joint +".tx")$attrInfo[0] ;
+			setAttr ($joint +".ty")$attrInfo[1] ;
+			setAttr ($joint +".tz")$attrInfo[2] ;
+
+		$grpCtr = `createNode "transform" -n ($name + "_" + $padding + "_grp")`;
+		$ctr = `circle -n ($name + "_" + $padding + "_ctr")`;
+			if($i == ($num -1))
+			{
+			addAttr -ln "more"  -at double  -min 0 -max 1 $ctr[0];
+			setAttr -e -keyable true -lock 1 ( $ctr[0] + ".more");
+
+			addAttr -ln "stretch"  -at double  -min 0 -max 1 $ctr[0];
+			setAttr -e -keyable true -lock 0 ( $ctr[0] + ".stretch");
+            }
+
+			setAttr ($ctr[0] + ".overrideColor") 6;
+			setAttr ($ctr[0] + ".overrideEnabled") 1;
+
+		select $ctr;
+			DeleteHistory;
+		select -clear;
+
+		parent $ctr[0] $grpCtr;
+			$pc = `parentConstraint $joint $grpCtr`;
+			delete $pc;
+			$pc = `parentConstraint $ctr[0] $joint`;
+			$sc = `scaleConstraint $ctr[0] $joint`;
+
+		if($i == 0)
+			{
+			$upv = `createNode "transform" -n ($name + "_upv_base_lct")`;
+			$pc = `parentConstraint $ctr[0] $upv`;
+			delete $pc;
+			parent $upv $ctr[0];
+			setAttr ($upv + ".ty") -1;
+			setAttr ($upv + ".v") 0;
+			$tabUPV[0] = $upv;
+			}
+		if($i == ($num -1))
+			{
+			$upv = `createNode "transform" -n ($name + "_upv_tips_lct")`;
+			$pc = `parentConstraint $ctr[0] $upv`;
+			delete $pc;
+			parent $upv $ctr[0];
+			setAttr ($upv + ".ty") -1;
+			setAttr ($upv + ".v") 0;
+			$tabUPV[1] = $upv;
+            }
+
+		setAttr -e -keyable false -lock 0 ( $ctr[0] + ".sx");
+		setAttr -e -keyable false -lock 0 ( $ctr[0] + ".sy");
+		setAttr -e -keyable false -lock 0 ( $ctr[0] + ".sz");
+		setAttr -e -keyable false -lock 0 ( $ctr[0] + ".v");
+
+		$tabJoint[$i] = $joint;
+		$tabCTR[$i] = $ctr[0];
+
+		parent $grpCtr $grpCTR;
+		}
+
+	$skinCluster = `skinCluster -n ("skinCluster_" + $name + "_def")  -tsb $tabJoint $curve`;
+	$cvShape = `listRelatives -shapes $curve`;
+	$arcL = `arcLengthDimension ($cvShape[0] + ".u[1]")`;
+	$mdvArc = `createNode "multiplyDivide" -n ($name + "_ArcLengthMDV_nde")`;
+	$mdvSCL = `createNode "multiplyDivide" -n ($name + "_sclMDV_nde")`;
+	$mdv01 = `createNode "multiplyDivide" -n ($name + "_ctrMDV_00_nde")`;
+	$PMA01 = `createNode "plusMinusAverage" -n ($name + "_ctrPMA_00_nde")`;
+	$reverse = `createNode "reverse" -n ($name + "_ctrREV_00_nde")`;
+	//$arcShape = `listRelatives -s $arcL`;
+
+	float $arcValue = getAttr ($arcL +".arcLength");
+	setAttr ($mdvArc + ".operation") 2;
+	setAttr ($mdvSCL + ".input2X") $arcValue;
+	setAttr ($mdv01 + ".operation") 1;
+
+	connectAttr -f ($sclCTR + ".scaleY") ($mdvSCL + ".input1X");
+	connectAttr -f ($mdvSCL + ".outputX") ($mdvArc + ".input2X");
+
+	connectAttr -f ($arcL +".arcLength")($mdvArc + ".input1X");
+
+	connectAttr -f ($mdvArc +".outputX")($mdv01 + ".input1X");
+
+	connectAttr -f ($tabCTR[size($tabCTR) - 1] + ".stretch")($mdv01 + ".input2X");
+
+	connectAttr -f ($tabCTR[size($tabCTR) - 1] + ".stretch")($reverse + ".inputX");
+
+	connectAttr -f ($reverse + ".outputX")($PMA01 + ".input3D[0].input3Dx");
+
+	connectAttr -f ($mdv01 + ".outputX")($PMA01 + ".input3D[1].input3Dx");
+
+	$sC = `scaleConstraint $grpCTR $sclCTR`;
+
+	setAttr ($ik[0] + ".dTwistControlEnable") 1;
+	setAttr ($ik[0] +".dWorldUpType") 2;
+
+	connectAttr -f ($tabUPV[0] + ".worldMatrix[0]") ($ik[0] + ".dWorldUpMatrix");
+	connectAttr -f ($tabUPV[1] + ".worldMatrix[0]") ($ik[0] + ".dWorldUpMatrixEnd");
+
+	setAttr($grpBDD + ".v") 0;
+	setAttr($jntGrp + ".v") 0;
+
+	for($obj in $jointList)
+		connectAttr -f ($PMA01 + ".output3Dx") ($obj + ".scaleX");
+
+}
+
+
+
+global proc string padNumber(int $number, int $length){
+	string $paddedString = string($number);
+	while(size($paddedString)<$length)
+		$paddedString = ("0"+$paddedString);
+	return $paddedString;
+}

@@ -1,0 +1,462 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//  Some of the functions are copied from AEhardwareTextureTemplate.mel
+//
+
+proc string getPlugNode( string $plug )
+{
+    string $buffer[];
+    tokenize($plug, ".", $buffer);
+    return size($buffer) > 0 ? $buffer[0] : "";
+}
+
+proc string getMaterialFromMaterialInfo(string $materialInfo)
+{
+    string $connections[] = `listConnections -source true -destination false -plugs false ($materialInfo + ".material")`;
+
+    if (size($connections) > 0) 
+		return $connections[0];
+	else
+		return "";
+}
+
+proc string getTexturePlugFromMaterial(string $materialPlug)
+//
+// Description:
+//      Procedure to return the plug on a texture which is connected to
+//      materialPlug. If there is a bump node between, it will be by passed
+//      to return the correct plug.
+//
+// Returns:
+//      The returned plug will be something like "file1.outColor".
+//
+{
+    string $texturePlug = "";
+
+    string $connections[] = `listConnections -source true
+        -destination false -plugs true $materialPlug`;
+
+    // If there is a bump connected to this channel, skip over it
+    // to get the actual texture.
+
+    if (size($connections) > 0) {
+        string $node = getPlugNode($connections[0]);
+
+        string $type = `objectType $node`;
+
+        if ($type == "bump2d" || $type == "bump3d") {
+            string $bump = $node;
+
+            $connections = `listConnections -source true
+                -destination false -plugs true ($bump+".bumpValue")`;
+        }
+    }
+
+    if (size($connections) > 0)
+        $texturePlug = $connections[0];
+
+    return $texturePlug;
+}
+
+proc disconnectInfoTexture( string $info )
+{
+    // We need to break all connection because we want to ensure the
+    // texture being displayed has a multi index of zero.
+    //
+    // Note: the connections are broken from back to front because
+    // breaking a connection at the end of the multi will not affect
+    // the connections at the start of the multi.
+
+    string $connections[];
+    $connections = `listConnections -connections true ($info+".texture")`;
+
+    for ($i = size($connections); $i > 0; $i -= 2)
+        disconnectAttr ($connections[$i-1]+".message") $connections[$i-2];
+}
+
+//
+// if true, return the map connected to the transparency channel
+//
+
+proc string kcIsEyelashMaterial(string $material)
+{
+	// since cannot deduce by material name, deduce like below:
+	// 1) lambert material
+	// 2) no map applied to color channel
+	// 3) with map applied to transparency channel
+
+	if (`nodeType $material` == "lambert")
+	{
+		string $connections[] = `listConnections -source true -destination false ($material + ".color")`;
+
+		if (size($connections) == 0)
+		{
+			string $connections[] = `listConnections -plugs true -source true -destination false ($material + ".transparency")`;
+
+			if (size($connections) > 0)
+				return $connections[0];
+		}
+	}
+
+	return "";
+}
+
+proc string kcBypassHSV(string $material)
+{
+	string $connections[] = `listConnections -source true -destination false ($material + ".color")`;
+
+	for ($item in $connections)
+		if (`nodeType $item` == "HsvAdjust")
+		{
+			string $node[] = `listConnections -source true -destination false ($item + ".inputRGB")`;
+			return $node[0];
+		}
+
+	return "";
+}
+
+proc string kcGetFirstMaterial(string $layeredShader)
+{
+	int $count = `getAttr -size ($layeredShader + ".inputs")`;
+
+	if ($count > 0)
+	{
+		int $i = 0;
+
+		while (true)
+		{
+			string $connections[] = `listConnections -source true -destination false ($layeredShader + ".inputs[" + $i + "].color")`;
+
+			if (size($connections) > 0)
+				return $connections[0];
+
+			$i++;
+
+			if ($i > 1000)
+			{
+				warning($layeredShader + ": infinite loop encountered.");
+				return "";
+			}
+		}
+	}
+
+	return "";
+}
+
+proc string kcGetLastMaterial(string $layeredShader)
+{
+	int $count = `getAttr -size ($layeredShader + ".inputs")`;
+	int $curCount = 0;
+
+	if ($count > 0)
+	{
+		int $i = 0;
+
+		while (true)
+		{
+			string $connections[] = `listConnections -source true -destination false ($layeredShader + ".inputs[" + $i + "].color")`;
+
+			if (size($connections) > 0)
+				$curCount++;
+
+			if ($curCount == $count)
+				return $connections[0];
+
+			$i++;
+
+			if ($i > 1000)
+			{
+				warning($layeredShader + ": infinite loop encountered.");
+				return "";
+			}
+		}
+	}
+
+	return "";
+}
+
+proc kcResetEccentricity(string $material)
+{
+	if (`attributeExists eccentricity $material`)
+	{
+		// store eccentricity in custom attribute if eccentricity != 0
+
+		float $value = `getAttr ($material + ".eccentricity")`;
+
+		if ($value != 0.0)
+		{
+			setAttr ($material + ".eccentricity") 0.0;
+
+			// keep value in custom attribute
+
+			if (!`attributeExists kcEccentricity $material`)
+				addAttr -longName kcEccentricity -attributeType double $material;
+
+			setAttr ($material + ".kcEccentricity") $value;
+		}
+	}
+}
+
+proc kcRestoreEccentricity(string $material)
+{
+	if (`attributeExists eccentricity $material`)
+	{
+		if (`attributeExists kcEccentricity $material`)
+		{
+			float $value = `getAttr ($material + ".kcEccentricity")`;
+			setAttr ($material + ".eccentricity") $value;
+		}
+	}
+}
+
+proc kcDisplayTexture(int $flag, string $excludeSet[], string $excludeMaterial[])
+{
+	string $materialInfo[] = `ls -type materialInfo`;
+	$materialInfo = stringArrayRemove($excludeSet, $materialInfo);
+
+	if ($flag == 0)
+	{
+		for ($i = 0; $i < size($excludeMaterial); $i++)
+		{
+			// restore eccentricity
+
+			if ((`gmatch $excludeMaterial[$i] "*head*"`) ||
+				(`gmatch $excludeMaterial[$i] "*face*"`))
+			{
+				if (`nodeType $excludeMaterial[$i]` == "blinn")
+					kcRestoreEccentricity($excludeMaterial[$i]);
+			}
+		}
+
+		for ($item in $materialInfo)
+		{
+			// display texture (color channel)
+
+			string $material = getMaterialFromMaterialInfo($item);
+
+			if ($material != "")
+			{
+				string $materialPlug, $texturePlug;
+				
+				if ((`nodeType $material` == "layeredShader") || 
+				    (`nodeType $material` == "useBackground") ||
+				    (`nodeType $material` == "shadingMap") ||
+				    (`nodeType $material` == "surfaceShader"))
+				{
+					$materialPlug = ($material+".outColor");
+					$texturePlug = $materialPlug;
+				}
+				else
+				{
+					$materialPlug = ($material+".color");
+					$texturePlug = getTexturePlugFromMaterial($materialPlug);
+				}
+
+				if ($texturePlug != "") {
+					// Connect up the new texture to materialInfo.
+					//
+
+					string $node = getPlugNode($texturePlug);
+
+					if (size(`listConnections $node`) > 1) {
+						// It may be ambiguous for materialInfo to figure out which
+						// channel to display (for example, if a file texture is
+						// hooked up to both color and bump on a material). We
+						// make a connection to the "textureChannel" to specify
+						// which plug should be used.
+						// 
+
+						if (!isConnected($texturePlug, $item+".textureChannel"))
+							connectAttr -force $texturePlug ($item+".textureChannel");
+					}
+
+					// Now let materialInfo do its thing
+					//
+
+					if (!isConnected($node+".message", $item+".texture[0]"))
+						connectAttr -force ($node+".message") ($item+".texture[0]");
+				}
+			}
+		}
+	}
+	else
+	{
+		for ($item in $materialInfo)
+		{
+			// hide texture
+
+			disconnectInfoTexture($item);
+		}
+
+		for ($i = 0; $i < size($excludeMaterial); $i++)
+		{
+			string $mapPlug = kcIsEyelashMaterial($excludeMaterial[$i]);
+
+			if ($mapPlug != "")
+			{
+				// eyelash material
+
+				if (!isConnected($mapPlug, $excludeSet[$i] + ".texture[0]"))
+					connectAttr -force $mapPlug ($excludeSet[$i] + ".texture[0]");
+			}	
+			else
+			{
+				if ((`gmatch $excludeMaterial[$i] "*head*"`) ||
+					(`gmatch $excludeMaterial[$i] "*face*"`))
+				{
+					// show the high-resolution texture
+
+					string $material = $excludeMaterial[$i];
+
+					if (`nodeType $material` == "layeredShader")
+						if (`gmatch $material "*jac*"`)
+						{
+							// handle special cases for Jac 
+							// 1) old material - both materials are NOT transparent, take the first material
+							// 2) new material - first material is transparent, take the second material
+
+							string $firstMaterial = kcGetFirstMaterial($material);
+							float $firstTransparency[] = `getAttr ($firstMaterial + ".transparency")`;
+
+							string $lastMaterial = kcGetLastMaterial($material);
+							float $lastTransparency[] = `getAttr ($lastMaterial + ".transparency")`;
+
+							if (($firstTransparency[0] < 0.5) && ($lastTransparency[0] < 0.5))
+								$material = $firstMaterial;
+							else
+								$material = $lastMaterial;
+
+							if ($material != "")
+								if (!isConnected($material + ".message", $excludeSet[$i] + ".material"))
+									connectAttr -force ($material + ".message") ($excludeSet[$i] + ".material");
+						}
+						else
+						{
+							// replace the layered shader with material with transparency < 0.3
+
+							$material = kcGetLastMaterial($material);
+							float $transparency[] = `getAttr ($material + ".transparency")`;
+
+							if ($transparency[0] > 0.8)
+								$material = kcGetFirstMaterial($material);
+
+							if ($material != "")
+								if (!isConnected($material + ".message", $excludeSet[$i] + ".material"))
+									connectAttr -force ($material + ".message") ($excludeSet[$i] + ".material");
+						}
+
+					// set eccentricity to 0 (disable highlight)
+
+					if (`nodeType $material` == "blinn")
+					{
+						// set eccentricity to 0
+
+						kcResetEccentricity($material);
+					}
+
+
+					if ((`nodeType $material` != "useBackground") &&
+						(`nodeType $material` != "layeredShader") &&
+						(`nodeType $material` != "shadingMap") &&
+						(`nodeType $material` != "surfaceShader"))
+					{
+						string $node = kcBypassHSV($material);
+
+						if ($node != "")
+						{	
+							if (!isConnected($node + ".message", $excludeSet[$i] + ".texture[0]"))
+								connectAttr -force ($node + ".message") ($excludeSet[$i] + ".texture[0]");
+						}
+						else
+						{
+							// to handle wrongly named material
+
+							string $texturePlug = getTexturePlugFromMaterial($material + ".color");
+
+							if ($texturePlug != "")
+								if (!isConnected($texturePlug, $excludeSet[$i] + ".texture[0]"))
+									connectAttr -force $texturePlug ($excludeSet[$i] + ".texture[0]");
+
+
+							// special case for Caroline
+
+							if (gmatch($material, "*caroline*"))
+							{
+								string $temp[] = `ls -type file "caroline_c_lo_head_colorFile*"`;
+
+								if (size($temp) > 0)
+									if (!isConnected($temp[0], $excludeSet[$i] + ".texture[0]"))
+										connectAttr -force ($temp[0] + ".outColor") ($excludeSet[$i] + ".texture[0]");
+							}
+							else
+							{
+								if (gmatch($material, "*jacyoung*"))
+								{
+									string $temp[] = `ls -type file "jacyoung01_head_colorFile*"`;
+
+									if (size($temp) > 0)
+										if (!isConnected($temp[0], $excludeSet[$i] + ".texture[0]"))
+											connectAttr -force ($temp[0] + ".outColor") ($excludeSet[$i] + ".texture[0]");
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+//
+//	bodkus_eye_specMaterial1
+//	jac01_r_lo_eye_color_blinn
+//	jac_r_lo_head_layeredShader
+//	jac_c_lo_head_eyelash_lambert
+//	bodkus_c_lo_head_face_blinn
+//	ragis_c_lo_head_blinn
+//	ragis_l_lo_eyeball_blinn
+//
+
+global proc kcCustomDisplayTexture(int $flag)
+{
+	string $keywordSet[] = {
+		"*lens*",
+		"*eye*",
+		"*head*",
+		"*eyelash*",
+		"*jiemao*",
+		"*face*",
+		"*eyeball*"
+	};
+
+	string $excludeSet[];
+	string $excludeMaterial[];
+
+	string $materials[] = `ls -materials`;
+
+	for ($item in $materials)
+		for ($obj in $keywordSet)
+			if (gmatch($item, $obj))
+			{
+				string $connections[] = `listConnections -type materialInfo -source false -destination true ($item + ".message")`;
+
+				if (size($connections) > 0)
+				{
+					$excludeMaterial[size($excludeMaterial)] = $item;
+					$excludeSet[size($excludeSet)] = $connections[0];
+				}
+
+				break;
+			}
+
+	kcDisplayTexture($flag, $excludeSet, $excludeMaterial);
+}

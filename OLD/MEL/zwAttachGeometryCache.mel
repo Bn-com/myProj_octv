@@ -1,0 +1,101 @@
+global proc zwAttachGeometryCache()
+{
+	string $sel[] = `getGeometriesToCache`;
+	if (0 == size($sel)) {
+		error((uiRes("m_doImportCacheArgList.kNoGeometrySelected")));
+	}
+
+	string $geoCache = zwCacheSetDirectory("geoCache", "");
+	if (!`filetest -d $geoCache`)
+	{
+		$geoCache = `workspace -query -dir`;
+	}
+
+//	fileBrowserDialog -mode 4 -fileCommand "zwAttachGeometryCacheProc" -actionName (uiRes("m_AniGeoCacheMenu.kAttachGeomCache"));
+
+	$geoCache = `idmtFolderDialog -title (uiRes("m_AniGeoCacheMenu.kAttachGeomCache")) -initialDir $geoCache`;
+	$geoCache = substituteAllString($geoCache, "\\", "/");
+	zwAttachGeometryCacheProc($geoCache, "");
+}
+
+global proc int zwAttachGeometryCacheProc(string $fileName, string $fileType)
+{
+	if ($fileName == "")
+	{
+		return false;
+	}
+
+	searchReplaceNames("ShapeDeformed", "Shape", "all");
+
+	string $temp = `internalVar -userTmpDir` + "zwShadingEngineIOtemp.mel";
+	sysFile -delete $temp;
+	eval "source \"zwShadingEngineIO.mel\"";
+	zwShadingEngineOutput("", $temp, "mel");
+
+	string $sel[] = `getGeometriesToCache`;
+	for ($node in $sel)
+	{
+		string $file = $fileName + "/" + `substituteAllString $node ":" "_"` + ".xml";
+		if (`filetest -f $file`)
+		{
+			zwDoImportCacheFile $file $node;
+			continue;
+		}
+		$file = $fileName + "/" + `substituteAllString $node ":" "_"` + "Deformed.xml";
+		if (`filetest -f $file`)
+		{
+			zwDoImportCacheFile $file $node;
+			continue;
+		}
+
+		string $name = `match "[^:]+$" $node`;
+		$file = $fileName + "/" + $name + ".xml";
+		if (`filetest -f $file`)
+		{
+			zwDoImportCacheFile $file $node;
+			continue;
+		}
+		$file = $fileName + "/" + $name + "Deformed.xml";
+		if (`filetest -f $file`)
+		{
+			zwDoImportCacheFile $file $node;
+			continue;
+		}
+
+		string $buf[] = `getFileList -filespec ($fileName + "/*_" + $name + ".xml")`;
+		if (size($buf) > 0)
+		{
+			zwDoImportCacheFile ($fileName + "/" + $buf[0]) $node;
+			continue;
+		}
+		$buf = `getFileList -filespec ($fileName + "/*_" + $name + "Deformed.xml")`;
+		if (size($buf) > 0)
+		{
+			zwDoImportCacheFile ($fileName + "/" + $buf[0]) $node;
+			continue;
+		}
+
+		warning ($node + " 导入Cache 失败");
+	}
+
+	string $shadingGrps[] = `ls -type shadingEngine`;
+	for ($i=0; $i<size($shadingGrps); $i++)
+	{
+		string $objs[] = `sets -query $shadingGrps[$i]`;
+		for ($j=0; $j<size($objs); $j++)
+		{
+			sets -edit -forceElement $shadingGrps[$i] $objs[$j]; 
+		}
+	}
+
+	eval ("source \"" + $temp + "\"");
+	sysFile -delete $temp;
+
+	return true;
+}
+
+global proc zwDoImportCacheFile(string $file, string $node)
+{
+	print ($node + " 导入Cache ...\n");
+	doImportCacheFile $file "xml" {$node} {};
+}

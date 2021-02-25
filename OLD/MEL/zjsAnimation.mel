@@ -1,0 +1,137 @@
+//zjsAnimation.mel 
+
+global proc zjsAnimation()
+{	;	}	//do nothing
+
+//zjsCameraSwitch()  ////////////////////////////////////////////////
+// This feature let you see the scence switching from a camera to another  //////
+global proc zjsCameraSwitchUI()
+{
+	if(`window -ex zjsCameraSwitchWindow`) deleteUI zjsCameraSwitchWindow;
+	string $cameraShapes[]=`ls -type camera`;
+	string $cameras[];
+	int $i,$size;
+	$size=size($cameraShapes);
+	if($size==0) error "No Cameras in the scene!";
+	for($i=0;$i<$size;$i++)
+	{	string $tmpString[]=`listRelatives -p $cameraShapes[$i]`;
+		$cameras[$i]=$tmpString[0];
+	}
+	global string $cameraSwitch[]={"",""};
+	$cameraSwitch=`camera -n zjsSwitchCamera`;
+	window -t "Camera Switch" zjsCameraSwitchWindow;	columnLayout -adj 1;
+	textScrollList -nr 10 -ams 0 camerasList;
+	for($i=0;$i<$size;$i++)
+	{	textScrollList -e -a $cameras[$i] camerasList;	}
+	textScrollList -e -sii 1 camerasList;
+	int $frame;
+	string $camera[];
+	string $cameraShape[];
+	intSliderGrp -l "Frame#" -f 1 -min 0 -max 100 -fmn -10000 -fmx 32767 -v 1 frameSlider;
+	button -label "Append" -command "$frame=`intSliderGrp -q -v frameSlider`;$camera[]=`textScrollList -q -si camerasList`;$cameraShape[]=`listRelatives -s $camera`;global string $cameraSwitch[];zjsLinkCameraAttr($frame,$camera[0],$cameraShape[0],$cameraSwitch);lookThroughModelPanel $cameraSwitch[0] modelPanel4;";showWindow zjsCameraSwitchWindow;
+}
+
+global proc zjsLinkCameraAttr(int $frame,string $camera,string $cameraShape,string $cameraSwitch[],string $expression)
+{$expression="if(frame=="+$frame+"){connectAttr -f "+$camera+".t "+$cameraSwitch[0]+".t;connectAttr -f "+$camera+".r "+$cameraSwitch[0]+".r;connectAttr -f "+$cameraShape+".focalLength "+$cameraSwitch[1]+".focalLength;connectAttr -f "+$cameraShape+".focusDistance "+$cameraSwitch[1]+".focusDistance;connectAttr -f "+$cameraShape+".depthOfField "+$cameraSwitch[1]+".depthOfField;}";
+	string $name="zjsSwitchTo_"+$camera;
+	expression -n $name -s $expression;
+}
+
+global proc zjsDeleteSwitchCameras()
+{	string $cameraShapes[]=`ls -type camera`;		//delete cameras
+	int $i,$j,$size;string $temp;
+	$size=size($cameraShapes);
+	string $cameras[];
+	for($i=0;$i<$size;$i++)
+	{	string $tmpString[]=`listRelatives -p $cameraShapes[$i]`;
+		$cameras[$i]=$tmpString[0];
+	}
+	$size=size($cameras);
+	string $switchCameras[];
+	$j=0;
+	for($i=0;$i<$size;$i++)
+	{	$temp=`substring $cameras[$i] 1 15`;
+		if($temp=="zjsSwitchCamera") 
+		{	$switchCameras[$j]=$cameras[$i];
+			$j++;
+		}
+	}
+	$size=size($switchCameras);
+	if($size==0)
+		error "No Switching camera(s) in the scene!";
+	delete $switchCameras;
+
+	if($size!=0)						//delete expressions
+	{	$j=0;
+		string $expressions[]=`ls -type expression`;
+		string $switchExpressions[];
+		$size=size($expressions);
+		for($i=0;$i<$size;$i++)
+		{	$temp=`substring $expressions[$i] 1 12`;
+			if($temp=="zjsSwitchTo_")
+			{	$switchExpressions[$j]=$expressions[$i];
+				$j++;
+			}
+		}
+		delete $switchExpressions;
+	}
+}
+
+//zjsLocateDOF   ///////////////////////////////////////////////////
+//  This feature let you control the camera's DOF by a locator  //////
+global proc zjsLocateDOF()
+{	string $selection[]=`ls -sl -fl`;
+	string $allCameras[]=`listCameras -p`;
+	string $cameras[];
+	int $i,$j,$size;	$j=0;
+	$size=size($selection);
+	$cameras=zjsStringArrayIntersect($selection,$allCameras);
+	
+	if($cameras[0]=="") error "No camera selected!";
+	
+	$size=size($cameras);
+	for($i=0;$i<$size;$i++)
+	{	string $camera_view=$cameras[$i]+"_view";
+		string $cameraShape[]=`listRelatives -s $cameras[$i]`;
+		eval("setAttr "+$cameraShape[0]+".depthOfField 1");
+		if(`objExists $camera_view`)
+		{	
+			string $commands;
+			float $pos[]=`eval("getAttr "+$camera_view+".t")`;
+			string $DOF[]=`spaceLocator -n ($cameras[$i]+"_DOF")`;
+			move -a $pos[0] $pos[1] $pos[2];
+			string $cameraGroup=$cameras[$i]+"_group";
+			if(`objExists $cameraGroup`)
+				parent $DOF[0] $cameraGroup;
+			$commands=$cameraShape[0]+".focusDistance=sqrt(pow(("+$cameras[$i]+".tx-"+$DOF[0]+".tx),2)+pow(("+$cameras[$i]+".ty-"+$DOF[0]+".ty),2)+pow(("+$cameras[$i]+".tz-"+$DOF[0]+".tz),2));";
+			string $name="guLocate_"+$cameras[$i]+"_DOF";
+			expression -s $commands -n $name;
+		}
+		else
+		{	//string $cameraShape[]=`listRelatives -s $cameras[$i]`;
+			string $locatorName=$cameras[$i]+"_DOF";
+			string $locator[]=`spaceLocator -n $locatorName`;
+			string $camera_view=$locator[0];
+			float $pos[]=`eval("getAttr "+$cameras[$i]+".t")`;
+			float $rot[]=`eval("getAttr "+$cameras[$i]+".r")`;
+			move -a $pos[0] $pos[1] $pos[2];
+			rotate -a $rot[0] $rot[1] $rot[2];
+			move -os -r 0 0 -5;
+			select -r $locator $cameras[$i];
+			//aimConstraint -weight 1 -aimVector 0 0 -1 -upVector 0 1 0 -worldUpType "vector" -worldUpVector 0 1 0;
+			rotate -a 0 0 0 $locator;
+			string $commands=
+$cameraShape[0]+".focusDistance=sqrt(pow(("+$cameras[$i]+".tx-"+$camera_view+".tx),2)+pow(("+$cameras[$i]+".ty-"+$camera_view+".ty),2)+pow(("+$cameras[$i]+".tz-"+$camera_view+".tz),2));";
+			string $name="guLocate_"+$cameras[$i]+"_DOF";
+			expression -s $commands -n $name;
+			select -r $locator $cameras[$i];
+			$name=$cameras[$i]+"_group";
+			group -n $name;
+		}
+
+	}
+
+}
+
+
+// End of zjsAnimation.mel ///////////////////////////////////////////////////

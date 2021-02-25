@@ -1,0 +1,93 @@
+global proc s100FMcommons()
+{
+	//Add number of take in Version attr in render manager
+	s100putVersion ;
+	string $pycmd = ""
+		+"import pymel.core as mc\n"
+		+"h = mc.getPanel(type='modelPanel')\n"
+		+"for x in h:\n"
+		+"\ttry: mc.modelEditor(x, e=1, displayTextures=0)\n"
+		+"\texcept: pass\n";
+	python($pycmd);
+}
+
+// Forcing Viewport to ScriptEditor window
+global proc s100FMforceViewportToScriptEditor()
+{
+	print ("\n// Forcing Viewport to ScriptEditor window...\n\n");
+
+	// first deleting scriptEditor window if exists :
+	string $winds[] = `lsUI -wnd -l `;
+	for ($win in $winds)
+		if (startsWith($win, "scriptEditorPanel"))
+		{
+			print ("// Deleting window '"+$win+"' first...\n");
+			deleteUI $win;
+        }
+
+	print ("Forcing main viewPort to ScriptEditor\n");
+	setNamedPanelLayout "Single Perspective View";
+	updateToolbox();
+	string $currentPanel = `getPanel -withFocus`;
+	scriptedPanel -e -rp $currentPanel scriptEditorPanel1;
+}
+
+// Forcing Viewport back (persp) instead of ScriptEditor window
+global proc s100FMforceViewportBack()
+{
+	print ("\n// Forcing Viewport back instead of ScriptEditor window...\n\n");
+	lookThroughModelPanel persp scriptEditorPanel1;
+}
+
+// setting all "*.meshDisplay" (with two possible levels of namespaces) to $value
+// ex : s100FMsetMeshDisplayOfAllSceneTo(2)
+//
+global proc s100FMsetMeshDisplayOfAllSceneTo(float $value)
+{
+	string $ns[] = {"*:*","*","*:*:*"};
+	string $attrs[] = {"meshDisplay", "Mesh_Display"};
+	s100FMsetAttributesOfAllSceneTo($ns, $attrs, "meshDisplay", $value);
+}
+
+// setting all "#:*.meshDisplay" (with namespaces from selection) to $value
+// ex : s100FMsetMeshDisplayOfSelTo(0)
+//
+global proc s100FMsetMeshDisplayOfSelTo(float $value)
+{
+	string $ns[] = s100FMgetNamespacesFromSelection();
+	string $attrs[] = {"meshDisplay", "Mesh_Display"};
+	s100FMsetAttributesOfAllSceneTo($ns, $attrs, "meshDisplay", $value);
+}
+
+// getting all namespaces from selection :
+global proc string[] s100FMgetNamespacesFromSelection()
+{
+	string $ns[] = {};
+	string $sel[] = `ls -sl -o`;
+	$sel = stringArrayRemoveDuplicates($sel);
+	for ($sl in $sel) // $sl = $sel[0]
+		$ns = stringArrayCatenate($ns,{`match "^.*:" $sl`});
+	$ns = stringArrayRemoveDuplicates($ns);
+	return $ns;
+}
+
+
+// setting  "*.attributes" (with two possible levels of namespaces) to $value
+//
+global proc s100FMsetAttributesOfAllSceneTo(string $ns[], string $attrs[], string $globalName, float $value)
+{
+	string $sel[] = {};
+	//string $ns[] = {"*:*","*","*:*:*"};
+	for ($n in $ns) // $n = $ns[0]
+		for ($at in $attrs) // $at = $attrs[0]
+			$sel = stringArrayCatenate($sel,`ls ($n+"*."+$at)`);
+	$sel = stringArrayRemoveDuplicates($sel);
+	//print $sel;
+	int $ok = 0;
+	for ($sl in $sel)
+		if (`getAttr $sl`!=$value)
+			$ok += !catch(`setAttr $sl $value`);
+		else
+			$ok += 1;
+	print ("// "+$ok+"/"+size($sel)+" '"+$globalName+"' attributes set to "+$value+"\n");
+}

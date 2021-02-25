@@ -1,0 +1,311 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddStretchyIK
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: September 30, 2005
+//	Changed Projcet Date: September 23 2006
+//	Last Updated: July 24 2007
+//	Update/Change this file at: Julii FreeMAN
+//	Note:	stretchy IK 
+//		缩放IK
+//		2006-10-12
+//			由原来的exprssion mode改为node mode
+//			添加开关
+//		2007-7-24
+//			增加功能 hold原来的长度开关
+//			增加伸长功能
+//			增加slide功能
+//			修正cycle warning的问题
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procedure Name: ddStretchyIK
+// 
+//    弹性IK
+// Arguments:
+//	$ikHandleName 被操作IK的命名
+//	$axis 被缩放的轴
+//		ddSIK_x	X轴
+//		ddSIK_y	Y轴
+//		ddSIK_z	Z轴
+//////////////////////////////////////////////////////////
+global proc ddStretchyIK(string $ikHandleName,string $axis)
+{
+	int $i ;
+	float $startPosition[3],$endPosition[3],$temp[3],$jointChainLength,$distance ;
+	string $jointChainList[],$tmp,$dimension,$ikConLoc,
+	$locators[2],$tmpString[],$expString,
+	$dimensionShape,$ddSIKmultiplyDivide,$ddSIKsetRange ;
+
+	//get joints in ik chain 取得ik链下所有的joint列表
+	$jointChainList = `ikHandle -query -jointList $ikHandleName` ;
+
+	$startPosition = `xform -query -worldSpace -translation $jointChainList[0]` ;
+	$endPosition = `xform -query -worldSpace -translation $ikHandleName` ;
+
+	//create curve 创建与joint chain等长的curve
+	curve -degree 1 -point $startPosition[0] $startPosition[1] $startPosition[2] -name ($ikHandleName + "_curve") ;
+	for ($i=1;$i<size($jointChainList) ;$i++ )
+	{
+		$temp = `xform -query -worldSpace -translation $jointChainList[$i]` ;
+		curve -worldSpace -append -point $temp[0] $temp[1] $temp[2] ($ikHandleName + "_curve") ;
+	}
+
+	curve -worldSpace -append -point $endPosition[0] $endPosition[1] $endPosition[2] ($ikHandleName + "_curve") ;
+	setAttr ($ikHandleName + "_curve.visibility") false ;
+
+	//create curveInfo and connect to curve
+	createNode curveInfo -name ($ikHandleName + "_curveInfo") ;
+	connectAttr ($ikHandleName + "_curve.worldSpace") ($ikHandleName + "_curveInfo.inputCurve") ;
+
+	//重写distance联接，maya自己的command有bug 太小的距离会出错
+	$dimensionShape = `createNode distanceDimShape` ;
+	setAttr ($dimensionShape+".visibility") false ;
+	$startLoc = `spaceLocator -p 0 0 0 -name ($ikHandleName + "_sLoc")` ;
+	$endLoc = `spaceLocator -p 0 0 0 -name ($ikHandleName + "_eLoc")` ;
+
+	$tmpString = `listRelatives -shapes $startLoc` ;
+	connectAttr -f ($tmpString[0] + ".worldPosition") ($dimensionShape + ".startPoint") ;
+
+	$tmpString = `listRelatives -shapes $endLoc` ;
+	connectAttr -f ($tmpString[0] + ".worldPosition") ($dimensionShape + ".endPoint") ;
+
+
+	$tmpString = `listTransforms $dimensionShape` ;
+	$dimension = $tmpString[0] ;
+	$dimension = `rename $dimension ($ikHandleName + "_" + $dimension)` ;
+
+	$tmpString = `pointConstraint -offset 0 0 0 -weight 1 $jointChainList[0] $startLoc` ;
+	delete $tmpString[0] ;
+
+	$tmpString = `pointConstraint -offset 0 0 0 -weight 1 $ikHandleName $endLoc` ;
+	delete $tmpString[0] ;
+
+	parent $startLoc $jointChainList[0] ;
+	parent $endLoc $ikHandleName ;
+
+	//create ikHandle controller
+	/*
+	$tmpString = `spaceLocator -p 0 0 0 -name ($ikHandleName + "Con")` ;
+	$ikConLoc = $tmpString[0] ;
+	$tmpString = `pointConstraint -offset 0 0 0 -weight 1 $ikHandleName $ikConLoc` ;
+	delete $tmpString[0] ;
+
+	setAttr -lock false ($ikHandleName + ".t") ;
+	setAttr -lock false ($ikHandleName + ".tx") ;
+ setAttr -lock false ($ikHandleName + ".ty") ;
+ setAttr -lock false ($ikHandleName + ".tz") ;
+ pointConstraint -weight true $ikConLoc $ikHandleName ;*/
+ $ikConLoc = $ikHandleName ;
+ //增加控制属性
+ addAttr -ln stretchyEnable -at double  -min 0 -max 1 -dv 1 $ikConLoc ; //缩放开关on/off
+ setAttr -e -keyable true ($ikConLoc + ".stretchyEnable") ;
+ //addAttr -ln adjustable -at double -min 0 $ikConLoc ; //
+ //setAttr -e -keyable true ($ikConLoc + ".adjustable") ;
+ addAttr -ln hold -at double -minValue 0 -maxValue 1 -defaultValue 1 $ikConLoc ; //hold住原缩放长度开关
+ setAttr -e -keyable true ($ikConLoc + ".hold") ;
+ addAttr -ln extraScale -at double -minValue 0 $ikConLoc ;
+ setAttr -e -keyable true ($ikConLoc + ".hold") ;
+ addAttr -ln slide -at double -minValue 0 $ikConLoc ;//中间关节滑动 只有在两节骨的时候起作用
+ setAttr -e -keyable true ($ikConLoc + ".slide") ;
+
+ $jointChainLength = `getAttr ($ikHandleName + "_curveInfo.arcLength")` ;
+ $distance = `getAttr ($dimension + ".distance")` ;
+ //$temp[0] = 1 - $distance / $jointChainLength ;
+ //$temp[1] = $jointChainLength / $distance - 1;
+
+ // stretchy scale rate 缩放比率
+ $ddSIKmultiplyDivide = `createNode multiplyDivide -name ($ikHandleName + "_multiplyDivide")` ;
+
+ connectAttr -force ($dimension + ".distance") ($ddSIKmultiplyDivide + ".input1X") ;
+ connectAttr -force ($ikHandleName + "_curveInfo.arcLength") ($ddSIKmultiplyDivide + ".input2X") ;
+ setAttr ($ddSIKmultiplyDivide + ".operation") 2 ;
+
+ //设置缩放开关
+ $ddSIKsetRange = `createNode setRange -name ($ikHandleName + "_setRange")` ;
+ connectAttr -force ($ikConLoc + ".stretchyEnable") ($ddSIKsetRange + ".valueX") ;
+ setAttr ($ddSIKsetRange + ".oldMinX") 0 ;
+ setAttr ($ddSIKsetRange + ".oldMaxX") 1 ;
+ setAttr ($ddSIKsetRange + ".minX") 0 ;
+ connectAttr -force ($ddSIKmultiplyDivide + ".outputX") ($ddSIKsetRange + ".maxX") ;
+ 
+
+ switch ($axis)
+ {
+  case "ddSIK_x":
+    $expString = "" ;
+    for($tmp in $jointChainList)
+    {
+     connectAttr -force ($ddSIKsetRange + ".outValueX") ($tmp +".sx") ;
+	 cycleCheck -e off ;
+    }
+    break ;
+  case "ddSIK_y":
+    $expString = "" ;
+    for($tmp in $jointChainList)
+    {
+     connectAttr -force ($ddSIKsetRange + ".outValueX") ($tmp +".sy") ;
+    }
+    break ;
+  case "ddSIK_z":
+    $expString = "" ;
+    for($tmp in $jointChainList)
+    {
+     connectAttr -force ($ddSIKsetRange + ".outValueX") ($tmp +".sz") ;
+    }
+    break ;
+ }
+
+ //设置伸长提示
+ /*
+ createNode transform -n ($ikHandleName + "_warningBox") ;
+ createNode nurbsCurve -n ($ikHandleName + "_warningBoxShape") -p ($ikHandleName + "_warningBox") ;
+	setAttr -k off ".v";
+	setAttr ".cc" -type "nurbsCurve" 
+		1 16 0 no 3
+		17 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16
+		17
+		-0.5 -0.5 -0.5
+		0.5 -0.5 -0.5
+		0.5 -0.5 0.5
+		-0.5 -0.5 0.5
+		-0.5 -0.5 -0.5
+		-0.5 0.5 -0.5
+		0.5 0.5 -0.5
+		0.5 -0.5 -0.5
+		0.5 -0.5 0.5
+		0.5 0.5 0.5
+		0.5 0.5 -0.5
+		-0.5 0.5 -0.5
+		-0.5 0.5 0.5
+		-0.5 -0.5 0.5
+		0.5 -0.5 0.5
+		0.5 0.5 0.5
+		-0.5 0.5 0.5
+		;
+ $temp = `xform -q -ws -rp $ikConLoc` ;
+ move -worldSpace -absolute $temp[0] $temp[1] $temp[2] ;
+ parent ($ikHandleName + "_warningBox") $ikConLoc ;
+ setAttr ($ikHandleName + "_warningBox.template") 1 ;
+ connectAttr -force ($ikHandleName + "_plusMinusAverage.output1D") ($ikHandleName + "_warningBox.shearYZ") ;
+ */
+ shadingNode -asUtility plusMinusAverage -name ($ikHandleName + "_plusMinusAverage") ;
+ setAttr ($ikHandleName + "_plusMinusAverage.operation") 2 ;
+ setAttr ($ikHandleName + "_plusMinusAverage.input1D[1]") 1 ;
+ //设置缩放轴向
+ switch ($axis)
+ {
+  case "ddSIK_x":
+	connectAttr -force ($jointChainList[0] + ".sx") ($ikHandleName + "_plusMinusAverage.input1D[0]") ;
+	break ;
+  case "ddSIK_y":
+	connectAttr -force ($jointChainList[0] + ".sy") ($ikHandleName + "_plusMinusAverage.input1D[0]") ;
+	break ;
+  case "ddSIK_z":
+	connectAttr -force ($jointChainList[0] + ".sz") ($ikHandleName + "_plusMinusAverage.input1D[0]") ;
+	break ;
+ }
+ cycleCheck -e on ;
+
+ select -r $ikConLoc ;
+}
+
+/////////////////////////////////////////////
+// Procedure Name: ddStretchyIKCMD
+// 
+//
+/////////////////////////////////////////////
+global proc ddStretchyIKCMD()
+{
+ string $selected[] ;
+ //get selected ikHandle 从选择列表中获得ikhandle
+ $selected = `ls -selection -type "ikHandle"` ;
+
+ //如果没有选择 or
+ //选择的物体不是ikHandle or
+ //多于一个以上的ikHandle
+ //则报错
+ if(size($selected) == 0 || size($selected) > 1 )
+ {
+  error "You only seleted a ikHandle!" ;
+  return ;
+ }
+ 
+ ddStretchyIK
+ (
+  $selected[0],
+  `radioCollection -query -select ddSIKcollection1`
+ ) ;
+
+}
+
+/////////////////////////////////////////////
+// Procedure Name: ddStretchyIKUI
+// 
+//
+/////////////////////////////////////////////
+global proc ddStretchyIKUI()
+{
+
+ if (`window -ex ddStretchyIKWin`)
+ {
+  deleteUI ddStretchyIKWin ;
+ }
+
+ if (`window -ex ddStretchyIKWin`)
+ {
+  windowPref -remove ddStretchyIKWin ;
+ }
+ 
+ window -widthHeight 460 220
+        -title "durdur 's Toyboxes Stretchy ikHandle Tools v0.10 beta"
+        ddStretchyIKWin ;
+
+ menuBarLayout;
+ menu -label "Edit" editmenu;
+      menuItem -label "Save Settings";
+      menuItem -label "Reset Settings";
+ menu -label "Help" helpmenu;
+      menuItem -label "Help on durdur 's Toyboxes Stretchy ikHandle Tools ...";
+ setParent ..;
+
+ columnLayout -w 460 -adjustableColumn true ;
+
+  radioCollection ddSIKcollection1 ;
+            string $ddSIKRB1, $ddSIKRB2, $ddSIKRB3;
+        rowLayout -numberOfColumns 4 
+                -columnWidth4 100 80 80 80 ;
+                text -label "    Stretchy Axis:" ;
+                $ddSIKRB1 = `radioButton -label "X Axis" ddSIK_x` ;
+                $ddSIKRB2 = `radioButton -label "Y Axis" ddSIK_y` ;
+                $ddSIKRB3 = `radioButton -label "Z Axis" ddSIK_z` ;
+
+        setParent.. ;
+ 
+ rowLayout -numberOfColumns 3
+           -columnWidth3 90 90 90 ;
+
+  button -label "Add Stretchy"
+         -width 90
+         -height 30
+         -command "ddStretchyIKCMD;deleteUI ddStretchyIKWin" ;
+
+  button -label "Apply"
+         -command "ddStretchyIKCMD"
+         -width 90
+         -height 30;
+
+  button -label "Close"
+         -command "deleteUI ddStretchyIKWin"
+	 -width 90
+	 -height 30 ;
+
+ setParent ..;
+
+ radioCollection -edit -select ddSIK_x ddSIKcollection1 ;
+
+ showWindow ddStretchyIKWin ;//$window;
+}
+
+//End of file.

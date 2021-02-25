@@ -1,0 +1,303 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// TNP MUSCLE CREATOR TOOL
+// @Date: 2004.03.12
+// @Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// @Description:
+//		This script takes in an $inputCurve (1-3deg) and builds a muscle along the curve
+//	with a number of cross-sections equal to the number of CVs of the curve. The muscle
+//	consists of a number of cross-sections and two locators that the user may manipulate
+//	to change the shape of the muscle.	
+//
+//	@Note:
+//		- give $inputCurve the name of the muscle that it represents: curve<MuscleName>
+//
+//	@Prototype:
+//		0. extract the <MuscleName> prefix from $inputCurve's name.
+//		1. rebuild $inputCurve ($actionLine): keep original, 1deg, param: 0-1, name: <MuscleName>_ActionLine
+//			$noOfSpans = $inputCurve.spans; $maxRadius = 1.0;
+//		2. Iterate thru' the curve's CP (controlPoints)
+//			2.1. If cv[0] : 
+//					- create a locator ($attachLocator), <MuscleName>_AttachPoint , at cv[0]
+//					- create the cross-section for this cv (set SCALE to $epsilon) and store it to $crossSectionArray[]
+//						+ $uParam = 0.0;
+//						+ $sectionName = <MuscleName>_section_0;
+//						+ $sectionName = createCrossSection($actionLine,$sectionName,$uParam,$scaleFactor)		 
+//			2.2. If cv[$end]:
+//					- create a locator ($insertionLocator), <MuscleName>_InsertionPoint , at cv[$end]
+//					- create cross-section for this cv (set SCALE to $epsilon) and store it to $crossSectionArray[]
+//						+ $uParam = 1.0; $scaleFactor = $epsilon;
+//						+ $sectionName = <MuscleName>_section_ + $end;
+//						+ $sectionName = createCrossSection($actionLine,$sectionName,$uParam,$scaleFactor)		 
+//			2.3. cv[i], i != [0,$end] create cross-section and store to $crossSectionArray[]
+//					- $uParam = i/$noOfSpans;
+//					- $scaleFactor = ($uParam<= 0.5? (0.5+$uParam):(1.5-$uParam))*$maxRadius
+//					- $sectionName = <MuscleName>_section_ + $i;
+//					- $sectionName = createCrossSection($actionLine,$sectionName, $uParam,$scaleFactor)
+//		3. Clean up: grouping
+//  											   
+//	@Muscle structure: hierarchy of the created muscle
+//	 <MuscleName>Group
+//		- <MuscleName>_AttachLoc: locator at curve.cv[0]
+//		- <MuscleName>_InsertionLoc: locator at curve.cv[$end]
+//		- <MuscleName>_ActionLine: duplicated input curve (1deg, param:0->1, hidden)
+//			+ <MuscleName>_CrossSections: group node of the cross sections (available)
+//		- <MuscleName>_envelope: the lofted surface 
+// 
+//	@Change Log:
+//		- constraint the translation of the cross-sections to the control points
+//
+proc createCrossSection(int $crossSectionSpans, string $actionLine, string $myCrossSection, int $i, float $scaleFactor[], string $crossSectionArray[]){
+	// create a nurbsCircle 
+	string $temp[] = `circle -c 0 0 0 -nr 0 0 1 -sw 360 -r 1 -d 3 -ut 0 -tol 0.01 -s$crossSectionSpans -ch 1 -name $myCrossSection`;
+	$myCrossSection = $temp[0];
+	setAttr ($myCrossSection + ".scale") $scaleFactor[0] $scaleFactor[1] $scaleFactor[2];
+	setAttr ($myCrossSection + ".inheritsTransform") 1;
+	$crossSectionArray[size($crossSectionArray)] = $myCrossSection;
+	
+	// move the cross-section to new position
+	float $pos[] = `pointPosition -w ($actionLine+".cp["+$i+"]")`;
+	xform -ws -translation $pos[0] $pos[1] $pos[2] $myCrossSection;
+	// constraint translate attr of the control point to the cross-section's translation
+	connectAttr ($myCrossSection + ".translate") ($actionLine + ".cp["+$i+"]");
+
+	// tangent constraint	
+	tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0 $actionLine $myCrossSection;
+}
+// create a muscle based on the input curve
+// currently support three types of common muscles:
+// classified based on the arrangement of muscle fibers
+// 1: fusiMuscle (Parallel)
+// 2: pennate
+// 3: convergent 
+global proc string tnpMuscleCreator(string $inputCurve, float $maxRadius, int $crossSectionSpans, int $muscleType){
+
+	if(!kcIsType($inputCurve,"nurbsCurve")) error "Plz select a nurbsCurve";
+
+	string	$crossSectionArray[];
+	string	$actionLine;
+	string	$attachLocator;
+	string	$insertionLocator;
+	string	$attachCurve; // if muscleType = 3
+	float	$scaleFactor[]; //x y z
+	float	$epsilon = 0.05*$maxRadius; // scale factor at the two ends
+	int		 $noOfSpans; // curve spans
+	string	$prefix;
+	string	$crossSectionName;
+	string	$envelope;
+	string	$shadingNet[]; 
+	string	$map[];
+
+	// initialize variables if needed
+	$prefix = "tnp" + substitute("curve", $inputCurve, ""); // cut out "curve" in the $inputCurve name	
+	$actionLine = $prefix + "_baseCurve";
+	$attachLocator = $prefix + "_attachLoc";
+	$insertionLocator = $prefix + "_insertionLoc";
+	$crossSectionName = $prefix + "_crossSection";
+	$envelope = $prefix + "_envelope";
+	$shadingNet[1] = "tnpMuscleType1Lambert";
+	$shadingNet[2] = "tnpMuscleType2Lambert";
+	$shadingNet[3] = "tnpMuscleType3Lambert";
+	$map[1]			 = "tnpMuscleType1Map";
+	$map[2]			 = "tnpMuscleType2Map";
+	$map[3]			 = "tnpMuscleType3Map";
+
+	// 1. rebuild the curve
+	select $inputCurve;
+	FreezeTransformations;
+	string $rebuildCurve[] = `rebuildCurve -replaceOriginal 1 -constructionHistory 0 -rebuildType 0 -degree 1 
+									-keepRange 0 -keepControlPoints 1 -keepEndPoints 1 $inputCurve`;
+
+	$actionLine = `rename $rebuildCurve[0] $actionLine`;
+	setAttr ($actionLine + ".template") 0;
+	setAttr ($actionLine + ".inheritsTransform") 1;
+	setAttr -lock true ($actionLine + ".translate");
+	setAttr -lock true ($actionLine + ".rotate");
+	setAttr -lock true ($actionLine + ".scale");
+	// add extra attribute for recovery purpose
+	if(!attributeExists("muscleType", $actionLine))
+		addAttr -longName "muscleType" -defaultValue 0 -keyable false $actionLine;
+	setAttr ($actionLine + ".muscleType") $muscleType;
+
+	$noOfSpans = `getAttr ($actionLine + ".spans")`; // $totalCVs = spans + 1;
+	if($noOfSpans==1) error("Number of spans must be greater than 1!");
+	// Iterate thru' CPs
+	for($i=0; $i<=$noOfSpans; $i++){
+		if($i==0){ // attach point
+				switch($muscleType){
+					case 1:
+					case 2:
+							$scaleFactor = {$epsilon,$epsilon, $epsilon};
+							break;
+					case 3:
+							// equally scale down along the y axis by 0.3
+							// scaling along the x axis will be interpolated from 1 to $epsilon
+							$scaleFactor = {$maxRadius*.2, $maxRadius*.8, $maxRadius};
+							break;
+					default:
+							error("unsupported muscle type! Muscle type varies from 1-3");
+				}
+				float $p[] = `pointPosition -w ($actionLine + ".cp[0]")`;
+				string $temp[] = `spaceLocator -n $attachLocator`;
+				$attachLocator = $temp[0];
+				setAttr ($attachLocator + ".scale") (0.3*$maxRadius) (0.3*$maxRadius) (0.3*$maxRadius);
+				xform -ws -translation $p[0] $p[1] $p[2] $attachLocator;
+				// tangent constraint	
+				tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0 $actionLine $attachLocator;
+				
+
+				string $myCrossSection = $crossSectionName + "_0";
+				// create the cross section and store to $crossSectionArray, $crossSectionLocatorArray
+				createCrossSection($crossSectionSpans, $actionLine,$myCrossSection,$i, $scaleFactor,$crossSectionArray);
+			
+				// constraint translation attr
+				//connectAttr ($attachLocator + ".translate") ($crossSectionArray[$i] + ".translate");
+				connectAttr ($crossSectionArray[$i] + ".translate") ($attachLocator + ".translate");
+				
+		}else if($i==$noOfSpans){ // insertion point
+				switch($muscleType){
+					case 1:
+					case 2:
+							$scaleFactor = {$epsilon,$epsilon, $epsilon};
+							break;
+					case 3: // convergent type
+							// equally scale down along the y axis by 0.3
+							// scaling along the x axis will be interpolated from 1 to $epsilon
+							$scaleFactor = {$epsilon*.2,$epsilon, $epsilon};
+							break;
+					default:
+							error("unsupported muscle type! Muscle type varies from 1-3");
+				}
+				float $p[] = `pointPosition -w ($actionLine + ".cp[" + $noOfSpans + "]")`;
+				string $temp[] = `spaceLocator -n $insertionLocator`;
+				$insertionLocator = $temp[0];
+				xform -ws -translation $p[0] $p[1] $p[2] $insertionLocator;
+				// tangent constraint	
+				tangentConstraint -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpVector 0 1 0 $actionLine $insertionLocator;
+				
+				setAttr ($insertionLocator + ".overrideEnabled") 1;
+				setAttr ($insertionLocator + ".overrideColor") 6;
+				setAttr ($insertionLocator + ".scale") (0.5*$maxRadius) (0.5*$maxRadius) (0.5*$maxRadius);
+
+				string $myCrossSection = $crossSectionName + "_" + $noOfSpans;
+				// create the cross section and store to $crossSectionArray, $crossSectionLocatorArray
+				createCrossSection($crossSectionSpans, $actionLine,$myCrossSection,$i, $scaleFactor,$crossSectionArray);
+				
+				// constraint translation attr
+				//connectAttr ($insertionLocator + ".translate") ($crossSectionArray[$i] + ".translate");
+				connectAttr ($crossSectionArray[$i] + ".translate") ($insertionLocator + ".translate");
+				
+		}else{	// in-between CVs
+				switch($muscleType){
+					case 1:
+					case 2:{
+							float $uParam = (float)$i/$noOfSpans;
+							float $scale = ($uParam<=0.5?0.5+$uParam:1.5-$uParam)*$maxRadius;
+							$scaleFactor = {$scale,$scale, $scale};
+					}
+							break;
+					case 3: // convergent type
+							// equally scale down along the x axis by 0.2
+							// scaling along the x axis will be interpolated from 1 to $epsilon
+							float $uParam = (float)($i-1)/$noOfSpans;
+							float $scale = (1-$uParam)*$maxRadius;
+							$scaleFactor = {$scale*.2,$scale, $scale};
+
+							break;
+					default:
+							error("unsupported muscle type! Muscle type varies from 1-3");
+				}
+				string $myCrossSection = $crossSectionName + "_" + $i;
+				createCrossSection($crossSectionSpans, $actionLine,$myCrossSection,$i, $scaleFactor,$crossSectionArray);
+		}//
+	}// ends for loop
+
+	// delete tangentConstraint on crossSections
+	for($crossSection in $crossSectionArray){
+		string $conns[] = `listConnections -type "tangentConstraint" $crossSection`;
+		for($conn in $conns)
+			if(`objExists $conn`) delete $conn;
+	}
+	// loft cross-sections to create the muscle shape
+	select $crossSectionArray;
+	string $temp[] = `loft -ch 1 -uniform 1 -close 0 
+								  -autoReverse 0 
+								  -degree 3 
+								  -sectionSpans 1 
+								  -range 1 
+								  -polygon 0 //nurbs
+								  -reverseSurfaceNormals true
+								  -name $envelope`;
+	$envelope = $temp[0];
+	setAttr ($envelope + ".template") 0;
+	setAttr -lock true ($envelope + ".translate");
+	setAttr -lock true ($envelope + ".rotate");
+	setAttr -lock true ($envelope + ".scale");
+	setAttr ($envelope + ".inheritsTransform") 0;
+	setAttr ($envelope + ".curvePrecision") 10;
+	setAttr ($envelope + ".curvePrecisionShaded") 10;
+	
+	// add extra attributes to the muscle to store the attach, insertion, and actionLine
+	// if muscleType==3 -> create attachCurve attr
+	// (only safe if the users never change names
+	addAttr -longName "attachLocator" -at message $envelope;
+	addAttr -longName "insertionLocator" -at message $envelope;
+	if($muscleType==3) 
+		addAttr -longName "attachCurve" -at message $envelope;
+	addAttr -longName "actionLine" -at message $envelope;
+	addAttr -longName "muscleType" -defaultValue 0 $envelope;
+	
+	connectAttr ($attachLocator + ".message") ($envelope + ".attachLocator");
+	connectAttr ($insertionLocator + ".message") ($envelope + ".insertionLocator");
+	if($muscleType==3){
+		$attachCurve = $crossSectionArray[0];
+		connectAttr ($attachCurve + ".message") ($envelope + ".attachCurve");
+	}
+	connectAttr ($actionLine + ".message") ($envelope + ".actionLine");
+	setAttr -lock 1 ($envelope + ".muscleType") $muscleType;
+
+	// Create shading network
+	string $lambert = $shadingNet[$muscleType];
+	if(!objExists($lambert + "SG")){
+		$lambert = `shadingNode -asShader lambert -name $lambert`;
+		string $set = `sets -renderable true -noSurfaceShader true -empty -name ($lambert + "SG")`;
+		connectAttr -f ($lambert+".outColor") ($set + ".surfaceShader");
+
+		string $checker = `shadingNode -asTexture checker -name $map[$muscleType]`;	
+		string $p2d = `shadingNode -asUtility place2dTexture`;
+		connectAttr ($p2d + ".outUV") ($checker + ".uv");
+		connectAttr ($p2d + ".outUvFilterSize") ($checker + ".uvFilterSize");
+		connectAttr -f ($checker + ".outColor") ($lambert + ".color");
+
+		setAttr ($p2d + ".coverageU") 2;
+		setAttr ($p2d + ".coverageV") 2;
+		setAttr ($p2d + ".repeatU") 60;
+		setAttr ($p2d + ".repeatV") 1;
+		if($muscleType == 2) setAttr ($p2d + ".rotateFrame") 90;
+		setAttr ($checker + ".color1") -type double3 1 0 0;
+		setAttr ($checker + ".color2") -type double3 0.548 0 0;
+	}
+	sets -edit -forceElement ($lambert+"SG") $envelope;
+
+	// Grouping
+	string $muscleGroup = $prefix + "_muscle";
+	parent $crossSectionArray $actionLine;
+
+	// group attachLocator, loftedMuscle, and $actionLine under $muscleGroup
+	// then $muscleGroup and insertionLocator is put under the $actionLine's parent;
+
+	// group attachPoint, insertionPoint, and the loftedMuscle to the parent node of the curve
+	string $parent[] = `listRelatives -parent $actionLine`;
+	if(objExists($parent[0])) parent $attachLocator $insertionLocator $envelope $parent[0];
+	//$muscleGroup = `group -name $muscleGroup $actionLine $attachLocator $envelope`;
+
+	return $muscleGroup;
+}

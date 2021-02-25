@@ -1,0 +1,85 @@
+//-------------------------------------------------------------------------------------------------------------------
+// djFileSwitchRamp.mel
+//
+// author: David Johnson
+// contact: david@djx.com.au
+// website: www.djx.com.au
+// last rev: 13 June 2012
+// version: 1.1 (modified by Basefount Technology for Miarmy)
+//
+// Description:	Connects selected fileTextures to evenly spaced color positions on a rampTexture
+//
+//
+// usage:	Select the required number of existing fileTextures (or anything that has an ".outColor" attribute)
+//			Run the script
+//			A new ramp texture will be created with each file texture connected and evenly spaced.
+//
+// NOTE: 	No checks are done to see if the selected nodes actually have .outColor
+//
+//
+// SEE ALSO:	djPopulateSingleSwitch.mel which builds a singleShadingSwitch to drive this fileSwitchRamp.
+//			This setup enables objects to choose which file texture they will use based on an animatable mcdid attribute.
+//
+//-------------------------------------------------------------------------------------------------------------------
+
+global proc string djFileSwitchRamp() {
+	string $ft[] = `ls -sl`;
+		
+	// create the ramp
+	string $ramp = `shadingNode -asTexture ramp -n fileSwitchRamp`;
+	select -r $ramp;
+		
+	// colorEntryList index 0 stays unconnected
+	// This could be used as a default color
+	setAttr ($ramp + ".colorEntryList[0].color") -type double3 0 0 0;
+	setAttr -l true ($ramp + ".colorEntryList[0].position");
+
+	// hook up the selected textures
+	//
+	for($i=1; $i<=size($ft); $i++) {
+		setAttr ($ramp + ".colorEntryList[" + $i + "].color") -type double3 0 0 0;
+		
+		// ramp color position
+		//	(offset by -0.001 to avoid possible rounding errors when using many fileTextures)
+		//	
+		float $pos = float($i) / size($ft) - 0.005;
+		setAttr ($ramp + ".colorEntryList[" + $i + "].position") $pos;
+		setAttr -l true ($ramp + ".colorEntryList[" + $i + "].position");
+		
+		connectAttr -force ($ft[$i-1] + ".outColor") ($ramp + ".colorEntryList[" + $i + "].color");
+		
+		// rename the fileTexture to make it obvious what mcdid it relates to
+		// pad names to keep hypershader orderly (assume <100 fileTextures)
+		//
+		rename $ft[$i-1] ("f_"+(($i<10)?"0":"")+$i+"_");
+
+	}
+	
+	// set interpolation to none
+	setAttr ($ramp + ".interpolation") 0;
+	
+	// Create multipyDivide used to remap the color entry list back to meaningful numbers.
+	// So input 1 to choose file 1, input 2 for file2 and so on.
+	// 0 will select color index 0, which is not locked or connected to a file.
+	//
+	// Optional:	Connect the output of a switch node created by djPopulateSingleSwitch.mel to input1X.
+	// 				Then each object's mcdid attribute that will choose the correct fileTexture.
+	// 				(see djPopulateSingleSwitch.mel for more details)
+	//
+	// 				By enabling ramp interpolation and using fractional inputs you can do cross-fades.
+	//
+	string $mult = `shadingNode -asUtility multiplyDivide -n fileSwitchMult`;
+	setAttr ($mult + ".operation") 2;
+	setAttr ($mult + ".input2X") `size($ft)`;
+	connectAttr -f ($mult +".outputX") ($ramp + ".vCoord");		// assumes the ramp will be a vRamp
+	
+	// lock all inputs except input1X
+	setAttr -l true ($mult + ".operation");
+	setAttr -l true ($mult + ".input1Y");
+	setAttr -l true ($mult + ".input1Z");
+	setAttr -l true ($mult + ".input2X");
+	setAttr -l true ($mult + ".input2Y");
+	setAttr -l true ($mult + ".input2Z");
+	
+	return $mult;
+}

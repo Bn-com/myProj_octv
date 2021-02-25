@@ -1,0 +1,214 @@
+global proc s100moveAndRenameLipsAutoUI()
+{
+	if(`window -ex 	s100moveAndRenameLipsAutoUI`)
+			deleteUI s100moveAndRenameLipsAutoUI;
+
+		window -title "Relocating and Renaming Lips by EP"  -h 400  s100moveAndRenameLipsAutoUI;
+		columnLayout -adjustableColumn true s100moveAndRenameLipsAutoUICLMain;
+
+
+	menuBarLayout s100moveAndRenameLipsAutoUIMLMain;
+
+
+		menu -en 0 -label "Help" -helpMenu true;
+			menuItem -en 1 -c s100moveAndRenameLipsAutoUI   -label "refresh";
+			menuItem -en 0   -label "help";
+			menuItem -en 0  -label "About...";
+
+		setParent ..;
+$width = 250 ;
+
+			window -e -h 400 -w $width -sizeable 0  s100moveAndRenameLipsAutoUI;
+		showWindow;
+
+
+	formLayout -p s100moveAndRenameLipsAutoUICLMain s100moveAndRenameLipsAutoUIFLMain;
+
+
+
+$text ="this will copy all Lips located in $EpFolder \"/_Lips\" to local path for each scene folder and name them correctly.\n\nSelect a episode in this list" ;
+
+	$textField = `scrollField -en 0 -wordWrap 1 -text $text -w ($width -20) -h 110 `;
+
+	$txtField2 = `textScrollList -selectCommand s100moveAndRenameLipsAutoUIRefreshWhenEPSelected -w ($width -20) -h 200 s100moveAndRenameLipsAutoUIbtTxtField `;
+
+
+	$btRun = `button -en 0   -w ($width - 20 )-l "Run Script" -ann "scene must not be already a render scene(with light and passes)"  -c s100moveAndRenameLipsAuto s100moveAndRenameLipsAutoUIbtUpdate`;
+
+
+
+	formLayout -e
+
+	-attachForm $textField "top" 5
+	-attachForm $textField "left" 5
+
+	-attachControl $txtField2  "top" 5 $textField
+	-attachForm $txtField2 "left" 5
+
+
+	-attachControl $btRun  "top" 5 $txtField2
+	-attachForm $btRun "left" 5
+
+
+	s100moveAndRenameLipsAutoUIFLMain ;
+
+showWindow ;
+
+s100moveAndRenameLipsAutoUIRefreshEP ;
+
+}
+global proc s100moveAndRenameLipsAutoUIRefreshWhenEPSelected()
+{
+button -e -en 1   s100moveAndRenameLipsAutoUIbtUpdate ;
+}
+
+
+
+global proc s100moveAndRenameLipsAutoUIRefreshEP()
+{
+global string $currentProd_Name ;
+$folder = s100ASListEp($currentProd_Name) ;
+textScrollList -e -removeAll   s100moveAndRenameLipsAutoUIbtTxtField ;
+
+
+	for($tmp in $folder )
+	{
+	textScrollList -e -append $tmp   s100moveAndRenameLipsAutoUIbtTxtField ;
+
+    }
+}
+
+
+global proc s100moveAndRenameLipsAuto()
+{
+global string $currentProd_Name ;
+
+string $path = `s100moveAndRenameLipsAutoGetpath`;
+string $cleanP =  substituteAllString($path , "/_Lips","")   ;
+int $chA[] ;
+
+	if(`filetest -d  $path`)
+	{
+  	string $allLips[]  = `getFileList -filespec "*.anim" -folder $path ` ;
+	string $getAllShots[] = `s100returnAllSubRootSceneForShotsFolders({$cleanP}) `;
+	//print $getAllShots ;
+		for($i = 0 ; $i < size($allLips) ; $i++)
+		{
+		$ch = 0 ;
+		$pathToCopy = "";
+			for($j = 0 ; $j < size($getAllShots) ; $j++)
+			{
+    		$arr = stringToStringArray($getAllShots[$j] , "/" ) ;
+			$last = $arr[size($arr)- 1 ] ;
+				if(`gmatch $allLips[$i] ("*" + $last +"*")`)
+				{
+				$chA[$j]  = 1 ;
+
+				$ch = 1 ;
+				$pathToCopy= $getAllShots[$j] ;
+				break ;
+                }
+
+
+            }
+
+			if($ch == 1)
+			{
+			$pathToCopy += "_Lips/" ;
+			
+			$name = s100buildNameFromPath($pathToCopy,$currentProd_Name ) ;
+				$pathToCopyMaj = substituteAllString($pathToCopy ,"/_Lips","/_Lips");
+
+
+				if(`filetest -d $pathToCopyMaj` != 1)
+				{
+				sysFile -md $pathToCopyMaj ;
+                }
+			
+			string $char_tmp = substituteAllString(($path + $allLips[$i] ), ".anim", "");
+			string $chars_tmp[] = stringToStringArray($char_tmp, "_");
+			string $char_tmp = $chars_tmp[size($chars_tmp)-1];
+
+			$fullPath = $pathToCopyMaj + $name +"_"+$char_tmp+".anim" ;
+
+			sysFile -copy $fullPath   ($path + $allLips[$i] );
+			print ("\nfile " + ($path + $allLips[$i] ) + " copied to " + $fullPath) ;
+
+
+            }
+
+
+
+        }
+		for($j = 0 ; $j < size($getAllShots) ; $j++)
+		{
+				if($chA[$j] == 0)
+				{
+					$pathToCopy = $getAllShots[$j] + "_Lips/" ;
+
+				print ("\n\nno lips for shot  "  + $getAllShots[$j]) ;
+
+
+
+						if(`filetest -d $pathToCopy` != 1)
+						{
+						sysFile -md $pathToCopy ;
+						}
+					$noFile = $pathToCopy +"no_Lips_in_this_shot.txt";
+					$fileId=`fopen $noFile "w"`;
+					string $s =  ("No file for Shot "+ $pathToCopy +"  \n") ;
+					fwrite $fileId $s ;
+					fclose $fileId;
+				}
+
+        }
+
+    }else{
+	warning ("folder " + $path + "doesn't exists");
+    }
+
+
+
+}
+
+global proc string s100buildNameFromPath(string $pathSh,string $prod )
+{
+//$prod = $currentProd_Name ;
+//$pathSh = $pathToCopy
+string $suf ;
+	if($prod =="Maya" )
+	{
+	$suf = "MA" ;
+    }
+string $name = $suf ;
+string $base  = `s100assetManagerGetEpPath($prod) `;
+string $sub = substituteAllString($pathSh , $base ,"") ;
+
+string $array[] = stringToStringArray($sub ,"/") ;
+
+
+	for($i = 0 ; $i < size($array ) ; $i++)
+	{
+	string $array2[] = stringToStringArray($array[$i]  ,"_") ;
+	$name +="_" +$array2[0];
+
+
+    }
+
+return $name ;
+
+
+
+}
+
+global proc string  s100moveAndRenameLipsAutoGetpath()
+{
+global string $currentProd_Name ;
+string $base  = `s100assetManagerGetEpPath($currentProd_Name) `;
+string $textA[]  = `textScrollList -q -selectItem  s100moveAndRenameLipsAutoUIbtTxtField `;
+string $path = $base + $textA[0] +"/_Lips/";
+
+
+return $path ;
+}
+//s100moveAndRenameLipsAutoUI;

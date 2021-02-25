@@ -1,0 +1,199 @@
+global proc zwSetProject()
+{
+	int $type = 2;
+	if (`optionVar -exists zwSetProjectType`)
+	{
+		$type = `optionVar -query zwSetProjectType`;
+	}
+	string $project = "";
+	if (`optionVar -exists zwSetProjectProject`)
+	{
+		$project = `optionVar -query zwSetProjectProject`;
+	}
+	string $disk = "D:";
+	if (`optionVar -exists zwSetProjectDisk`)
+	{
+		$disk = `optionVar -query zwSetProjectDisk`;
+	}
+	string $assetType = "characters";
+	if (`optionVar -exists zwSetProjectAssetType`)
+	{
+		$assetType = `optionVar -query zwSetProjectAssetType`;
+	}
+
+	if (`window -exists zwSetProject`)
+	{
+		deleteUI zwSetProject;
+	}
+	window -menuBar true -title "Create/Set Project" -resizeToFitChildren true zwSetProject;
+		menu -label "Help";
+			menuItem -label "Help on Create/Set Project" -command "showHelp -absolute -docs \"http://talk.idmt.com.cn/redirect.php?goto=findpost&ptid=59290&pid=649739\"";
+		columnLayout -adjustableColumn true;
+			radioButtonGrp -numberOfRadioButtons 3 -label "" -label1 "Asset" -label2 "Shot" -label3 "Exam" -select $type -changeCommand "zwSetProjectTypeChange" radioButtonGrpType;
+			optionMenuGrp -label "Disk:" -columnAlign 1 "right" optionMenuGrpDisk;
+				menuItem -label "D:";
+				menuItem -label "E:";
+				menuItem -label "G:";
+			optionMenuGrp -edit -value $disk optionMenuGrpDisk;
+			textFieldGrp -label "Project:" -text $project -changeCommand "zwSetProjectTypeChange" textFieldGrpProject;
+				popupMenu -button 1 -postMenuCommand "zwSetProjectMenu \"popupMenuProjectL\" \"textFieldGrpProject\"" popupMenuProjectL;
+				popupMenu -button 3 -postMenuCommand "zwSetProjectMenu \"popupMenuProjectR\" \"textFieldGrpProject\"" popupMenuProjectR;
+			optionMenuGrp -label "Type:" -columnAlign 1 "right" optionMenuGrpAssetType;
+				menuItem -label "characters";
+				menuItem -label "props";
+				menuItem -label "sets";
+			optionMenuGrp -edit -value $assetType optionMenuGrpAssetType;
+			textFieldGrp -label "Name:" textFieldGrpAssetName;
+			textFieldGrp -label "SQ:" textFieldGrpSQ;
+			textFieldGrp -label "SC:" textFieldGrpSC;
+			button -label "Create/Set Project" -command "zwSetProjectProc";
+
+	zwSetProjectTypeChange;
+
+	showWindow zwSetProject;
+}
+
+global proc zwSetProjectTypeChange()
+{
+	int $type = `radioButtonGrp -query -select radioButtonGrpType`;
+	if ($type == 3)
+	{
+		textFieldGrp -edit -text "Exam" textFieldGrpProject;
+	}
+	string $project = `textFieldGrp -query -text textFieldGrpProject`;
+	$project = strip($project);
+	textFieldGrp -edit -editable ($type == 1 || $type == 2) textFieldGrpProject;
+	optionMenuGrp -edit -visible ($type == 1 && (toupper($project)) != "ROMA") optionMenuGrpAssetType;
+	textFieldGrp -edit -visible ($type == 1 && (toupper($project)) != "ROMA") textFieldGrpAssetName;
+	textFieldGrp -edit -visible ($type == 2) textFieldGrpSQ;
+	textFieldGrp -edit -visible ($type == 2) textFieldGrpSC;
+}
+
+global proc zwSetProjectMenu(string $popupMenu, string $textFieldGrp)
+{
+	setParent -menu $popupMenu;
+	menu -edit -deleteAllItems $popupMenu;
+
+	if (!`textFieldGrp -query -editable textFieldGrpProject`)
+	{
+		string $porject = "Exam";
+		menuItem -label $porject -command ("textFieldGrp -edit -text \"" + $porject + "\" \"" + $textFieldGrp + "\"; zwSetProjectTypeChange;");
+	}
+	else
+	{
+		string $str = zwGetProjects();
+		string $buf[];
+		tokenize $str "|" $buf;
+		for ($i=0; $i<size($buf); $i+=7)
+		{
+			string $porject = $buf[$i+1];
+			if ($porject != "WinxClub")
+			{
+				menuItem -label $porject -command ("textFieldGrp -edit -text \"" + $porject + "\" \"" + $textFieldGrp + "\"; zwSetProjectTypeChange;");
+			}
+		}
+	}
+}
+
+global proc zwSetProjectProc()
+{
+	string $dest;
+
+	int $type = `radioButtonGrp -query -select radioButtonGrpType`;
+	string $disk = `optionMenuGrp -query -value optionMenuGrpDisk`;
+	string $project = `textFieldGrp -query -text textFieldGrpProject`;
+	$project = strip($project);
+	if ($type == 1)
+	{
+		string $assetType = `optionMenuGrp -query -value optionMenuGrpAssetType`;
+		string $assetName = `textFieldGrp -query -text textFieldGrpAssetName`;
+		$assetName = strip($assetName);
+		if ((toupper($project)) == "ROMA")
+		{
+			$dest = $disk + "/MC_roma";
+		}
+		else if ($project == "" || $assetName == "")
+		{
+			return;
+		}
+		else
+		{
+			$dest = $disk + "/" + $project + "/" + $assetType + "/" + $assetName;
+		}
+
+		optionVar -stringValue zwSetProjectAssetType $assetType;
+	}
+	else if ($type == 2)
+	{
+		string $SQ = `textFieldGrp -query -text textFieldGrpSQ`;
+		$SQ = strip($SQ);
+		string $SC = `textFieldGrp -query -text textFieldGrpSC`;
+		$SC = strip($SC);
+		if ($project == "" || $SQ == "" || $SC == "")
+		{
+			return;
+		}
+		if (zwIsRainbowProject($project))
+		{
+			$dest = $disk + "/" + $project + "/SQ_" + $SQ + "/SC_" + $SC + "/roma_sq_" + $SQ + "_sc_" + $SC;
+			if (!`filetest -d $dest`)
+			{
+				$dest = $disk + "/" + $project + "/sq_" + $SQ + "/roma_sq_" + $SQ + "_sc_" + $SC;
+			}
+		}
+		else
+		{
+			$dest = $disk + "/" + $project + "/SQ_" + $SQ + "/SC_" + $SC;
+		}
+	}
+	else if ($type == 3)
+	{
+		$dest = $disk + "/" + $project;
+	}
+
+	optionVar -intValue zwSetProjectType $type;
+	optionVar -stringValue zwSetProjectProject $project;
+	optionVar -stringValue zwSetProjectDisk $disk;
+
+	int $explore = false;
+	if (!`filetest -f ($dest + "/workspace.mel")`)
+	{
+		$explore = true;
+	}
+/*
+	string $source;
+	if (zwIsRainbowProject($project) && $type == 2)
+	{
+		$source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/SHOT_winxII";
+	}
+	else if ($type == 3)
+	{
+		$source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/2008";
+	}
+	else
+	{
+		$source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/" + zwAboutVersion();
+	}
+	if (!`filetest -d $source`)
+	{
+		$source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/8.5";
+	}
+	zwXcopyEx($source, $dest, false, false);
+	setProject $dest;
+*/
+	if ($explore)
+	{
+		sysFile -md $dest;
+		eval "source \"setProject.mel\"";
+		sp_createAndSetDefaultProject $dest true;
+	}
+	else
+	{
+		setProject $dest;
+	}
+	deleteUI zwSetProject;
+	if ($explore)
+	{
+		showHelp -absolute -docs $dest;
+	}
+}

@@ -1,0 +1,155 @@
+global proc ezRenderTreeTools()
+{
+	if(`window -exists ez_tree_tools`)
+		deleteUI ez_tree_tools;
+	window -title "Tree Tools" -mb true  -s true -resizeToFitChildren true ez_tree_tools;
+
+		menu -label "Help";
+			menuItem -label "Help on Tree Tools..." -command "";
+
+		string $formLayout = `formLayout`;
+			string $camLight = `button -l "color面对摄像机"  -h 30 -command "ezTreeCam"`;
+			string $norLeft = `button -l "左光方面normal贴图" -h 30 -command "ezTreeNormalMap(\"L\")"`;
+			string $norRight = `button -l "右光方面normal贴图" -h 30 -command "ezTreeNormalMap(\"R\")"`;
+			string $depth = `button -l "面片树场景专用depth分层"  -h 30 -command "ezcreateDepthRLnurb"`;
+			string $con = `button -l "选择面片控制器"  -h 30 -command "ezSelectTreeLoc"`;
+		formLayout -edit 
+			-attachForm	$camLight		"top"		10
+			-attachForm	$camLight		"left"		20
+			-attachForm	$camLight		"right"		20
+
+			-attachControl	$norLeft		"top"		10	$camLight
+			-attachForm	$norLeft		"left"		20
+			-attachPosition	$norLeft		"right"		0	50
+
+			-attachControl	$norRight		"top"		10	$camLight
+			-attachControl	$norRight		"left"		10	$norLeft
+			-attachPosition	$norRight		"right"		0	93
+
+			-attachControl	$depth			"top"		10	$norLeft
+			-attachForm	$depth			"left"		20
+			-attachForm	$depth			"right"		20	
+
+			-attachControl	$con			"top"		10	$depth
+			-attachForm	$con			"left"		20
+			-attachForm	$con			"right"		20	
+		$formLayout;
+		
+		window -e -w 300 -h 220 ez_tree_tools;
+	showWindow ez_tree_tools;
+}
+
+
+global proc ezTreeCam()
+{
+	string $loc[] = `ls -sl`;
+	
+	source "generateChannelMenu.mel";
+	
+	string $light = "keyLight_shadow";
+	if (!objExists($light))
+		error "请确认存在一个名为keyLight_shadow主阴影投射灯光！";
+	float $angle = `getAttr ($light+".ry")`;
+	string $shadows[] = `ls -type transform "*treeshadow*" "*:*treeshadow*"`;
+	string $allLights[] = `ls -type light`;
+	for ($shadow in $shadows)
+	{
+		if (`objExists ($shadow + ".ry")`)
+		{
+			select -r $shadow;
+			CBdeleteConnection  ($shadow + ".ry");
+			setAttr ($shadow + ".ry") ($angle - 90.0);
+
+			for ($obj in $allLights)
+			{
+				lightlink -break -light $obj -object $shadow;
+			}
+			lightlink -make -light $light -object $shadow;
+
+		}
+	}
+	select -cl;
+
+	string $cams = `lookThru -q`;
+	
+	string $mats[] = `ls -mat "*tree*" "*:*tree*"`;
+	string $des;
+	for ($mat in $mats)
+	{
+		string $cons[] = `listConnections -type vectorProduct $mat`;
+		string $oldcam[];
+		if (`objExists $cons[0]`)
+		{
+			$oldcam = `listConnections -p true ($cons[0]+".matrix")`;
+			if (`objExists $oldcam[0]`)
+				disconnectAttr  $oldcam[0] ($cons[0]+".matrix");
+			connectAttr -f ($cams+".worldInverseMatrix[0]")  ($cons[0]+".matrix");
+		}
+
+	}
+
+	float $ry = `getAttr ($cams+".ry")`;
+	if (!`objExists $loc[0]`)
+		error "请检查Tree的旋转控制器命名！";
+	//string $tree[] = `pickWalk -d up $loc[0]`;
+	setAttr ($loc[0]+".ry") (-1*$ry);
+	select -cl;
+}
+
+global proc ezTreeNormalMap(string $side)
+{
+	string $otherSide;
+	if ($side == "L")
+		$otherSide = "R";
+	else if ($side == "R")
+		$otherSide = "L";
+
+	string $files[] = `ls -type file`;
+	for ($file in $files)
+	{
+		string $tex = `getAttr ($file+".fileTextureName")`;
+		if (endsWith($tex,("NS"+$side+".iff")))
+		{
+			string $replace = `substring $tex 1 (size($tex)-7)` + "NS"+$otherSide+".iff";
+			setAttr -type "string" ($file+".fileTextureName") $replace;
+		}
+	}
+	print "已更换normal贴图！";
+}
+
+
+global proc ezcreateDepthRLnurb()
+{
+
+	source "ezRenderMainLayoutRenderLayer.mel";
+
+	string $depthRL = "depth";
+	string $obj[] = `ls -sl`;
+
+	source "slLightDepth.mel";slDepthLight;slDepthMataril;
+
+	string $zlight[] = `ls  "*:zlighting"`;
+	string $light = $zlight[0];
+	
+	string $existsLayer[] = `ls -type renderLayer $depthRL`;
+	if (!`objExists $existsLayer[0]`)
+	{
+		createRenderLayer -name $depthRL -e -mc -number 1 -noRecurse;
+		ezRenderMainLayoutRenderLayerSWSeting;
+	}
+	layerEditorLayerButtonSelect 0 $depthRL;
+	updateHighlightSelectIcon;
+	editRenderLayerMembers $depthRL $obj $light;
+
+	setAttr "defaultRenderLayer.renderable" 0;
+}
+
+global proc ezSelectTreeLoc()
+{
+	string $loc[] = `ls -type locator "*treenrominversrot*" "*:*treenrominversrot*"`;
+	if (`objExists $loc[0]`)
+	{
+		string $con = getTransform($loc[0]);
+		select -r $con;
+	}
+}

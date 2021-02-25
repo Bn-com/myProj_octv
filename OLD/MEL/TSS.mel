@@ -1,0 +1,1079 @@
+/*
+//
+//    Create By Larry. 2003.1.21
+//    Produce Name:    TSS
+//
+//    How To Control:
+//       Player1:      Left:   Ctrl+Alt + Left           Right:  Ctrl + Alt + Right
+//                      UP :   Ctrl+Alt + Up              Down:  Ctrl+Alt + Down
+//        
+//       Player2:      Left:   Ctrl+Alt + s		 Right:  Ctrl+Alt + f
+//                       Up:   Ctrl+Alt + e               Down:  Ctrl+Alt + d
+//      
+//       Ctrl + Alt + p:   Pause/Resume Game;
+//
+//
+*/
+
+////////////////////////////////////////////////////////////////// 
+//
+//  Global Description:
+//  Global string $gDirection        Snake 移动方向
+//  global string $gADirection;      ASnake 移动方向
+//  Global string $lastSnake         最后一个Snake的名字
+//  global string $AlastSnake;
+
+//  global int $IsNewCreate;       是否有创建Snake的标志
+//  global float $ST1;             Timer的值
+//  global int $SnakeJobNumber;    Scriptjob的值
+//  global int $SnakeShaderIndex;  Snake Shader
+//  global int $IsPause;           判断是否为暂停状态
+//  global int $gscore;            分数
+//  global int $Agscore;           SnakeA 分数
+//  global int $KillEachOther;     是否允许相互Kill
+//  global int $gameHighScore;     最高分
+//  global int $SnakeNoEdge;       是否存在边界
+
+//  global float $SnakeOcupyX[];   Snake自身占用的位置  
+//  global float $SnakeOcupyY[];
+//  global float $SnakeOcupyZ[];
+//  global float $ASnakeOcupyX[];  
+//  global float $ASnakeOcupyY[];
+//  global float $ASnakeOcupyZ[];
+//  
+//  global float $ObstacleX[];      障碍物 X 坐标
+//  global float $ObstacleY[];      障碍物 Y 坐标
+//  global float $ObstacleZ[];      障碍物 Z 坐标
+
+//  global int $NumberOfPlayer;
+//
+//////////////////////////////////////////////////////////////////
+
+
+
+global proc TSS()
+{
+    
+    //Create The UI ;
+    if(`window -ex SnakeUI`) deleteUI SnakeUI;
+    string $window = `window -title "MSnake" -w 390 -h 115 SnakeUI`;
+    columnLayout;
+        intSliderGrp -label "Lever" -field true
+                     -minValue 1 -maxValue 10
+    	             -fieldMinValue 1 -fieldMaxValue 10
+                     -value 1
+                     SleverCTL;
+        intSliderGrp -label "Speed" -field true 
+                     -minValue 1 -maxValue 10
+    	             -fieldMinValue 1 -fieldMaxValue 10
+                     -value 5
+                     SspeedCTL;       
+                     
+    rowColumnLayout -numberOfRows 1;
+               
+         checkBox -label "No Edge" -cc onNoEdge SnakeEdgeCTL;
+         checkBox  -label "Enable Player2" -cc onPlayerChange SnakePlayerCTL; 
+         checkBox  -label "Enable Kill Each Other" -cc onKillChange -en 0 SnakeKillCTL; 
+    setParent..;
+                     
+    rowColumnLayout -numberOfRows 1;
+    		    text -label "" -w 60;
+                    button -w 60 -label "Start"  -c onSnakeStart Snake_PCTL;
+                    text -label "" -w 60;
+                    button -w 60 -label "Pause(P)"  -c "onSnakePause(1)" Snake_PauseCTL;
+                    text -label "" -w 60;
+                    button -w 60 -label "Close" -c  onSnakeCloseGame;
+    showWindow $window;                     
+       
+    source TSS.mel;        
+    SnakeCreateScene();  
+}
+
+//设置是否存在边界
+global proc onNoEdge()
+{
+   global int $SnakeNoEdge;
+   $SnakeNoEdge = `checkBox -q -v SnakeEdgeCTL`;
+}
+
+
+// 设置是否允许相互Kill
+global proc onKillChange()
+{
+   global int $KillEachOther;
+   int $val = `checkBox -q -v SnakeKillCTL`;
+   if($val)
+   {
+      $KillEachOther = 1;
+   }else{
+      $KillEachOther = 0;
+   }	
+}
+
+// 设置Player数目
+global proc onPlayerChange()
+{
+  global int $NumberOfPlayer;
+  global int $KillEachOther;  
+  
+  int $val = `checkBox -q -v SnakePlayerCTL`;
+  if($val)
+  {
+  	checkBox -e -en 1 SnakeKillCTL;
+  	$NumberOfPlayer=2;
+// 创建 ASnake 	
+  	polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name ASnake;
+        polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name AChildSnake;
+        addAttr -ln ParentSnake -dt "string"  AChildSnake;
+        setAttr -type "string" AChildSnake.ParentSnake ASnake;
+    
+        select -r ASnake;
+        sets -e -forceElement SnakeShader3SG;  
+        select -r AChildSnake; 
+        sets -e -forceElement SnakeShader3SG;	
+        
+        setAttr ASnake.translate 0 0 0;
+     	setAttr AChildSnake.translate -1 0 0; 
+// 设置HUD        
+        if(`headsUpDisplay -ex AGamesHUD`) headsUpDisplay -rem AGamesHUD;
+        headsUpDisplay -s 2 -block 4 -blockSize "large" -labelFontSize "large" -lw 200 -label "Player2 Score: 00000" AGamesHUD;
+  	
+  }else{
+        checkBox -e -en 0 -v 0 SnakeKillCTL;
+        $NumberOfPlayer=1;
+        if(`headsUpDisplay -ex AGamesHUD`) headsUpDisplay -rem AGamesHUD;
+        
+        if(`objExists "ASnake"`) delete ASnake;
+        if(`objExists "AChildSnake"`) delete AChildSnake;
+        $KillEachOther = 0;
+
+  }
+}
+
+// 退出时运行
+global proc onSnakeCloseGame()
+{
+    scriptJob -killAll;
+    SnakeCreateShotCut("Remove");
+    
+     if(`headsUpDisplay -ex AGamesHUD`) headsUpDisplay -rem AGamesHUD;
+     if(`headsUpDisplay -ex GamesHUD`) headsUpDisplay -rem GamesHUD;
+     if(`headsUpDisplay -ex GameHsHUD`) headsUpDisplay -rem GameHsHUD;
+
+     //Delete Old Setting, if Exist.
+    string $sceneSet[] = {"Snake","SnakeFood","ChildSnake","SnakeShader1","SnakeShader2",
+                          "SnakeShader3","SnakeShader4","SnakeShader5","SnakeShader6",
+                          "SnakeShader7","SnakeShader1SG","SnakeShader2SG","SnakeShader3SG",
+                          "SnakeShader4SG","SnakeShader5SG","SnakeShader6SG","SnakeShader7SG",
+                          "ObstacleShader","ObstacleShaderSG","ASnake","AChildSnake"};
+    for($tmp in $sceneSet)
+    {
+        if(`objExists $tmp`) delete $tmp;
+    }
+    
+    delete `ls -tr "SnakeEdge*"`;
+    delete `ls -tr "SnakeObstacle*"`;
+    delete `ls -tr "AChildSnake*"`;
+    
+       
+    if(`window -ex SnakeUI`) deleteUI SnakeUI;
+}
+
+
+global proc onSnakePause(int $i)
+{
+    global int $IsPause;
+    
+    if($int = 2)
+    {
+       $IsPause = 1 - $IsPause;
+       $i = $IsPause;
+    }
+   
+    $IsPause = $i;	
+    if($i == 1)
+    {
+       button -e -w 60 -label "Resume(P)"  -c "onSnakePause(0)" Snake_PauseCTL;     
+    }else{
+       button -e -w 60 -label "Pause(P)"  -c "onSnakePause(1)" Snake_PauseCTL;       
+    }
+}
+
+// 创建快捷键
+global proc SnakeCreateShotCut(string $method)
+{
+   if($method == "Remove")
+   {
+       hotkey -ctl -alt -k Right -n "";
+       hotkey -ctl -alt -k Right -n "" ;
+       hotkey -ctl -alt -k Up -n "";
+       hotkey -ctl -alt -k Down -n "" ; 
+       hotkey -ctl -alt -k "p" -n "" ; 
+       hotkey -ctl -alt -k "s" -n "";
+       hotkey -ctl -alt -k "f"  -n "" ;
+       hotkey -ctl -alt -k "e"  -n "" ;
+       hotkey -ctl -alt -k "d"  -n "" ;   
+       return;
+   }
+
+// Create HotKeys to control Snake   
+   nameCommand -ann "Move Right" -c "Snakehotkeycmd(\"Right\",\"Left\")" SnakeMoveRightCMD;
+   nameCommand -ann "Move Left" -c "Snakehotkeycmd(\"Left\",\"Right\")" SnakeMoveLeftCMD;
+   nameCommand -ann "Move UP" -c "Snakehotkeycmd(\"Up\",\"Down\")" SnakeMoveUpCMD;
+   nameCommand -ann "Move Down" -c "Snakehotkeycmd(\"Down\",\"Up\")" SnakeMoveDownCMD;
+
+   hotkey -ctl -alt -k Right -n SnakeMoveRightCMD;
+   hotkey -ctl -alt -k Left  -n SnakeMoveLeftCMD ;
+   hotkey -ctl -alt -k Up    -n SnakeMoveUpCMD ;
+   hotkey -ctl -alt -k Down  -n SnakeMoveDownCMD ;
+   
+   nameCommand -ann "Pause" -c "onSnakePause(2)" SnakePauseCMD;
+   hotkey -ctl -alt -k "p" -n SnakePauseCMD ; 
+
+   nameCommand -ann "AMove Right" -c "ASnakehotkeycmd(\"Right\",\"Left\")" ASnakeMoveRightCMD;
+   nameCommand -ann "AMove Left" -c "ASnakehotkeycmd(\"Left\",\"Right\")" ASnakeMoveLeftCMD;
+   nameCommand -ann "AMove UP" -c "ASnakehotkeycmd(\"Up\",\"Down\")" ASnakeMoveUpCMD;
+   nameCommand -ann "AMove Down" -c "ASnakehotkeycmd(\"Down\",\"Up\")" ASnakeMoveDownCMD;
+
+     hotkey -ctl -alt -k "s" -n ASnakeMoveLeftCMD;
+     hotkey -ctl -alt -k "f"  -n ASnakeMoveRightCMD ;
+     hotkey -ctl -alt -k "e"  -n ASnakeMoveUpCMD ;
+     hotkey -ctl -alt -k "d"  -n ASnakeMoveDownCMD ;   
+
+
+
+}
+
+global proc ASnakehotkeycmd(string $dir,string $andir)
+{
+   global string $gADirection;
+   if($gADirection == $dir) return;
+   if($gADirection == $andir) return;   
+   $gADirection = $dir;
+} 
+
+
+global proc Snakehotkeycmd(string $dir,string $andir)
+{
+   global string $gDirection;
+   string $thedir;
+   if($gDirection == $dir) return;
+   if($gDirection == $andir) return;   
+   $gDirection = $dir;
+} 
+
+// 移动 Child Snake
+global proc SnakeMoveChild(string $obj)
+{
+	   
+   global int $IsNewCreate;
+   global int $AIsNewCreate;
+
+   
+   global float $SnakeOcupyX[];
+   global float $SnakeOcupyY[];
+   global float $SnakeOcupyZ[];
+   
+   global float $ASnakeOcupyX[];
+   global float $ASnakeOcupyY[];
+   global float $ASnakeOcupyZ[];
+   
+   float $OX[],$OY[],$OZ[];
+   global string $lastSnake;
+   global string $AlastSnake;
+   string $allchild[];
+   string $last;
+   int $newC;
+   if($obj == "Snake")
+   { 
+        $allchild = `ls -tr "ChildSnake*"`;
+        clear $SnakeOcupyX; clear $SnakeOcupyZ; clear $SnakeOcupyZ;
+        $last = $lastSnake; 
+        $newC = $IsNewCreate;
+   }else{
+        $allchild = `ls -tr "AChildSnake*"`;
+        clear $ASnakeOcupyX; clear $ASnakeOcupyZ; clear $ASnakeOcupyZ;
+        $last = $AlastSnake; 
+        $newC = $AIsNewCreate;
+   }
+   
+   int $index =0;
+   int $num = size($allchild);
+   int $i = $num -1;
+   for($i; $i > -1; $i--)
+   {
+      string $tmp = $allchild[$i];
+      if($newC == 1)
+      {
+      	 if($tmp == $last)
+      	 {
+      	     $newC = 0;
+      	     $OX[$index] = `getAttr ($tmp + ".tx")`; 
+      	     $OY[$index] = `getAttr ($tmp + ".ty")`;
+      	     $OZ[$index] = `getAttr ($tmp + ".tz")`;
+      	     $index ++;
+      	     continue;
+      	 }
+      }
+      	
+      string $parent = `getAttr ($tmp + ".ParentSnake")`;
+      float $tr[] = `getAttr ($parent + ".translate")`;
+      setAttr ($tmp + ".translate") $tr[0] $tr[1] $tr[2]; 
+      	     
+      $OX[$index] = $tr[0]; 
+      $OY[$index] = $tr[1];
+      $OZ[$index] = $tr[2];
+      $index ++;
+   }
+      $OX[$index] = `getAttr ($obj + ".tx")`; 
+      $OY[$index] = `getAttr ($obj + ".ty")`;
+      $OZ[$index] = `getAttr ($obj + ".tz")`;
+      
+   if($obj == "Snake")
+   {
+       $IsNewCreate = 0;
+       $SnakeOcupyX = $OX;
+       $SnakeOcupyY = $OY;
+       $SnakeOcupyZ = $OZ;      	 
+   }else{
+       $AIsNewCreate = 0;
+       $ASnakeOcupyX = $OX;
+       $ASnakeOcupyY = $OY;
+       $ASnakeOcupyZ = $OZ; 
+   }
+	   
+   
+}
+
+// 创建新的 Child Snake
+global proc SnakeCreateNewSnake(string $obj)
+{
+   global string $lastSnake;
+   global string $AlastSnake;
+   
+   global int $IsNewCreate;
+   global int $AIsNewCreate; 
+   string $newsnake[];
+   string $last;
+   if($obj == "Snake")
+   {
+     $newsnake = `polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name ChildSnake`;
+     $last = $lastSnake;
+   }else{
+     $newsnake = `polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name AChildSnake`;
+     $last = $AlastSnake;
+   }
+   
+   float $ltr[] = `getAttr ($last + ".translate")`;
+   setAttr ($newsnake[0] + ".translate") $ltr[0] $ltr[1] $ltr[2];
+   
+   addAttr -ln ParentSnake -dt "string"  $newsnake[0];
+   setAttr -type "string" ($newsnake[0] + ".ParentSnake") $last;
+   
+   // Assign random shader; 
+    global int $SnakeShaderIndex;
+    int $rSG = $SnakeShaderIndex;
+    string $SG = "SnakeShader" + $rSG + "SG";
+    select -r $newsnake[0];
+    sets -e -forceElement $SG;
+
+   
+   if($obj == "Snake")
+   {
+      $lastSnake = $newsnake[0];
+      $IsNewCreate = 1;
+   }else{
+      $AlastSnake = $newsnake[0];
+      $AIsNewCreate = 1;
+   }
+   
+  
+ //   global int $TotalSnake;
+ //   $TotalSnake ++;
+    
+ //   if($TotalSnake > 200) error "Exceed maxmum snake childen! Pass";
+    
+    select -cl;
+}
+
+// 
+global proc onSnakeStart()
+{
+    global int $KillEachOther;
+    global int $NumberOfPlayer;
+     global int $SnakeNoEdge;
+      $SnakeNoEdge = `checkBox -q -v SnakeEdgeCTL`;
+    $KillEachOther = `checkBox -q -v SnakeKillCTL`;
+    if(`checkBox -q -v  SnakePlayerCTL`)  {$NumberOfPlayer = 2;}else{$NumberOfPlayer =1;}
+
+// UI control
+    button -e -w 60 -label "Stop"  -c onSnakeStop Snake_PCTL;
+    checkBox -e -en 0 SnakeKillCTL;
+    checkBox -e -en 0 SnakePlayerCTL;
+    
+    int $spval = `intSliderGrp -q -v SspeedCTL`;
+    int $slev  = `intSliderGrp -q -v SleverCTL`;
+
+//  Create Obstacle    
+    int $num;
+    if($slev == 1)
+    {
+    	$num = 0;
+    }else
+    {
+    	$num = 2 * $slev;
+    }
+    delete `ls -tr "SnakeObstacle*"`;
+    global float $ObstacleX[];
+    global float $ObstacleY[];
+    global float $ObstacleZ[];
+    clear $ObstacleX;clear $ObstacleY;clear $ObstacleZ;
+    int $i =0;
+    for($i; $i < $num; $i ++)
+    {
+         SnakeCreateObstacle();
+    }
+    
+//
+// Get Real Speed value    
+    float $sp;
+    if($spval < 2)
+    {
+    	$sp = $spval;
+    }else if($spval < 7)
+    {
+    	$sp = 0.7 - 0.1 * $spval;
+    }else
+    {
+    	$sp = -0.02 * $spval + 0.22;
+    }
+      
+///
+
+// Create ScriptJob and start Game
+    global float $ST1;
+    global int $SnakeJobNumber;
+    $ST1 = `timerX`;
+    string $cmdstr = "SnakeIdleFun(" + $sp + ")";
+    if($SnakeJobNumber != 0)
+    {
+        if(`scriptJob -ex $SnakeJobNumber`) scriptJob -kill $SnakeJobNumber;
+    }	
+    $SnakeJobNumber = `scriptJob -e "idle" $cmdstr`; 
+    SnakeCreateShotCut("aaa");
+    SnakeMakeRandomPoint();
+     
+    global int $TotalSnake;
+    $TotalSnake = 0;
+    
+    if(`modelPanel -ex modelPanel3`)  setFocus modelPanel3;
+}
+
+
+global proc SnakeCreateObstacle()
+{
+    int $range = 10;
+    int $rx = rand(-$range, $range);
+    int $ry = rand(-$range, $range);
+    int $rz = rand(-$range, $range);
+   
+    // Exclude the snake start point;
+    if(($rx == 0) && ($ry == 0)) SnakeCreateObstacle();
+    if(($rx == 1) && ($ry == 0)) SnakeCreateObstacle();
+    
+    string $obs[] = `polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeObstacle`;
+    setAttr ($obs[0] + ".translate") $rx $ry 0;    
+    
+    if(SnakeObstacleCheck($obs[0]))
+    {
+    	delete $obs[0];
+    	SnakeCreateObstacle;
+    }
+    
+    select -r $obs[0]; 
+    sets -e -forceElement ObstacleShaderSG;  
+
+// Save the Obstacle translate value      
+    global float $ObstacleX[];
+    global float $ObstacleY[];
+    global float $ObstacleZ[]; 
+    
+    int $size = size($ObstacleX);
+    $ObstacleX[$size] = $rx;
+    $ObstacleY[$size] = $ry;
+    $ObstacleZ[$size] = $rz;    
+}
+
+//判断 是否跟障碍物碰撞
+global proc int SnakeObstacleCheck(string $obj)
+{
+    global float $ObstacleX[];
+    global float $ObstacleY[];
+    global float $ObstacleZ[]; 
+    
+    float $tr[] = `getAttr ($obj + ".translate")`;
+    
+    int $i = 0;
+    for($i ; $i < size($ObstacleX) ; $i ++)
+    {
+        if($ObstacleX[$i] == $tr[0])
+    	{
+    	    if($tr[1] == $ObstacleY[$i])
+    	    {
+    	        return 1;
+    	    }
+    	}
+    }
+    return 0;
+}
+
+
+global proc onSnakeStop()
+{
+   //  UI Control
+    button -e -w 60 -label "Start"  -c onSnakeStart Snake_PCTL;
+    checkBox -e -en 1 SnakePlayerCTL;
+    if(`checkBox -q -v SnakePlayerCTL`) checkBox -e -en 1 SnakeKillCTL;	
+   
+   // Kill ScriptJob 
+    global int $SnakeJobNumber;
+    if($SnakeJobNumber != 0)
+    {
+        if(`scriptJob -ex $SnakeJobNumber`) scriptJob -kill $SnakeJobNumber;
+    }	
+   
+    SnakeResetGame("All");
+}
+
+// ScriptJob 运行程序
+global proc SnakeIdleFun(float $Snakespeed)
+{
+   global int $IsPause;
+   if($IsPause) return;
+   global float $ST1;
+   $eptime = `timerX -startTime $ST1`;
+   global int $NumberOfPlayer;
+   
+   if($eptime > $Snakespeed)
+   {
+      $ST1 = `timerX`;
+      SnakeMoveChild("Snake");
+      onMoveHeadSnake("Snake");
+      if(!SnakeOutRangeCheck(10,"Snake")) SnakeDie("Snake"); 
+      if(SnakeOcupyCheck("Snake"))  SnakeDie("Snake"); 
+      if(SnakeObstacleCheck("Snake")) SnakeDie("Snake");      
+      SnakeEatFood("Snake");  
+      
+      if($NumberOfPlayer == 2)
+      {  
+          SnakeMoveChild("ASnake");
+          onMoveHeadSnake("ASnake"); 
+          if(!SnakeOutRangeCheck(10,"ASnake")) SnakeDie("ASnake");
+          if(SnakeOcupyCheck("ASnake")) SnakeDie("ASnake"); 
+          if(SnakeObstacleCheck("ASnake")) SnakeDie("ASnake");
+          SnakeEatFood("ASnake");  
+      }     
+
+  }
+}
+
+// 移动Snake的头
+global proc onMoveHeadSnake(string $obj)
+{
+   global string $gDirection;
+   global string $gADirection;
+   float $tx = `getAttr ($obj + ".tx")`;	
+   float $ty = `getAttr ($obj + ".ty")`;
+   
+   string $dir;
+   if($obj == "Snake")
+   { 
+   	$dir = $gDirection;
+    }else{
+        $dir = $gADirection;
+    }
+   
+   switch($dir)
+   {
+   	case "Left":
+   	    setAttr ($obj + ".tx") ($tx -1);
+   	    break;
+   	case "Right":
+   	    setAttr ($obj + ".tx") ($tx + 1);
+   	    break;
+   	case "Up":
+   	    setAttr ($obj + ".ty") ($ty + 1);
+   	    break;
+   	case "Down":
+   	    setAttr ($obj + ".ty") ($ty -1);
+   	    break;
+    }
+}
+
+
+
+// Reset the Scene Set
+global proc SnakeResetGame(string $obj)
+{
+   // delete All Child
+   if($obj == "Snake" || $obj == "All")
+   {
+       string $allchild[] = `ls -tr "ChildSnake*"`;
+       for($tmp in $allchild)
+      {
+          if($tmp == "ChildSnake") continue;
+          if(`objExists $tmp`) delete $tmp;
+      }
+      global string $gDirection ;      // Snake 移动方向
+      global string $lastSnake;        // 最后一个Snake的名字
+      global int $IsNewCreate;        // 是否有创建Snake的标志
+      $lastSnake = "ChildSnake";
+      $IsNewCreate = 0; 
+      $gDirection = "Left"; 
+      setAttr Snake.translate 0 0 0;
+      setAttr ChildSnake.translate 1 0 0;      
+      
+      global float $SnakeOcupyX[];
+      global float $SnakeOcupyY[];
+      global float $SnakeOcupyZ[];
+      clear $SnakeOcupyX; clear $SnakeOcupyZ; clear $SnakeOcupyZ;
+      
+     global int $gscore;
+     $gscore = -1;
+     DisplayScore("Snake");
+
+    }
+
+    if($obj == "ASnake" || $obj == "All")
+    {
+      if(`objExists "ASnake"`)
+      {     
+       string $allchild[] = `ls -tr "AChildSnake*"`;
+   
+       for($tmp in $allchild)
+       {
+          if($tmp == "AChildSnake") continue;
+          if(`objExists $tmp`) delete $tmp;
+       }     	 
+    
+        global string $gADirection ;      // ASnake 移动方向
+        global string $AlastSnake;        // 最后一个ASnake的名字   
+        global int $AIsNewCreate;        // 是否有创建ASnake的标志
+        $AlastSnake = "AChildSnake";
+        $gADirection = "Right";
+        $AIsNewCreate = 0;
+        setAttr ASnake.translate 0 0 0;
+     	setAttr AChildSnake.translate -1 0 0; 
+     	
+       global float $ASnakeOcupyX[];
+       global float $ASnakeOcupyY[];
+       global float $ASnakeOcupyZ[];
+       clear $ASnakeOcupyX; clear $ASnakeOcupyZ; clear $ASnakeOcupyZ; 
+          
+        global int $Agscore;
+        $Agscore = -1;
+        if(`headsUpDisplay -ex AGamesHUD`) DisplayScore("ASnake");
+     }
+   }
+    
+   
+   if($obj == "All")
+   {
+     SnakeMakeRandomPoint;    
+     global int $IsPause;
+     $IsPause = 0; 
+     global int $gscore;
+     $gscore = -1;
+     global int $Agscore;
+     $Agscore = -1;
+     DisplayScore("Snake");
+     if(`headsUpDisplay -ex AGamesHUD`) DisplayScore("ASnake");
+     
+     delete `ls -tr "SnakeObstacle*"`;
+     
+   }
+
+}
+
+
+//边界检查
+global proc int SnakeOutRangeCheck(int $range,string $obj)
+{  	
+   float $trans[] = `getAttr ($obj + ".translate")`;
+   
+   global int $SnakeNoEdge;
+   if(!$SnakeNoEdge)
+   {
+       if(($trans[0] > $range) || ($trans[0] < -$range)) return 0;
+       if(($trans[1] > $range) || ($trans[1] < -$range)) return 0; 
+   }else{
+      if($trans[0] > $range) {setAttr ($obj + ".tx")  (-$trans[0] + 1);return 1;}
+      if($trans[0] < -$range) {setAttr ($obj + ".tx") (-$trans[0] - 1);return 1;}
+      if($trans[1] > $range) {setAttr ($obj + ".ty")  (-$trans[1] + 1);return 1;}
+      if($trans[1] < -$range) {setAttr ($obj + ".ty") (-$trans[1] - 1);return 1;}
+   }
+   
+   return 1; 
+}
+
+// Create Random Snake Food
+
+global proc SnakeMakeRandomPoint()
+{
+    int $range = 10;
+    int $rx = rand(-$range, $range);
+    int $ry = rand(-$range, $range);
+   
+    if(`objExists SnakeFood`) delete SnakeFood;
+    string $food[] = `polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeFood`;
+ 
+    setAttr ($food[0] + ".translate") $rx $ry 0;
+
+//  避免跟Snake 重合
+//    if(SnakeOcupyCheck("SnakeFood"))
+//   {
+//      print ("Re-Cal Point \n");
+//      SnakeMakeRandomPoint;
+//   }
+    
+//  避免跟障碍物重合    
+    if(SnakeObstacleCheck("SnakeFood"))
+    {
+       print ("Re-Cal Point \n");
+       SnakeMakeRandomPoint;
+    }
+    
+// Assign random shader; 
+    int $rSG = rand(1,8);
+    string $SG = "SnakeShader" + $rSG + "SG";
+    select -r $food[0];
+    sets -e -forceElement $SG;
+    select -cl;
+        
+    global int $SnakeShaderIndex;
+    $SnakeShaderIndex = $rSG;
+
+}
+
+// 检查是否吃到Food
+global proc SnakeEatFood(string $obj)
+{
+   float $food[] =`getAttr SnakeFood.translate`;
+   float $snake[] = `getAttr ($obj + ".translate")`;
+   
+   if(($food[0] == $snake [0]) && ($food[1] == $snake[1]) && ($food[2] == $snake[2]))
+   {
+      SnakeCreateNewSnake($obj);
+      SnakeMakeRandomPoint;
+      DisplayScore($obj);
+   } 
+}
+
+// 检查自身碰撞，及相互碰撞
+global proc int SnakeOcupyCheck(string $obj)
+{
+   float $trans[] = `getAttr ($obj + ".translate")`;
+   
+   int $FoodCheck = 0; 
+ //  if($obj == "SnakeFood")
+ //  {
+ //     $FoodCheck = 1;
+ //  }
+   global float $SnakeOcupyX[];
+   global float $SnakeOcupyY[];
+   global float $SnakeOcupyZ[];
+   
+   global float $ASnakeOcupyX[];
+   global float $ASnakeOcupyY[];
+   global float $ASnakeOcupyZ[];
+   
+   float $OX[],$OY[],$OZ[],$AOX[],$AOY[],$AOZ[];
+   
+   if($obj == "Snake")
+   {
+       $OX = $SnakeOcupyX;
+       $OY = $SnakeOcupyY;
+       $OZ = $SnakeOcupyZ;
+       $AOX = $ASnakeOcupyX;
+       $AOY = $ASnakeOcupyY;
+       $AOZ = $ASnakeOcupyZ;
+   }else if($obj == "ASnake")
+   {
+   	clear $OX;clear $OY;clear $OZ;clear $AOX;clear $AOY;clear $AOZ;
+        $OX = $ASnakeOcupyX;
+        $OY = $ASnakeOcupyY;
+        $OZ = $ASnakeOcupyZ;
+        $AOX = $SnakeOcupyX;
+        $AOY = $SnakeOcupyY;
+        $AOZ = $SnakeOcupyZ;
+   }	 
+   int $i = 0;
+   for($i; $i < size($OX); $i ++)
+   {
+      if($trans[0] == $OX[$i])
+      {
+           if($trans[1] == $OY[$i]) return 1;
+      }
+   }
+   
+   global int $KillEachOther;
+   if($KillEachOther || $FoodCheck)
+   {
+       int $i = 0;
+       for($i; $i < size($AOX); $i ++)
+       {
+          if($trans[0] == $AOX[$i])
+          {
+           if($trans[1] == $AOY[$i]) return 1;
+          }
+      }      
+   }
+   
+   return 0;
+}
+
+
+// Create the base SceneSet
+global proc SnakeCreateScene()
+{
+    //Delete Old Setting, if Exist.
+    string $sceneSet[] = {"Snake","ChildSnake","SnakeShader1","SnakeShader2",
+                          "SnakeShader3","SnakeShader4","SnakeShader5","SnakeShader6",
+                          "SnakeShader7","SnakeShader1SG","SnakeShader2SG","SnakeShader3SG",
+                          "SnakeShader4SG","SnakeShader5SG","SnakeShader6SG","SnakeShader7SG",
+                          "ObstacleShader","ObstacleShaderSG","ASnake","AChildSnake"};
+    for($tmp in $sceneSet)
+    {
+        if(`objExists $tmp`) delete $tmp;
+    }
+    
+    polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name Snake;
+    polyCube -w 1 -h 1 -d 1 -sx 1 -sy 1 -sz 1 -ax 0 1 0 -tx 1 -ch 1 -name ChildSnake;
+    
+    addAttr -ln ParentSnake -dt "string"  ChildSnake;
+    setAttr -type "string" ChildSnake.ParentSnake Snake; 
+       
+       
+   // Create Shaders
+    shadingNode -asShader lambert -name SnakeShader1;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader1SG;
+    connectAttr -f SnakeShader1.outColor SnakeShader1SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader2;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader2SG;
+    connectAttr -f SnakeShader2.outColor SnakeShader2SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader3;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader3SG;
+    connectAttr -f SnakeShader3.outColor SnakeShader3SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader4;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader4SG;
+    connectAttr -f SnakeShader4.outColor SnakeShader4SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader5;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader5SG;
+    connectAttr -f SnakeShader5.outColor SnakeShader5SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader6;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader6SG;
+    connectAttr -f SnakeShader6.outColor SnakeShader6SG.surfaceShader;
+    
+    shadingNode -asShader lambert -name SnakeShader5;
+    sets -renderable true -noSurfaceShader true -empty -name SnakeShader7SG;
+    connectAttr -f SnakeShader7.outColor SnakeShader7SG.surfaceShader;
+    
+    setAttr "SnakeShader1.color" -type double3 1 0 0 ;    
+    setAttr "SnakeShader2.color" -type double3 1 1 0 ;
+    setAttr "SnakeShader3.color" -type double3 0 0 1 ;
+    setAttr "SnakeShader4.color" -type double3 1 1 1 ; 
+    setAttr "SnakeShader5.color" -type double3 0 1 0;   
+    setAttr "SnakeShader6.color" -type double3 0 1 1 ;
+    setAttr "SnakeShader7.color" -type double3 1 0 1 ;
+
+       
+    // Asign Shader to Snake;
+        select -r Snake;
+        sets -e -forceElement SnakeShader1SG;  
+        select -r ChildSnake; 
+        sets -e -forceElement SnakeShader1SG;        
+        
+   
+  // Create Obstacle Shader
+    shadingNode -asShader lambert -name ObstacleShader;
+    sets -renderable true -noSurfaceShader true -empty -name ObstacleShaderSG;
+    connectAttr -f ObstacleShader.outColor ObstacleShaderSG.surfaceShader;
+    setAttr "ObstacleShader.color" -type double3 0 0 0 ;  
+  
+   
+   // Create Edge 
+   
+     delete `ls -tr "SnakeEdge*"`;
+   
+    string $pol[] = `polyPlane -w 21 -h 21 -sx 1 -sy 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeEdge`;
+    setAttr ($pol[0] + ".rx") 90;
+    setAttr ($pol[0] + ".tx") -11;
+    setAttr ($pol[0] + ".sx") 0.05;
+    
+    string $pol[] = `polyPlane -w 21 -h 21 -sx 1 -sy 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeEdge`;
+    setAttr ($pol[0] + ".rx") 90;
+    setAttr ($pol[0] + ".tx") 11;
+    setAttr ($pol[0] + ".sx") 0.05;
+    
+    $pol = `polyPlane -w 21 -h 21 -sx 1 -sy 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeEdge`;
+    setAttr ($pol[0] + ".rx") 90;
+    setAttr ($pol[0] + ".ty") -11;
+    setAttr ($pol[0] + ".sz") 0.05;
+    setAttr ($pol[0] + ".sx") 1.1;
+    
+    $pol = `polyPlane -w 21 -h 21 -sx 1 -sy 1 -ax 0 1 0 -tx 1 -ch 1 -name SnakeEdge`;
+    setAttr ($pol[0] + ".rx") 90;
+    setAttr ($pol[0] + ".ty") 11;
+    setAttr ($pol[0] + ".sz") 0.05;
+    setAttr ($pol[0] + ".sx") 1.1;
+    
+    select -r "SnakeEdge*"; 
+    sets -e -forceElement ObstacleShaderSG; 
+
+    select -cl;
+ 
+// Create HUD
+
+    if(`headsUpDisplay -ex GameHsHUD`) headsUpDisplay -rem GameHsHUD;
+    headsUpDisplay -s 2 -block 1 -blockSize "large" -labelFontSize "large" -lw 200 -label "Highest Score: 00000" GameHsHUD;
+    CheckHighScore(1,"NULL");
+    
+    if(`headsUpDisplay -ex GamesHUD`) headsUpDisplay -rem GamesHUD;
+    headsUpDisplay -s 2 -block 3 -blockSize "large" -labelFontSize "large" -lw 200 -label "Player1 Score: 00000" GamesHUD;
+    
+
+// Create Camera View;
+   if(`modelPanel -ex modelPanel3`)
+   {
+        modelPanel -e -camera front modelPanel3;
+        string $me = `modelPanel -q -me modelPanel3`;
+        modelEditor -e -displayAppearance smoothShaded $me;
+        setFocus modelPanel3;
+        switchPanes "single" 0;
+        select -r `ls -tr "SnakeEdge*"`;
+        FrameSelected;
+        select -cl;
+   }
+
+   SnakeResetGame("All");
+}
+
+
+global proc SnakeDie(string $obj)
+{
+    CheckHighScore(0,$obj);
+    SnakeResetGame($obj);
+}
+
+
+global proc DisplayScore(string $obj )
+{
+   global int $gscore;
+   global int $Agscore;
+   int $rscore;
+   
+   if($obj == "Snake") 
+   {
+       $gscore++;
+       $rscore =   $gscore;
+       
+    }
+   if($obj == "ASnake") 
+   {
+   	$Agscore++;
+        $rscore =  $Agscore;
+   }
+  
+   if($rscore <= 20) {$rscore = 10 * $rscore;}
+   else if($rscore <= 50) {$rscore = 200 + 20 * ($rscore -20);}
+   else if($rscore <= 100) {$rscore = 800 + 30 *($rscore - 50);}
+   else {$rscore = 2300 + 50 *($rscore - 100);}
+   
+  
+   if($rscore > 10000) $gscore =0;
+   string $stxt;
+   if($rscore < 10)
+   {
+       $stxt = "0000" + $rscore;
+   }else if( $rscore < 100)
+   {
+        $stxt = "000" + $rscore;
+   }else if ($rscore < 1000)
+   {
+        $stxt = "00" + $rscore;
+   }else if($rscore < 10000)
+   {
+      $stxt = "0" + $rscore;
+   }else {
+      $stxt = $rscore;
+   }
+   
+   if($obj == "Snake")
+   {
+       $stxt = "Player1 Score: " + $stxt;
+       headsUpDisplay -e -label $stxt GamesHUD;
+       headsUpDisplay -r GamesHUD;
+   }
+   
+   if($obj == "ASnake")
+   {
+       $stxt = "Player2 Score: " + $stxt;
+       headsUpDisplay -e -label $stxt AGamesHUD;
+       headsUpDisplay -r AGamesHUD;
+   }
+}
+
+
+global proc CheckHighScore(int $stat,string $obj)
+{
+   	
+   global int $gameHighScore;
+   global int $gscore;
+   global int $Agscore;
+   
+   int $rscore;
+   if($obj == "Snake")  $rscore =  $gscore;
+   if($obj == "ASnake") $rscore =  $Agscore;
+   
+   if($rscore <= 20) {$rscore = 10 * $rscore;}
+   else if($rscore <= 50) {$rscore = 200 + 20 * ($rscore -20);}
+   else if($rscore <= 100) {$rscore = 800 + 30 *($rscore - 50);}
+   else {$rscore = 2300 + 50 *($rscore - 100);}   
+   
+   if($stat == 1) $rscore = $gameHighScore;   
+   
+   if($rscore >= $gameHighScore)
+   {
+      $gameHighScore = $rscore;
+      string $stxt;
+      if($rscore < 10)
+      {
+         $stxt = "Highest Score: 0000" + $rscore;
+      }else if( $rscore < 100)
+      {
+         $stxt = "Highest Score: 000" + $rscore;
+      }else if ($rscore < 1000)
+      {
+         $stxt = "Highest Score: 00" + $rscore;
+      }else if($rscore < 10000)
+      {
+         $stxt = "Highest Score: 0" + $rscore;
+      }else {
+         $stxt = "Highest Score: " + $rscore;
+      }
+    
+    headsUpDisplay -e -label $stxt GameHsHUD;
+    headsUpDisplay -r GameHsHUD;
+   }
+   
+   if($stat == 1) 
+   { 
+       $gscore = 0;
+       $Agscore = 0;
+   }
+}

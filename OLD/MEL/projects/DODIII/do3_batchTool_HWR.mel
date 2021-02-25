@@ -1,0 +1,99 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: zhangben
+//	Created: 2012.12.21 21:30
+//
+//	Description:
+//					
+//////////////////////////////////////////////////////////
+global proc savePBFile(string $targetPath,string $prefix)
+{
+	string $batchPBPath = $targetPath;
+	string $fileShortName = `file -q -sn -shn`;
+	string $newName = $batchPBPath + "\\" + $prefix + $fileShortName;
+	configHWR();
+	file -rename $newName;
+	file -save;
+}
+
+global proc configHWR()
+{
+	workspace -openWorkspace "D:/PlayBlast_Pro";
+	
+	workspace -fr "images" "D:/PlayBlast_Pro/images";
+	workspace -fr "scenes" "D:/PlayBlast_Pro/scenes";
+
+	source "channelBoxCommand.mel";
+	hwRenderLoad();
+	setAttr "defaultRenderGlobals.currentRenderer" -type "string" "mayaHardware";
+	//python("import zb_createSpecRL as csrl");
+	zwQueryCameraTime "defaultRenderGlobals";
+
+	int $startFrame=`getAttr "defaultRenderGlobals.startFrame"`;
+	int $endFrame=`getAttr "defaultRenderGlobals.endFrame"`;
+	playbackOptions -min $startFrame;
+	playbackOptions -max $endFrame;
+	int $cf = `currentTime -q`;
+
+	python("execfile('//file-cluster/gdc/Resource/Support/Maya/projects/DODIII/do3_config_RG_renderCam.py')");
+	
+	do3_importAllRef();
+	python("execfile('//file-cluster/gdc/Resource/Support/Maya/projects/DODIII/do3_modelAssignLambert.py')");
+
+	OptimizeScene;
+		
+	setAttr "defaultResolution.width" 960;
+	setAttr "defaultResolution.height" 540;
+	setAttr "defaultRenderGlobals.imageFilePrefix" -type "string" "<Scene>/<Camera>/<Scene>_<Layer>";
+		
+	//catch(`playblast  -format avi -sequenceTime 0 -clearCache 1 -viewer 0 -showOrnaments 1 -fp 4 -percent 50 -compression "FFDS" -quality 70 -frame $cf `);
+	setAttr "defaultRenderGlobals.imageFormat" 8;
+	string $fn = `file -q -sn -shn`;
+	file -rename ("pl_"+ $fn);		
+	
+	//file -rename("do3_023_002_sd_c001.ma")
+	file -save;
+    //batchRender 
+	hwRender ;
+}
+global proc do_batch_output_locator()
+{
+	python("from idmt.maya.DOD.scripts import dod_common_proc");
+	python("reload(dod_common_proc");
+	python("dod_common_proc.dod_common_proc().export_airscrewLocator()");
+}
+global proc do3_importAllRef()
+{
+	string $refNodes[] = `ls -type "reference"`;
+	for ($eachRef in $refNodes)
+	{
+		if (catch (`referenceQuery -filename $eachRef`) == 1)
+		{
+			delete $eachRef;
+		}
+		else
+		{
+			string $filePath = `referenceQuery -filename $eachRef`;
+			file -importReference   $filePath;
+		}
+	   
+	}
+}
+global proc do3_batchTool_batchRenderCMD()
+{
+    string $path = `textField -q -tx "pathTex"`;	
+    string $fileList[] = `textScrollList -q -ai "dbt_LST"`;
+    string $filesFullList[] ={};
+    for ($eachFile in $fileList)
+    {
+        string $fullPath = $path + "\\" + $eachFile;
+        string $sourStr = "\"source \\\"//file-cluster/gdc/Resource/Support/Maya/projects/DODIII/do3_batchTool_HWR.mel\\\";configHWR()\"";
+    	string $cmd = "\""+`getenv "MAYA_LOCATION"` +"/bin/mayabatch\" -file \"" 
+    					 + $fullPath
+    					 + "\" -command " + $sourStr;
+    
+    	system("\""+$cmd+"\"");
+    }
+}	
+

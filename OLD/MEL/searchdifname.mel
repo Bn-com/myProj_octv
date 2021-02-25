@@ -1,0 +1,145 @@
+
+global proc searchdifname()
+{
+	int $i;
+	string $child[];
+
+	if (`window -q -exists sdnWin`)
+		return;
+
+	window -title "Compare Names" -resizeToFitChildren true sdnWin;
+
+		columnLayout -adjustableColumn true;
+
+			frameLayout -label "" -borderStyle "etchedOut";
+		
+				$i = 0;
+
+				string $formLayout = `formLayout`;
+ 					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Corresponding File:" -text "" sdn_text`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("sdn_brow " + $child[0])`;
+					$child[$i++] = `button -label "Compare" -command ("CompareName " + $child[0])`;
+					$child[$i++] = `button -label "Cancel" -command ("deleteUI -window  sdnWin")`;
+				setParent ..;
+
+				formLayout -edit
+
+					-attachForm		$child[1]	"top"		10
+					-attachForm		$child[1]	"right"		5
+
+					-attachForm		$child[0]	"top"		10
+					-attachForm		$child[0]	"left"		0
+					-attachControl		$child[0]	"right"		5	$child[1]
+
+					-attachControl		$child[2]	"top"		10	$child[0]
+					-attachForm		$child[2]	"left"		0
+					-attachPosition		$child[2]	"right"		0	50
+
+					-attachControl		$child[3]	"top"		10	$child[0]
+					-attachControl		$child[3]	"left"		5	$child[2]
+					-attachPosition		$child[3]	"right"		0	100
+
+				$formLayout;
+
+			setParent ..;
+
+		setParent ..;
+
+	showWindow sdnWin;
+}
+
+global proc sdn_brow(string $control)
+{
+	fileBrowserDialog -mode 0  -fileCommand sdn_browProc -actionName "Browse" -operationMode "Reference";
+}
+
+global proc int sdn_browProc(string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename sdn_text;
+
+	return true;
+}
+
+//compare shape names between 2 scenes
+global proc CompareName(string $ctl)
+{
+	string $filename = `textFieldGrp -q -text $ctl`;
+
+	if (size($filename)>0)
+	{
+		waitCursor -state on;
+
+		//output shape names of mapping scene to a temp file
+		//KC: add double quotes to enclose filename
+
+		system ("mayabatch -command \"Outputnames\" -file \""+$filename+"\"");
+		comp_proc();
+
+		waitCursor -state off;
+	}
+}
+
+global proc comp_proc()
+{
+	string $oldnames[];	//store corresponding names
+	string $matches[];	//store matched names
+	string $newnames[] = `ls -sn -shapes`;	//store current shape names
+	if (size($newnames)==0)
+	{
+		error "no shapes in the scene";
+		return;
+	}
+
+	$tmp = ( `internalVar -userPrefDir` + "tmpnames.txt" );
+
+	$fileID = `fopen $tmp r`;
+
+	if ($fileID == 0)
+	{
+		// cannot open the file
+
+		error("Fail to open " + $tmp);
+	}
+
+	string $buffer = strip(`fgetline $fileID`);
+
+	int $i = 0;
+	while (size($buffer) > 0) 
+	{
+
+		$oldnames[$i++] = $buffer;
+		$buffer = strip(`fgetline $fileID`);
+	}
+
+	fclose $fileID;
+
+	//search
+	int $j = 0;
+	for ($shp in $newnames)
+	{
+		for ($old in $oldnames)
+		{
+			if ($old == $shp)
+			{
+				$matches[$j++] = $shp;
+				break;
+			}
+		}
+	}
+	
+	string $diff[] = stringArrayRemove($matches, $newnames);
+
+	if (size($diff)>0)
+	{
+		print ("different names: \n");
+
+		for ($k in $diff)
+		{
+			print ($k+"\n");
+		}
+	}
+	else print "match completely!";
+}
+
+
+

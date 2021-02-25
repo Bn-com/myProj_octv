@@ -1,0 +1,140 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddWristSnap
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: January 22 2007
+//	Changed Projcet Date:
+//	Last Updated: January 22 2007
+//	Update/Change this file at: Julii FreeMAN
+//	Note: IK FK Switch IK FK ×´Ì¬ÇÐ»»
+//		
+//		
+//		
+//////////////////////////////////////////////////////////
+global proc ddWristSnap()
+{
+	//GET WRIST CON
+	$tmp = `ls -sl`;
+	string $sel = $tmp[0];
+	string $name_parts[];
+	string $nameSpace[];
+	string $char;
+	string $side;
+	int $tok;
+
+	$tok = tokenize($sel, ":", $nameSpace);
+	if ( $tok == 2)
+	{
+		tokenize($nameSpace[1], "_", $name_parts);
+		$char = ($nameSpace[0] + ":" + $name_parts[0]);
+		$side = $name_parts[2];
+	}
+	else
+	{
+		tokenize($sel, "_", $name_parts);
+		$char = $name_parts[0];
+		$side = $name_parts[2];
+	}
+	print ($char + "\n" + $side + "\n") ;
+
+	//GET CURRENT FRAME
+	float $frame = `currentTime -q`;
+
+	if(`gmatch $sel "*world*"`)
+	{
+		print "SNAPPING FK TO IK\n\n";
+
+		//SNAP WORLD WRIST CON TO LOCAL WRIST CON
+		string $local = `substitute "_world" $sel ""`;
+		string $local_group = ($local+"_group");
+
+		//float $p[3] = `xform -q -ws -rp $sel`;
+
+		//move -a $p[0] $p[1] $p[2] $local_group;
+
+		//DUPLICATE LOCAL WRIST CON AND ORIENT CONSTRAIN TO WORLD CON
+		string $dup[] = `duplicate -rr $local`;
+		string $oc[] = `orientConstraint -weight 1 $sel $dup[0]`;
+		refresh;
+
+		//SET KEYFRAME FOR LOCAL WRIST CON
+		float $rot[3] = `getAttr ($dup[0]+".rotate")`;
+		setAttr ($local+".rotate") $rot[0] $rot[1] $rot[2];
+		setKeyframe -time $frame -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $local;		
+
+		delete $oc;
+		delete $dup;
+
+		//SET KEYFRAME FOR WORLD WRIST CON
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $sel;
+
+		//SET KEYFRAME FOR ARM JOINTS
+		string $arm = `substitute "wristCon" $local "arm"`;
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $arm;
+
+		//SET SOLVER ENABLE OFF AND SET KEYFRAME ON NEXT FRAME
+		setAttr ($local+".solverEnable") 0;
+		setKeyframe -time ($frame+1) -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" $local;
+
+		//SELECT LOCAL WRIST CON
+		select -r $local;
+	}
+	else
+	{
+		print "SNAPPING IK TO FK\n\n";
+
+		//SNAP WORLD WRIST CON TO LOCAL WRIST CON
+		//string $world = `substitute "_wrist" $sel "_world_wrist"`;
+		string $world = ($char+"_world_wristCon_"+$side);
+		string $local = ($char+"_wristCon_"+$side);
+		string $handle = ($char+"_armHandle_"+$side);
+
+		float $p[3] = `xform -q -ws -rp $local`;
+
+		move -a $p[0] $p[1] $p[2] $world;
+
+		//DUPLICATE WORLD CON
+		string $dup[] = `duplicate -rr $world`;
+		string $oc[] = `orientConstraint -weight 1 $local $dup[0]`;
+		float $rot[3] = `getAttr ($dup[0]+".rotate")`;
+		setAttr ($world+".rotate") $rot[0] $rot[1] $rot[2];
+
+		refresh;
+
+		delete $oc;
+		delete $dup;
+
+		//SET KEYFRAME FOR LOCAL WRIST CON
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $local;
+
+		//SET KEYFRAME FOR ARM JOINTS
+		string $arm = `substitute "wristCon" $local "arm"`;
+		string $pole = `substitute "wristCon" $local "poleLoc"`;
+
+		setKeyframe -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $arm;
+		float $arm_p[3] = `xform -q -ws -rp $arm`;
+		float $pole_p[3] = `xform -q -ws -rp $pole`;
+		float $x = $pole_p[0] - $arm_p[0];
+		float $y = $pole_p[1] - $arm_p[1];
+		float $z = $pole_p[2] - $arm_p[2];
+
+		//SET POLE VECTOR KEYFRAMES
+		setKeyframe -v $x ($handle+".poleVectorX");
+		setKeyframe -v $y ($handle+".poleVectorY");
+		setKeyframe -v $z ($handle+".poleVectorZ");
+		setAttr ($handle+".poleVectorX") $x;
+		setAttr ($handle+".poleVectorY") $y;
+		setAttr ($handle+".poleVectorZ") $z;
+
+		//SET SOLVER ENABLE ON AND SET KEYFRAME ON NEXT FRAME
+		setAttr ($local+".solverEnable") 1;
+		setKeyframe -time ($frame+1) -breakdown 0 -controlPoints 0 -shape 1 -at "solverEnable" $local;
+
+		//SET KEYFRAME FOR WORLD WRIST CON 
+		setKeyframe -time $frame -breakdown 0 -hierarchy below -controlPoints 0 -shape 1 $world;
+
+		//SELECT WORLD WRIST CON
+		select -r $world;
+	}
+}

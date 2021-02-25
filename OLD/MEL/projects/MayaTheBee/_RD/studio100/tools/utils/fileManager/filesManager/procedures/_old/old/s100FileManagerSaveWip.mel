@@ -1,0 +1,260 @@
+global proc s100FileManagerSaveWip()
+{
+	s100FMcommons ;
+	//s100deleteMainFloatingWindowMan;
+
+	$fileNameLong = `file -q -sceneName `;
+	string $arrTmp[]  = `textScrollList -q -si  s100FileManagerUITSTake` ;
+	string $tk = $arrTmp[0];
+
+	if(size($tk)>0)
+	{
+		string $path = `textField -q -tx  s100FileManagerUITFpath ` + "WIP_Archives/" + $tk + "/" ;
+
+		string $name = `s100FileManagerGetLastInc`;
+		$name = substituteAllString($name,".ma","");
+		int $inc = `match "[0-9]+$" $name`;
+		$padding = padNumber(($inc +1), 3);
+		$name = `s100FileManagerBuildName`;
+		//string $getInc = `s100FileManagerIncrementInc`;
+		$name += "_" + $padding + ".ma" ;
+		$path += $name ;
+
+		file -rename $path ;
+		file -f -save -options "v=0" -type "mayaAscii";
+		s100FMconformFolderForShotAndSetProjet;
+		print ("\nfile created : " +$path +"\n") ;
+		// Create log
+		s100log("Save inc", $name, "s100FileManagerUITFpath",$fileNameLong);
+	}
+	else
+		warning "select a take";
+
+	s100FileManagerUIRefreshInc ;
+}
+
+global proc s100FileManagerExportCamera(int $selected)
+{
+	//s100FMcommons ;
+	//s100deleteMainFloatingWindowMan;
+
+	$fileNameLong = `file -q -sceneName `;
+	string $arrTmp[]  = `textScrollList -q -si  s100FileManagerUITSTake` ;
+	string $tk = $arrTmp[0];
+
+	string $cameras[] = s100FileManagerGetCamerasToExport($selected);
+
+	if(size($tk)>0)
+	{
+		string $path = `textField -q -tx  s100FileManagerUITFpath ` + "EXPORT/" + $tk + "/" ;
+
+		string $name = `s100FileManagerGetLastInc`;
+		$name = substituteAllString($name,".ma","");
+		int $inc = `match "[0-9]+$" $name`;
+		$padding = padNumber(($inc +1), 3);
+
+		for ($camera in $cameras)
+		{
+			$name = `s100FileManagerBuildCameraName($camera)`;
+			$name += "_" + $padding + ".ma" ;
+			$path += $name ;
+
+			file -rename $path ;
+			file -f -save -options "v=0" -type "mayaAscii";
+			s100FMconformFolderForShotAndSetProjet;
+			print ("\nfile created : " +$path +"\n") ;
+			// Create log
+			s100log("Save camera ", $name, "s100FileManagerUITFpath",$fileNameLong);
+        }
+	}
+	else
+		warning "select a take";
+
+	s100FileManagerUIRefreshInc ;
+}
+
+global proc s100FileManagerSaveWipAndPublish()
+{
+	s100FMcommons ;
+	s100deleteMainFloatingWindowMan;
+
+	string $path = `textField -q -tx  s100FileManagerUITFpath ` ;
+	$fileName = `file -q -sceneName -shortName`;
+	$fileNameLong = `file -q -sceneName `;
+
+	string $name = `s100FileManagerBuildName`;
+	$name +=   ".ma" ;
+	$path += $name ;
+	int $ch = 0 ;
+
+	if($fileName != "")
+		file -s;
+
+	if($fileNameLong != $path )
+	{
+		if(`filetest -e $path`)
+		{
+			//
+			$rec = `confirmDialog -title "file already Exists" -message "file already Exists, Do you want to replace it? "
+				-button "Yes" -button "No" -defaultButton "Yes"
+				-cancelButton "No" -dismissString "No"`;
+
+			if($rec ==  "Yes")
+			{
+				$ch = 1 ;
+            }
+
+        }else{
+			$ch = 1 ;
+        }
+
+    }else{
+		$ch = 1 ;
+    }
+
+
+	if($ch)
+	{
+		// unsmooth and wireframe
+		s100FAMprePublishActionShot;
+
+		file -rename $path ;
+		file -f -save -options "v=0" -type "mayaAscii";
+		s100FMconformFolderForShotAndSetProjet ;
+		print ("\nfile created : " +$path +"\n") ;
+		//s100FileManagerSaveWip;
+
+		// Create log
+		s100log("PUBLISH", $fileName,"s100FileManagerUITFpath",$fileNameLong);
+
+
+		s100FileManagerUIRefreshInc ;
+		s100FMRefreshPublishButton;
+		$noteWrite = `s100FileNoteWrite($fileName)`;
+		s100FMPrintNoteForShot;
+
+	}else{
+		warning "file was not published" ;
+    }
+}
+
+
+global proc s100FAMsaveBckUp(string $way)
+{
+
+}
+
+
+// QA addendum :
+// to export camera from PREVIZ
+
+global proc string[] s100FileManagerGetCamerasToExport(int $selected)
+{
+	string $camTopNodes[]={};
+	if ($selected==false)
+		$camTopNodes = s100FileManagerGetAllRefdCameras(1);
+	else
+		print "// no 'Export selected camera' tool written yet...\n";
+
+	return $camTopNodes;
+}
+// select -r (s100FileManagerGetCamerasToExport(0))
+
+global proc string[] s100CheckRefNodesInConnections(string $connectionTypesToKeep[], string $node)
+// string $node = "Ep016_Sq017A_Sc109_Cam:camera_loc
+{
+	string $res[]={};
+	string $cons[]=`listConnections -scn 1 -s 1 -d 0 $node`;
+	string $OKcons[]={};
+	for ($type in $connectionTypesToKeep)
+	{
+		string $OKconsLocal[] = `listConnections -scn 1 -type $type -s 1 -d 0 $node`;
+  		$OKcons = stringArrayCatenate($OKcons,$OKconsLocal);
+    }
+	$OKcons = stringArrayRemoveDuplicates($OKcons);
+
+	for ($con in $cons) // string $con = $cons[0]
+	{
+		if (!stringArrayContains($con,$OKcons))
+			$res[size($res)]=$con;
+    }
+	return $res;
+}
+/*
+
+global proc string [] s100FileManagerGetAllRefdCameras(int $promptIfAnimated)
+{
+	string $camRNs[]={};
+	string $refs[] = `ls -type reference`;
+	for ($ref in $refs) // string $ref = "Ep016_Sq017A_Sc103_CamRN" // $refs[0]
+	{
+		if (!(`match "sharedReferenceNode" $ref`=="sharedReferenceNode"))
+		{
+			string $file = "";
+			int $refd = !catch($file=`referenceQuery -f $ref`);
+			if ($refd && `match "camera_1pnt.ma" $file`=="camera_1pnt.ma")
+			{
+				$camRNs[size($camRNs)]=$ref;
+				print ("// "+$ref+" -> \""+$file+"\" which IS an official camera. Keeped\n");
+			}
+		}
+	}
+
+	string $camTopNodes[]={};
+	string $connectedCams[]={};
+	string $connectedNodes[]={};
+	for ($camRN in $camRNs) // string $camRN = $camRNs[0] ; $camRN = "C_CassandraOriginal_01_01RN"
+	{
+		string $allNodes[] = `referenceQuery -n $camRN `;
+
+		// topnode check:
+		string $camTrNodes[] = `ls -tr -hd 1 $allNodes`;
+		if (size($camTrNodes)==1)
+			$camTopNodes[size($camTopNodes)]=$camTrNodes[0];
+		else
+			warning ("Found more or less than ONE topNode for nodes of reference file '"+$camRN+"' !!??");
+
+		// animation check:
+		for ($node in $allNodes) // string $node = $allNodes[0] ;
+		{
+			string $connectionTypesToKeep[]={"animCurve"};
+			string $connected[] = s100CheckRefNodesInConnections($connectionTypesToKeep,  $node);
+			if(size($connected))
+			{
+				if (!stringArrayContains($camRN,$connectedCams))
+					$connectedCams[size($connectedCams)]=$camRN;
+				$connectedNodes = stringArrayCatenate($connectedNodes,{$node});
+            }
+		}
+	}
+
+	$connectedCams = stringArrayRemoveDuplicates($connectedCams);
+	$connectedNodes = stringArrayRemoveDuplicates($connectedNodes);
+	if ($promptIfAnimated && size($connectedCams) )
+	{
+		print ("// "+size($connectedCams)" cameras are connected, and not by animation curves...\n"
+			+ "// Here's the list of the ("+size($connectedNodes)+") specific nodes:\n\n");
+		print $connectedNodes;
+		print "//\n";
+
+		string $res = `confirmDialog -title ("Some cameras are connected!")
+			-message ( size($connectedCams)" cameras are connected !\n"
+					  + "and not by animation curves...\n"
+					  + "(List of ("+size($connectedNodes)+") specific nodes in Script Editor)\n\n"
+					  + "You might want to bake them first before exportation...\n Continue anyway?")
+			-button "Yes" -button "No" -defaultButton "No"
+			-cancelButton "No" -dismissString "No"`;
+
+		if ($res == "No") {
+			print "// s100FileManagerGetAllRefdCameras >> 'Stopped' by user, emptying list of cameras.\n";
+			$camTopNodes = {};
+		}
+		else
+		{
+			print ("// Keeping going (said the user)... A vos risques et perils...\n");
+		}
+    }
+
+	return $camTopNodes;
+}
+*/

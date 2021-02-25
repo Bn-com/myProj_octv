@@ -1,0 +1,250 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// Modified by Larry,   Add to noise to each shader.  
+// if already has color gain connect. then mutil org color gain with noise node color
+//
+//  use switch node to control repeatUV and Coverage
+
+//  2002.7.12   Update for add noise to selected Shader
+
+
+global proc mwAddNoise2()
+{
+ 	//GET ALL COLORFILE NODES
+	
+	// Get Selected Node
+	
+	string $tmpnodes[] = `ls -sl`;
+	string $selectShader[];
+	string $colorList[];
+	
+	
+	int $tpindex= 0;
+	if(size($tmpnodes) != 0)
+	{
+           for($tmp in $tmpnodes)
+           {
+           	if(`nodeType $tmp` != "surfaceShader") continue;
+           	string $pre = `substring $tmp 1 (size($tmp) - 14)`;
+           	if(`objExists ($pre + "_colorFile")`)
+           	{
+           	   $colorList[$tpindex] = $pre + "_colorFile";
+           	   $tpindex ++;
+           	}
+           }
+ 
+         }else{
+            $colorList = `ls "*colorFile"`;
+         }
+     //    print $colorList;
+
+        //CREATE NOISE MAP AND SWITCH NODE;         
+         
+        string $attlist[];
+        int $switchIndex;
+        
+
+       string $globalNoise[] = `ls "NOISE_REVERSE*"`;
+       if(size($globalNoise) !=0)
+        {
+           if(size(`ls -sl`) == 0) 
+           {
+	       print ("No Shader Selected or Texture File Not Found\n");
+               return;           	
+           }
+           
+           print ("Global NOISE_REVERSE exist!\n\n");         
+           print $globalNoise;  
+           if(`objExists "NOISE_REVERSE"`)
+           { 
+                $attlist[0] = "NOISE_REVERSE"; 
+                $attlist[1] = "NOISE_COVERAGE_SWITCH";
+                if(`objExists "NOISE_REPEATUV_SWITCH"`)
+                {
+                   $attlist[2] = "NOISE_REPEATUV_SWITCH";	
+                }else{
+                   $attlist[2] = "NOISE_COVERAGE_SWITCH1";   // FIX A OLD NAME BUG                
+                }
+                
+                $switchIndex = `getAttr -s "NOISE_COVERAGE_SWITCH.input"`;
+           
+           }else{
+             print ("\n Cannot find DEFAULT REVERSE NODE");
+             return;
+           }
+           
+        }else{
+        
+            $attlist = Create_Default_Noise_Node();		
+	    $switchIndex = 0;
+        }
+       
+	
+	string $inshapelist[];
+	for($node in $colorList)
+	{
+		
+            // By Larry:
+                // get prefix name;
+                  string $buf[];
+                  int $size = `tokenize $node "_" $buf`;
+                  string $prefix = `substring $node 1 (size($node) - 10)`;  
+               
+                // Get the input Shape list;
+                  
+                   clear  $inshapelist;
+                   string $cSG = $prefix + "_SG";
+                   print ($cSG + "\n");
+                   if(`objExists $cSG` == 1)
+                   {
+                       $inshapelist = `listConnections -d 0 -s 1 ($cSG + ".dagSetMembers")`;
+                       
+                   }
+                   if(size($inshapelist)==0) 
+                   {
+                       continue;
+                   }
+
+		//CHECK FOR EXISTING CONNECTIONS
+		string $cons[] = `listConnections -s 1 -d 0 ($node+".colorGain")`;
+		if(`size $cons`)
+		{
+			
+			for($con in $cons)
+			{
+			   
+				   if(`nodeType $con` == "multiplyDivide")
+				   {
+				       print ($con + "  Already Has a MD Node connected, Skipped\n");
+				       continue;
+				   }
+				   int $breakold = 0;
+				   if(`nodeType $con` == "reverse")
+	 			   {
+				   	if(`gmatch $con "NOISE_REVERSE*"`)
+				        {
+				                print ($con + "  Already Has a Noise Node connected, Skipped\n");
+				   	        continue;
+				   	}else{
+				   	   $breakold = 1;
+				   	   print ("Break old NOISE Connect for " + $con  + "\n");
+				   	}				       
+				   }
+				   
+				   // Create MD node
+				   if($breakold == 0)
+				   {
+				       string $MDnode = `shadingNode -asUtility multiplyDivide`;
+				       $MDnode = `rename $MDnode ($prefix + "_Noise_MD")`;
+				       string $oldConnect = `connectionInfo -sfd ($node + ".colorGain")`;
+				       string $reverse = $attlist[0];
+				   
+				       connectAttr -f ($reverse+".output") ($MDnode + ".input1");
+				       connectAttr -f $oldConnect ($MDnode + ".input2");
+				       connectAttr -f ($MDnode + ".output") ($node + ".colorGain");				   
+				       print ("\n Add MD Node to: " + $con +"\n");
+				    }else{
+				       string $reverse = $attlist[0];
+				       connectAttr -f ($reverse+".output") ($node+".colorGain");  
+				    }
+				   
+				   
+				       int $shapenum = size($inshapelist);
+			               if($shapenum !=0 )
+			               {
+			    			int $i =0;
+			    			for($i ; $i < $shapenum; $i ++)
+			    			{
+			      				string $shapeconn = `connectionInfo -sfd ($cSG + ".dagSetMembers[" + $i + "]")`;
+			       				connectAttr -f $shapeconn ($attlist[1] + ".input[" + $switchIndex + "].inShape");
+			       				connectAttr -f $shapeconn ($attlist[2] + ".input[" + $switchIndex + "].inShape"); 
+			       
+			       				string $place2dnode = `shadingNode -asUtility place2dTexture`;
+			       				$place2dnode = `rename $place2dnode ($inshapelist[$i] + "_PLACE2DTEXTURE")`; 
+                               				connectAttr -f ($place2dnode + ".coverage") ($attlist[1] + ".input[" + $switchIndex + "].inDouble");
+                               				connectAttr -f ($place2dnode + ".repeatUV") ($attlist[2] + ".input[" + $switchIndex + "].inDouble");
+			       				$switchIndex ++;
+			    			}
+					}
+				   
+			}
+		}
+		else
+		{
+			//By Larry:
+		
+			string $reverse = $attlist[0];			
+			connectAttr -f ($reverse+".output") ($node+".colorGain");
+			
+			int $shapenum = size($inshapelist);
+			if($shapenum !=0 )
+			{
+			    int $i =0;
+			    for($i ; $i < $shapenum; $i ++)
+			    {
+			       string $shapeconn = `connectionInfo -sfd ($cSG + ".dagSetMembers[" + $i + "]")`;
+			       connectAttr -f $shapeconn ($attlist[1] + ".input[" + $switchIndex + "].inShape");
+			       connectAttr -f $shapeconn ($attlist[2] + ".input[" + $switchIndex + "].inShape"); 
+			       
+			       string $place2dnode = `shadingNode -asUtility place2dTexture`;
+			       $place2dnode = `rename $place2dnode ($inshapelist[$i] + "_PLACE2DTEXTURE")`; 
+                               connectAttr -f ($place2dnode + ".coverage") ($attlist[1] + ".input[" + $switchIndex + "].inDouble");
+                               connectAttr -f ($place2dnode + ".repeatUV") ($attlist[2] + ".input[" + $switchIndex + "].inDouble");
+			       $switchIndex ++;
+			    }
+			}
+			
+		}
+		
+	}
+	print "\nALL DONE\n";
+}
+
+
+global proc string[] Create_Default_Noise_Node()
+{
+     	string $file = `shadingNode -asTexture file`;
+	$file = `rename $file ("ROCK_NOISE_FILE")`;
+	string $placement = `shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($placement+".coverage") ($file+".coverage");
+	connectAttr -f ($placement+".translateFrame") ($file+".translateFrame");
+	connectAttr -f ($placement+".rotateFrame") ($file+".rotateFrame");
+	connectAttr -f ($placement+".mirror") ($file+".mirror");
+	connectAttr -f ($placement+".stagger") ($file+".stagger");
+	connectAttr -f ($placement+".wrapU") ($file+".wrapU");
+	connectAttr -f ($placement+".wrapV") ($file+".wrapV");
+	connectAttr -f ($placement+".repeatUV") ($file+".repeatUV");
+	connectAttr -f ($placement+".offset") ($file+".offset");
+	connectAttr -f ($placement+".rotateUV") ($file+".rotateUV");
+	connectAttr -f ($placement+".noiseUV") ($file+".noiseUV");
+	connectAttr ($placement+".outUV") ($file+".uv");
+	connectAttr ($placement+".outUvFilterSize") ($file+".uvFilterSize");
+
+	//ASSIGN ROCK NOISE AS THE NOISE TEXTURE
+	setAttr -type "string" ($file+".fileTextureName") "Z:/Projects/Thru_The_Moebius_Strip/Production/WORKING/R&D/LOOK DEVELOPMENT/rockNoise.iff";
+
+	//CREATE REVERSE NODE
+	string $reverse = `createNode reverse`;
+        $reverse = `rename $reverse ("NOISE_REVERSE")`;
+	connectAttr -f ($file+".outColor") ($reverse+".input");	
+	
+	// CREATE Switch Node
+	string $coverageSwitch = `shadingNode -asUtility doubleShadingSwitch`;
+	$coverageSwitch = `rename $coverageSwitch "NOISE_COVERAGE_SWITCH"`;
+	string $repeatUVSwitch = `shadingNode -asUtility doubleShadingSwitch`;
+	$repeatUVSwitch = `rename $repeatUVSwitch "NOISE_REPEATUV_SWITCH"`;
+	
+	connectAttr -f ($coverageSwitch + ".output") ($placement + ".coverage");
+        connectAttr -f ($repeatUVSwitch + ".output") ($placement + ".repeatUV");
+	
+	string $rt[] = {$reverse,$coverageSwitch,$repeatUVSwitch};
+	return $rt;  // return the reverse node name,switch node name;  
+}

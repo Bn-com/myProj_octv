@@ -1,0 +1,106 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-3-25
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-3-25
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc woRenderLineLayer(string $type,string $distance)
+{
+	/*
+	string $version = `zwAboutVersion`;
+	if ((float)$version <2014.0 )
+	{
+		if (!`pluginInfo -query -loaded "Mayatomr.mll"`) loadPlugin "Mayatomr.mll";
+		miCreateDefaultNodes();
+		source "//file-cluster/GDC/Resource/Support/Maya/2012/scripts/mentalrayUI.mel";
+		miCreateOtherOptionsNodesForURG();
+	}
+	*/
+	//Hanhong 修改21014-03-22（原因maya2014 mr问题,建议另加）
+	
+	
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -sl`;
+
+	string $charPre = woRenderGetCharPre();
+	string $buff[];
+	int $num = `tokenize $charPre "_" $buff`;
+	string $layerName = `substring $buff[1] 8 (size($buff[1]))`;
+
+	string $renderLayer = `createRenderLayer -name ($layerName+"_"+$type) -makeCurrent -noRecurse $objShape`;
+	
+	
+	editRenderLayerGlobals -currentRenderLayer $renderLayer;
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	setAttr defaultRenderGlobals.currentRenderer -type "string" "mentalRay" ;
+
+	//contours shader
+	string $contours = `shadingNode -asShader surfaceShader -n propContours`;
+	string $contoursSG = `sets -renderable true -noSurfaceShader true -empty -name propContoursSG`;
+	connectAttr -f ($contours+".outColor") ($contoursSG+".surfaceShader");
+	setAttr ($contours+".outColor") -type double3 1 1 1 ;
+	setAttr ($contoursSG+".miContourEnable") 1;
+	setAttr ($contoursSG+".miContourColor") -type double3 0 0 0 ;
+	setAttr ($contoursSG+".miContourRelativeWidth") 1;
+	setAttr ($contoursSG+".miContourWidth") 0.05;
+	switch ($distance)
+	{
+		case "远景" :
+			setAttr ($contoursSG+".miContourWidth") 0.025;
+			break;
+		case "中景" :
+			setAttr ($contoursSG+".miContourWidth") 0.04;
+			break;
+		case "半身" :
+			setAttr ($contoursSG+".miContourWidth") 0.045;
+			break;
+		case "特写" :
+			setAttr ($contoursSG+".miContourWidth") 0.055;
+			break;
+	
+	}
+
+	sets -e -forceElement $contoursSG $objShape;
+
+	//renderSetting setup
+	editRenderLayerAdjustment "miDefaultFramebuffer.contourEnable";
+	setAttr "miDefaultFramebuffer.contourEnable" 1;
+	setAttr "miDefaultFramebuffer.contourSamples" 30;
+	setAttr "miDefaultFramebuffer.contourFilter" 2;
+	setAttr "miDefaultFramebuffer.contourClearImage" 1;
+	setAttr "miDefaultFramebuffer.contourClearColor" -type double3 1 1 1 ;
+
+	string $contrast = `mrCreateCustomNode -asUtility "" contour_contrast_function_levels`;
+	string $store = `mrCreateCustomNode -asUtility "" contour_store_function`;
+	editRenderLayerAdjustment "miDefaultOptions.contourContrast";
+	defaultNavigation -ce -source $contrast -destination miDefaultOptions.contourContrast;
+	editRenderLayerAdjustment "miDefaultOptions.contourStore";
+	defaultNavigation -ce -source $store -destination miDefaultOptions.contourStore;
+	setAttr "miDefaultOptions.maxSamples" 3;
+
+	setAttr ($contrast+".diff_index") 0;
+	switch ($type)
+	{
+		case "outLine" :
+			setAttr ($contrast+".ndelta") 180;
+			setAttr ($contrast+".zdelta") 10;
+			break;
+		case "inLine" :
+			setAttr ($contrast+".ndelta") 8;
+			setAttr ($contrast+".zdelta") 0.2;
+			break;
+	}
+	
+	select -cl;
+}

@@ -1,0 +1,187 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ’‘÷æΩ‹
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zjViewFileIcon()
+{
+    if (!`window -exists ViewFIconWin`)
+       {
+	        window -width 400 -height 300 -title "Browse Scene" ViewFIconWin;
+              
+		formLayout -numberOfDivisions 100 formLayout1;
+
+		textFieldButtonGrp  -label "Folder:" -buttonLabel "   Browse   " 
+		                    -columnWidth 1 50 -columnWidth 3 65 -columnAlign 1 "left" 
+				    -adjustableColumn 2 -buttonCommand "ViewFileIconBrowse" 
+				    folder;
+		radioButtonGrp  -numberOfRadioButtons 2 -select 1 -label "Sort by" -labelArray2 "Name" "Date" 
+		                -onCommand "ViewFileIconSortBy" -columnWidth 1 50 -columnWidth 2 60 
+			        -columnAlign 1 "left" 
+				sortBy;
+		textScrollList  -selectCommand "changview" 
+		                -doubleClickCommand "OpenSelFile "
+			        fileList;
+
+        	text -label "Thumbnail" txt;
+                image  -w 128 -h 128 -vis false fimage ;
+		button   -label "Open" -command "OpenSelFile " 
+		         ViewFile;
+		button   -label "Import" -command "ImpSelFile " 
+		         ImpFile;
+		button   -label "Reference" -command "RefSelFile " 
+		         RefFile;
+		button   -label "Close" -command ("deleteUI -window  ViewFIconWin" )
+		         cancel;
+
+		formLayout -edit
+			-attachForm	folder		"top"		5
+			-attachForm	folder		"left"		5
+			-attachNone	folder		"bottom"
+			-attachForm	folder		"right"		5
+
+			-attachControl	sortBy		"top"		5	folder
+			-attachForm	sortBy		"left"		5
+			-attachNone	sortBy		"bottom"
+			-attachNone	sortBy		"right"
+
+			-attachControl	txt     	"top"		5	folder
+			-attachForm	txt		"right"	        15
+
+			-attachControl	fimage  	"top"		5	sortBy
+			-attachForm	fimage		"right"	        10
+
+			-attachControl	fileList	"top"		5	sortBy
+			-attachForm	fileList	"left"		5
+			-attachControl	fileList	"bottom"	5	ViewFile
+			-attachControl	fileList	"right"		10      fimage
+
+			-attachNone	ViewFile	"top"
+			-attachForm	ViewFile	"left"		5
+			-attachForm	ViewFile	"bottom"	5
+			-attachPosition	ViewFile	"right"		0	25
+
+			-attachNone	ImpFile		"top"
+			-attachControl	ImpFile		"left"		5	ViewFile
+			-attachForm	ImpFile		"bottom"	5
+			-attachPosition	ImpFile		"right"		0       50
+
+			-attachNone	RefFile		"top"
+			-attachControl	RefFile  	"left"		5	ImpFile
+			-attachForm	RefFile		"bottom"	5
+			-attachPosition	RefFile		"right"		0       75
+
+			-attachNone	cancel		"top"
+			-attachControl	cancel		"left"		5	RefFile
+			-attachForm	cancel		"bottom"	5
+			-attachPosition	cancel		"right"		0       100
+
+		formLayout1;
+	
+	 showWindow ViewFIconWin;
+	}
+}
+
+global proc ViewFileIconBrowse()
+{
+	string $Folder = `workspace -query -fn`;
+	workspace -dir $Folder;
+	fileBrowserDialog -mode 4 -fileCommand "ValidFolder" -actionName "Maya Files Folder";
+}
+
+global proc ValidFolder(string $filename, string $fileType)
+{
+	textFieldButtonGrp -edit -text $filename folder;
+	ViewFileIconSortBy();
+}
+
+global proc string tokenizeFile(string $fname)
+{
+        string $buffer[];
+        $numTokens = `tokenize $fname "          " $buffer`;
+	return $buffer[0];
+}
+global proc ViewFileIconSortBy()
+{
+	string $filename, $fileList[], $filenames[];
+	$filename = `textFieldButtonGrp -query -text folder`;
+		if (`filetest -d $filename` != 0)
+		{
+			tokenize $filename "/" $filenames;
+			$filename = "";
+			for ($i=0; $i<size($filenames); $i++)
+				$filename += $filenames[$i] + "\\";
+			
+			if (`radioButtonGrp -query -select sortBy` == 1)
+				$pipe = popen(("DIR /B /O:N " + $filename), "r" );
+			else
+				$pipe = popen(("DIR /B /O:-D " + $filename), "r" );
+			while (!feof($pipe))
+			{
+				$str0 = fgetline( $pipe );
+				  if (size($str0)>3)
+				  {
+  				    $str = strip($str0);
+					if(`gmatch $str "*.mb"` != 0) 
+					{
+					 $fileList[size($fileList)] = $str + "          " + `idmtFile -modified $str`;	// by huangzhongwei 20060425
+					}
+				  }
+			}
+			pclose( $pipe );
+			textScrollList -edit -removeAll fileList;
+
+			for($i=0; $i<size($fileList); $i++)
+				textScrollList -edit -append $fileList[$i] fileList;
+		}
+}
+
+
+global proc changview()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	string $self = tokenizeFile($selected[size($selected)-1]);
+ 	string $self =  `substitute ".mb" $self ""`;
+
+	$filename += "/" +$self +".iff";
+
+	if (`filetest -s $filename`)
+	{
+ 	  image -edit -vis true fimage ;
+          image -edit -image $filename fimage;
+	}else  image -edit -vis false fimage ;
+}
+
+global proc OpenSelFile ()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected)>0)	{
+            $filename += "/" + tokenizeFile($selected[size($selected)-1]);
+            saveChanges("file -f -open "+"\""+$filename+"\"");
+	}
+}
+global proc ImpSelFile ()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected)>0)	{
+            $filename += "/" + tokenizeFile($selected[size($selected)-1]);
+            file -import $filename;
+	}
+}
+global proc RefSelFile ()
+{
+	string $filename = `textFieldButtonGrp -query -text folder`;
+	string $selected[] = `textScrollList -query -selectItem fileList`;
+	if (size($selected)>0)	{
+            $filename += "/" + tokenizeFile($selected[size($selected)-1]);
+            file -loadReference  $filename;
+	}
+}

@@ -1,0 +1,159 @@
+// cachingFileOpen.mel (c) 2005 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	This script is called whenever a scene that recieves cache, i.e. a lighting or fx file, is opened.
+Use:
+	cachingFileOpen
+Options:
+	
+	
+Dependancies:
+
+	syncCache
+	syncAssets
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	08/24/05
+Revisions:	02/12/07	Rev 1.1
+		- Added support for fur. And versioning of fur.
+		
+		07/25/04	Rev 1.1
+		- Revision made
+		- Revision made
+		
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+source loadAllPlugins.mel;
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global int $TMP_a = 1;
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() {
+	string $requiredPlugins[] = 
+	{
+	"objExport",
+	"studioImport"	
+	};
+	loadAllPlugins ($requiredPlugins);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc postAssetSyncCallback()
+{
+	global string $gAssetSyncCallback = "rfxDirmap";
+	global int $gSyncLatestOrLive;	// 0 = sync to live version, 1 = sync to highest version number. Currently only applies to fur
+	string $tmp[] = `fileInfo -q "cacheSynching"`;
+	string $cacheSynching = $tmp[0];
+	int $versionLock = false;
+	
+	$tmp = `fileInfo -q "pointCacheSynching"`;
+	string $pointCacheSynching = $tmp[0];
+
+	// set output format to sgi
+	catch (`setAttr "miDefaultFramebuffer.format" 4`);  // sgi
+	catch (`setAttr "miDefaultFramebuffer.datatype" 3`); // RGBA 16 bit non-floating point
+	
+	// are versions locked (render scene file) - currently this only applies to fur
+	$tmp = `fileInfo -q "versionLock"`;
+	if ($tmp[0] == "1")
+	{
+		$versionLock = true;
+	}
+	
+	if ($cacheSynching != "disabled")
+	{
+		fileInfo animCacheDirty 1;	// always sync cache	
+		print ("cachingFileOpen: synching animCache.\n");
+		syncCache (!`about -batch`);	
+	}
+	if ($pointCacheSynching != "disabled")
+	{
+		print ("cachingFileOpen: synching pointCacheNodes.\n");
+		syncPointCacheNodes "" "";	
+	}
+	if (!$versionLock)
+	{
+		print ("cachingFileOpen: synching fur nodes.\n");
+		syncFurNodes "" "" $gSyncLatestOrLive;
+	}
+	
+	if (`exists $gAssetSyncCallback`)
+		eval ($gAssetSyncCallback);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc cachingFileOpen( ) 
+{
+	global int $gDeferCachingFileOpen;
+	if ($gDeferCachingFileOpen == 1)
+	{
+		print ("cachingFileOpen: Deferred.\n");
+		return;	
+	}
+	// get the sequence and shot group from fileInfo vars
+	string $tmp[] = `fileInfo -q "sequence"`;
+	string $seq = $tmp[0];
+	
+	$tmp = `fileInfo -q "shotGroup"`;
+	string $shotGroup = $tmp[0];
+	
+	// check to see that asset and cache synching are turned on
+	$tmp = `fileInfo -q "assetSynching"`;
+	string $assetSynching = $tmp[0];
+	
+	$tmp = `fileInfo -q "cacheSynching"`;
+	string $cacheSynching = $tmp[0];
+
+	// set cache synching to linear interpolation
+	fileInfo "animCacheBakeItt" "linear";
+	fileInfo "animCacheBakeOtt" "linear";
+
+	
+	print ("Asset Synching: "+$assetSynching+"\n");
+	print ("Cache Synching: "+$cacheSynching+"\n");
+	
+	// derive the name of the shot group xml
+	string $struc = getPath ("ShotInfoDir",{$seq,$shotGroup})+"/"+$seq+"_"+$shotGroup+"_structure.xml";
+	
+	if (!`filetest -f $struc` && ($assetSynching != "disabled" || $cacheSynching != "disabled"))
+		error ("cachingFileOpen: Structure file "+$struc+" doesn't exist.");
+		
+	// call the asset syncher
+	string $callback = "postAssetSyncCallback";
+	
+	if (!`about -batch` && $assetSynching != "disabled")
+	{
+		 syncAssets ($struc,"",$callback);	
+	}
+	else
+		eval ($callback);
+	
+	
+	// Insert project specific code below.....
+	// ---------------------------------------- 
+	
+	
+}

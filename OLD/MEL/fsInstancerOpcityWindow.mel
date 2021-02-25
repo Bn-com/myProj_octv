@@ -1,0 +1,110 @@
+global proc fsInstancerOpcityWindow()
+{
+	if (`window -exists instancerOpcityWindow`)
+		deleteUI instancerOpcityWindow;
+	window  -t "粒子替代透明工具1.0"
+		-mxb 0
+		-wh 200 150
+		instancerOpcityWindow;
+
+	menuBarLayout;
+	menu -l "帮助";
+		menuItem -l "工具帮助";
+	scrollLayout -childResizable 1 mainSol;
+	columnLayout -adj 0 mainCol;
+	formLayout mainForm;
+	textFieldGrp -l "输入物体名:" -cw2 75 91 objTex;
+	textFieldGrp -l "输入材质球名:" -cw2 87 80 matTex;
+	button -l "生成透明物体" -c "objOpcity" objBut;
+	button -l "生成粒子表达式" -c "particleExp" particleBut;
+	formLayout -e
+		   -af objTex top 3
+		   -af objTex left 0
+		   -af objTex right 0
+
+		   -ac matTex top 2 objTex
+		   -af matTex left 0
+		   -af matTex right 0
+
+		   -ac objBut top 2 matTex
+		   -af objBut left 0
+		   -af objBut right 0
+
+		   -ac particleBut top 2 objBut
+		   -af particleBut left 0
+		   -af particleBut right 0
+		   mainForm;
+
+
+	showWindow instancerOpcityWindow;
+}
+global proc objOpcity()
+{
+
+	string $dupObj[];
+	for($i=0;$i<11;$i++)
+	{
+		string $objTex=`textFieldGrp -q -text objTex`;
+		string $matTex=`textFieldGrp -q -text matTex`;
+		select -r $objTex;
+		string $temp[]=`duplicate -rr -n ("opcObj"+$i)`;
+		$dupObj=stringArrayCatenate($dupObj,$temp);
+
+		//shading
+		string $shadeName[]=`duplicate -upstreamNodes -n ("objOpc_M"+"_"+$i) $matTex`;
+		float $opc=$i*0.1;
+		setAttr ($shadeName[0]+".transparency") -type double3 $opc $opc $opc;
+		sets -renderable 1 -noSurfaceShader 1 -empty -n ("objOpc_M"+$i+"SG");
+		connectAttr -f ($shadeName[0]+".transparency") ("objOpc_M"+$i+"SG"+".surfaceShader");
+		
+		select -r $temp;
+		sets -e -forceElement ("objOpc_M"+$i+"SG");
+
+	}
+
+	select -r $dupObj;
+	group -n insGroup;
+}
+
+global proc particleExp()
+{
+	string $partName[]=`ls -sl`;
+	string $partShape[]=`listRelatives -c $partName[0]`;
+	if(`nodeType $partShape[0]`!="particle")
+		error "请选择粒子！！！！";
+	
+	addAttr -ln rotPP0 -dt vectorArray $partShape[0];
+	addAttr -ln rotPP -dt vectorArray $partShape[0];
+	setAttr -e -keyable true ($partShape[0]+".rotPP");
+	addAttr -ln scalePP0 -dt vectorArray $partShape[0];
+	addAttr -ln scalePP -dt vectorArray $partShape[0];
+	setAttr -e -keyable true ($partShape[0]+".scalePP");
+	addAttr -ln indexPP0 -dt doubleArray $partShape[0];
+	addAttr -ln indexPP -dt doubleArray $partShape[0];
+	setAttr -e -keyable true ($partShape[0]+".indexPP");
+	addAttr -ln dieAtPP0 -dt doubleArray $partShape[0];
+	addAttr -ln dieAtPP -dt doubleArray $partShape[0];
+	setAttr -e -keyable true ($partShape[0]+".dieAtPP");
+	addAttr -ln dieAt -at double -min 0 -max 100 -dv 1 $partShape[0];
+	setAttr -e -keyable true ($partShape[0]+".dieAt");
+
+	//creation
+	string $creationExp[];
+	$creationExp[0]="rotPP=rand(360);\r\n";
+	$creationExp[1]="indexPP=0;\r\n";
+	$creationExp[2]="lifespanPP=rand(3,5);\r\n";
+	$creationExp[3]="dieAtPP=dieAt*lifespanPP*0.01;";
+	string $expCreation;
+	for($i=0;$i<4;$i++)
+	{
+		$expCreation=$expCreation+$creationExp[$i];
+	}
+	dynExpression -c -s $expCreation $partShape[0];
+
+	//runtime
+	string $runExp;
+	$runExp="indexPP=int(linstep(dieAtPP,lifespanPP,age)*11);";
+	dynExpression -rbd -s $runExp $partShape[0];
+
+	clear $creationExp;
+}

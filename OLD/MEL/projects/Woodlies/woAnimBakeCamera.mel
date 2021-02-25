@@ -1,0 +1,289 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc woAnimBakeCamera()
+{
+	string $fn = `file -q -sn -shn`;
+	string $buff[];
+	int $num = `tokenize $fn "_" $buff`;
+	
+	string $sceneCam[] = `ls ("*_"+$buff[1]+"_"+$buff[2]+"_"+$buff[3])`;
+	if (size($sceneCam))
+	{
+		select -r $sceneCam[0];
+		zwBakeCamera();
+	}
+	file -save;
+}
+
+
+global proc string zwBakeCamera()
+{
+	int $find = false;
+	string $unBaked[] = `ls -selection`;
+	if (size($unBaked) == 1)
+	{
+		string $buf[] = `listRelatives -fullPath -children $unBaked[0]`;
+		if (size($buf))
+		{
+			if (`nodeType $buf[0]` == "camera" || `nodeType $buf[0]` == "stereoRigCamera")
+			{
+				$find = true;
+			}
+		}
+	}
+	if (!$find)
+	{
+		error "请选择一个摄像机";
+	}
+	
+	float $translation[] = `xform -query -worldSpace -translation $unBaked[0]`;
+	if (abs($translation[0]) > 15000 || abs($translation[1]) > 15000 || abs($translation[2]) > 15000)
+	{
+		if (!`about -batch`)
+		{
+			string $message = "摄像机离原点过远，这可能会导致渲染问题，建议往原点靠拢\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n\n如有疑问请联系项目TD\n";
+			string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+			if ($result == "Cancel")
+			{
+				return "";
+			}
+		}
+	}
+
+
+	string $name = `match "[^|]+$" $unBaked[0]` + "_baked";
+	string $baked[] = `ls $name`;
+	if (size($baked))
+	{
+		delete $baked;
+		/*string $rs = `confirmDialog -title "Bake Camera" -message ($name + " 已经存在，删除它吗？") -button "Delete" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($rs == "Delete")
+		{
+			delete $baked;
+		}
+		else
+		{
+			return $baked[0];
+		}*/
+	}
+
+// duplicate
+	if (`nodeType $unBaked[0]` == "stereoRigTransform")
+	{
+		loadPlugin -qt "stereoCamera"; 
+		python "from maya.app.stereo import stereoCameraRig";
+		$baked = `python "stereoCameraRig.createStereoCameraRig(rigName='StereoCamera')"`;
+		$baked[0] = `rename $baked[0] $name`;
+		string $shapes1[] = `listRelatives -fullPath -shapes $unBaked[0]`;
+		string $shapes2[] = `listRelatives -fullPath -shapes $baked[0]`;
+		for ($i=0; $i<size($shapes1); $i++)
+		{
+			zwMakeStereoCameraConnect $shapes1[$i] $shapes2[$i];
+		}
+	}
+	else
+	{
+		$baked = `duplicate -returnRootsOnly -inputConnections -name $name $unBaked[0]`;
+	}
+
+// unlock
+	$buf = `listRelatives -fullPath -children $baked[0]`;
+	$buf[size($buf)] = $baked[0];
+	string $node;
+	for ($node in $buf)
+	{
+		if (`match "|camclip$" $node` != "")
+		{
+			delete $node;
+		}
+		else
+		{
+			string $attrs[] = `listAttr -keyable -locked $node`;
+			for ($attr in $attrs)
+			{
+				setAttr -lock false ($node + "." + $attr);
+			}
+		}
+	}
+
+// parentConstraint
+	string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+	for ($attr in $attrs)
+	{
+		string $lockedPlug = `connectionInfo -gla ($baked[0] + "." + $attr)`;
+		if ( $lockedPlug != "" )
+		{
+			setAttr -lock false $lockedPlug;
+		}
+		setAttr -lock false -keyable true ($baked[0] + "." + $attr);
+		$buf = `listConnections -source true -destination false -connections true -plugs true ($baked[0] + "." + $attr)`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			disconnectAttr $buf[$i+1] $buf[$i];
+		}
+	}
+	$buf = `listRelatives -parent $baked[0]`;
+	if (size($buf))
+	{
+		$baked = `parent -world $baked[0]`;
+	}
+	string $constraint[] = `parentConstraint $unBaked[0] $baked[0]`;
+
+	zwSetAttrInt ($baked[0] + ".scaleX") 1;
+	zwSetAttrInt ($baked[0] + ".scaleY") 1;
+	zwSetAttrInt ($baked[0] + ".scaleZ") 1;
+
+// timeLine
+	string $sceneName = `file -query -shortName -sceneName`;
+	float $startTime = `playbackOptions -query -min`;
+	float $endTime = `playbackOptions -query -max`;
+
+// bake
+	// View Selected		
+	select $baked[0];
+
+	string $scripts = "";
+	string $modelPanels[] = `getPanel -visiblePanels`;
+	for ($modelPanel in $modelPanels)
+	{
+		if (`getPanel -typeOf $modelPanel` == "modelPanel")
+		{
+			if (!`isolateSelect -query -state $modelPanel`);
+			{
+				isolateSelect -state true $modelPanel;
+				$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+			}
+		}
+	}
+
+	bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -shape true $baked[0];
+
+	if (`nodeType $baked[0]` == "transform")
+	{
+		string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+		for ($attr in $attrs)
+		{
+			setAttr -lock true -keyable false ($baked[0] + "." + $attr);
+		}
+	}
+	else
+	{
+		string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+		for ($attr in $attrs)
+		{
+			setAttr -lock true ($baked[0] + "." + $attr);
+		}
+	}
+
+//	delete $constraint;
+	$buf = `listRelatives -fullPath -children $baked[0]`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		int $delete = true;
+		if (`nodeType $buf[$i]` == "camera" || `nodeType $buf[$i]` == "stereoRigCamera" || `nodeType $buf[$i]` == "stereoRigFrustum")
+		{
+			$delete = false;
+		}
+		else
+		{
+			string $shapes[] = `listRelatives -fullPath -shapes $buf[$i]`;
+			if (size($shapes) > 0)
+			{
+				if (`nodeType $shapes[0]` == "camera")
+				{
+					$delete = false;
+				}
+			}
+		}
+		if ($delete)
+		{
+			delete $buf[$i];
+		}
+	}
+
+	if ($scripts != "")
+	{
+		eval $scripts;
+	}
+
+	eyAnimCamAttr $baked[0];
+
+	return $baked[0];
+}
+
+global proc zwMakeStereoCameraConnect(string $source, string $dest)
+{
+	string $attrs[] = `listAttr -write -connectable $source`;
+	for ($attr in $attrs)
+	{
+		if (`objExists ($dest + "." + $attr)`)
+		{
+			string $buf[] = `listConnections -destination false ($dest + "." + $attr)`;
+			if (size($buf) == 0)
+			{
+				if (!catch (`connectAttr ($source + "." + $attr) ($dest + "." + $attr)`))
+				{
+					disconnectAttr ($source + "." + $attr) ($dest + "." + $attr);
+				}
+			}
+		}
+	}
+
+	string $root[] = `ls -long $source`;
+	$root[0] = `substitute "|[^|]+$" $root[0] ""`;
+
+	string $attrs[] = `listConnections -plugs true -connections true -destination false $source`;
+	for ($i=0; $i<size($attrs); $i+=2)
+	{
+		string $long[] = `ls -long $attrs[$i+1]`;
+		if (`match ("^" + $root[0] + "[|.]") $long[0]` == "")
+		{
+			string $plug = `substitute "^[^.]+[.]" $attrs[$i] ""`;
+			if (`objExists ($dest + "." + $plug)`)
+			{
+				string $buf[] = `listConnections -destination false ($dest + "." + $plug)`;
+				if (size($buf) == 0)
+				{
+					connectAttr -force $attrs[$i+1] ($dest + "." + $plug);
+				}
+			}
+		}
+	}
+}
+
+global proc eyAnimCamAttr(string $cam)
+{
+	string $root[] = `ls -long $cam`;
+
+	string $shapes[] = `listRelatives -fullPath -c $cam`;
+	if (size($shapes))
+	{
+		string $dests[] = `listConnections -s 1 -d 0 -c 1 -p 1 $shapes[0]`;
+		for ($i=0;$i<size($dests);$i=$i+2)
+		{
+			string $nodeType[] = `nodeType -inherited $dests[$i+1]`;
+			if ($nodeType[0] != "animCurve")
+			{
+				string $source[] = `ls -long $dests[$i+1]`;
+				if (`match ("^" + $root[0] + "[|.]") $source[0]` == "")
+				{
+					if (`getAttr -l $dests[$i]`)
+					{
+						setAttr -l false $dests[$i];
+					}
+					evalEcho ("disconnectAttr \"" + $dests[$i+1] + "\" \"" + $dests[$i] + "\"");
+				}
+			}
+		}
+	}
+}

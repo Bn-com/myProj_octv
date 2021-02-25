@@ -1,0 +1,1325 @@
+global proc zwCameraImportExport()
+{
+}
+
+
+
+
+
+// Bake
+global proc string zwBakeCamera()
+{
+// check
+	python("execfile(\"//file-cluster/GDC/Resource/Support/Maya/Python/IDMT/yyScripts/yy_gCamExt.py\")");
+	python("yyUnlockGCam()");
+
+	int $find = false;
+	string $unBaked[] = `ls -selection`;
+	if (size($unBaked) == 1)
+	{
+		string $buf[] = `listRelatives -fullPath -children $unBaked[0]`;
+		if (size($buf))
+		{
+			if (`nodeType $buf[0]` == "camera" || `nodeType $buf[0]` == "stereoRigCamera")
+			{
+				$find = true;
+			}
+		}
+	}
+	if (!$find)
+	{
+		error "请选择一个摄像机";
+	}
+
+	//删除相机抖动（RR项目有，不影响其他项目）
+	if (`zwGetProject ""` == "RainbowRiders")
+	{
+		source RR_animAddNoise.mel;
+		animDelNosie;
+	}
+	
+	
+	// 检查是否离原点太远，20100106黄仲维加
+//	float $translation[] = `xform -query -worldSpace -translation $unBaked[0]`;
+//	if (abs($translation[0]) > 15000 || abs($translation[1]) > 15000 || abs($translation[2]) > 15000)
+//	{
+//		if (!`about -batch`)
+//		{
+//			string $message = "摄像机离原点过远，这可能会导致渲染问题，建议往原点靠拢\n\n点 Cancel 返回检查处理，点 Ignore 忽略继续\n\n如有疑问请联系项目TD\n";
+//			string $result = `confirmDialog -message $message -button "Cancel" -button "Ignore" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+//			if ($result == "Cancel")
+//			{
+//				return "";
+//			}
+//		}
+//	}
+	zwImportModule("idmt.maya.camera", true);
+	int $CheckPosition = `python ("idmt.maya.camera.CheckPosition('" + $unBaked[0]+ "')")`;
+	if (!$CheckPosition)
+	{
+		return "";
+	}
+
+
+	string $name = `match "[^|]+$" $unBaked[0]` + "_baked";
+	string $baked[] = `ls $name`;
+	if (size($baked))
+	{
+		string $rs = `confirmDialog -title "Bake Camera" -message ($name + " 已经存在，删除它吗？") -button "Delete" -button "Cancel" -defaultButton "Cancel" -cancelButton "Cancel" -dismissString "Cancel"`;
+		if ($rs == "Delete")
+		{
+			delete $baked;
+		}
+		else
+		{
+			return $baked[0];
+		}
+	}
+
+// duplicate
+	if (`nodeType $unBaked[0]` == "stereoRigTransform")
+	{
+		loadPlugin -qt "stereoCamera"; 
+		python "from maya.app.stereo import stereoCameraRig";
+		$baked = `python "stereoCameraRig.createStereoCameraRig(rigName='StereoCamera')"`;
+		$baked[0] = `rename $baked[0] $name`;
+		string $shapes1[] = `listRelatives -fullPath -shapes $unBaked[0]`;
+		string $shapes2[] = `listRelatives -fullPath -shapes $baked[0]`;
+		for ($i=0; $i<size($shapes1); $i++)
+		{
+			zwMakeStereoCameraConnect $shapes1[$i] $shapes2[$i];
+		}
+	}
+	else
+	{
+		$baked = `duplicate -returnRootsOnly -inputConnections -name $name $unBaked[0]`;
+	}
+
+// unlock
+	$buf = `listRelatives -fullPath -children $baked[0]`;
+	$buf[size($buf)] = $baked[0];
+	string $node;
+	for ($node in $buf)
+	{
+		if (`match "|camclip$" $node` != "")
+		{
+			delete $node;
+		}
+		else
+		{
+			string $attrs[] = `listAttr -keyable -locked $node`;
+			for ($attr in $attrs)
+			{
+				setAttr -lock false ($node + "." + $attr);
+			}
+		}
+	}
+
+// parentConstraint
+	string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+	for ($attr in $attrs)
+	{
+		string $lockedPlug = `connectionInfo -gla ($baked[0] + "." + $attr)`;
+		if ( $lockedPlug != "" ){
+			setAttr -lock false $lockedPlug;
+		}
+		setAttr -lock false -keyable true ($baked[0] + "." + $attr);
+		$buf = `listConnections -source true -destination false -connections true -plugs true ($baked[0] + "." + $attr)`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			disconnectAttr $buf[$i+1] $buf[$i];
+		}
+	}
+	$buf = `listRelatives -parent $baked[0]`;
+	if (size($buf))
+	{
+		$baked = `parent -world $baked[0]`;
+	}
+	string $constraint[] = `parentConstraint $unBaked[0] $baked[0]`;
+
+	zwSetAttrInt ($baked[0] + ".scaleX") 1;
+	zwSetAttrInt ($baked[0] + ".scaleY") 1;
+	zwSetAttrInt ($baked[0] + ".scaleZ") 1;
+
+// timeLine
+	string $sceneName = `file -query -shortName -sceneName`;
+	int $timeLine[3];
+	catch($timeLine = `idmtProject -timeLine -echo off`);
+	if ($timeLine[0] == $timeLine[1])
+	{
+		$timeLine[0] = `playbackOptions -query -min`;
+		$timeLine[1] = `playbackOptions -query -max`;
+	}
+	float $startTime = $timeLine[0];
+	float $endTime = $timeLine[1];
+
+// bake
+	// View Selected		
+	select $baked[0];
+
+	string $scripts = "";
+	string $modelPanels[] = `getPanel -visiblePanels`;
+	for ($modelPanel in $modelPanels)
+	{
+		if (`getPanel -typeOf $modelPanel` == "modelPanel")
+		{
+			if (!`isolateSelect -query -state $modelPanel`);
+			{
+				isolateSelect -state true $modelPanel;
+				$scripts += "isolateSelect -state false \"" + $modelPanel + "\";\n";
+			}
+		}
+	}
+
+//	if (`nodeType $baked[0]` == "stereoRigTransform")
+//	{
+//		bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -attribute "translateX" -attribute "translateY" -attribute "translateZ" -attribute "rotateX" -attribute "rotateY" -attribute "rotateZ" -attribute "scaleX" -attribute "scaleY" -attribute "scaleZ" $baked[0];
+//	}
+//	else
+//	{
+		bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -shape true $baked[0];
+//	}
+//	string $channels[];
+//	clear $channels;
+//	for ($attr in $attrs)
+//	{
+//		$channels[size($channels)] = $baked[0] + "." + $attr;
+//	}
+//	string $shapes[] = `listRelatives -shapes $baked[0]`;
+//	for ($shape in $shapes)
+//	{
+//		$channels[size($channels)] = $baked[0] + "." + $attr;
+//	}
+//	bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false $channels;
+
+	$buf = `listConnections -connections true -plugs true -type "animLayer" $baked[0]`;
+	for ($i=0; $i<size($buf); $i+=2)
+	{
+		disconnectAttr $buf[$i] $buf[$i+1];
+	}
+	$buf = `listConnections -connections true -plugs true -type "animBlendNodeBase" $baked[0]`;
+	for ($i=0; $i<size($buf); $i+=2)
+	{
+		disconnectAttr $buf[$i+1] $buf[$i];
+	}
+
+	if (`nodeType $baked[0]` == "transform")
+	{
+		string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+		for ($attr in $attrs)
+		{
+		//	setAttr -lock true -keyable false ($baked[0] + "." + $attr);
+			setAttr -lock true ($baked[0] + "." + $attr);
+		}
+	}
+	else
+	{
+		string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+		for ($attr in $attrs)
+		{
+			setAttr -lock true ($baked[0] + "." + $attr);
+		}
+	}
+
+//	delete $constraint;
+	$buf = `listRelatives -fullPath -children $baked[0]`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		int $delete = true;
+		if (`nodeType $buf[$i]` == "camera" || `nodeType $buf[$i]` == "stereoRigCamera" || `nodeType $buf[$i]` == "stereoRigFrustum")
+		{
+			$delete = false;
+		}
+		else
+		{
+			string $shapes[] = `listRelatives -fullPath -shapes $buf[$i]`;
+			if (size($shapes) > 0)
+			{
+				if (`nodeType $shapes[0]` == "camera")
+				{
+					$delete = false;
+				}
+			}
+		}
+		if ($delete)
+		{
+			delete $buf[$i];
+		}
+	}
+
+	if ($scripts != "")
+	{
+		eval $scripts;
+	}
+//	python("yyClearPostBakeNode()");
+
+	eyAnimCamAttr $baked[0];
+
+	return $baked[0];
+}
+
+
+
+
+
+// Checkin
+global proc string zwCheckinCheckCamera(string $asset_type, int $progress)
+{
+	print "Check cameras' name\n";
+	print "-------------------\n";
+
+	string $selection[];
+	clear $selection;
+
+	string $err = "";
+
+	string $sceneName = `file -query  -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if ($project == "Jonalu")
+	{
+		return "";
+	}
+	string $mode = zwGetMode($sceneName);
+
+	string $cameras[] = `ls -cameras`;
+	if ($asset_type != "")	// || ($project == "Jonalu" && (`match "_mdl_" $sceneName` != "" || `match "_rgg_" $sceneName` != "")) || ($project != "Jonalu" && `match "_[^_]_[^_]{2}[_.]" $sceneName` != ""))	// asset
+	{
+		for ($shape in $cameras)
+		{
+			if (!`camera -query -startupCamera $shape`)
+			{
+				string $parent[] = `listRelatives -fullPath -parent $shape`;
+				string $camera = `match "[^|]+$" $parent[0]`;
+				if (!(`gmatch $camera "re_cam_*"` || `gmatch $camera "FM_*"`))
+				{
+					$selection[size($selection)] = $parent[0];
+				}
+			}
+		}
+		if (size($selection) > 0)
+		{
+			$err += "前期文件不能有摄像机（名为re_cam_*、FM_* 的摄像机例外）\n";
+			print $selection;
+		}
+	}
+	else	// anim
+	{
+//		if ($progress == 100)
+//		{
+			string $name = `zwGetPath "cameraName" $sceneName`;
+
+			int $referencedCam = 0;
+			int $notReferencedCam = 0;
+			int $bakedCam = 0;
+			for ($shape in $cameras)
+			{
+				if (!`camera -query -startupCamera $shape` && !`zwIsLeftRightCamera $shape`)
+				{
+					if (`reference -isNodeReferenced $shape`)
+					{
+						string $filename = `referenceQuery -filename $shape`;
+						if (`match "[/\\]episode_camera[/\\]" $filename` != "")
+						{
+							$referencedCam ++;
+						}
+					}
+					else
+					{
+						string $parent[] = `listRelatives -fullPath -parent $shape`;
+						string $camera = `match "[^|]+$" $parent[0]`;
+						if (tolower($camera) == tolower($name))
+						{
+							$notReferencedCam ++;
+						}
+						else if (tolower($parent[0]) == tolower("|" + $name + "_baked"))
+						{
+							$bakedCam ++;
+						}
+						else
+						{
+							string $camera = `match "[^|:]+$" $parent[0]`;
+							$camera = `substitute "(CAM[0-9]*[_:])*" $camera ""`;
+							if (!(`gmatch $camera "re_cam_*"` || `gmatch $camera "FM_*"`))
+							{
+							//	$err += "多余摄像机或者命名错误，正确命名应该是：" + $name + "\n" + $parent[0] + "\n";
+							}
+						}
+					}
+				}
+			}
+			if ($mode == "anim" || $mode == "layout" || $mode == "blocking")	// || ($project == "PatchPillows" && ($mode == "cloth" || $mode == "dynamic"))
+			{
+				if ($notReferencedCam != 1 || $bakedCam != 1)
+				{
+					$err += ("anim, layout 文件必须有一个名为" + $name + " 的原始摄像机和一个bake 好、名为" + $name + "_baked 的摄像机。bake 摄像机请使用工具：IDMT_Anim -> Bake Camera\n");
+				}
+			}
+		//	else if (!`gmatch $sceneName "*_ef_*"`)
+		//	{
+		//		if ($project == "BubbleGuppies" && `gmatch $sceneName "*_ch_*"`)
+		//		{
+		//		}
+		//		else
+		//		{
+		//			if ($referencedCam == 0 || $notReferencedCam + $bakedCam > 0)
+		//			{
+		//				$err += "只能参考动画文件的摄像机，请删除其他摄像机。参考动画文件的摄像机请使用工具：IDMT_TD -> Get Camera\n";
+		//			}
+		//		}
+		//	}
+			else if (!(`gmatch $sceneName "*_ch_*"` || `gmatch $sceneName "*_dy_*"` || `gmatch $sceneName "*_ef_*"` || `match "_cr[_.]" $sceneName` != ""))
+			{
+			//	if ($referencedCam == 0 || $notReferencedCam + $bakedCam > 0)
+			//	{
+			//		if (!($project == "TTMS" && zwAboutVersion() == "8.5"))
+			//		{
+			//			$err += "只能参考动画文件的摄像机，请删除其他摄像机。参考动画文件的摄像机请使用工具：IDMT_TD -> Get Camera\n";
+			//		}
+			//	}
+				if ($notReferencedCam + $bakedCam > 0)	// 黄仲维20100621修改，有些环节不需要参考摄像机的，例如mp
+				{
+					$err += "只能参考动画文件的摄像机，请删除其他摄像机。参考动画文件的摄像机请使用工具：IDMT_TD -> Get Camera\n";
+				}
+			}
+//		}
+	}
+
+	if ($err != "")
+	{
+		select $selection;
+	}
+
+	print "\n";
+
+	return $err;
+}
+
+global proc string zwCheckinGetBakedCamera()
+{
+	string $transform = "";
+
+	string $name = `zwGetPath "cameraName" ""` + "_baked";
+
+	string $buf[] = `ls -cameras`;
+	for ($shape in $buf)
+	{
+		if (!(`camera -query -startupCamera $shape` || `reference -isNodeReferenced $shape`))
+		{
+			string $parent[] = `listRelatives -fullPath -parent $shape`;
+			if (tolower($parent[0]) == "|" + tolower($name))
+			{
+				$transform = $parent[0];
+				break;
+			}
+		}
+	}
+	
+	return $transform;
+}
+
+// 锁摄像机属性
+global proc zwCheckinLockCamera(string $shape)
+{
+	if (!(`getAttr ($shape + ".backgroundColorR")` == 0 && `getAttr ($shape + ".backgroundColorG")` == 0 && `getAttr ($shape + ".backgroundColorB")` == 0))
+	{
+		setAttr -lock false ($shape + ".backgroundColor");
+		setAttr -lock false ($shape + ".backgroundColorR");
+		setAttr -lock false ($shape + ".backgroundColorG");
+		setAttr -lock false ($shape + ".backgroundColorB");
+		evalEcho ("setAttr \"" + $shape + ".backgroundColor\" -type \"double3\" 0 0 0");
+	}
+
+	string $attr = $shape + ".horizontalFilmOffset";
+	if (!`connectionInfo -isDestination $attr` && ! `connectionInfo -isLocked $attr`)
+	{
+		zwSetAttrInt $attr 0;
+	}
+
+	$attr = $shape + ".verticalFilmOffset";
+	if (!`connectionInfo -isDestination $attr` && ! `connectionInfo -isLocked $attr`)
+	{
+		zwSetAttrInt $attr 0;
+	}
+	
+	$attr = $shape + ".overscan";
+	if (!`connectionInfo -isDestination $attr` && ! `connectionInfo -isLocked $attr`)
+	{
+		zwSetAttrInt $attr 1;
+	}
+
+	zwSetAttrInt ($shape + ".displayFilmGate") false;
+	zwSetAttrInt ($shape + ".displayResolution") true;
+	zwSetAttrInt ($shape + ".displayFieldChart") false;
+	zwSetAttrInt ($shape + ".displaySafeAction") true;
+	zwSetAttrInt ($shape + ".displaySafeTitle") false;
+	zwSetAttrInt ($shape + ".journalCommand") false;
+
+	string $parent[] = `listRelatives -fullPath -allParents $shape`;
+	$parent[size($parent)] = $shape;
+	for ($node in $parent)
+	{
+		string $attrs[] = `listAttr -keyable -unlocked $node`;
+		for ($attr in $attrs)
+		{
+			$attr = $node + "." + $attr;
+			if (`objExists $attr`)
+			{
+				if (!`getAttr -lock $attr`)
+				{
+					evalEcho ("setAttr -lock true \"" + $attr + "\"");
+				}
+			}
+		}
+	}
+
+	zwSetAttrInt ($shape + ".renderable") true;
+	string $project = zwGetProject("");
+	if ($project == "Strawberry")
+	{
+		zwSetAttrInt ($shape + ".filmFit") 1;
+	}
+	if (!`getAttr -lock ($shape + ".filmFit")`)
+	{
+		evalEcho ("setAttr -lock true \"" + $shape + ".filmFit\"");
+	}
+}
+
+global proc zwCheckinCamera()
+{
+	print "Checkin cameras\n";
+	print "---------------\n";
+
+	string $camera = zwCheckinGetBakedCamera();
+
+// clean the camera
+	string $children[] = `listRelatives -fullPath -children $camera`;
+
+	// camclip
+	for ($i=0; $i<size($children); $i++)
+	{
+		if (`match "[^|]+$" $children[$i]` == "camclip" || `match "[^|]+$" $children[$i]` == "camclip_camclip")
+		{
+			delete $children[$i];
+		}
+	}
+
+	// imagePlane
+	string $shape = $children[0];
+	string $buf[] = `listAttr -multi ($shape + ".imagePlane")`;
+	for ($i=0; $i<size($buf); $i++)
+	{
+		string $buf1[] = `listConnections ($shape + "." + $buf[$i])`;
+		for ($j=0; $j<size($buf1); $j++)
+		{
+			delete $buf1[$j];
+		}
+	}
+
+	string $project = zwGetProject("");
+	if ($project == "Enyo")
+	{
+		setAttr -lock false ($shape + ".nearClipPlane");
+		string $buf[] = `listConnections -destination false -connections true -plugs true ($shape + ".nearClipPlane")`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			disconnectAttr $buf[$i+1]  $buf[$i];
+		}
+		setAttr -lock false ($shape + ".farClipPlane");
+		string $buf[] = `listConnections -destination false -connections true -plugs true ($shape + ".farClipPlane")`;
+		for ($i=0; $i<size($buf); $i+=2)
+		{
+			disconnectAttr $buf[$i+1]  $buf[$i];
+		}
+		zwSetAttrFloat ($shape + ".farClipPlane") 10000.0;
+	}
+
+	// lock
+	zwCheckinLockCamera $shape;
+
+	// addattr
+	if (!`objExists ($camera + ".version")`)
+	{
+		addAttr -shortName "ver" -longName "version" -dataType "string" $camera;
+	}
+	string $sceneName = `file -query  -shortName -sceneName`;
+	setAttr -type "string" ($camera + ".version") $sceneName;
+
+// checkin the camera
+	tokenize $sceneName "_." $buf;
+	string $episode = $buf[1];
+	string $filetitle;
+	if ($project == "Enyo" || $project == "LilLarikkins" || zwHasSeq($project))
+	{
+		$filetitle = `match "([^_]+_){4}" $sceneName` + "cam";
+	}
+	else
+	{
+		$filetitle = `match "([^_]+_){3}" $sceneName` + "cam";
+	}
+
+	sysFile -delete (`internalVar -userTmpDir` + $filetitle + ".ma");
+	// export
+	string $temp;
+	string $type[] = `file -q -type`;
+	if ($type[0] == "mayaBinary")
+	{
+		$temp = `internalVar -userTmpDir` + $filetitle + ".mb";
+		sysFile -delete $temp;
+		select $camera;
+		file -preserveReferences -exportSelected -type "mayaBinary" $temp;
+	}
+	else
+	{
+		$temp = `internalVar -userTmpDir` + $filetitle + ".ma";
+		sysFile -delete $temp;
+		select $camera;
+		file -preserveReferences -exportSelected -type "mayaAscii" $temp;
+	}
+
+	// remove namespace
+	string $cmd = `getenv "MAYA_LOCATION"` + "/bin/mayabatch.exe";
+//	$cmd = substituteAllString($cmd, "/", "\\") + " -file \"" + substituteAllString($temp, "/", "\\") + "\" -command \"catch(`zwRemoveUnusedNamespace \\\":\\\"`); file -force -type \"mayaAscii\" -save;\"";
+	$cmd = "\"\"" + substituteAllString($cmd, "/", "\\") + "\" -file \"" + substituteAllString($temp, "/", "\\") + "\" -command \"zwCheckinCameraB2A\"\"";
+	print `system $cmd`;
+
+	$temp = `internalVar -userTmpDir` + $filetitle + ".ma";
+
+	// history
+	string $folder;
+	global string $zwEnyoCheckinCamera;
+	if ($zwEnyoCheckinCamera != "")
+	{
+		$folder = $zwEnyoCheckinCamera + "/" + $episode;
+	}
+	else
+	{
+		$folder = `zwGetPath "camera" ""`;
+		if ($folder == "")
+		{
+			error "不能判断摄像机输出路径";
+		}
+		$folder = `substitute "/[^/]+$" $folder ""`;
+	}
+/*
+	$buf = `getFileList -filespec ($folder + "/" + $filetitle + ".m*")`;
+	for ($filename in $buf)
+	{
+		string $source = $folder + "/" + $filename;
+		string $dest = $folder + "/history/" + $filetitle + "_" + $version + "." + `match "[^.]+$" $filename`;
+		if (!`filetest -f $dest`)
+		{
+			string $rs = `zwSysFile "copy" $source $dest true`;
+			if ($rs != "")
+			{
+				warning $rs;
+			}
+		}
+	}
+*/
+	string $source = $folder + "/" + $filetitle + ".mb";
+	if (`filetest -f $source`)
+	{
+		string $dest = $folder + "/history/" + $filetitle + ".mb";
+		string $rs = `zwSysFile "move" $source $dest true`;
+		if ($rs != "")
+		{
+			warning $rs;
+		}
+	}
+
+	string $baked = `substitute "[.]ma$" $temp "_baked.ma"`;
+	string $history = `match "[^.]+" $sceneName`;
+	string $dest = $folder + "/history/" + $history + "_cam.ma";
+	if (`filetest -f $baked`)	// 立体相机
+	{
+		if ($zwEnyoCheckinCamera == "")
+		{
+			string $rs = `zwSysFile "move" $temp $dest true`;
+			if ($rs != "")
+			{
+				warning $rs;
+			}
+		}
+
+		// upload
+		$dest = $folder + "/" + $filetitle + ".ma";
+		string $rs = `zwSysFile "move" $baked $dest true`;
+		if ($rs != "")
+		{
+			error $rs;
+		}
+	}
+	else
+	{
+		if ($zwEnyoCheckinCamera == "")
+		{
+			string $rs = `zwSysFile "copy" $temp $dest true`;
+			if ($rs != "")
+			{
+				warning $rs;
+			}
+		}
+
+		// upload
+		$dest = $folder + "/" + $filetitle + ".ma";
+		string $rs = `zwSysFile "move" $temp $dest true`;
+		if ($rs != "")
+		{
+			error $rs;
+		}
+	}
+
+	if ($zwEnyoCheckinCamera != "")
+	{
+		return;
+	}
+
+//// reference the camera
+//	// backup look through
+//	string $modelPanel[];
+//	if (!`about -batch`)
+//	{
+//		$buf = `getPanel -visiblePanels`;
+//		for ($i=0; $i<size($buf); $i++)
+//		{
+//			if (`getPanel -typeOf $buf[$i]` == "modelPanel")
+//			{
+//				if (`lookThru -query $buf[$i]` == `match "[^|]+$" $camera`)
+//				{
+//					$modelPanel[size($modelPanel)] = $buf[$i];
+//				}
+//			}
+//		}
+//	}
+
+	// delete old camera
+	delete $camera;
+
+	// reference
+	zwImportModule("idmt.maya.path", true);
+	$dest = `python ("idmt.maya.path.GetDollarPath('" + $dest + "')")`;
+
+	int $referenced = false;
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		if (`match $filetitle $reference` != "")
+		{
+			$referenced = true;
+			string $referenceNode = `file -query -referenceNode $reference`;
+			$dest = `file -loadReference $referenceNode $dest`;
+			break;
+		}
+	}
+	if (!$referenced)
+	{
+		$dest = `file -reference -namespace "CAM" $dest`; 
+	}
+
+//	// restore look through
+//	if (!`about -batch`)
+//	{
+//		string $namespce = `file -query -namespace $dest`;
+//		for ($i=0; $i<size($modelPanel); $i++)
+//		{
+//			lookThru $modelPanel[$i] ($namespce + ":" + `match "[^|]+$" $camera`);
+//		}
+//	}
+
+	print "\n";
+}
+
+
+
+
+
+// Get Camera
+global proc zwGetCameraUI()
+{
+	string $project, $episode, $sequence, $scene;
+
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $project = zwGetProject($sceneName);
+	if ($project == "")
+	{
+		warning "未知项目";
+	}
+	else if ($project == "Enyo" || $project == "LilLarikkins" || zwHasSeq($project))
+	{
+		string $str = `match "^[^_.]+_[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+		if ($str != "")
+		{
+			string $buf[];
+			tokenize $str "_" $buf;
+			$episode = $buf[1];
+			$sequence = $buf[2];
+			$scene = $buf[3];
+		}
+	}
+	else if (zwIsRainbowProject($project))
+	{
+		string $str = `match "^[^_.]+_[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+		if ($str != "")
+		{
+			string $buf[];
+			tokenize $str "_" $buf;
+			$episode = $buf[1];
+			$scene = $buf[2];
+		}
+	}
+	else
+	{
+		string $str = `match "^[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+		if ($str != "")
+		{
+			string $buf[];
+			tokenize $str "_" $buf;
+			$episode = $buf[1];
+			$scene = $buf[2];
+		}
+	}
+
+	if (`window -exists zwGetCameraUI`)
+		deleteUI zwGetCameraUI;
+	window -title "Reference Camera" -resizeToFitChildren true zwGetCameraUI;
+		columnLayout -adjustableColumn true;
+			textFieldGrp -editable false -label "Project:" -text $project textFieldGrpProject;
+				popupMenu -button 1 -postMenuCommandOnce true -postMenuCommand "zwGetCameraPopupMenu \"popupMenuProjectL\"" popupMenuProjectL;
+				popupMenu -button 3 -postMenuCommandOnce true -postMenuCommand "zwGetCameraPopupMenu \"popupMenuProjectR\"" popupMenuProjectR;
+			textFieldGrp -label "Episode:" -text $episode textFieldGrpEpisode;
+			textFieldGrp -visible (zwHasSeq($project)) -label "Sequence:" -text $sequence textFieldGrpSequence;
+			textFieldGrp -label "Scene:" -text $scene textFieldGrpScene;
+			button -label "Reference" -command "zwGetCameraFromUI";
+	showWindow zwGetCameraUI;
+}
+
+global proc zwGetCameraPopupMenu(string $popupMenu)
+{
+	setParent -menu $popupMenu;
+
+	if (`getenv "OFFICE_LOCATION"` != "")
+	{
+		global string $idmtProjects;
+		if ($idmtProjects == "")
+		{
+			$idmtProjects = `eval "idmtService \"GetProjects\" \"\""`;
+		}
+		string $buf[];
+		tokenize $idmtProjects "|" $buf;
+		for ($i=0; $i<size($buf); $i+=7)
+		{
+			string $porject = $buf[$i+1];
+			if ($porject != "WinxClub")
+			{
+				menuItem -label $porject -command ("textFieldGrp -edit -text \"" + $porject + "\" \"textFieldGrpProject\"; textFieldGrp -edit -visible (\"" + $porject + "\" == \"Woodlies\" || \"" + $porject + "\" == \"Ninjago\") \"textFieldGrpSequence\";");
+			}
+		}
+	}
+}
+
+global proc zwGetCameraFromUI()
+{
+	string $project = `textFieldGrp -query -text textFieldGrpProject`;
+	if ($project == "")
+	{
+		error "请选择Project";
+	}
+	string $episode = `textFieldGrp -query -text textFieldGrpEpisode`;
+	if ($episode == "")
+	{
+		error "请选择Episode";
+	}
+	string $sequence = "";
+	if (`textFieldGrp -query -visible textFieldGrpSequence`)
+	{
+		$sequence = `textFieldGrp -query -text textFieldGrpSequence`;
+		if ($sequence == "")
+		{
+			error "请选择Sequence";
+		}
+	}
+	string $scene = `textFieldGrp -query -text textFieldGrpScene`;
+	if ($scene == "")
+	{
+		error "请选择Scene";
+	}
+	
+	zwGetCameraUIGetCameraEx $project $episode $sequence $scene;
+}
+
+global proc zwGetCameraUIGetCamera(string $projectShort, string $episode, string $scene)
+{
+	string $project = zwGetProject($projectShort);
+	zwGetCameraUIGetCameraEx $project $episode "" $scene;
+}
+
+global proc zwGetCameraUIGetCameraEx(string $projectFolder, string $episode, string $sequence, string $scene)
+{
+	string $buf1[];
+	
+	string $project = zwGetProjectShort($projectFolder);
+	if ($projectFolder == "")
+	{
+		error "该项目不存在";
+	}
+
+	string $camera;
+	if ($sequence == "")
+	{
+		$camera = $project + "_" + $episode + "_" + $scene;
+	}
+	else
+	{
+		$camera = $project + "_" + $episode + "_" + $sequence + "_" + $scene;
+	}
+	print $camera;
+
+	string $folder;
+	if (zwIsRainbowProject($projectFolder))
+	{
+		$folder = "//serverone/CONTENT_4_GLOBAL/PRJ_winxII/MC_winxII/scenes/cameras/sequence_" + $episode;
+	}
+	else if (zwGetProjectGeneration($projectFolder) == 2)
+	{
+		$folder = `zwGetPath "camera" $camera`;
+		$folder = `substitute "/[^/]+$" $folder ""`;
+	}
+	else
+	{
+		$folder = `getenv "IDMT_PROJECTS"` + "/" + $projectFolder + "/Production/Animation/episode_" + $episode + "/episode_camera";
+	}
+
+	string $buf[] = `getFileList -filespec ($folder + "/" + $camera + "_cam_??_c???.mb")`;
+	int $version = 0;
+	string $new = $camera + "_cam.ma";
+//	if (!`filetest -f ($folder + "/" + $new)`)
+//	{
+//		$new = $camera + "_cam.mb";
+//	}
+//	if (!`filetest -f ($folder + "/" + $new)`)
+//	{
+//		string $enyo[] = `getFileList -filespec ($folder + "/" + $project + "_" + $episode + "_*_" + $scene + "_cam.ma")`;
+//		$new = "";
+//		for ($file in $enyo)
+//		{
+//			$new = $file;
+//			break;
+//		}
+//	}
+//	if (!`filetest -f ($folder + "/" + $new)`)
+//	{
+//		$new = "";
+//		for ($file in $buf)
+//		{
+//			string $str = `substring $file (size($file)-5) (size($file)-3)`;
+//			int $ver = int($str);
+//			if ($ver > $version)
+//			{
+//				$version = $ver;
+//				$new = $file;
+//			}
+//		}
+//	}
+//	if ($new == "")
+//		error "Could not find the relative camera.";
+	if (!`filetest -f ($folder + "/" + $new)`)
+	{
+		error "Could not find the relative camera.";
+	}
+
+	string $cameraPath = $folder + "/" + $new;
+	zwImportModule("idmt.maya.path", true);
+	$cameraPath = `python ("idmt.maya.path.GetDollarPath('" + $cameraPath + "')")`;
+
+	int $referenced = false;
+	string $str = `match "[^.]+" $new`;
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		if (`match $str $reference` != "")
+		{
+			$referenced = true;
+			string $referenceNode = `file -query -referenceNode $reference`;
+			$dest = `file -loadReference $referenceNode $cameraPath`;
+			break;
+		}
+	}
+	if (!$referenced)
+	{
+		if (`match "[.]ma$" $new` != "")
+		{
+			file -ignoreVersion -reference -namespace "CAM" $cameraPath;
+		}
+		else
+		{
+			zwCameraReference $cameraPath;
+		}
+	}
+}
+
+global proc zw3dCamera()
+{
+	string $buf[];
+	string $LR = "CAM_LR";
+	string $L = "CAM_L";
+	string $R = "CAM_R";
+
+	string $baked = zwBakeCamera();
+	if (`objExists ($baked + "|" + $LR)`)
+	{
+		return;
+	}
+
+	zwUnLockAndHide $baked;
+	$buf = `duplicate -returnRootsOnly -name $L $baked`;
+	if ($buf[0] != $L)
+	{
+		rename $buf[0] $L;
+	}
+	$buf = `duplicate -returnRootsOnly -name $R $baked`;
+	if ($buf[0] != $R)
+	{
+		rename $buf[0] $R;
+	}
+	zwLockAndHide $baked;
+	parent ("|" + $L) $baked;
+	parent ("|" + $R) $baked;
+	group -name $LR ($baked + "|" + $L) ($baked + "|" + $R);
+
+	$LR = $baked + "|" + $LR;
+	$L = $LR + "|" + $L;
+	$R = $LR + "|" + $R;
+
+	$buf = `listRelatives -path -shapes $baked`;
+	string $attrs[] = `listAttr -keyable $buf[0]`;
+	for ($attr in $attrs)
+	{
+		connectAttr ($baked + "." + $attr) ($L + "." + $attr);
+		connectAttr ($baked + "." + $attr) ($R + "." + $attr);
+	}
+
+	zwLockAndHide $L;
+	zwSetAttrFloat ($L + ".rotateY") -0.7;
+	setAttr -keyable true -lock false ($L + ".rotateY");
+//	setAttr -keyable false -lock true ($L + ".visibility");
+	setAttr -lock true ($L + ".visibility");
+
+	zwLockAndHide $R;
+	zwSetAttrFloat ($R + ".translateX") 0.5;
+	zwSetAttrFloat ($R + ".rotateY") 0.7;
+	setAttr -keyable true -lock false ($R + ".rotateY");
+//	setAttr -keyable false -lock true ($R + ".visibility");
+	setAttr -lock true ($R + ".visibility");
+
+	setAttr -keyable true -lock false ($baked + ".visibility");
+	cutKey -clear -attribute "visibility" $baked;
+	setAttr ($baked + ".visibility") false;
+
+	zwLockAndHide $LR;
+//	setAttr -keyable false ($LR + ".visibility");
+}
+
+global proc zwLockAndHide(string $obj)
+{
+//	setAttr -keyable false -lock true ($obj + ".translateX");
+//	setAttr -keyable false -lock true ($obj + ".translateY");
+//	setAttr -keyable false -lock true ($obj + ".translateZ");
+//	setAttr -keyable false -lock true ($obj + ".rotateX");
+//	setAttr -keyable false -lock true ($obj + ".rotateY");
+//	setAttr -keyable false -lock true ($obj + ".rotateZ");
+//	setAttr -keyable false -lock true ($obj + ".scaleX");
+//	setAttr -keyable false -lock true ($obj + ".scaleY");
+//	setAttr -keyable false -lock true ($obj + ".scaleZ");
+
+	setAttr -lock true ($obj + ".translateX");
+	setAttr -lock true ($obj + ".translateY");
+	setAttr -lock true ($obj + ".translateZ");
+	setAttr -lock true ($obj + ".rotateX");
+	setAttr -lock true ($obj + ".rotateY");
+	setAttr -lock true ($obj + ".rotateZ");
+	setAttr -lock true ($obj + ".scaleX");
+	setAttr -lock true ($obj + ".scaleY");
+	setAttr -lock true ($obj + ".scaleZ");
+}
+
+global proc zwUnLockAndHide(string $obj)
+{
+	setAttr -keyable true -lock false ($obj + ".translateX");
+	setAttr -keyable true -lock false ($obj + ".translateY");
+	setAttr -keyable true -lock false ($obj + ".translateZ");
+	setAttr -keyable true -lock false ($obj + ".rotateX");
+	setAttr -keyable true -lock false ($obj + ".rotateY");
+	setAttr -keyable true -lock false ($obj + ".rotateZ");
+	setAttr -keyable true -lock false ($obj + ".scaleX");
+	setAttr -keyable true -lock false ($obj + ".scaleY");
+	setAttr -keyable true -lock false ($obj + ".scaleZ");
+}
+
+// wanshoulong
+global proc eyAnimCamAttr(string $cam)
+{
+	string $root[] = `ls -long $cam`;
+//	$root[0] = `substitute "|[^|]+$" $root[0] ""`;
+
+	string $shapes[] = `listRelatives -fullPath -c $cam`;
+	if (size($shapes))
+	{
+	//	string $sources[] = `listConnections -s 0 -d 1 -c 1 -p 1 $shapes[0]`;
+	//	for ($i=0;$i<size($sources);$i=$i+2)
+	//	{
+	//		if (`getAttr -l $sources[$i]`)
+	//			setAttr -l false $sources[$i];
+	//		if (`getAttr -l $sources[$i+1]`)
+	//			setAttr -l false $sources[$i+1];
+	//		
+	//		disconnectAttr $sources[$i]  $sources[$i+1] ;
+	//	}
+	
+		string $dests[] = `listConnections -s 1 -d 0 -c 1 -p 1 $shapes[0]`;
+		for ($i=0;$i<size($dests);$i=$i+2)
+		{
+			string $nodeType[] = `nodeType -inherited $dests[$i+1]`;
+			if ($nodeType[0] != "animCurve")
+			{
+				string $source[] = `ls -long $dests[$i+1]`;
+				if (`match ("^" + $root[0] + "[|.]") $source[0]` == "")
+				{
+					if (`getAttr -l $dests[$i]`)
+					{
+						setAttr -l false $dests[$i];
+					}
+					evalEcho ("disconnectAttr \"" + $dests[$i+1] + "\" \"" + $dests[$i] + "\"");
+				}
+			}
+		}
+	}
+}
+
+global proc string zwGetCameraEx(string $filename)
+{
+	string $cameraName = `zwGetPath "cameraName" $filename`;
+
+	string $cameras[] = `ls -cameras`;
+	for ($shape in $cameras)
+	{
+		string $parent[] = `listRelatives -fullPath -parent $shape`;
+		string $str = `match "[^|:]+$" $parent[0]`;
+		$str = `substitute "(CAM[0-9]*[_:])*" $str ""`;
+		if (tolower($str) == tolower($cameraName))
+		{
+			return $parent[0];
+		}
+	}
+
+	return $cameraName;
+}
+
+global proc string zwCheckCameraPositionEx(string $filename)
+{
+	string $rs = "";
+
+	string $camera = zwGetCameraEx($filename);
+	if (`objExists $camera`)
+	{
+		float $translation[] = `xform -query -worldSpace -translation $camera`;
+		if (abs($translation[0]) > 15000 || abs($translation[1]) > 15000 || abs($translation[2]) > 15000)
+		{
+			$rs = `match "[^|]+$" $camera`;
+		}
+	}
+
+	return $rs;
+}
+
+global proc string zwMakeStereoCamera()
+{
+	string $single = "";
+	string $singleShape = "";
+
+	string $buf[] = `ls -selection`;
+	if (size($buf) == 1)
+	{
+		string $shapes[] = `listRelatives -fullPath -shapes $buf[0]`;
+		if (size($shapes) > 0)
+		{
+			if (`nodeType $shapes[0]` == "camera")
+			{
+				$single = $buf[0];
+				$singleShape = $shapes[0];
+			}
+		}
+	}
+	if ($single == "")
+	{
+		error "请选择一个普通摄像机";
+	}
+	string $name = `match "[^|:]+$" $single`;
+	$name = `substitute "_old$" $name ""`;
+	$single = `rename $single ($name + "_old")`;
+	string $shapes[] = `listRelatives -fullPath -shapes $single`;
+	$singleShape = $shapes[0];
+	if (`objExists ("|" + $name)`)
+	{
+		delete ("|" + $name);
+	}
+
+	loadPlugin -qt "stereoCamera"; 
+	python "from maya.app.stereo import stereoCameraRig";
+	$buf = `python "stereoCameraRig.createStereoCameraRig(rigName='StereoCamera')"`;
+	string $stereoRigTransform = `rename $buf[0] $name`;
+	$buf = `listRelatives -fullPath -shapes -type "stereoRigCamera" $stereoRigTransform`;
+	string $stereoRigCamera = $buf[0];
+
+	string $constraint[] = `parentConstraint $single $stereoRigTransform`;
+
+	zwMakeStereoCameraConnect $singleShape $stereoRigCamera;
+
+	return $stereoRigTransform;
+}
+
+global proc zwMakeStereoCameraConnect(string $source, string $dest)
+{
+	string $attrs[] = `listAttr -write -connectable $source`;
+	for ($attr in $attrs)
+	{
+		if (`objExists ($dest + "." + $attr)`)
+		{
+			string $buf[] = `listConnections -destination false ($dest + "." + $attr)`;
+			if (size($buf) == 0)
+			{
+				if (!catch (`connectAttr ($source + "." + $attr) ($dest + "." + $attr)`))
+				{
+					disconnectAttr ($source + "." + $attr) ($dest + "." + $attr);
+				}
+			}
+		}
+	}
+
+	string $root[] = `ls -long $source`;
+	$root[0] = `substitute "|[^|]+$" $root[0] ""`;
+
+	string $attrs[] = `listConnections -plugs true -connections true -destination false $source`;
+	for ($i=0; $i<size($attrs); $i+=2)
+	{
+		string $long[] = `ls -long $attrs[$i+1]`;
+		if (`match ("^" + $root[0] + "[|.]") $long[0]` == "")
+		{
+			string $plug = `substitute "^[^.]+[.]" $attrs[$i] ""`;
+			if (`objExists ($dest + "." + $plug)`)
+			{
+				string $buf[] = `listConnections -destination false ($dest + "." + $plug)`;
+				if (size($buf) == 0)
+				{
+					connectAttr -force $attrs[$i+1] ($dest + "." + $plug);
+				}
+			}
+		}
+	}
+}
+
+global proc int zwIsLeftRightCamera(string $shape)
+{
+	if (`nodeType $shape` == "camera")
+	{
+		string $parent[] = `listRelatives -fullPath -parent $shape`;
+		string $connections[] = `listConnections -connections true -plugs true ($parent[0] + ".message")`;
+		for ($i=1; $i<size($connections); $i+=2)
+		{
+			string $plug = `match "[^.]+$" $connections[$i]`;
+			if ($plug == "leftCam" || $plug == "rightCam")
+			{
+				return true;
+			}
+		}
+	}
+	
+	return false;
+}
+
+global proc string[] zwBakeLeftRightCamera()
+{
+	string $leftRight[];
+	clear $leftRight;
+
+	string $cmds[];
+	clear $cmds;
+
+	string $attrs[] = {"translateX", "translateY", "translateZ", "rotateX", "rotateY", "rotateZ", "scaleX", "scaleY", "scaleZ"};
+
+	string $cameras[] = `ls -cameras`;
+	for ($camera in $cameras)
+	{
+		int $find = false;
+		string $parent[] = `listRelatives -fullPath -parent $camera`;
+		string $connections[] = `listConnections -connections true -plugs true ($parent[0] + ".message")`;
+		for ($i=1; $i<size($connections); $i+=2)
+		{
+			string $plug = `match "[^.]+$" $connections[$i]`;
+			if ($plug == "leftCam" || $plug == "rightCam")
+			{
+				$find = true;
+				break;
+			}
+		}
+		if (!$find)
+		{
+			continue;
+		}
+		$leftRight[size($leftRight)] = $parent[0];
+		for ($attr in $attrs)
+		{
+			if (`getAttr -lock ($parent[0] + "." + $attr)`)
+			{
+				$cmds[size($cmds)] = "setAttr -lock true \"" + $parent[0] + "." + $attr + "\"";
+			}
+			if (!`getAttr -keyable ($parent[0] + "." + $attr)`)
+			{
+				$cmds[size($cmds)] = "setAttr -keyable false \"" + $parent[0] + "." + $attr + "\"";
+			}
+		}
+		for ($attr in $attrs)
+		{
+			string $lockedPlug = `connectionInfo -getLockedAncestor ($parent[0] + "." + $attr)`;
+			if ($lockedPlug != "")
+			{
+				setAttr -lock false $lockedPlug;
+			}
+			setAttr -keyable true ($parent[0] + "." + $attr);
+		}
+		string $connections[] = `listConnections -connections true -plugs true $camera`;
+		for ($i=0; $i<size($connections); $i+=2)
+		{
+			if (`match "[.]nearClipPlane$" $connections[$i]` == "" && `match "[.]farClipPlane" $connections[$i]` == "")
+			{
+				if (!`getAttr -keyable $connections[$i]`)
+				{
+					setAttr -keyable true $connections[$i];
+					$cmds[size($cmds)] = "setAttr -keyable false \"" + $connections[$i] + "\"";
+				}
+			}
+		}
+	}
+
+	if (size($leftRight))
+	{
+		string $sceneName = `file -query -shortName -sceneName`;
+		int $timeLine[3];
+		catch($timeLine = `idmtProject -timeLine -echo off`);
+		if ($timeLine[0] == $timeLine[1])
+		{
+			$timeLine[0] = `playbackOptions -query -min`;
+			$timeLine[1] = `playbackOptions -query -max`;
+		}
+		float $startTime = $timeLine[0];
+		float $endTime = $timeLine[1];
+
+		bakeResults -simulation true -t ($startTime + ":" + $endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -controlPoints false -shape true $leftRight;
+
+		for ($cmd in $cmds)
+		{
+			eval $cmd;
+		}
+	}
+
+	return $leftRight;
+}

@@ -1,0 +1,468 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-5-6
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-7-19
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc slCreatGeoCache()
+{
+	//避免弹出警告
+	cycleCheck -e off;
+	
+	string $info[] = slGetProjectInformation();//0 project 1 projShot 2 episode 3 scene 4 desc
+	string $sceneName = `file -q -sn -shn`;
+	string $cachePath=`zwGetPath "geoCache" $sceneName`+"/";
+	
+	string $cacheSets[];
+	string $allSets[] = `ls -type objectSet`;
+	for ($set in $allSets)
+	{
+		if (endsWith($set,"CACHE_OBJS"))
+		{
+			$cacheSets[size($cacheSets)] = $set;
+		}
+	}
+
+	//打开解算开关
+	//slCreatCacheControl;
+	
+	for ($set in $cacheSets)
+	{
+		if (`referenceQuery -inr $set`)
+		{
+			string $referenceFile = `referenceQuery -f $set`;
+			string $repeat="";
+			string $buff[]={};
+			int $num = `tokenize $referenceFile "{}" $buff`;
+			if ($num>1)
+			{
+				$repeat = "_"+$buff[$num-1];
+				$referenceFile = $buff[0];
+			}
+			clear $buff;
+			$num = `tokenize $referenceFile "_" $buff`;
+			string $charName = `substituteAllString $referenceFile ($buff[0]+"_") ""`;
+			$charName = `substituteAllString $charName ("_"+$buff[$num-3]+"_"+$buff[$num-2]+"_"+$buff[$num-1]) ""`;
+
+			string $folderName = $cachePath+$charName+$repeat;
+			//if (`getenv username` == "wanshoulong")
+				$folderName = $cachePath+$info[4]+$charName+$repeat;
+
+			//print ($folderName+"\n");
+
+			
+			select -cl;
+			select -noExpand -deselect $set;
+			select -add $set;
+			string $geometry[] = `ls -sl`;
+			string $pts="";
+			for ($obj in $geometry)
+			{
+				string $his[] = `listHistory $obj`;
+				$pts = $pts+" -pts \""+$his[0]+"\"";
+			}
+			select -cl;
+			string $endtime = `playbackOptions -q -max`;
+			string $cmd = "cacheFile -sch -f \""+$charName+"\" -dir \""+$folderName+"\" -st 980 -et "+$endtime+$pts;
+
+			//print ($cmd+"\n");
+
+			catch(`eval $cmd`);
+		}
+	}
+}
+
+global proc slImportGeoCacheFile(string $checkin)
+{
+	//避免弹出警告
+	cycleCheck -e off;
+	
+	string $info[] = slGetProjectInformation();//0 project 1 projShot 2 episode 3 scene 4 desc
+	string $sceneName = `file -q -sn -shn`;
+	string $cachePath=`zwGetPath "geoCache" $sceneName`+"/"+$info[4];
+	string $folders[] =`getFileList -folder $cachePath`;
+	for ($char in $folders)
+	{
+		string $charType="",$charName="",$referenceNum="",$referencePost="";
+		string $charNum[] = stringToStringArray($char,"_");
+
+		
+		//判断道具还是角色
+		if (match("^[p-P]",$charNum[0]) != "")
+		{
+			$charType = "props";
+		}
+		else if (match("^[c-C]",$charNum[0]) != "")
+		{
+			$charType = "characters";
+		}
+		//获取角色名
+		if (match("^[0-9]+$",$charNum[size($charNum)-1]) == "")
+		{
+			$charName = $char;
+		}
+		else
+		{
+			$charName = `substring $char 1 (size($char)-size($charNum[size($charNum)-1])-1)`;
+			$referenceNum = "_"+$charNum[size($charNum)-1];
+			$referencePost="{"+$charNum[size($charNum)-1]+"}";
+		}
+		//print ($charType+"---"+$charName+"\n");
+		
+		string $charPath = `zwGetPath "scenes" ""`+"/"+$charType+"/"+$charName+"/master/"+$info[1]+"_"+$charName+"_h_ms_cache.mb";
+		print ($charPath+"\n");
+		if (!`filetest -r $charPath`)
+		{
+			continue;
+		}
+		slImportRef $charPath "mayaBinary";
+	}
+
+	//文件夹排序的问题，10会在2之前，导致超过10个同样角色或者道具时报错，改成为先只参考所有，后导cache
+	for ($char in $folders)
+	{
+		string $charType="",$charName="",$referenceNum="",$referencePost="";
+		string $charNum[] = stringToStringArray($char,"_");
+		//判断道具还是角色
+		if (match("^[p-P]",$charNum[0]) != "")
+		{
+			$charType = "props";
+		}
+		else if (match("^[c-C]",$charNum[0]) != "")
+		{
+			$charType = "characters";
+		}
+		//获取角色名
+		if (match("^[0-9]+$",$charNum[size($charNum)-1]) == "")
+		{
+			$charName = $char;
+		}
+		else
+		{
+			$charName = `substring $char 1 (size($char)-size($charNum[size($charNum)-1])-1)`;
+			$referenceNum = "_"+$charNum[size($charNum)-1];
+			$referencePost="{"+$charNum[size($charNum)-1]+"}";
+		}
+		//print ($charType+"---"+$charName+"\n");
+		
+		string $charPath = `zwGetPath "scenes" ""`+"/"+$charType+"/"+$charName+"/master/"+$info[1]+"_"+$charName+"_h_ms_cache.mb";
+		//print ($charPath+"\n");
+		if (!`filetest -r $charPath`)
+		{
+			continue;
+		}
+		string $cacheObjs[] = `ls -dag -ni -type "mesh" ($info[1]+"_"+$charName+$referenceNum+":*")`;
+		string $namespace = `file -q -rpr ($charPath+$referencePost)`;
+		string $xml[] = `getFileList -fld ($cachePath+$char+"/") -fs "*.xml"`;
+		if (size($xml))
+		{
+			string $buff[] = stringToStringArray($xml[0],".");
+			string $cacheName = $buff[0];
+			string $cacheFile=`cacheFile -ccn -dir ($cachePath+$char)  -f $cacheName`;
+			
+			string $channels[] = `cacheFile -f ($cachePath+$char+"/"+$xml[0]) -q -cnm`;
+			for ($i=0;$i<size($cacheObjs);$i++)
+			{
+				print ($cacheObjs[$i]+"******");
+				
+				string $switch = `createNode historySwitch -n ($namespace+"_"+$i+"_swith")`;
+				source doImportCacheFile.mel;
+				string $channel = findChannelForObject($i,$channels,$cacheObjs[$i]);
+				print ($channel+"\n");
+				
+				catch(`connectAttr -f ($cacheObjs[$i]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+				setAttr ($switch+".playFromCache") 1;
+				getAttr -silent ($switch+".op[0]");
+				setAttr ($switch+".playFromCache") 0;
+				catch(`disconnectAttr ($cacheObjs[$i]+".outMesh") ($switch+".undeformedGeometry[0]")`);
+				setAttr ($switch+".ihi") 0;
+
+				setAttr ($cacheFile+".channel["+$i+"]") -type "string" $channel;
+				connectAttr -f ($cacheFile+".inRange") ($switch+".playFromCache");
+				connectAttr -f ($cacheFile+".outCacheData["+$i+"]") ($switch+".inPositions[0]");
+				connectAttr -f ($switch+".outputGeometry[0]") ($cacheObjs[$i]+".inMesh");
+				
+				if (`getenv username` == "wanshoulong")
+				{
+					//select -r $cacheObjs[$i];
+					//catch(`polySmooth  -mth 0 -dv 1 -c 1 -kb 1 -ksb 1 -khe 0 -kt 1 -kmb 1 -suv 1 -peh 0 -sl 1 -dpe 1 -ps 0.1 -ro 1 -ch 1 $cacheObjs[$i]`);
+					//select -cl;
+				}
+				//zjDelsmooth;
+
+			}
+		}
+	}
+	
+	//恢复材质连接
+	eyRenderRehyperShade;
+    	
+	
+	//导入相机
+	source zwCameraImportExport.mel;
+	catch(`zwGetCameraUIGetCameraEx $info[1] $info[2] $info[5] $info[3]`);
+
+	file -save ;
+
+	if ($checkin)
+	{
+		string $filename = `file -q -sn`;
+		idmtProject  -c  $filename -des "自动解算，效果参考动画AVI；如果文件有问题请联系TD和PA";
+	}
+}
+
+global proc string[] slGetProjectInformation()
+{
+	string $porjInfo[];
+	string $projShot, $episode, $scene,$desc,$sequence="";
+	
+	string $project = zwGetProject("");
+	string $sceneName = `file -query -shortName -sceneName`;
+	string $str = `match "^[^_.]+_[^_.]+_[^_.]+_[^_.]+" $sceneName`;
+	if ($str == "")
+	{
+		error "未知项目";
+	}
+	else if ($project == "Enyo" || $project == "LilLarikkins")
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[3];
+
+		$desc = $buf[4];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+	}
+	else if ($project == "Woodlies")
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[3];
+
+		$desc = $buf[4];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+		
+		$sequence = $buf[2];
+	}
+	else
+	{
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		$projShot = $buf[0];
+		$episode = $buf[1];
+		$scene = $buf[2];
+
+		$desc = $buf[3];
+		if (size($desc) <= 2)
+			$desc = "";
+		else 
+			$desc = "D"+$desc+"/";
+	}
+
+	$projInfo[0] = $project;
+	$projInfo[1] = $projShot;
+	$projInfo[2] = $episode;
+	$projInfo[3] = $scene;
+	$projInfo[4] = $desc;
+	$projInfo[5] = $sequence;
+
+	return $projInfo;
+}
+
+global proc  slGeoCacheTools()
+{
+	if (`window -ex slGeoCacheToolsUI`)
+	{
+		deleteUI slGeoCacheToolsUI;
+	}
+	
+	window -title " GeoCache  Tools                WHO" -in "Geo" -menuBar true  -mxb false -s true  -resizeToFitChildren true slGeoCacheToolsUI;
+		menu -label "Help";
+			menuItem -label "Help on Render Tools..." -command "";
+		
+		columnLayout -adjustableColumn true -rs 10 ;
+			string $button1 = `button -h 40 -l "创建GeometryCache"	-c "slCreatGeoCacheCombine 0"`;
+			checkBox -l "合并创建CH文件?" 	slGeoCacheToolsUI_Com;
+			string $button2 = `button -h 40 -l "创建CH文件"			-c "slImportGeoCacheFile 0"`;
+
+			checkBox -e -onc ("button -e -en 0 "+$button2) -ofc ("button -e -en 1 "+$button2) slGeoCacheToolsUI_Com;
+			checkBox -e -v 1 slGeoCacheToolsUI_Com;
+			button -e -en 0 $button2;
+		setParent ..;
+	showWindow slGeoCacheToolsUI;
+}
+
+global proc slCreatGeoCacheCombine(int $batch)
+{
+	string $proj = `zwGetProject ""`;
+	if ($proj == "ShenShou")
+	{
+		string $chars[] = `ls "Character" "*:Character" "*:*:Character"`;
+		for ($char in $chars)
+		{
+			if (attributeExists("DynamicCtrlCloak",$char) && attributeExists("StartFrame",$char) )
+			{
+				setAttr ($char+".DynamicCtrlCloak") 1;
+				setAttr ($char+".StartFrame") 980;
+			}
+		}
+	}
+	
+	
+	slCreatGeoCache;
+	
+	//创建ch文件
+	if (`checkBox -q -v slGeoCacheToolsUI_Com` || $batch)
+	{
+		string $sceneName = `file -q -sn -shn`;
+		$sceneName = `substituteAllString $sceneName "_an_" "_ch_"`;
+		if ($proj == "ShenShou")
+		{
+			$sceneName = `substituteAllString $sceneName "_ch_" "_dy_"`;
+		}
+		string $ws = `workspace -q -rd`+"scenes/";
+		
+		file -f -new;
+		file -rename ($ws+$sceneName);
+		file -save;
+
+		if (!$batch)
+		{
+			file -f -o ($ws+$sceneName);
+			slImportGeoCacheFile 0;
+		}
+		else 
+		{	
+			slGeocacheMusterBatchCloth($ws+$sceneName);
+		}
+	}
+	
+	
+	//复制动画的avi，做checkin用仅供后台制作用
+	/*if ($batch)
+	{
+		string $sceneName = `file -q -sn -shn`;
+		string $buff[] = stringToStringArray($sceneName,"_");
+		string $preName = `substring $sceneName 1 (size($sceneName)-size($buff[size($buff)-1]))`;
+		
+		string $aviPath = zwGetPath("scene","")+"/";
+		$aviPath = `substituteAllString $aviPath "/" "\\"`;
+		string $aviFile[] = `getFileList -fld $aviPath -fs ($preName +"*.avi")`;
+		if (size($aviFile))
+		{
+			string $dest = zwGetMusterProject("")+"\\scenes\\";
+			string $chDest = `substituteAllString $sceneName "_an_" "_ch_"`;
+			string $aviDest = `substituteAllString $chDest ".mb" ".avi"`;
+			sysFile -copy ($dest+$aviDest)  ($aviPath+$aviFile[0]);
+
+			string $cmd = "copy \"" + $aviPath+$aviFile[0]+"\" \"" + $dest+$aviDest + "\"" ;
+			$fileId = `fopen ($dest+"temp.bat") "w"`;
+			fprint $fileId $cmd;
+			fclose $fileId;
+			//system("load \""+$dest+"temp.bat\"");
+			system("load \""+$cmd+"\"");
+ 
+			//print $aviDest;
+			//print ($dest+$chDest);
+			
+			//string $cmd = "D:/Alias/MAYA2009x64/bin/mayabatch.exe -file \""+ $dest+$chDest+"\" -command \"slImportGeoCache \\\""+$dest+$chDest+"\\\";idmtProject -checkin \\\""+ $dest+$chDest+"\\\"\"";
+			//eval($cmd);
+			//print $cmd;
+			//slImportGeoCache  ($dest+$chDest);
+			//idmtProject -checkin ($dest+$chDest);
+
+			slGeocacheMusterBatchCloth($dest+$chDest);
+		}
+	}*/
+
+}
+
+global proc slCreatCacheControl()
+{
+	string $project = zwGetProject("");
+	if ($project == "RainbowRiders")
+	{
+		string $master[] = `ls "*:Master"`;
+		for ($ms in $master)
+		{
+			if (attributeExists("HairCtrlVis",$ms) && `getAttr ($ms+".HairCtrlVis")`)
+			{
+				continue;
+			}
+			
+			if (attributeExists("HairDynamic",$ms))
+			{
+				setAttr ($ms+".HairDynamic") 1;
+			}
+			else if (attributeExists("Hair_Dynamic",$ms))
+			{
+				setAttr ($ms+".Hair_Dynamic") 1;
+			}
+		}
+	}
+}
+
+global proc slGeocacheMusterBatchCloth(string $sceneName)
+{
+	// 建立工程文件夹
+	string $source = "//file-cluster/GDC/Resource/Support/Maya/Import/projects/8.5";
+	//string $dest = zwGetMusterProject("");	
+	string $dest = "//file-cluster/GDC/Netrender/Maya_Odd/N537";    ///固定使用万寿龙的提交目录
+	//string $dest = `optionVar -query musterCheckinProject`;
+	zwXcopyEx $source $dest false false;
+	string $fileNames[]={};
+	tokenize $sceneName "/\\" $fileNames;
+	//string $mayaFileName=`substituteAllString $sceneName "/" "\\"`;
+	//string $netPath=`substitute "[/\\]scenes[/\\].*" $mayaFileName ""`;
+	string $taskName[]=stringToStringArray($fileNames[size($fileNames)-1],".");
+	
+	string $mayaFileName = `substituteAllString $dest "\\" "/"`+"/scenes/"+$fileNames[size($fileNames)-1];
+	sysFile -copy $mayaFileName $sceneName;
+
+	string $mrtool = "\\\\file-cluster\\GDC\\Resource\\Support\\Virtual Vertex\\Muster5.54x32\\Mrtool.exe";
+	string $time[]={};
+	tokenize $taskName[0] "_" $time;
+	float $startframe=1;
+	float $endframe=1;
+	float $byframe=1;
+	int $numberBy=4;
+	int $packet=1000;
+	int $priority=100;
+	string $dispatcher = "192.168.3.182";
+	string $pool="\"Entire Farm\"";
+	//string $engine = "\"Maya2009X64 Layer\"";
+
+	string $fullcommand = "\"" + $mrtool + "\" -b -s "+ $dispatcher + " -u admin -p 110 "
+			+ " -e 74" 
+			+ " -n " + ("Cache_"+$taskName[0])
+			+ " -f \"" + $mayaFileName + "\""
+			+ " -proj \""+$dest + "\""
+			+ " -sf " + $startframe 
+			+ " -ef " + $endframe 
+			+ " -bf " + $byframe 
+			+ " -pk " + $packet	// 4
+			+ " -pr " + $priority 
+			+ " -pool " + $pool
+			+ " -max 2"
+			+ " -info \"user: " + `getenv "USERNAME"` + " time: " + `about -currentDate` + " " + `about -currentTime` + "\""
+			+ " -se "+$numberBy
+			+ " -st 1"
+			+ " -add \" -preRender \\\"source slCreatGeoCache.mel;slImportGeoCacheFile 1;\\\"\"";
+	system("start " + $fullcommand);
+	//print ("\n"+$fullcommand+"\n");
+}

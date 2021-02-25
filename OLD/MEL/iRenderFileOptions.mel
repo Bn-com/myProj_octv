@@ -1,0 +1,211 @@
+global proc iRenderFeedbackDisplay(string $str)
+{
+	if (`window -ex iRenderOptionsWindow`) {
+		string $temp = `scrollField -q -text iRenderfeedbackWin`;
+		$str = substituteAllString($str, "/", "\\");
+		scrollField -e -text ($temp + $str) iRenderfeedbackWin;
+	}
+}
+
+global proc iRenderSetHaircache()
+{
+	string $fbString;
+	string $hs[] = `ls -type diskCache`; 
+	for ($item in $hs){
+		string $cname = `getAttr  ($item + ".cacheName")`; 
+		if ($cname != ""&&`gmatch $cname "*.mchp"`){
+			string $buffer[];
+			clear($buffer);
+			tokenize $cname "/" $buffer;
+			string $fname = $buffer[size($buffer) - 1];
+			setAttr ($item + ".cacheName") -type "string" $fname;
+		}
+	}
+	iRenderFeedbackDisplay("\n^OPE003: 正在整理文件缓存...\n        完成！");
+}
+
+global proc iRenderCheckHaircache()
+{
+	int $flag = 0;
+	string $hs[] = `ls -type diskCache`;
+	for ($item in $hs){
+		int $s = `getAttr ($item+".startTime")`;
+		int $e = `getAttr ($item+".endTime")`;
+		if (!($s+$e)){
+			$flag += 1;
+		}
+	}
+	if ($flag>0){
+		string $str;
+		$str = "\n^INF001: 磁盘缓存异常...请确保所需缓存文件位于当前项目data目录下并选择:";
+		$str += "\n         1)重新打开本文件";
+		$str += "\n         2)尝试手动连接缓存文件";
+		iRenderFeedbackDisplay($str);		
+	}
+}
+
+global proc iRenderOpenScene(string $sceneFile)
+{
+	string $fbString;
+	if (`filetest -f $sceneFile`){
+		// Open file from the network file server
+		iRenderFeedbackDisplay("\n^OPE002: 正在打开文件...\n        ");
+		$fbString = `file -f -o $sceneFile`;
+		ReferenceEditor;
+		// Reset hair cache file name
+		iRenderSetHaircache;
+		// Save to current project directory
+		string $scname = `file -q -sceneName -shortName`;
+		$scname = `textFieldGrp -q -tx projDir` + "data\\" + $scname;
+		iRenderFeedbackDisplay("\n^OPE004: 保存到当前工程...\n        " + $fbString);
+		file -rename $scname;
+		$fbString = `file -force -s`;
+		// Re-check if the cache acts correctly
+		// iRenderCheckHaircache;
+		// Refresh UI
+		textFieldGrp -e -tx $fbString scenDir;
+	}
+}
+
+global proc iRenderSelectiveDDC()
+{
+	// Reveal scene directory
+	string $fbString;
+	string $sceneFile = `textFieldGrp -q -tx scenDir`;
+	if (`window -q -exists iRenderSelectiveOpenWin`) {
+		string $sel[] = `textScrollList -q -selectItem selectiveList`;
+		$sceneFile += $sel[0];
+		textFieldGrp -e -tx $sceneFile scenDir;
+		$fbString = "\n^INF002: 文件选择: " + $sel[0] + " ... 完成!";
+		iRenderFeedbackDisplay($fbString);
+		iRenderOpenScene $sceneFile;
+	}
+}
+
+global proc iRenderSelectiveOpen(string $fileList[])
+{ 
+	if (`window -q -exists iRenderSelectiveOpenWin`) {
+		deleteUI iRenderSelectiveOpenWin;
+	} 
+	window -mb true
+		-title "iRender Selective Open"
+		-widthHeight 100 180
+		iRenderSelectiveOpenWin;
+
+	formLayout -nd 100 mainForm;
+	columnLayout  leftCL;
+	separator -style "none" -height 10;
+	text -align "left" -width 160 -l ("鼠标双击选定并返回!");
+	textScrollList -nr 20
+				-allowMultiSelection false 
+				-dcc "iRenderSelectiveDDC;deleteUI iRenderSelectiveOpenWin" 
+				-width 220 -height 280 selectiveList;
+	for ($each in $fileList ){
+		textScrollList -e -append $each selectiveList;
+	}
+	showWindow iRenderSelectiveOpenWin;
+}
+
+global proc iRenderStandardStart()
+{
+	if (`window -q -exists iRenderOptionsWindow`) {
+		string $fbString;
+		// Collect info necessary for operation
+		string $projDir = `textFieldGrp -q -tx projDir`;
+		string $dataDir = $projDir + "data";
+		// Query info necessary to get the scene file and cache files
+		string $projSel = `optionMenuGrp -q -v projSel`;
+		$projSel = `toupper $projSel`;
+		string $epNum = `textFieldGrp -q -tx epNum`;
+		string $scNum = `textFieldGrp -q -tx scNum`;
+		// Scene path concatenating
+		string $scenDir = "";
+		$scenDir = "\\\\file-cluster\\GDC\\Projects\\" + $projSel + "\\";
+		if ($projSel=="BRATZ"){				//add by zzj
+			$scenDir += ("Production\\Animation\\episode_" + $epNum + "\\");
+		}
+		else
+		{
+			$scenDir += ("Project\\scenes\\Animation\\episode_" + $epNum + "\\");
+		}
+		$scenDir += ("scene_" + $scNum + "\\cloth\\");
+		//print("\nTarget Directoroy:" + $scenDir);
+		// Check if the directory needed exist
+		if (`filetest -d $scenDir`){
+			string $mbs[] = `getFileList -folder $scenDir -filespec "*.mb"`;
+			string $mas[] = `getFileList -folder $scenDir -filespec "*.ma"`;
+			string $fileList[] = stringArrayCatenate($mbs, $mas);
+			// First thing we need to do is to open a maya scene file
+			textFieldGrp -e -tx $scenDir scenDir;			
+			if (size($fileList)==1){
+				string $project = zwGetProject($fileList[0]);
+				if (zwIsRainbowProject($project)){
+					//iRenderFileCoper()
+				}else{
+				iRenderOpenScene ($scenDir + $fileList[0]);
+				}
+			}else{
+				iRenderSelectiveOpen $fileList;
+			}
+			string $avi[] = `getFileList -folder $scenDir -filespec "*.avi"`;
+			int $flag = `checkBoxGrp -q -v1 checkPblastAVI`;
+			if ($flag>0&&`size($avi)`>0){
+				string $temp = $scenDir + $avi[0];
+				$fbString = "\n^OPE004: 正在打开预览视频文件...";
+				iRenderFeedbackDisplay($fbString);
+				system("load " + $temp);
+			}
+			// Cache re-organize
+			iRenderSetHaircache;
+		}else{
+			$fbString = "\n^INF003: 目标场景目录不存在!";
+			iRenderFeedbackDisplay($fbString);
+		}
+	
+	// Refresh iRenderUI
+	iRenderOptions;
+	}
+}
+
+global proc iRenderBuildGUI()
+{
+	// Directory info
+	string $project_dir = `workspace -query -rd`;
+	$project_dir = `substituteAllString $project_dir "/" "\\"`;
+	string $scene_file = `file -q -sceneName`;
+	$scene_file = `substituteAllString $scene_file "/" "\\"`;
+	
+	separator -style "none" -height 6 generalHeader;
+	frameLayout -l "当前工程目录信息 － 标准开始获取的文件将保存到该工程" -collapsable true -width 420 generalFL;
+		columnLayout curProjCL;
+			textFieldGrp -label "工程目录" -ed 0 -tx $project_dir projDir;
+			textFieldGrp -label "场景目录" -ed 0 -tx $scene_file scenDir;
+		setParent ..;
+	setParent ..;
+
+	frameLayout -l "获取文件 － 打开网上文件并保存到当前工程data目录下" -collapsable true -width 420 getFileFL;
+		columnLayout -adjustableColumn true;
+		formLayout editCharHairForm;
+		columnLayout getFileCL;
+		
+		eval "source \"iRenderSetLayerByProjectUI.mel\";";
+		string $tempCCCmd="if (`optionMenuGrp  -ex projSelTmp`) optionMenuGrp -e -v `optionMenuGrp -q -v projSel` projSelTmp;changeCurrentProjectTool";
+			optionMenuGrp -label "项目" -cal 1 "right" -cc $tempCCCmd projSel;
+				menuItem -l "Bratz";
+				menuItem -l "WinxClub";
+				menuItem -l "Strawberry";		//add by zzj
+				menuItem -l "BubbleGuppies";		//add by zzj
+			separator -style "none" -height 5;
+			textFieldGrp -label "集数"  -ed 1 -tx "" epNum;
+			textFieldGrp -label "场数"  -ed 1 -tx "" scNum;
+			separator -style "none" -height 5;
+			checkBoxGrp -l "" -l1 "观看Playblast" -v1 true checkPblastAVI;
+		setParent ..;
+	setParent ..;
+	separator -style "none" -height 5;
+	button -label "标准开始" -align "center" -height 30 -bgc .4 .6 0 -c "iRenderStandardStart" iRenderStartBTN;
+	separator -style "none" -height 5;
+	setParent ..;
+	setParent ..;
+}
+iRenderBuildGUI();

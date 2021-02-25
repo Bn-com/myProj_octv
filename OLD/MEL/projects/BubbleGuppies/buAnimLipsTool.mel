@@ -1,0 +1,366 @@
+
+global proc buAnimLipsTool()
+{
+	//文件名字
+	string $buff[];
+	string $filename = `file -q -sn -shn`;
+	if (!size($filename))
+		return ;
+	tokenize $filename "_" $buff;
+	string $episode = $buff[1];
+	string $shot[0]={$buff[2]};
+	string $get = `idmtService "GetAnimByFilename" $filename`;
+	int $num = `tokenize $get "|" $buff`;
+	if ($num == 7)
+	{
+		tokenize $buff[6] "*" $buff;
+		$shot = $buff;
+	}
+	
+	string $path = "//File-cluster/gdc/Projects/BubbleGuppies/BubbleGuppies_Scratch/Animation/LipsFile/"+$episode+"/";
+	
+	string $tFolder[] = `getFileList -fld $path`;
+	if (size($tFolder) != 0)
+	{
+		for ($k in $tFolder)
+		{
+			if (`gmatch $k "*.ini*"`==0)
+			{
+				$path += ($k+"/");
+			}
+		}
+	}
+
+	$tFolder = `getFileList -fld $path`;
+	if (size($tFolder) != 0) 
+	{
+		for ($l in $tFolder)
+		{
+			if (`gmatch $l "*.ini*"`==0)
+			{
+				$path += ($l+"/");
+			}
+		}
+	}
+
+	string $files[] = `getFileList -fld $path -fs ($episode+"_"+$shot[0]+"*.txt")`;
+		
+	if (`window -q -exists BuanmouthUI`) deleteUI BuanmouthUI;
+	string $buwin=`window -title "BUmouthSetting" -w 300 -h 400 -resizeToFitChildren true BuanmouthUI`;
+		columnLayout -columnAttach "both" 5 -rowSpacing 10 -columnWidth 250 -backgroundColor 125 125 125;
+			frameLayout -label "口型文本显示" -labelAlign "center" -borderStyle "etchedOut" -backgroundColor 125 125 125 BuMset ;
+			textScrollList -numberOfRows 8 -allowMultiSelection true-showIndexedItem 4 -backgroundColor 125 125 125 hjanMouthls;
+			setParent ..;
+			setParent ..;
+			button -l "自动读取" -w 60 -h 30 -c buAnimLipsset -backgroundColor 125 125 125;
+			button -l "选择读取" -w 60 -h 30  -c buMouthselect-backgroundColor 125 125 125;
+			setParent ..;
+			setParent ..;
+		setParent ..;
+
+		for ($i in $files )
+		{
+			textScrollList -e -append $i hjanMouthls;
+		}
+	showWindow $buwin;
+}
+
+
+
+
+global proc buAnimLipsset()
+{
+	string $buff[];
+	//选择角色控制线组
+	string $sel[] = `ls -sl`;
+	if (size($sel) != 1)
+		error "请选择导入口型的角色!";
+	tokenize $sel[0] ":" $buff;
+	string $pre = `substring $sel[0] 1 (size($sel[0])-size($buff[size($buff)-1]))`;
+	string $mouth = $pre + "Mouth";
+	// 角色名字添加 
+	string $cuff[];
+	tokenize $pre "_" $cuff;
+	string $mat=`match "[a-z]" $cuff[1]`+`match "[0-9]+" $cuff[1]`;
+	int	$sz=`size $cuff[1]`-`size $mat`;
+	string $chname=endString($cuff[1], $sz);
+
+
+	
+
+
+	//文件名字
+	string $filename = `file -q -sn -shn`;
+	if (!size($filename))
+		return ;
+	tokenize $filename "_" $buff;
+	string $episode = $buff[1];
+	string $shot[0]={$buff[2]};
+	//$shot[0] = `substring $buff[2] 1 4`;
+	
+	
+	
+	string $get = `idmtService "GetAnimByFilename" $filename`;
+	int $num = `tokenize $get "|" $buff`;
+	if ($num == 7)
+	{
+		tokenize $buff[6] "*" $buff;
+		$shot = $buff;
+	}
+	int $start = `playbackOptions -q -min`;
+	int $curtime;
+
+	string $path = "//File-cluster/gdc/Projects/BubbleGuppies/BubbleGuppies_Scratch/Animation/LipsFile/"+$episode+"/";
+	
+	
+
+
+
+	string $tFolder[] = `getFileList -fld $path`;
+	if (size($tFolder) != 0)
+	{
+		for ($k in $tFolder)
+		{
+			if (`gmatch $k "*.ini*"`==0)
+			{
+				$path += ($k+"/");
+			}
+		}
+	}
+
+	$tFolder = `getFileList -fld $path`;
+	if (size($tFolder) != 0) 
+	{
+		for ($l in $tFolder)
+		{
+			if (`gmatch $l "*.ini*"`==0)
+			{
+				$path += ($l+"/");
+			}
+		}
+	}
+
+
+	string $lipsFile;
+	for ($i=0;$i<size($shot);$i++)
+	{
+		string $files[] = `getFileList -fld $path -fs ($episode+"_"+$shot[$i]+"_*"+$chname+"*_"+"*.txt")`;
+		
+		if (`size $files`==1)
+		{
+			string $files[] = `getFileList -fld $path -fs ($episode+"_"+$shot[$i]+"_*"+$chname+"*_"+"*.txt")`;
+		
+			if ($i)
+				$start = $curtime;
+			if (size($files) && `attributeExists "MouthTemp" $mouth`)
+			{
+				cutKey -cl -t ($start+":") -f ":" -at "MouthTemp" $mouth;
+
+				$lipsFile = $path + $files[size($files)-1];
+				//print ($lipsFile+"\n");
+			
+				$fileId = `fopen $lipsFile "r"`;
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				while (size($nextLine)>0)
+				{
+					int $num = `tokenize $nextLine " \t\n" $buff`;
+					if ($num == 2)
+					{
+					
+						if (`gmatch $buff[1] "*NM*"`==1)
+						{
+							int $time = (int)$buff[0];
+							int $val = (int)`match "[0-9]+" $buff[1]`+13;
+							setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+						}
+						else
+						{
+							int $time = (int)$buff[0];
+							int $val = (int)`match "[0-9]+" $buff[1]`;
+							setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+						}
+					}
+					$curtime = $start + (int)$buff[0]-1;
+					$nextLine = `fgetline $fileId`;
+				}
+				fclose $fileId;
+				print ($files[0]+"导入口型成功");
+			}
+		}
+		else
+		{
+			string $files[] = `getFileList -fld $path -fs ($episode+"_"+$shot[$i]+"*.txt")`;
+			
+			if ($i)
+				$start = $curtime;
+			if (size($files) && `attributeExists "MouthTemp" $mouth`)
+			{
+				cutKey -cl -t ($start+":") -f ":" -at "MouthTemp" $mouth;
+
+				$lipsFile = $path + $files[size($files)-1];
+				
+				$fileId = `fopen $lipsFile "r"`;
+				$nextLine = `fgetline $fileId`;
+				$nextLine = `fgetline $fileId`;
+				while (size($nextLine)>0)
+				{
+					//print ($nextLine+"\n");
+					int $num = `tokenize $nextLine " \t\n" $buff`;
+					if ($num == 2)
+					{
+						if (`gmatch $buff[1] "*NM*"`==1)
+						{
+							int $time = (int)$buff[0];
+							int $val = (int)`match "[0-9]+" $buff[1]`+13;
+							
+							setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+						}
+						else
+						{
+							int $time = (int)$buff[0];
+							int $val = (int)`match "[0-9]+" $buff[1]`;
+							
+							setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+						}
+					}
+					$curtime = $start + (int)$buff[0]-1;
+					$nextLine = `fgetline $fileId`;
+				}
+				fclose $fileId;
+
+				print ($files[0]+"导入口型成功!");
+			}
+		}
+	}
+}
+
+
+global proc buMouthselect()
+{
+	string $buff[];
+	//选择角色控制线组
+	string $sel[] = `ls -sl`;
+	if (size($sel) != 1)
+		error "请选择导入口型的角色!";
+	tokenize $sel[0] ":" $buff;
+	string $pre = `substring $sel[0] 1 (size($sel[0])-size($buff[size($buff)-1]))`;
+	string $mouth = $pre + "Mouth";
+	// 角色名字添加 
+	string $cuff[];
+	tokenize $pre "_" $cuff;
+	string $mat=`match "[a-z]" $cuff[1]`+`match "[0-9]+" $cuff[1]`;
+	int	$sz=`size $cuff[1]`-`size $mat`;
+	string $chname=endString($cuff[1], $sz);
+
+
+	
+
+
+	//文件名字
+	string $filename = `file -q -sn -shn`;
+	if (!size($filename))
+		return ;
+	tokenize $filename "_" $buff;
+	string $episode = $buff[1];
+	string $shot[0]={$buff[2]};
+	//$shot[0] = `substring $buff[2] 1 4`;
+	
+	
+	
+	string $get = `idmtService "GetAnimByFilename" $filename`;
+	int $num = `tokenize $get "|" $buff`;
+	if ($num == 7)
+	{
+		tokenize $buff[6] "*" $buff;
+		$shot = $buff;
+	}
+	int $start = `playbackOptions -q -min`;
+	int $curtime;
+
+	string $path = "//File-cluster/gdc/Projects/BubbleGuppies/BubbleGuppies_Scratch/Animation/LipsFile/"+$episode+"/";
+	
+	
+
+
+
+	string $tFolder[] = `getFileList -fld $path`;
+	if (size($tFolder) != 0)
+	{
+	for ($k in $tFolder)
+	{
+	if (`gmatch $k "*.ini*"`==0)
+	{
+	$path += ($k+"/");
+	}
+
+	}
+
+	}
+
+	$tFolder = `getFileList -fld $path`;
+	if (size($tFolder) != 0) 
+	{
+	for ($l in $tFolder)
+	{
+	if (`gmatch $l "*.ini*"`==0)
+	{
+	$path += ($l+"/");
+	}
+
+	}
+
+	}
+	string $lipsFile;
+	for ($i=0;$i<size($shot);$i++)
+	{
+		
+		string $texselect[]=`textScrollList -q -selectItem hjanMouthls`;
+		
+			
+		string $files[] = `getFileList -fld $path -fs $texselect[0]`;
+			
+		if ($i)
+			$start = $curtime;
+		if (size($files) && `attributeExists "MouthTemp" $mouth`)
+			{
+			cutKey -cl -t ($start+":") -f ":" -at "MouthTemp" $mouth;
+
+			$lipsFile = $path + $files[size($files)-1];
+			
+			$fileId = `fopen $lipsFile "r"`;
+			$nextLine = `fgetline $fileId`;
+			$nextLine = `fgetline $fileId`;
+			while (size($nextLine)>0)
+			{
+				//print ($nextLine+"\n");
+				int $num = `tokenize $nextLine " \t\n" $buff`;
+				if ($num == 2)
+				{
+					if (`gmatch $buff[1] "*NM*"`==1)
+					{
+					int $time = (int)$buff[0];
+					int $val = (int)`match "[0-9]+" $buff[1]`+13;
+					
+					setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+					}
+					else
+					{
+					int $time = (int)$buff[0];
+					int $val = (int)`match "[0-9]+" $buff[1]`;
+					
+					setKeyframe -t ($start+$time-1) -v $val -ott "step" -at "MouthTemp" $mouth;
+					}
+				}
+				$curtime = $start + (int)$buff[0]-1;
+				$nextLine = `fgetline $fileId`;
+			}
+			fclose $fileId;
+
+			print ($files[0]+"导入口型成功!");
+			}
+		
+	}
+	
+	
+}

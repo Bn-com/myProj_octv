@@ -1,0 +1,433 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Tran Nguyen Phuong
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// 
+// CROWD CREATION BASED ON LOCATORS AND CURVES
+// 
+// COPYRIGHT (c) 2003 IDMT CHINA
+// 
+// Author: Tran Nguyen Phuong <tran@idmt.org.cn>
+// 
+// Date: 13.07.2003
+//
+// Description:
+//		Create a GUI for tnpCrowdCreator. Users may access the 
+//		plugin's features via this interface.
+//
+// NOTE:
+//		Naming conventions:
+//		+ "crowdLocator*" : for initial particle locators 
+//							(maybe locator node or nurbsCurves)
+//		+ "crowdLocator" : static locations
+//		+ "crowdMovingCurve" : moving tracks for particles
+//		
+// ____________________________________________________________
+// Ref: [1] follow.mel from Maya
+//		[2] kcCrowd* from KC Ong.
+//
+global proc tnpCrowdCreate(string $spanSlider,
+					string $smoothSlider,
+					string $staticGeoRange,
+					string $walkingGeoRange){
+
+	int		$noOfSpans = `intSliderGrp -q -value $spanSlider`;	
+	float	$smoothness = `floatSliderGrp -q -value $smoothSlider`;	
+	int		$minStaticIndexPP = `intFieldGrp -q -value1 $staticGeoRange`;	
+	int		$maxStaticIndexPP = `intFieldGrp -q -value2 $staticGeoRange`;
+	int		$minWalkingIndexPP = `intFieldGrp -q -value1 $walkingGeoRange`;	
+	int		$maxWalkingIndexPP = `intFieldGrp -q -value2 $walkingGeoRange`;		
+	
+	// CALL THE CREATOR
+	tnpCrowdCreator $noOfSpans 
+					$smoothness 
+					$minStaticIndexPP 
+					$maxStaticIndexPP 
+					$minWalkingIndexPP 
+					$maxWalkingIndexPP;
+
+}
+global proc tnpCrowdApplyChange(string $spanSlider, 
+						 string $speedSlider,
+						 string $smoothSlider,
+						 string $indexPPSlider,
+						 string $staticGeoIdRange,
+						 string $walkingGeoIdRange,
+						 string $fakeGeoIdRange,
+						 string $checkBox,
+						 string $checkBoxUpdateRange,
+						 string $checkBoxFake){
+
+	global string	$crowdParticle; // name of the crowd particle
+	global string	$crowdSpeedMultipliers[]; // speeds
+
+	int $spans = `intSliderGrp -q -value $spanSlider`;
+	float $speed = `floatSliderGrp -q -value $speedSlider`;
+	float $smooth = `floatSliderGrp -q -value $smoothSlider`;
+	float $indexPP = `intSliderGrp -q -value $indexPPSlider`;
+	int $indexChanged = `checkBox -q -value $checkBox`;
+	int $rangeChanged = `checkBox -q -value $checkBoxUpdateRange`;
+	int $makeFakeCrowd = `checkBox -q -value $checkBoxFake`;
+
+	int $minStaticIndexPP = `intFieldGrp -q -value1 $staticGeoIdRange`;
+	int $maxStaticIndexPP = `intFieldGrp -q -value2 $staticGeoIdRange`;
+	int $minWalkingIndexPP = `intFieldGrp -q -value1 $walkingGeoIdRange`;
+	int $maxWalkingIndexPP = `intFieldGrp -q -value2 $walkingGeoIdRange`;
+	float $statePP[];
+
+	print ("minWalkingIndexPP = " + $minWalkingIndexPP + "\n");
+	print ("maxWalkingIndexPP = " + $maxWalkingIndexPP + "\n");
+
+	string $sl[] = `ls -tr -selection`;
+
+	if (size($sl) < 1)
+	{
+		print "Please select one/group of crowd curves";
+		return;
+	}
+	// randomize the geo range for selected crowd locators/curves
+	if($rangeChanged == true){
+		waitCursor -state on;
+		string $cmd;
+
+		for($item in $sl){
+			int $id = tnpLookup($item);
+
+			if($id !=-1){
+				$statePP = `particle -attribute statePP -order $id -q $crowdParticle`;
+				// update indexPP
+				if($statePP[0] == 0) // static 
+					$cmd = "particle -e -attribute indexPP -order " + $id + " -floatValue " + rand($minStaticIndexPP, $maxStaticIndexPP) + " " + $crowdParticle;
+				else
+					$cmd = "particle -e -attribute indexPP -order " + $id + " -floatValue " + rand($minWalkingIndexPP, $maxWalkingIndexPP) + " " + $crowdParticle;
+
+				eval($cmd);
+			}
+		}
+
+		print ("GeoRanges are updated!");
+		waitCursor -state off;
+		return;
+	}
+
+	// APPLY CHANGES
+	int $status = 0;	
+	for($item in $sl){
+
+		int $id = tnpLookup($item);
+		
+		if($id!=-1){ 
+
+			$status = 1;
+			
+			$statePP = `particle -attribute statePP -order $id -q $crowdParticle`;
+
+			if($statePP[0] == 1){
+				
+				// Rebuild the curve with new no of spans
+				rebuildCurve -replaceOriginal 1 
+							 -rebuildType 0 
+							 -keepRange 0 
+							 -keepControlPoints 0 
+							 -keepEndPoints 1 
+							 -keepTangents 0 
+							 -spans $spans
+							 -degree 1 
+							 -tolerance 0.05 $item;
+		
+				// update noOfSpansPP
+				string $cmd = "particle -e -attribute noOfSpansPP -order " + $id + " -floatValue " + $spans + " " + $crowdParticle;
+				print ("[ SYS ] Update spansPP = " + $cmd + "\n");
+				eval($cmd);
+
+				// update speedPP
+				$cmd = "particle -e -attribute speedPP -order " + $id + " -floatValue " + $speed + " " + $crowdParticle;
+				print ("[ SYS ] Update speed[" + $id + "] = " + $cmd + "\n");
+				eval($cmd);
+
+				// update smoothPP
+				$cmd = "particle -e -attribute smoothPP -order " + $id + " -floatValue " + $smooth + " " + $crowdParticle;
+				print ("[ SYS ] Update smoothPP[" + $id + "] = " + $cmd + "\n");
+				eval($cmd);
+			}
+			if($indexChanged == true){
+				// update indexPP
+				$cmd = "particle -e -attribute indexPP -order " + $id + " -floatValue " + $indexPP + " " + $crowdParticle;
+				print ("[ SYS ] Update indexPP[" + $id + "] = " + $cmd + "\n");
+				eval($cmd);
+
+				// update speedPP according to this indexPP
+				string $t = $crowdSpeedMultipliers[(int)$indexPP];
+				float $speed = ($t=="")?1:`getAttr ($t + ".input2X")`;
+				particle -e -attribute speedPP -order $id -floatValue $speed $crowdParticle;
+				print ("[ SYS ] Update speed[" + $id + "]\n");
+				
+			}
+		}
+	}
+	
+	// fake crowd
+	if ($makeFakeCrowd == true){
+		int $minFakeIndex = `intFieldGrp -q -value1 $fakeGeoIdRange`;
+		int $maxFakeIndex = `intFieldGrp -q -value2 $fakeGeoIdRange`;
+
+		$status = 0;
+		for($item in $sl){
+			int $id = tnpLookup($item);
+			if($id != -1){
+			
+				$status = 1;
+				
+				// change statePP to 3: fake
+				//$cmd = "particle -e -attribute statePP -order " + $id + " -floatValue 3 " + $crowdParticle;
+				//print ("[ SYS ] Change statePP[" + $id + "] = " + $cmd + "\n");
+				//eval($cmd);
+	
+				// change indexPP		
+				$cmd = "particle -e -attribute indexPP -order " + $id + " -floatValue " + (int)rand($minFakeIndex, $maxFakeIndex) + " " + $crowdParticle;
+				print ("[ SYS ] Change indexPP[" + $id + "] = " + $cmd + "\n");
+				eval($cmd);
+			}						
+		}
+	}
+
+	if($status)
+		print ("[ SYS ] Selected curves are updated!\n");
+	else
+		warning ("Nothing has changed, Plz select crowd locators first!");
+}
+global proc tnpCrowdLoadAttrs(string $spanSlider, 
+					   string $speedSlider,
+					   string $smoothSlider,
+					   string $indexPPSlider){
+
+	global string $crowdParticle; // name of the crowd particle
+
+	string $sl[] = `ls -selection`;
+
+	if (size($sl) != 1)
+	{
+		print "Please select only one crowd locator/curve";
+		return;
+	}
+	
+	int $id = tnpLookup($sl[0]);
+	if($id < 0) error ($sl[0] + " has no index"); 
+	
+
+	// get attributes and update sliders 
+	
+	// statePP
+	$cmd = "particle -attribute statePP -order " + $id + " -q " + $crowdParticle;
+	float $statePP[] = eval($cmd);
+	
+	if ($statePP[0] == 1){
+		// noOfSpansPP	
+		int $spans = `getAttr ($sl[0] + ".spans")`; 
+		intSliderGrp -e -value $spans $spanSlider;
+
+		// speedPP
+		$cmd = "particle -attribute speedPP -order " + $id + " -q " + $crowdParticle;
+		float $speed[] = eval($cmd);
+		floatSliderGrp -e -value $speed[0] $speedSlider;
+
+		// smoothPP
+		$cmd = "particle -attribute smoothPP -order " + $id + " -q " + $crowdParticle;
+		float $smooth[] = eval($cmd);
+		floatSliderGrp -e -value $smooth[0] $smoothSlider;	
+	}
+
+	// indexPP
+	$cmd = "particle -attribute indexPP -order " + $id + " -q " + $crowdParticle;
+	float $indexPP[] = eval($cmd);
+	intSliderGrp -e -value $indexPP[0] $indexPPSlider;		
+}
+proc makeCrowdUI(string $win){
+	string $intro = "TNP CROWD CREATOR V1.0\n";
+	$intro +="Copyright (c) 2003 IDMT CHINA\n";
+
+	string $help = "";
+	$help += "\t+ create a set of crowd \"locators\": locator or nurbsCurve\n";
+	$help += "\t   (by default, these MUST be named \"crowdLocator*\")\n"; 
+	$help += "\t+ place them wherever in the space as u wish\n";
+	$help += "\t+ click on <Create> button: a set of particles will be created\n";
+	$help += "\t   and associated with these locators accordingly.\n";
+	$help += "\t+ use the \"instancer\" to replace partices with geometries\n";
+	$help += "\t+ play it!\n";
+	$help += "\t+ click on <Apply> button to change number of spans and speed\n";
+	$help += "\t   of the selected curves (individual/group).\n";
+	$help += "_______________________________________________________\n";
+	$help += "NOTE:\n";
+	$help += "\t + v1.0: only allows you to create ONE crowd particle per scene!\n";
+		
+	window 
+		-title "tnpCrowdCreator v1.0" 
+		-iconName "crowdCreator" 
+		-titleBar true
+		-minimizeButton true 
+		-maximizeButton true
+		-iconify true
+		-sizeable false
+		-retain
+		-width 428
+		-resizeToFitChildren true
+		$win;
+	
+	string $cl = `columnLayout -rowSpacing 9 -adjustableColumn true`;
+
+	text -label $intro -font "boldLabelFont";
+
+	frameLayout -collapsable true -collapse true -height 25 -label "HOW TO USE?" 
+				-labelAlign "bottom" -borderStyle "in" 
+				-collapseCommand ("window -e -h 450 " + $win)
+				-parent $cl;
+		columnLayout;
+			text -label $help -align "left";
+			setParent..;
+		setParent..;
+	
+	frameLayout -collapsable false -height 280 -label "PER PARTICLE ATTRIBUTES" 
+				-labelAlign "bottom" -borderStyle "in" 
+				-parent $cl;
+		columnLayout;		
+			string $spanSlider = `intSliderGrp
+				-label "No Of Spans" 
+				-field true
+				-min 4
+				-max 100
+				-fmn 4
+				-fmx 500
+				-value 20`;
+
+			string $speedSlider = `floatSliderGrp
+				-enable true
+				-label "Speed" 
+				-field true
+				-min 0.0
+				-max 500.0
+				-value 1.0`;
+			
+			string $smoothSlider =`floatSliderGrp
+				-label "Smoothness"
+				-field true
+				-min 0.0
+				-max 1.0
+				-value 0.1`;
+			
+			string $indexPPSlider = `intSliderGrp
+				-label "GeoIndexPP" 
+				-field true
+				-min 0
+				-max 30
+				-fmn 0
+				-fmx 300
+				-value 0`;
+			separator;
+			string $staticGeoRange = `intFieldGrp -numberOfFields 2
+			   	-label "StaticGeoIdRange"
+    			-value1 0 -value2 0`;
+		
+			string $walkingGeoRange = `intFieldGrp -numberOfFields 2
+			   	-label "WalkingGeoIdRange"
+    			-value1 0 -value2 0`;
+			string $fakeGeoRange = `intFieldGrp -numberOfFields 2
+				-label "FakeGeoIdRange"
+				-value1 -1 -value2 -1`;
+		
+			string $checkBox = `checkBox
+				-label "updateIndexPP"
+				-align "left"
+				-value false`;
+
+			string $checkBoxUpdateRange = `checkBox
+				-label "updateGeoIdRanges"
+				-align "left"
+				-value false`;
+
+			string $checkBoxFake = `checkBox
+				-label "makeFakeCrowd"
+				-align "left"
+				-value false`;
+		
+			setParent ..;
+		setParent ..;
+					
+	string $rl = `rowColumnLayout -numberOfRows 1 -parent $cl`;
+
+	string $makeCreateButton = `button 
+		-width 80
+		-label "Create"
+		-align "center"`;
+	
+	string $makeLoadAttrButton = `button 
+		-width 100
+		-label "LoadAttributes"
+		-align "center"
+		-command ("tnpCrowdLoadAttrs " 
+				+ $spanSlider + " "
+				+ $speedSlider + " "
+				+ $smoothSlider + " "
+				+ $indexPPSlider)`;
+
+	string $makeApplyButton = `button 
+		-width 80
+		-label "APPLY"
+		-align "center"
+		-command ("tnpCrowdApplyChange " 
+				+ $spanSlider + " "
+				+ $speedSlider + " "
+				+ $smoothSlider + " "
+				+ $indexPPSlider + " "
+				+ $staticGeoRange + " "
+				+ $walkingGeoRange + " "
+				+ $fakeGeoRange + " "
+				+ $checkBox + " "
+				+ $checkBoxUpdateRange + " "
+				+ $checkBoxFake)`;
+
+	string $invisibleButton = `button 
+		-width 80
+		-label "Invisible"
+		-align "center"
+		-command ("window -e -vis 0 " +$win)`;
+
+	string $exitButton = `button 
+		-width 80
+		-label "EXIT"
+		-align "center"
+		-command ("deleteUI -window " +$win)`;
+	
+	setParent ..;
+
+	showWindow $win;
+	
+	//print $noOfSpans;
+	button -e -command ("tnpCrowdCreate "  
+							+ $spanSlider + " " 
+							+ $smoothSlider + " "
+							+ $staticGeoRange + " "
+							+ $walkingGeoRange
+							+ "; //button -e -enable false " + $makeCreateButton
+							) $makeCreateButton;	
+}
+global proc tnpCrowdUI(){
+
+	source tnpCrowdCreator;
+	source tnpCrowdGridLocatorUI;
+	source tnpCrowdCollisionDetection;
+	source tnpCrowdCollisionAvoidance;
+
+	global string $crowdParticle = "crowdParticle";
+	$win = "tnpCrowdWindow";
+
+	if (!`window -exists $win`){
+		makeCrowdUI($win);
+	}
+	showWindow $win;
+}

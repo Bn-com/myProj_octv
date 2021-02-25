@@ -1,0 +1,120 @@
+global proc ezCrowdCreatLoc()
+{
+	string $selected[] = `ls -selection`;
+
+	if ((size($selected) !=  1) || (kcIsType($selected[0], "nurbsSurface") && kcIsType($selected[0], "mesh")))
+		error "select a NURBS or Poly plane.";
+
+	string $plane = $selected[0];
+	float $dist = `floatSliderGrp -q -v crowdDist`;
+	int $num = `intSliderGrp -q -v crowdNum`;
+
+	ezCrowdSetPos($plane,  $dist,  $num);
+}
+
+global proc ezCrowdSetPos(string $boundPlane, float $collisionDist, int $size)
+{
+	int $maxAttempt = 500;
+
+	vector $obstaclePos[];
+	float  $obstacleRad[];
+
+	string $obstacles[] = `ls "crowdObstacle*"`;
+
+	for ($item in $obstacles)
+	{	
+		if (kcIsType($item, "nurbsCurve") && `nodeType $item` == "transform")
+		{
+			float $pos[] = `xform -q -worldSpace -translation  $item`;
+			float $scale[] = `xform -q -relative -scale  $item`;
+			$obstaclePos[size($obstaclePos)] = <<$pos[0], $pos[1], $pos[2]>>;
+			$obstacleRad[size($obstacleRad)] = $scale[0];
+		}
+
+	}
+	vector $pos[];
+
+	float $minX = `getAttr ($boundPlane + ".boundingBoxMinX")`;
+	float $maxX = `getAttr ($boundPlane + ".boundingBoxMaxX")`;
+	float $y    = `getAttr ($boundPlane + ".boundingBoxMinY")`;
+	float $minZ = `getAttr ($boundPlane + ".boundingBoxMinZ")`;
+	float $maxZ = `getAttr ($boundPlane + ".boundingBoxMaxZ")`;
+
+
+	string $group = `createNode transform -name loc_group`;
+
+
+	for ($i = 0; $i < $size; $i++)
+	{
+		int $count = 0;
+
+		while (true) 
+		{
+			vector $newPos = <<rand($minX, $maxX), $y, rand($minZ, $maxZ)>>;
+
+
+			if (ezCrowdPosCollide($obstaclePos, $obstacleRad, $pos, $newPos, $collisionDist) == false)
+			{
+				$pos[size($pos)] = $newPos;
+
+				string $locator[] = `spaceLocator -position 0 0 0 -name ("crowdLoc" + $i)`;
+				xform -worldSpace -translation ($newPos.x) ($newPos.y) ($newPos.z) $locator[0];
+				parent $locator[0] $group;
+									
+				break;
+			}
+
+			$count++;
+
+			if ($count > $maxAttempt)
+			{
+				warning("Max attempt reached. Fail to compute position for locator " + $i);
+				break;
+			}
+		}
+	}
+
+	select $group;
+
+	int $size = size($pos);
+	print("Create " + $size + " locators.");
+}
+
+global proc int ezCrowdPosCollide(vector $obstaclePos[], float $obstacleRad[], vector $pos[], vector $newPos, float $collisionDist)
+{
+	for ($i = 0; $i < size($obstaclePos); $i++)
+	{
+		vector $temp = $obstaclePos[$i] - $newPos;
+
+		if ($temp.x * $temp.x + $temp.y * $temp.y + $temp.z * $temp.z < $obstacleRad[$i] * $obstacleRad[$i])
+			return true;
+	}
+
+
+	for ($item in $pos)
+	{
+		vector $temp = $item - $newPos;
+
+		if ($temp.x * $temp.x + $temp.y * $temp.y + $temp.z * $temp.z < $collisionDist * $collisionDist)
+			return true;
+	}
+
+	return false;
+}
+
+global proc ezCrowdCreatObstacle()
+{
+	string $curves[] = `ls -sl`;
+
+	string $group = `createNode transform -name crowdObstacle_group`;
+
+	for ($i=0 ; $i< size($curves) ; $i++)
+	{
+		if (kcIsType($curves[$i], "nurbsCurve"))
+		{
+			closeCurve -ch 1 -ps 0 -rpo 1 -bb 0.5 -bki 0 -p 0.1 $curves[$i];
+			rename $curves[$i] ("crowdObstacle" + $i);
+			parent ("crowdObstacle" + $i) $group;
+		}
+	}
+}

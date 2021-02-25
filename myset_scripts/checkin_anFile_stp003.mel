@@ -1,0 +1,823 @@
+//#=========step 004  enter copy  texture =======HIGH RISK============
+print ("\nproject:" + $project);
+print ("\nmode:" + $mode);
+print ("\ndestFolder:" + $destFolder);
+print ("\nprogress:" + $progress);
+//
+//检查贴图的大小与格式
+string $files[] = `ls -type "file"`;
+int $i=0;
+int $flag=0;
+string $info="";
+string $infos="";
+string $checkMaps[];
+clear $checkMaps;
+for ($file in $files)
+{
+    string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+    int $flags=0;
+    for($map in $checkMaps){
+        if($map==$fileTextureName){
+            $flags=1;
+            break;
+        }
+    }
+    if($flags==1){
+        continue;
+    }
+    if(`filetest -f $fileTextureName`){
+        float $ImageoutSizeX=`getAttr ($file+".outSizeX")`;
+        float $ImageoutSizeY=`getAttr ($file+".outSizeY")`;
+        if($ImageoutSizeX>4096 || $ImageoutSizeY>4096){
+            $i=$i+1;
+            $info=$info+$fileTextureName+"\n";
+        }
+
+        string $ext=`fileExtension($fileTextureName)`;
+        if($ext!="JPG" && $ext!="jpg" && $ext!="jpeg" && $ext!="JPEG" && $ext!="HDR" && $ext!="hdr" && $ext!="TX" && $ext!="tx" && $ext!="PNG" && $ext!="png" ){
+            $flag=1;
+            $infos=$infos+$fileTextureName+"\n";
+        }
+    }
+    $checkMaps[size($checkMaps)]=$fileTextureName;
+}
+if($i>4){
+    //string $renname=`getenv username`;
+    //if($renname!="liangb"){
+        confirmDialog -title "贴图分辨率" -message ($info+"超过四张贴图的分辨率大于4096");
+        error ($info+"贴图的分辨率大于4096");
+    //}
+}
+if($flag>0){
+    confirmDialog -title "贴图格式" -message ($infos+"贴图格式不正确,正确的格式(JPG,HDR,TX,PNG)");
+    error($infos+"贴图格式不正确,正确的格式(JPG,HDR,TX,PNG)");
+}
+
+
+//检查arnold代理与非代理文件
+if($mode=="cache" || $mode=="anim"){
+
+}else{
+    zwCheckArnoldTx();
+}
+
+//==========================Very Important    High risk  process=================
+
+
+//    zwCheckinCopyTextureImage($project, $mode, $destFolder, $progress);
+
+
+
+
+//#=================================================================
+
+//global proc zwCheckinCopyTextureImage(string $project, string $mode, string $destFolder, int $progress)
+//{
+string $maps;
+if (`match "layout" $mode` != "" || `match "anim" $mode` != "" || `match "simulation" $mode` != "" || `match "crowd" $mode` != "" || `match "cache" $mode` != "" || `match "effect" $mode` != "" || `match "render" $mode` != "" )
+{
+    $maps = `substitute "[^/]*$" $destFolder "maps"`;
+}
+else
+{
+    $maps = `substitute "/[^/]*$" $destFolder ""`;
+}
+
+$maps = `substitute "/scenes/" $maps "/sourceimages/"`;
+print ("\nmaps:" + $maps);
+
+
+string $OCTV_PROJECTS = tolower(`getenv "OCTV_PROJECTS"`);
+
+string $production = `getenv "OCTV_PROJECTS"` + "/" + $project + "/Project";
+
+print ("\nproduction:" + $production);
+
+string $error = `zwCheckTextureImage 1 {"file", "fileTextureName", $production, $project, $mode, $destFolder}`;
+if (`pluginInfo -query -loaded "Mayatomr"`)
+{
+    $error += `zwCheckTextureImage 1 {"mentalrayTexture", "fileTextureName", $production, $project, $mode, $destFolder}`;
+    $error += `zwCheckTextureImage 1 {"mentalrayIblShape", "texture", $production, $project, $mode, $destFolder}`;
+}
+$error += `zwCheckTextureImage 1 {"imagePlane", "imageName", $production, $project, $mode, $destFolder}`;
+
+//yeti贴图的上传
+if(`pluginInfo -query -loaded "pgYetiMaya"`){
+    print("\n yeti上传："+$destFolder+"\n");
+
+    $error+=zwYetiCheckCopyTextureImage($destFolder, $project);
+}
+
+if ($error != "")
+{
+    if ($progress >= 100)
+    {
+        error $error;
+    }
+    else
+    {
+        warning $error;
+    }
+}
+
+//zwCopyTextureImage(3, {"file", "fileTextureName", $maps, "1", "1", $progress, $project, "0"});
+//if (`pluginInfo -query -loaded "Mayatomr"`)
+//{
+//    zwCopyTextureImage(3, {"mentalrayTexture", "fileTextureName", $maps, "1", "1", $progress, $project, "0"});
+//    zwCopyTextureImage(3, {"mentalrayIblShape", "texture", $maps, "1", "1", $progress, $project, "0"});
+//    zwCopyTextureImage(3, {"mib_ptex_lookup", "filename", $maps, "1", "1", $progress, $project, "0"});
+//    zwCopyTextureImage(2, {"", "", $maps, "1", "1", $progress, $project, "0"});
+//}
+//if (`pluginInfo -query -loaded "vrayformaya"`)
+//{
+//    zwCopyTextureImage(3, {"VRayMesh", "fileName", $maps, "1", "1", $progress, $project, "0"});
+//    zwCopyTextureImage(3, {"VRayLightIESShape", "iesFile", $maps, "1", "1", $progress, $project, "0"});
+//    zwCopyTextureImage(4, {"", "", $maps, "1", "1", $progress, $project, "0"});
+//}
+//
+//zwCopyTextureImage(3, {"imagePlane", "imageName", $maps, "1", "1", $progress, $project, "0"});
+//zwCopyTextureImage(3, {"brush", "imageName", $maps, "1", "0", $progress, $project, "0"});
+//zwCopyTextureImage(3, {"brush", "leafImage", $maps, "1", "0", $progress, $project, "0"});
+//zwCopyTextureImage(3, {"brush", "flowerImage", $maps, "1", "0", $progress, $project, "0"});
+
+//print ("\nfile texture done" );
+//}
+
+// upload cache
+if ($copyCache)
+{
+    CheckinCacheFile($project,$destFolder);
+    if(`pluginInfo -query -loaded "pgYetiMaya"`){
+        print "\n上传yeti缓存\n";
+        zwCheckCopyYetiCache($destFolder,$project);
+    }
+}
+
+// 删除所有ViewSelectedSet
+if (!`about -batch`)
+{
+    $buf = `getPanel -type "modelPanel"`;
+    for ($modelPanel in $buf)
+    {
+        isolateSelect -state false $modelPanel;
+    }
+}
+
+// 线框显示
+$buf = `getPanel -type "modelPanel"`;
+for($panel in $buf)
+    modelEditor -edit -displayAppearance "wireframe" -displayLights "default" $panel;
+
+
+//checkin tx\ms的时候自动运行"diable all BOTs"
+if ($mode == "texture" || $mode == "master")
+{
+    zwSetIntAttrAll "file" "useCache" false;
+    //delete all diskcache
+    $buf = `ls -type "diskCache"`;
+    if (size($buf) > 0)
+    {
+        delete $buf;
+    }
+
+    if (`pluginInfo -query -loaded "Mayatomr"`)
+    {
+        zjRemoveMRsda;
+    }
+}
+
+//checkin *hair*_dy的时候，自动运行“动３”
+if ($mode == "simulation" && `match "hair" (tolower($filename))` != "")
+{
+    zwSetIntAttrAll "hairSystem" "simulationMethod" 3;
+}
+
+
+if ($copyMaps)
+{
+    string $files[] = `ls -type "file"`;
+    for ($file in $files)
+    {
+        if (`reference -isNodeReferenced $file`)
+        {
+            continue;
+        }
+
+        string $fileTextureName = `getAttr ($file + ".fileTextureName")`;
+
+        //	string $texname = `match "[^/\\]+$" $fileTextureName`;
+        //	$upPath = "${OCTV_PROJECTS}/" + $project + "/Project/sourceimages/" + $asset_type + "/" + $idName + "/" + $texname;
+        //	$upPath = `substitute "/[^/]+$" $str ""` + "/" + $texname;
+        //	$upPath = `substitute "//octvision.com/CG/Themes" $destMapFolder "${OCTV_PROJECTS}"` + "/" + $texname;
+        string $upPath = `substitute "//octvision.com/CG/Themes" $fileTextureName "${OCTV_PROJECTS}"`;
+
+        if ($fileTextureName != $upPath)
+        {
+            setAttr ($file + ".fileTextureName") -type "string" $upPath;
+        }
+    }
+
+}
+
+// save a temp file for uploading
+
+int $rs = catch(`file -force -prompt false -save -uiConfiguration false`);
+if ($rs)
+{
+    sysFile -delete $temp;
+    error "不能保存文件，请检查是否D：盘空间不足";
+}
+
+print ("\nasset_type:" + $asset_type);
+int $tdTest = `getenv "OCTV_TDTEST"`;
+if ( $tdTest!= 0)
+{
+    error ("测试，文件已经另存为：" + $temp);
+}
+
+//Upload attached file and maya file
+string $bakfList[] = `getFileList -folder ($destFolder + "/" + "Backups/")`;
+string $newFile = `file -q -sn`;
+string $onlyfilename = basename($newFile, "");
+string $headName = `match "[^.]+" $onlyfilename`;
+
+
+print ("\nnewFile:" + $newFile);
+print ("\ndestFile:" + $destFolder);
+
+int $flagCam=false;
+string $sysrs = "";
+string $bakname = "";
+
+//动画自动导出摄像机组
+//相机目标路径
+string $camFolder="";
+string $camName="";
+//if($mode=="anim"){
+int $rs=true;
+string $message="是否单独导出相机文件上传？\n\n点Ignore忽略继续,点OK上传相机文件";
+string $result = `confirmDialog -message $message -button "Ignore" -button "OK" -defaultButton "OK" -cancelButton "Ignore" -dismissString "Ignore"`;
+
+if($result=="OK"){
+    //string $newFile = `file -q -sn`;
+    //string $onlyfilename = basename($newFile, "");//文件名
+    string $buf[];
+    clear $buf;
+    tokenize $onlyfilename "_." $buf;
+
+    string $allObj[]=`listCameras -p`;//查找相机
+    string $importCam="";
+    string $OCTV_PROJECTS = `getenv "OCTV_PROJECTS"`;
+    int $flag=false;
+    for($i=0;$i<size($allObj);$i++){
+        string $allCam[]=`listRelatives -p $allObj[$i]`;//相机上一级的目录
+        string $buffer[];
+        for($j=0;$j<size($allCam);$j++){
+            tokenize $allCam[$j] "_" $buffer;
+            if((size($buffer)>=4 && size($buffer)<=6) && (`match "_cam" $allCam[$j]` != "")){
+                string $sceneNum=$buffer[1];
+                string $shotNum=$buffer[2];
+                if($buffer[0]==$buf[0] && $sceneNum==$buf[1] && $shotNum==$buf[2]){
+                   $flag=true;
+                   select -d;
+                   select -r $allCam[$j];
+                   $camName=$allCam[$j];
+
+
+                   $camFolder = $OCTV_PROJECTS + "/" + $buffer[0] + "/Project/scenes/animation/"+ $sceneNum + "/" + $shotNum+"/camera";
+
+                   string $fList[] = `getFileList -folder ($camFolder + "/") -filespec ($allCam[$j] + "*")`;
+
+                   if (size($fList))
+                    {
+                        string $fLists[];
+                        clear $fLists;
+                        for($f in $fList){
+                            string $lists=tolower($f);
+                            $fLists[size($fLists)]=$lists;
+                        }
+
+                        string $sortVerhis[] = `sort $fLists`;
+                        string $lastVerfile = "";
+                        if (size($sortVerhis))
+                            $lastVerfile = $sortVerhis[size($sortVerhis)-1];
+
+                        print ("\nlastVerf:" + $lastVerfile);
+                        string $cver = `match "_c[0-9]{3}." $lastVerfile`;
+                        int $newver = int(`substring $cver 3 5`) + 1;
+
+                        int $padding = 3;
+                        string $newNum = `python ("'%0" + $padding + "d' % " + $newver)`;
+                         $camName =  $camName + "_c" + $newNum + ".ma";
+                    }
+                    else
+                         $camName =  $camName + "_c001.ma";
+
+                   string $camPath = `substitute $onlyfilename $newFile $camName`;
+
+                   file -force -options "v=0;" -typ "mayaAscii" -pr -es  $camPath;
+                   for($objsCam in $allObj){
+                        lockNode -lock off $objsCam;
+                   }
+                   delete $allCam[0];
+                   int $rs = catch(`file -force -prompt false -save -uiConfiguration false`);
+                    if ($rs)
+                    {
+                        sysFile -delete $temp;
+                        error "不能保存文件，请检查是否D：盘空间不足";
+                    }
+
+                   $sysrs = `zwSysFile "copy" ($camPath) $camFolder  0`;
+                   $flagCam=true;
+                   break;
+                }
+            }else{
+                continue;
+            }
+
+        }
+        if($flag){
+            break;
+        }
+        while(size($allCam)>0){
+            $allCam=`listRelatives -p $allCam[0]`;
+            tokenize $allCam[0] "_" $buffer;
+
+            if((size($buffer)>=4 && size($buffer)<=6) && (`match "_cam" $allCam[0]` != "")){
+                print ("\nallCam:" + $allCam[0]);
+                string $sceneNum=$buffer[1];
+                string $shotNum=$buffer[2];
+                if($buffer[0]==$buf[0] && $sceneNum==$buf[1] && $shotNum==$buf[2]){
+                   $flag=true;
+
+                   select -d;
+                   select -r $allCam[0];
+                   $camName=$allCam[0];
+
+                   $camFolder = $OCTV_PROJECTS + "/" + $buffer[0] + "/Project/scenes/animation/"+ $sceneNum + "/" + $shotNum+"/camera";
+
+                   string $fList[] = `getFileList -folder ($camFolder + "/") -filespec ($allCam[$j] + "*")`;
+
+                   if (size($fList))
+                    {
+                        string $fLists[];
+                        clear $fLists;
+                        for($f in $fList){
+                            string $lists=tolower($f);
+                            $fLists[size($fLists)]=$lists;
+                        }
+
+                        string $sortVerhis[] = `sort $fLists`;
+                        string $lastVerfile = "";
+                        if (size($sortVerhis))
+                            $lastVerfile = $sortVerhis[size($sortVerhis)-1];
+
+                        print ("\nlastVerf:" + $lastVerfile);
+                        string $cver = `match "_c[0-9]{3}." $lastVerfile`;
+                        int $newver = int(`substring $cver 3 5`) + 1;
+
+                        int $padding = 3;
+                        string $newNum = `python ("'%0" + $padding + "d' % " + $newver)`;
+                         $camName =  $camName + "_c" + $newNum + ".ma";
+                    }
+                    else
+                         $camName =  $camName + "_c001.ma";
+
+                    string $camPath = `substitute $onlyfilename $newFile $camName`;
+
+                    file -force -options "v=0;" -typ "mayaAscii" -pr -es  $camPath;
+                    for($objsCam in $allObj){
+                        lockNode -lock off $objsCam;
+                    }
+                    delete $allCam[0];
+                    int $rs = catch(`file -force -prompt false -save -uiConfiguration false`);
+                    if ($rs)
+                    {
+                        sysFile -delete $temp;
+                        error "不能保存文件，请检查是否D：盘空间不足";
+                    }
+                    $sysrs = `zwSysFile "copy" ($camPath) $camFolder  0`;
+                    $flagCam=true;
+                    break;
+                }
+            }
+        }
+        if($flag){
+            break;
+        }
+    }
+    if(!$flag){
+            error "场景中的相机组命名错误，正确的名字格式为：项目名_场景号_镜头号_相机，例如 PROJ_sc10_sh02_cam";
+    }
+
+}
+//}
+
+
+if ($asset_type == "characters" || $asset_type == "props" || $asset_type == "sets" || $asset_type == "cameras")	//Asset and cameras
+{
+    string $verhis[];
+    clear $verhis;
+    for ($item in $bakfList)
+    {
+        if (`filetest -d ($destFolder + "/" + "Backups/" + $item)` && `gmatch $item ($headName + "*")`)
+        {
+            $verhis[size($verhis)] = $item;
+        }
+    }
+
+    string $sortVerhis[] = `sort $verhis`;
+    string $lastVerfile = "";
+    if (size($sortVerhis))
+        $lastVerfile = $sortVerhis[size($sortVerhis)-1];
+
+    print ("\nlastVerfile:" + $lastVerfile);
+    string $cver = `match "_c[0-9]{3}$" $lastVerfile`;
+    int $onlyver = int(`substring $cver 3 5`);
+
+
+    int $padding = 3;
+    string $newNum = `python ("'%0" + $padding + "d' % " + ($onlyver + 1))`;
+    $bakname = $headName + "_c" + $newNum;
+
+    for ($i =1; $i<($onlyver-1); $i++)
+    {
+        string $hisNum = `python ("'%0" + $padding + "d' % " + $i)`;
+        string $hisname = $headName + "_c" + $hisNum;
+        $sysrs = `zwSysFile "rd" ($destFolder + "/" + "Backups/" + $hisname) "" 0`;   //建一个文件夹
+    }
+
+
+    $sysrs = `zwSysFile "fcopy" $newFile ($destFolder + "/" + "Backups/" + $bakname) 0`;  //拷贝到文件夹下面
+}
+else
+{
+    $bakfList = `getFileList -folder ($destFolder + "/")`;
+    $headName = `substring $headName 1 (size($headName)-5)`;
+    print ("\n--------------headename:" + $headName);
+
+
+    string $verhis[];
+    clear $verhis;
+    for ($item in $bakfList)
+    {
+        print ("\nitem:" + $destFolder + "/"+ $item);
+        print ("\nheadName:" + $headName);
+        if (`filetest -f ($destFolder + "/" + $item)` && `gmatch $item ($headName + "*")`)
+        {
+            $verhis[size($verhis)] = $item;
+        }
+    }
+
+    string $sortVerhis[] = `sort $verhis`;
+    string $lastVerfile = "";
+    if (size($sortVerhis))
+        $lastVerfile = $sortVerhis[size($sortVerhis)-1];
+
+    print ("\nlastVerfile:" + $lastVerfile);
+    string $cver = `match "_c[0-9]{3}." $lastVerfile`;
+    int $onlyver = int(`substring $cver 3 5`);
+
+    int $padding = 3;
+    string $newNum = `python ("'%0" + $padding + "d' % " + ($onlyver + 1))`;
+    $bakname = $headName + "_c" + $newNum;
+
+    for ($i =1; $i<($onlyver-1); $i++)
+    {
+        string $hisNum = `python ("'%0" + $padding + "d' % " + $i)`;
+        string $hisname = $headName + "_c" + $hisNum;
+        $sysrs = `zwSysFile "del" ($destFolder + "/" + $hisname + "." + $fileExt) "" 0`;  //删除原来的文件重命名文件名
+    }
+
+}
+
+//2016.2.29上传效果图片
+if  ($attached != "")
+{
+    string $attachedExt = fileExtension($attached);
+    string $attachedName;
+    if ($asset_type != "")
+    {
+
+        $attachedName = $headName + "." + $attachedExt;
+        //$sysrs = `zwSysFile "copy" $attached ($destFolder + "/" + "Backups/" + $bakname + "/" + $attachedName) 0`;
+        $sysrs = `zwSysFile "copy" $attached ($destFolder + "/" + $attachedName) 0`;
+
+        string $db = "dbo.filesystem_upload";
+        string $fpath=$destFolder + "/" + $attachedName;
+
+        string $buf[];
+        clear $buf;
+
+        tokenize $attachedName "_." $buf;
+
+        python("import octvDB");
+        python("octvDB.delTextureDB('" + $db + "','" +$attachedName + "')");
+        python("octvDB.insertAssertDB('" + $db + "','" + $attachedName + "','" + $fpath + "','" + $project + "','" + $buf[1] + "','" + 0 + "','" + $asset_type + "','" + $mode + "')");
+
+    }
+    else
+    {
+        $attachedName = $headName + "." + $attachedExt;
+        $sysrs = `zwSysFile "copy" $attached ($destFolder + "/" + $attachedName) 0`;
+
+        string $db = "dbo.filesystem_upload";
+
+        string $fpath=$destFolder + "/" + $attachedName;
+
+        string $buf[];
+        clear $buf;
+        tokenize $attachedName "_." $buf;
+        print "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\n";
+        print $buf[1];
+        print"\n";
+        print $buf[2];
+        python("import octvDB");
+
+        string $anim="animation";
+        python("octvDB.delTextureDB('" + $db + "','" +$attachedName + "')");
+        python("octvDB.insertAnimationDB('" + $db + "','" + $attachedName + "','" + $fpath + "','" + $project + "','" + $buf[1] + "','" + $buf[2] + "','" + 1 + "','" + $anim + "','" + $mode + "')");
+    }
+}
+
+$sysrs = `zwSysFile "fcopy" $newFile $destFolder 0`;  //拷贝一个新的文件在目录下
+
+/*string $msFolder = "";
+string $msAnim = "";
+if ($mode == "rigging")
+{
+    $msFolder = `substitute "/rigging" $destFolder "/master"`;
+    //2015.12.11
+    if(`match "_dy_" $onlyfilename`!="" ){
+        $msAnim = `substitute "_dy_rg" $onlyfilename "_h_dy_msAnim"`;
+
+    }else if(`match "_mc_" $onlyfilename`!=""){
+        $msAnim = `substitute "_mc_rg" $onlyfilename "_h_mc_msAnim"`;
+
+    }else{
+        $msAnim = `substitute "_rg" $onlyfilename "_msAnim"`;
+    }
+
+    $sysrs = `zwSysFile "copy" $newFile ($msFolder + "/" + $msAnim) 0`;
+}*/
+
+
+//2015.12.11
+//上传文件场景文件直接生成msTex文件
+string $msTex="";
+string $msTexFolder="";
+if($mode=="texture" && $asset_type == "sets"){
+    $msTexFolder=`substitute "/texture" $destFolder "/master"`;
+
+    $msTex=`substitute "_tx" $onlyfilename "_msTex"`;
+    $sysrs=`zwSysFile "copy" $newFile ($msTexFolder + "/" + $msTex) 0`;
+}
+
+
+//2015.12.10
+//备份一份只有lambert材质的文件在master文件夹中给动画组做动画,msNoTex
+
+string $TexFolder="";
+string $msNoTex="";
+
+if(($mode=="master" && `match "_h_msAnim" $onlyfilename`!="")|| ($mode=="texture" && $asset_type == "sets" && `match "_h_tx" $onlyfilename`!="")){
+    if($mode=="master"){
+        $msNoTex =  `substitute "_h_msAnim" $onlyfilename "_h_msNoTex"`;
+
+    }else if($mode=="texture" && $asset_type == "sets"){
+        $msNoTex =  `substitute "_h_tx" $onlyfilename "_h_msNoTex"`;
+
+    }
+    string $msNoTexFileName="D:/octvTemp/"+$msNoTex ;
+    sysFile -delete $msNoTexFileName;
+    file -rename $msNoTexFileName;
+
+    string $allShading[]=`ls -type shadingEngine`;
+    for($i in $allShading){
+        if($i!="initialParticleSE" && $i!="initialShadingGroup"){
+            catch(`delete $i`);
+        }
+    }
+    hyperShadePanelMenuCommand("hyperShadePanel1", "deleteUnusedNodes");
+
+    string $lambert=`shadingNode -asShader lambert`;
+    string $lambertSG=`sets -renderable true -noSurfaceShader true -empty -name ($lambert+"SG")`;
+    connectAttr -f ($lambert+".outColor") ($lambertSG+".surfaceShader");
+    select -allDagObjects;
+    sets -e -forceElement $lambertSG;
+
+    int $rss = catch(`file -force -prompt false -save -uiConfiguration false`);
+    if ($rss)
+    {
+        sysFile -delete $msNoTexFileName;
+        error "不能保存文件，请检查是否D：盘空间不足";
+    }
+    if($mode=="master"){
+        $TexFolder=$destFolder;
+
+    }else if($mode=="texture" && $asset_type == "sets"){
+
+        $TexFolder=`substitute "/texture" $destFolder "/master"`;
+    }
+
+    //print $TexFolder;
+    print $msNoTex;
+
+    $sysrs = `zwSysFile "copy" $msNoTexFileName ($TexFolder + "/" + $msNoTex) 0`;
+}
+
+
+
+
+
+//record for database
+string $upUser = `getenv username`;
+if ($asset_type == "characters" || $asset_type == "props" || $asset_type == "sets")	//Asset
+{
+    string $db = "asset";
+    string $fstate = "0";
+    string $ftype = "1";
+    string $fpath = ($destFolder + "/" + $filename);
+    string $checkState = "1";
+    string $checkUser = "";
+
+    switch($mode)
+    {
+        case "model":
+            $ftype = "1";
+            break;
+        case "morph":
+            $ftype = "2";
+            break;
+        case "rigging":
+            $ftype = "3";
+            break;
+        case "dynamic":
+            $ftype = "4";
+            break;
+        case "texture":
+            $ftype = "5";
+            break;
+        case "action":
+            $ftype = "6";
+            break;
+        case "lighting":
+            $ftype = "8";
+            break;
+        case "master":
+            $ftype = "7";
+            break;
+    }
+
+    python("import octvDB");
+
+    python("octvDB.delDB('" + $db + "','" + $filename + "')");
+    print ("\nlastVerfile:" + $desc);
+    python("octvDB.insertDB('" + $db + "','" + $filename + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+    $fstate = 1;
+    python("octvDB.insertDB('" + $db + "','" + $bakname + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+
+    /*if ($mode == "rigging")
+    {
+        $fstate = "0";
+        $fpath = ($msFolder + "/" + $msAnim);
+
+        python("octvDB.delDB('" + $db + "','" + $msAnim + "')");
+        $ftype = "7";
+        python("octvDB.insertDB('" + $db + "','" + $msAnim + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+
+    }*/
+    //2015.12.11
+    //上传文件场景文件直接生成msTex文件
+    if($mode=="texture" && $asset_type == "sets"){
+        $fstate = "0";
+        $fpath = ($msTexFolder + "/" + $msTex);
+
+        python("octvDB.delDB('" + $db + "','" + $msTex + "')");
+        $ftype = "7";
+        python("octvDB.insertDB('" + $db + "','" + $msTex + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+
+    }
+
+    //2015.12.10
+    //备份一份只有lambert材质的文件在master文件夹中给动画组做动画,msNoTex
+    if(($mode=="master" && `match "_h_msAnim" $onlyfilename`!="")|| ($mode=="texture" && $asset_type == "sets" && `match "_h_tx" $onlyfilename`!="")){
+        $fstate = "0";
+        $fpath = ($TexFolder + "/" + $msNoTex);
+
+        python("octvDB.delDB('" + $db + "','" + $msNoTex + "')");
+        $ftype = "7";
+        python("octvDB.insertDB('" + $db + "','" + $msNoTex + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+    }
+
+    //if($project == "JMWC"){
+        string $upUser = `getenv username`;
+        string $dbreturn[] = `python("octvDB.queryCheckUserDB('" + $db + "','" + $filename +"')")`;
+        string $checkUser = $dbreturn[0];
+        if($checkUser==$upUser && strip($checkUser)!= ""){
+            python("octvDB.setCheckUserUNLLDB('" + $db + "','" + $filename + "')");
+        }
+    //}
+
+}
+else
+{
+    string $db = "animation";
+    string $fstate = "0";
+    string $ftype = "1";
+    string $fpath = ($destFolder + "/" + $filename);
+    string $checkState = "1";
+    string $checkUser = "";
+
+    switch($mode)
+    {
+        case "layout":
+            $ftype = "5";
+            break;
+        case "anim":
+            $ftype = "0";
+            break;
+        case "camera":
+            if($asset_type=="cameras"){
+                $ftype = "2";  //总相机类型
+            }else{
+                $ftype = "11"; //动画相机类型
+            }
+            break;
+        case "cache":
+            $ftype = "1";
+            break;
+        case "crowd":
+            $ftype = "3";
+            break;
+        case "simulation":
+            $ftype = "7";
+            break;
+        case "effect":
+            $ftype = "4";
+            break;
+        case "render":
+            $ftype = "6";
+            break;
+        case "lighting":
+            $ftype = "9";
+            break;
+    }
+
+    python("import octvDB");
+
+    python("octvDB.insertDB('" + $db + "','" + $filename + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+
+    if ($mode == "anim" && $flagCam==true)
+    {
+        $fstate = "0";
+        $fpath = ($camFolder + "/" + $camName);
+
+        //python("octvDB.delDB('" + $db + "','" + $camName + "')");
+        $ftype = "11";
+        python("octvDB.insertDB('" + $db + "','" + $camName + "','" + $fstate + "','" + $ftype + "','" + $upUser + "','" + $fpath + "','" + $checkState + "','" + $checkUser  + "','" + $desc + "')");
+    }
+    //if($project == "JMWC"){
+        string $upUser = `getenv username`;
+        string $bufer[];
+        string $fileNames="";
+        int $i=`tokenize $filename "_." $bufer`;
+        if(`match "c" $buf[$i-2]`!=""){
+            string $cver = `match "_c[0-9]{3}." $filename`;
+            int $newver = int(`substring $cver 3 5`) - 1;
+            int $padding = 3;
+            string $newNum = `python ("'%0" + $padding + "d' % " + $newver)`;
+
+            for($j=0; $j<$i; $j++){
+                if($fileNames==""){
+                    $fileNames=$bufer[$j];
+                }else if($i-2==$j){
+                    $fileNames=$fileNames+"_c"+$newNum;
+                }else if($i-1==$j){
+                    $fileNames=$fileNames+"."+$bufer[$j];
+                }else{
+                    $fileNames=$fileNames+"_"+$bufer[$j];
+                }
+            }
+        }
+        string $dbreturn[] = `python("octvDB.queryCheckUserDB('" + $db + "','" + $fileNames +"')")`;
+        string $checkUser = $dbreturn[0];
+        if($checkUser==$upUser && strip($checkUser)!= ""){
+            python("octvDB.setCheckUserUNLLDB('" + $db + "','" + $fileNames + "')");
+        }
+    //}
+
+}
+
+//inform relative group members
+string $newbuf[];
+clear $newbuf;
+
+tokenize $filename "_." $buf;
+string $prefName = $buf[0] + "_" + $buf[1];
+
+string $OCTV_TECH = `getenv "OCTV_TECH"`;	//OCTV Tech folder
+string $invokepath = $OCTV_TECH + "/bin/msg/";
+string $cmd = $invokepath + "cmdMsgPush.exe \"" + "sendFileSysNotice"  + "\" \""  +  $prefName + "\" \""  + "文件系统有新的文件上传了,文件名:" + $filename + "\"";
+print ("\n------*******---------" + $cmd + "\n");
+string $sysCmd = `system $cmd`;

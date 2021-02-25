@@ -1,0 +1,580 @@
+
+
+
+//创建渲染层
+global proc hhRenderPass()
+{
+	if (`pluginInfo -q -loaded "Mayatomr"`==0)
+	{
+		loadPlugin -quiet "Mayatomr";
+		pluginInfo -edit -autoload 1 "Mayatomr";
+	}
+	hhMrSet;
+	int $FG=`getAttr "miDefaultOptions.finalGather"`;
+	if ($FG==0)
+	{
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		hhRenderPass_RM;
+		//RenderPass
+		hhRenderPass_InNPass;
+		hhRenderPass_NormalPass();
+		hhRenderPass_ZdepthPass;
+		hhRenderPass_AOPass;
+	}
+	else
+	{
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		hhRenderPass_RM;
+		//RenderPass
+		hhRenderPass_InNPass;
+		hhRenderPass_NormalPass();
+		hhRenderPass_ZdepthPass;
+		hhAmbinetOccFault();
+	}
+	renderLayerEditorRenderable RenderLayerTab "defaultRenderLayer" "0";
+
+}
+global proc hhRenderPassIFFcha()
+{
+	if (`pluginInfo -q -loaded "Mayatomr"`==0)
+	{
+		loadPlugin -quiet "Mayatomr";
+		pluginInfo -edit -autoload 1 "Mayatomr";
+	}
+	hhMrSetIff();
+	int $FG=`getAttr "miDefaultOptions.finalGather"`;
+	if ($FG==0)
+	{
+		
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		//hhRenderPass_exbrow();
+		hhRenderPass_RM();
+		//hhRenderPass_InNPass();
+		hhRenderPass_NormalPass();
+		hhRenderPass_ChaOccPass();
+		string $missShader[]=`lsType("misss_fast_shader_x_passes")`;
+		if(size($missShader)!=0)
+		{
+			//hh3Sfront();
+			hhRenderPass_3Sback();
+			//hhRenderPass_sss();
+			//hhRenderPass_3sNormal();
+			//hhRenderPass_idpass01();
+		}
+	}
+	else
+	{
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		//hhRenderPass_exbrow();
+		hhRenderPass_RM;
+		//RenderPass
+		//hhRenderPass_InNPass;
+		hhRenderPass_NormalPass();
+		//hhRenderPass_ZdepthPass;
+		hhAmbinetOccFault();
+		//sss
+		string $missShader[]=`lsType("misss_fast_shader_x_passes")`;
+		if(size($missShader)!=0)
+		{
+			//hh3Sfront();
+			hhRenderPass_3Sback();
+			//hhRenderPass_sss();
+			//hhRenderPass_3sNormal();
+			//hhRenderPass_idpass01();
+		}
+	}
+	setAttr defaultRenderGlobals.imageFormat 16;
+	renderLayerEditorRenderable RenderLayerTab "defaultRenderLayer" "0";
+
+}
+global proc hhRenderPassIFFenv()
+{
+	if (`pluginInfo -q -loaded "Mayatomr"`==0)
+	{
+		loadPlugin -quiet "Mayatomr";
+		pluginInfo -edit -autoload 1 "Mayatomr";
+	}
+	hhMrSetIff();
+	int $FG=`getAttr "miDefaultOptions.finalGather"`;
+	if ($FG==0)
+	{
+		
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		
+		hhRenderPass_RM();
+		//hhRenderPass_InNPass;
+		hhRenderPass_NormalPass();
+		hhRenderPass_ZdepthPass;
+		hhRenderPass_AOPass;
+	}
+	else
+	{
+		global string $hhLayer_Name;
+		string $objselec[]=`ls -sl`;
+		select $objselec;
+		hhRenderPass_exbrow();
+		hhRenderPass_RM;
+		//RenderPass
+		//hhRenderPass_InNPass;
+		hhRenderPass_NormalPass();
+		hhRenderPass_ZdepthPass;
+		hhAmbinetOccFault();
+	}
+	setAttr defaultRenderGlobals.imageFormat 16;
+	renderLayerEditorRenderable RenderLayerTab "defaultRenderLayer" "0";
+
+}
+
+//渲染层设置
+global proc hhLayer_UI()
+{
+    // Get the dialog's formLayout.
+    string $form = `setParent -q`;
+
+    formLayout -e -width 20 $form;
+
+	string $t = `text -l "层名"`;
+    textField -w 30 "hhLayer_name";
+    setFocus "hhLayer_name";
+    string $b1 = `button -l "建层"    -c "hhLayer_Button();layoutDialog -dismiss \"Abort\""`;
+
+	formLayout -edit
+		-attachForm            $t   "top"    5
+		-attachForm            $t   "left"   5
+		-attachNone            $t   "bottom"
+		-attachForm            $t   "right"  5   	
+		
+		-attachControl         "hhLayer_name"   "top"    5 $t
+		-attachForm            "hhLayer_name"   "left"   5
+		-attachNone            "hhLayer_name"   "bottom"
+		-attachForm            "hhLayer_name"   "right"  5
+		
+		-attachControl         $b1  "top"    5 "hhLayer_name"
+		-attachForm            $b1  "left"   25
+		-attachNone            $b1  "bottom"
+		-attachForm            $b1  "right"  25 
+
+    $form;
+    
+}
+
+global proc hhLayer_Button()
+{
+	global string $hhLayer_Name;
+	$hhLayer_Name=` textField -q -tx "hhLayer_name"`;
+	
+}
+//渲染设置
+//	This scripts try to set mentalRay quality between Production , draft or another level
+//	the other way is to run this script:
+//	evalDeferred -lowestPriority "optionMenuGrp -e -select 11  miRenderQualityMenu; miRenderQualityMenuChanged;";
+global proc hhMrSet()
+{
+	if (`pluginInfo -q -loaded "Mayatomr"`==0)
+	{
+		loadPlugin -quiet "Mayatomr";
+		pluginInfo -edit -autoload 1 "Mayatomr";
+	}
+		setAttr -type "string" defaultRenderGlobals.currentRenderer "mentalRay";
+		mentalrayUI "";
+		setAttr "miDefaultOptions.maxSamples" 2;
+		setAttr "miDefaultOptions.minSamples" 0;
+		setAttr "miDefaultOptions.motionBlur" 0;
+		setAttr "miDefaultOptions.contrastR" 0.1;
+		setAttr "miDefaultOptions.contrastG" 0.1;
+		setAttr "miDefaultOptions.contrastB" 0.1;
+		setAttr "miDefaultOptions.contrastA" 0.1;
+
+		setAttr "miDefaultOptions.sampleLock" 1;
+		setAttr "miDefaultOptions.jitter" 1;
+		setAttr "miDefaultOptions.filter" 2;
+		//exr格式
+		//setAttr defaultRenderGlobals.imageFormat 51;
+		//setAttr defaultRenderGlobals.imfkey -type "string" "exr";
+		//string $source = `file -q -sn -shn`;
+		//string $SN = `match "[^_]+"$source`;
+		//png格式
+
+		setAttr defaultRenderGlobals.imageFormat 32;
+	
+		//SN 项目 iff格式
+		setMayaSoftwareFrameExt(3, 0);
+		//32位
+		//setAttr miDefaultFramebuffer.datatype 5;
+		//16位
+		setAttr miDefaultFramebuffer.datatype 16;
+	
+}
+global proc hhMrSetIff()
+{
+	if (`pluginInfo -q -loaded "Mayatomr"`==0)
+	{
+		loadPlugin -quiet "Mayatomr";
+		pluginInfo -edit -autoload 1 "Mayatomr";
+	}
+		setAttr -type "string" defaultRenderGlobals.currentRenderer "mentalRay";
+		mentalrayUI "";
+		setAttr "miDefaultOptions.maxSamples" 2;
+		setAttr "miDefaultOptions.minSamples" 0;
+		setAttr "miDefaultOptions.motionBlur" 0;
+		setAttr "miDefaultOptions.contrastR" 0.1;
+		setAttr "miDefaultOptions.contrastG" 0.1;
+		setAttr "miDefaultOptions.contrastB" 0.1;
+		setAttr "miDefaultOptions.contrastA" 0.1;
+
+		setAttr "miDefaultOptions.sampleLock" 1;
+		setAttr "miDefaultOptions.jitter" 1;
+		setAttr "miDefaultOptions.filter" 2;
+		//exr格式
+		//setAttr defaultRenderGlobals.imageFormat 51;
+		//setAttr defaultRenderGlobals.imfkey -type "string" "exr";
+		//string $source = `file -q -sn -shn`;
+		//string $SN = `match "[^_]+"$source`;
+		//png格式
+
+			
+		setAttr defaultRenderGlobals.imageFormat 16;
+	
+		//SN 项目 iff格式
+		setMayaSoftwareFrameExt(3, 0);
+		//32位
+		//setAttr miDefaultFramebuffer.datatype 5;
+		//16位
+		setAttr miDefaultFramebuffer.datatype 2;
+	
+}
+
+//创建渲染层
+global proc hh_RenderLayer()
+{
+	hhMrSet();
+	//mentalray 参数设置
+	string $selectOBJ[]=`ls -sl -l`;
+	global string $hhLayer_Name;
+	$hhLayer_Name="";
+	layoutDialog -ui "hhLayer_UI" -t "创建渲染层";
+	if ($hhLayer_Name=="")	return;
+	createRenderLayer -makeCurrent -name $hhLayer_Name;
+
+
+}
+//创建ppassContributionMap
+global proc hhRenderPass_RM()
+{
+	string $objselec[]=`ls -sl`;
+	hh_RenderLayer;
+	string $passC[]=`ls "*passContributionMap*"`;
+	global string $hhLayer_Name;
+	renderLayerEditorCreateContMap RenderLayerTab $hhLayer_Name 0;
+	string $newpassC[]=`ls "*passContributionMap*"`;
+	string $fpassc[]=stringArrayRemove($passC, $newpassC);
+	if(size($fpassc)!=0)
+	{
+		renderLayerEditorItemOnRename $fpassc[0] ($hhLayer_Name+"_passmap");
+		select $objselec; 
+		renderLayerEditorOnSelectionChanged RenderLayerTab;
+	}
+}
+
+//角色Occ
+global proc hhRenderPass_ChaOccPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_AO")` ){select -r ($hhLayer_Name+"_AO");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_AO") renderPass`;
+	setRenderPassType -type "AO" $renderpass;
+	setAttr ($renderpass+".colorProfile") 2;
+	setAttr ($renderpass+".useLocalSettings") 1;
+	setAttr ($renderpass+".rays") 128;
+	setAttr ($renderpass+".maxDistance") 5;
+	setAttr ($renderpass+".spread") 0.8;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	hhAmbinetOccTrue;
+}
+//场景Occ
+global proc hhRenderPass_AOPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_AO")` ){select -r ($hhLayer_Name+"_AO");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_AO") renderPass`;
+	setRenderPassType -type "AO" $renderpass;
+	setAttr ($renderpass+".useLocalSettings") 1;
+	setAttr ($renderpass+".rays") 128;
+	setAttr ($renderpass+".maxDistance") 100;
+	setAttr ($renderpass+".spread") 0.8;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	hhAmbinetOccTrue;
+}
+//Fre
+global proc hhRenderPass_InNPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_Fre")` ){select -r ($hhLayer_Name+"_Fre");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_Fre") renderPass`;
+	setRenderPassType -type "INCICN" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+//Normal
+global proc hhRenderPass_NormalPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_Normal")` ){select -r ($hhLayer_Name+"_Normal");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_Normal") renderPass`;
+	setRenderPassType -type "NORMAL" $renderpass;
+	setAttr ($renderpass+".space") 0;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+//motion Vector
+global proc hhRenderPass_MotVectorPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists MV3` ){select -r MV3;doDelete;}
+	string $renderpass=`createNode -name "MV3" renderPass`;
+	setRenderPassType -type "MV3" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+//Ambient
+global proc hhRenderPass_DiffusePass()
+{
+	if( `objExists Diffuse` ){select -r Diffuse;doDelete;}
+	string $renderpass=`createNode -name "Diffuse" renderPass`;
+	setRenderPassType -type "DIFRAW" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+//Depth
+global proc hhRenderPass_ZdepthPass()
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_ZdepthPass")` ){select -r ($hhLayer_Name+"_ZdepthPass");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_ZdepthPass") renderPass`;
+	setRenderPassType -type "CAMZ" $renderpass;
+	setAttr ($renderpass+".remap") 1;
+	setAttr ($renderpass+".maxbuffer") 4;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+//Beauty
+global proc hhRenderPass_BeautyPass()
+{
+	if( `objExists beauty` ){select -r beauty;doDelete;}
+	string $renderpass=`createNode -name "beauty" renderPass`;
+	setRenderPassType -type "BEAUTY" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+////Specular
+global proc hhRenderPass_SpecularPass()
+{
+	if( `objExists specular` ){select -r specular;doDelete;}
+	string $renderpass=`createNode -name "specular" renderPass`;
+	setRenderPassType -type "SPEC" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+////Reflection
+global proc hhRenderPass_ReflectionPass()
+{
+	if( `objExists Reflection` ){select -r Reflection;doDelete;}
+	string $renderpass=`createNode -name "Reflection" renderPass`;
+	setRenderPassType -type "REFL" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+////Refration
+global proc hhRenderPass_RefrationPass()
+{
+	if( `objExists Refration` ){select -r Refration;doDelete;}
+	string $renderpass=`createNode -name "Refration" renderPass`;
+	setRenderPassType -type "REFR" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+}
+
+	//启动Ambient Occlusion
+global proc hhAmbinetOccTrue()
+{
+	if (!`pluginInfo -query -loaded "Mayatomr"`)
+	{
+		loadPlugin "Mayatomr";
+	}
+	mentalrayUI "";
+	global int $gMiStringOptAOStateIndex;
+	miSetStringOptionValue($gMiStringOptAOStateIndex, "true");
+}
+
+global proc hhAmbinetOccFault()
+{
+	if (!`pluginInfo -query -loaded "Mayatomr"`)
+	{
+		loadPlugin "Mayatomr";
+	}
+	mentalrayUI "";
+	global int $gMiStringOptAOStateIndex;
+	miSetStringOptionValue($gMiStringOptAOStateIndex, "fault");
+}
+
+//Other
+
+global proc hh3Sfront()
+//SSS front
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_SSSfront")` ){select -r ($hhLayer_Name+"_SSSfront");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_SSSfront") renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_frontBuffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+//othier
+global proc hhRenderPass_3Sfront()
+//SSS front
+{
+	global string $hhLayer_Name;
+	if( `objExists ($hhLayer_Name+"_SSSfront")` ){select -r ($hhLayer_Name+"_SSSfront");doDelete;}
+	string $renderpass=`createNode -name ($hhLayer_Name+"_SSSfront") renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_frontBuffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+global proc hhRenderPass_3Sback()
+//SSS back
+{
+	global string $hhLayer_Name;
+	string $renderpas=$hhLayer_Name+"_SSSback";
+	if( `objExists $renderpas` ){select -r $renderpas;doDelete;}
+	string $renderpass=`createNode -name $renderpas renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	setAttr ($renderpass+".numChannels") 4;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_backBuffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+global proc hhRenderPass_sss()
+//SSS 
+{
+	global string $hhLayer_Name;
+	string $renderpas=$hhLayer_Name+"_SSS";
+	if( `objExists $renderpas` ){select -r $renderpas;doDelete;}
+	string $renderpass=`createNode -name $renderpas renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	setAttr ($renderpass+".numChannels") 4;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_SSSBuffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+global proc hhRenderPass_3sNormal()
+//SSS normal
+{
+	global string $hhLayer_Name;
+	string $renderpas=$hhLayer_Name+"_SSSnormal";
+	if( `objExists $renderpas` ){select -r $renderpas;doDelete;}
+	string $renderpass=`createNode -name $renderpas renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_normalBuffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+global proc hhRenderPass_idpass01()
+//SSS idpass
+{
+	global string $hhLayer_Name;
+	string $renderpas=$hhLayer_Name+"_idpass01";
+	if( `objExists $renderpas` ){select -r $renderpas;doDelete;}
+	string $renderpass=`createNode -name $renderpas renderPass`;
+	setRenderPassType -type "CSTCOL" $renderpass;
+	global string $hhLayer_Name;
+	connectAttr -nextAvailable ($hhLayer_Name+".renderPass") ($renderpass+".owner");
+	connectAttr -nextAvailable ($renderpass+".message") ($hhLayer_Name+"_passmap.renderPass");
+	string $buff[]=`lsType("writeToColorBuffer")`;
+	for($b in $buff)
+	{
+	    if(`match "_idpass01Buffer" $b`!="")
+	    connectAttr ($renderpass+".message") ($b+".renderPass");
+	    
+	}
+}
+//眉毛、睫毛不加入pass
+global proc hhRenderPass_exbrow()
+{
+	string $objsed[]=`ls -sl`;
+	string $objsd[]=`ls "*_eyebrow_*" "*_eyelash_*" "*:*_eyebrow_*" "*:*_eyelash_*"`;
+	string $objs[]=stringArrayRemove($objsd, $objsed);
+	select $objs;
+}
+//idpass 面板
+global proc hhRenderPassWinows()
+{
+	if (`window -exists RenderPassTools_window`) deleteUI RenderPassTools_window;
+	string $window=`loadUI -uiFile "//file-cluster/gdc/Resource/Support/Maya/projects/HolyP5/HhRenderPassTools.ui"`;
+
+	if (`window -q -topEdge $window` < 0 || `window -q -leftEdge $window` < 0)
+	{
+		window -e -topLeftCorner 100 80 $window;
+	}
+	showWindow $window;
+
+}

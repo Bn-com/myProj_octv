@@ -1,0 +1,1144 @@
+proc string FBC_getPrefix(){
+	string $ret, $buff[];
+	if ( !`optionMenu -q -ni FBC_CHARA` )
+		return "";
+	string $name = `optionMenu -q -v FBC_CHARA`;
+
+	$num = `tokenize $name ": " $buff`;
+	if ( $num ) {
+		for ($i = 0; $i < ($num-1); $i++)
+			$ret += $buff[$i]+":";
+	} else
+		$ret = "";
+	return $ret;
+}
+
+//************************************************************************************************************
+//
+global proc string FBC_getCharaCode(){
+	string $curSel = `optionMenu -q -v FBC_CHARA`;
+	string $buff[];
+	$num = `tokenize $curSel ":" $buff`;
+	$num = `tokenize $buff[($num-1)] "_" $buff`;
+	if(!$num)
+	error "MASTER Ãü Ãû ´í Îó  !";
+	return $buff[0];
+}
+
+
+//************************************************************************************************************
+//
+global proc FBC_resizeWin() {
+	global string $gFBCFrames;              
+	int $title = 25;		        
+	int $menu = 0; //25			
+	int $layout = 5;			
+
+	string $osv = `system ver`;             
+	if ( gmatch($osv, "*XP*") ) $title += 10; 
+
+	string $buff[], $tmp[];                 
+	$num = `tokenize $gFBCFrames "," $buff`;
+	int $height;                            
+	for ( $one in $buff ) {                 
+		if (`frameLayout -q -ex $one`) {  
+			tokenize $one "|" $tmp;   
+			$height += `frameLayout -q -h $one`;  
+		}
+	}
+	$height += $title + $menu + $layout; 
+
+	int $width = 270;        
+	window -e -width $width -height $height FBIK_CharaConWin;  
+}
+
+//************************************************************************************************************
+//
+
+global proc FBC_minMaxWin(int $init)
+{
+	int $h = `formLayout -q -h FBC_FORM`;  
+	if ( $init == 1 || $h < 10 )   
+		FBC_resizeWin;	       
+	else
+		window -e -width 270 -height 30 FBIK_CharaConWin;  
+}
+//************************************************************************************************************
+//
+global proc FBIK_selectChanged() {
+
+	if ( !`columnLayout -q -ex FBC_TAB` )
+		return;
+
+	string $tab = "Hand";
+	string $tmp[] = `lsUI -type control`;
+	for ($one in $tmp) {
+		if ( gmatch($one, $tab+"_*") )
+			iconTextCheckBox -e -value 0 $one;
+	}
+
+	string $sel[] = `ls -sl`;
+/*	if ( !`size $sel` ){
+		_setSlider("");
+		FBC_setPinning("");
+		return;
+	}
+*/
+	for ($obj in $sel) {
+		if ( objectType($obj) == "transform" ) {
+			for ($i = 0; $i < 10; $i++) {
+				string $name = ($tab + "_" + $obj+"_BTN"+$i);
+
+				if ( gmatch($obj, "*EffPivot*") ) {
+					string $pivEff = `substitute "Pivot" $name ""` + "x";
+					if ( `iconTextCheckBox -q -ex $pivEff ` )
+						iconTextCheckBox -e -vis 1 $pivEff;
+				}
+
+				if ( `iconTextCheckBox -q -ex $name` ) {
+					iconTextCheckBox -e -value 1 $name;
+				//	print ("Select! " + $name + "\n");
+				//	FBIK_setBtnImage($obj, $name);
+/*
+					_setSlider($obj);
+					FBC_setPinning($obj);
+*/
+					// for pinning buttons
+					global int $gFBIK_pinnJob;
+					if ( objExists( $obj+".pinning" ) ) {
+						if ( $gFBIK_pinnJob )
+							scriptJob -kill $gFBIK_pinnJob -force;
+						$gFBIK_pinnJob = `scriptJob -p FBIK_CharaConWin -attributeChange ($obj+".pinning") ("FBC_setPinning(\""+$obj+"\")")`;
+					}
+
+					break;
+				}
+			}
+		} else if ( objectType($obj) == "joint" ) {
+			$obj = substituteAllString($obj, "|", "_"); // for jointA|jointB ...
+			for ($i = 0; $i < 10; $i++) {
+				string $name = ($tab + "_" + $obj+"_BTN"+$i);
+				if ( `iconTextCheckBox -q -ex $name` ) {
+					iconTextCheckBox -e -value 1 $name;
+				//	print ("Select! " + $name + "\n");
+					break;
+				}
+			}
+		}
+	}
+}
+//************************************************************************************************************
+//
+proc int _checkHasSubChara(string $cs) {
+	string $sub[] = `character -q $cs`;
+	if ( `size $sub` > 0 ) {
+		for($aa in $sub){
+			if ( objectType($aa) == "character")
+				return 1;
+		}
+	}
+	return 0;
+}
+
+//************************************************************************************************************
+//
+proc _createHelpButton(int $x, int $y, string $form, string $com) {
+	string $btn = `button -h 14 -w 14 -label "?" -c $com`;
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+}
+//************************************************************************************************************
+//
+proc string _omitPrefix(string $data){
+	string $ret, $buff[];
+
+	if ( gmatch($data, "*:*") ) {
+		$num = `tokenize $data ": " $buff`;
+		$ret = $buff[$num-1];
+	} else {
+		$ret = $data;
+	}
+	return $ret;
+}
+//************************************************************************************************************
+proc string[] _getPullName(string $eff) {
+
+	$eff = _omitPrefix($eff);
+
+	string $pull[] = {""};
+	switch ($eff) {
+		case "HeadEff":				$pull[0] = "headPull"; break;
+		case "NeckEff":				$pull[0] = "chestPull"; break;
+		case "SpineEff":			$pull[0] = ""; break;
+		case "HipsEff":				$pull[0] = "hipsPull"; break;
+		case "LeftArmEff":			$pull[0] = ""; break;
+		case "LeftForeArmEff":		$pull[0] = "leftElbowPull"; break;
+		case "LeftHandEff":			$pull[0] = "leftHandPullChest"; break;
+		case "LeftFingerBaseEff":	$pull[0] = "leftFingerBasePull"; break;
+		case "RightArmEff":			$pull[0] = ""; break;
+		case "RightForeArmEff":		$pull[0] = "rightElbowPull"; break;
+		case "RightHandEff":		$pull[0] = "rightHandPullChest"; break;
+		case "RightFingerBaseEff":	$pull[0] = "rightFingerBasePull"; break;
+		case "LeftLegEff":			$pull[0] = "leftKneePull"; break;
+		case "LeftUpLegEff":		$pull[0] = ""; break;
+		case "LeftFootEff":			$pull[0] = "leftFootPull"; break;
+		case "RightLegEff":			$pull[0] = "rightKneePull"; break;
+		case "RightUpLegEff":		$pull[0] = ""; break;
+		case "RightFootEff":		$pull[0] = "rightFootPull"; break;
+		case "LeftToeBaseEff":		$pull[0] = "leftToeBasePull"; break;
+		case "RightToeBaseEff":		$pull[0] = "rightToeBasePull"; break;
+	}
+	return $pull;
+}
+//************************************************************************************************************
+proc string _searchHikHandle(string $charaNode)
+{
+	string $ret="", $cNode, $tmp[];
+	if ( $charaNode == "" || objectType($charaNode) != "character")
+		return $ret;
+
+	if ( _checkHasSubChara($charaNode) ) {
+		$tmp = `listConnections -s 1 -d 0 -type character $charaNode`;
+		if ( `size $tmp` )
+			$cNode = $tmp[0];
+	} else {
+		$cNode = $charaNode;
+	}
+
+	string $members[] = `character -q $cNode`;
+	for ($one in $members) {
+		tokenize $one "." $tmp;
+		if ( objExists( $tmp[0]+".handle[0]" ) ) {
+			$tmp = `listConnections -s 0 -d 1 -p 0 -type hikHandle ($tmp[0]+".handle[0]")`;
+			if ( `size $tmp` )
+				$ret = $tmp[0];
+		}
+	}
+	if ( $ret == "" )
+		error "Error: hikHandle not found.";
+	return $ret;
+}
+//************************************************************************************************************
+proc string FBC_getCharaNodeName()
+{
+	string $buff[];
+
+	if ( `optionMenu -q -ni FBC_CHARA` < 1)
+		return "";
+
+	string $name = `optionMenu -q -v FBC_CHARA`;
+
+	$numTokens = `tokenize $name "> " $buff`;
+	$name = $buff[ $numTokens - 1 ];
+
+	return $name;
+}
+
+//************************************************************************************************************
+global proc FBIK_selectBtn(string $btn) {
+
+	string $tmp[];
+	int $n = `tokenize $btn "_" $tmp`;
+
+	string $node = $tmp[1];
+	for ( $i = 2; $i < ($n - 1); $i++ )
+		$node += "_" + $tmp[$i];
+
+	if ( objExists($node) ) {
+		int $mods = `getModifiers`;
+
+		if ( ($mods / 8) % 2 || ($mods / 4) % 2 ) { // alt or Ctrl
+			$tmp = `ls -sl`;
+			if ( stringArrayCount($node, $tmp) )
+				select -deselect $node;
+			else
+				select -add $node;
+
+		} else if ( ($mods / 1) % 2 ) { // Shift
+			clear $tmp;
+			if ( objectType($node) == "hikEffector"  )
+				$tmp = _getBodyParts($node, 0);
+			else
+				$tmp = _getBodyParts($node, 3);
+
+			if ( `size $tmp` ) {
+				string $com = "select -r ";
+				for ($one in $tmp)
+					$com += " " + $one;
+				$com += ";";
+				eval $com;
+				print $com;
+			} else 
+				select -r $node;
+
+		} else {
+			select -r $node;
+
+		}
+	}
+
+	string $panel = `getPanel -withFocus`;
+	setFocus $panel;												
+}
+//************************************************************************************************************
+
+global proc FBIK_ikfkHankle_R(string $grp)
+{
+	string $eff,$name;
+	string $data[] = _getEffs("body");
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+
+	if(`getAttr ($prefix + $charaCode + "_" + $data[17] + ".solverEnable")`)
+	select -r ($prefix + $charaCode + "_" + $data[18]);
+	else 	select -r ($prefix + $charaCode + "_" + $data[17]);
+
+	int $numbs[] = {15,16,17,18};
+
+	for($num in $numbs)
+	{
+		$eff = ($prefix + $charaCode + "_" + $data[$num]);
+
+		for ($i = 0; $i < 10; $i++) {
+			$name = ($grp + $eff+"_BTN"+$i);
+			if ( `iconTextCheckBox -q -ex $name` )
+				break;
+		}
+//print ($name + "\n");
+
+//		if ( $i >= 10 ) return "";
+
+		if ( `iconTextCheckBox -q -vis $name` )
+			iconTextCheckBox -e -vis 0 $name;
+		else iconTextCheckBox -e -vis 1 $name;
+	}
+/*	
+	if ( `iconTextCheckBox -q -v FBC_ikfk_L` )
+	setAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable") 1;
+	else 	setAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable") 0;
+*/
+
+	source ezIKFKSwitch.mel; ezIKFKSwitch;
+
+
+}
+
+//************************************************************************************************************
+
+proc _createikfkHandleR(string $grp ,int $x, int $y, string $nots ,string $name,string $form) {
+
+	setParent $form;
+	$btn = `iconTextCheckBox -h 25 -w 25 -style "iconOnly"
+		-mw 0 -mh 0 
+		-image "FBC_Btn_hand_FK.bmp"
+		-selectionImage "FBC_Btn_hand_IK.bmp"
+		-fn "tinyBoldLabelFont"
+		-ann $nots
+//		-vis $vis
+	$name`;
+	iconTextCheckBox -e -onCommand ("FBIK_ikfkHankle_R(\""+$grp+"\")") -offCommand ("FBIK_ikfkHankle_R(\""+$grp+"\")") $name;
+
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+}
+
+//************************************************************************************************************
+
+global proc FBIK_ikfkHankle_L(string $grp)
+{
+	string $eff,$name;
+	string $data[] = _getEffs("body");
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+
+	if(`getAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable")`)
+	select -r ($prefix + $charaCode + "_" + $data[12]);
+	else 	select -r ($prefix + $charaCode + "_" + $data[11]);
+
+	int $numbs[] = {9,10,11,12};
+
+	for($num in $numbs)
+	{
+		$eff = ($prefix + $charaCode + "_" + $data[$num]);
+
+		for ($i = 0; $i < 10; $i++) {
+			$name = ($grp + $eff+"_BTN"+$i);
+			if ( `iconTextCheckBox -q -ex $name` )
+				break;
+		}
+//print ($name + "\n");
+
+//		if ( $i >= 10 ) return "";
+
+		if ( `iconTextCheckBox -q -vis $name` )
+			iconTextCheckBox -e -vis 0 $name;
+		else iconTextCheckBox -e -vis 1 $name;
+	}
+/*	
+	if ( `iconTextCheckBox -q -v FBC_ikfk_L` )
+	setAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable") 1;
+	else 	setAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable") 0;
+*/
+	source ezIKFKSwitch.mel; ezIKFKSwitch;
+}
+
+//************************************************************************************************************
+
+proc _createikfkHandleL(string $grp ,int $x, int $y, string $nots ,string $name,string $form) {
+
+
+	setParent $form;
+	$btn = `iconTextCheckBox -h 25 -w 25 -style "iconOnly"
+		-mw 0 -mh 0 
+		-image "FBC_Btn_hand_FK.bmp"
+		-selectionImage "FBC_Btn_hand_IK.bmp"
+		-fn "tinyBoldLabelFont"
+		-ann $nots
+//		-vis $vis
+	$name`;
+	iconTextCheckBox -e -onCommand ("FBIK_ikfkHankle_L(\""+$grp+"\")") -offCommand ("FBIK_ikfkHankle_L(\""+$grp+"\")") $name;
+
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+}
+
+//************************************************************************************************************
+//
+proc string _createButton(string $grp, string $eff, int $x, int $y, string $form ,string $image , string $selimage ) {
+	string $name, $btn;
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+	int $nh = 13;
+	int $nw = 13;
+	if($eff == "handCon_left" || $eff == "handCon_right" || $eff == "MASTER")
+	{
+		$nh = 25;$nw = 25;
+	}
+//print $vis
+	int $vis=1;
+	if ( !objExists($prefix+$charaCode+"_"+$eff) )
+		$vis=0;
+	if ( $eff == "IKWristCon_left")
+		$vis=0;
+	if ( $eff == "IKWristCon_right")
+		$vis=0;
+
+	$eff = ($prefix + $charaCode + "_" + $eff);
+
+	for ($i = 0; $i < 10; $i++) {
+		$name = ($grp + $eff+"_BTN"+$i);
+		if ( !`iconTextCheckBox -q -ex $name` )
+			break;
+	}
+
+//print ($name + "\n");
+	if ( $i >= 10 ) return "";
+
+	$btn = `iconTextCheckBox -h $nh -w $nw -style "iconOnly"
+		-mw 0 -mh 0 
+		-image $image //"FBC_Btn_FK_Nrm.bmp"
+		-selectionImage $selimage //"FBC_Btn_FK_Sel.bmp"
+		-fn "smallBoldLabelFont"
+		-ann $eff
+		-vis $vis
+
+	$name`;
+	iconTextCheckBox -e -onCommand ("FBIK_selectBtn(\""+$name+"\")") -offCommand ("FBIK_selectBtn(\""+$name+"\")") $btn;
+
+	if ( objExists($prefix + $charaCode + "_" +$eff) )
+		FBIK_setBtnImage($eff, $btn);
+
+	if ( objExists( $charaCode + "_"  + $eff+".reachTranslation" ) )
+		scriptJob -p $btn -attributeChange ($eff+".reachTranslation") ("FBIK_setBtnImage(\""+$eff+"\",\""+$name+"\")");
+	if ( objExists($charaCode + "_"  +  $eff+".reachRotation" ) )
+		scriptJob -p $btn -attributeChange ($eff+".reachRotation") ("FBIK_setBtnImage(\""+$eff+"\",\""+$name+"\")");
+	if ( objExists( $charaCode + "_"  + $eff+".pinning" ) )
+		scriptJob -p $btn -attributeChange ($eff+".pinning") ("FBIK_setBtnImage(\""+$eff+"\",\""+$name+"\")");
+
+	string $cNode = FBC_getCharaNodeName();
+	string $hikHandle = _searchHikHandle($cNode);
+	string $pulls[] = _getPullName($eff);
+	if ( `size $pulls` && $pulls[0] != "") {
+		if ( objExists( ($hikHandle+"."+$pulls[0]) ) )
+			scriptJob -p $btn -attributeChange ($hikHandle+"."+$pulls[0]) ("FBIK_setBtnImage(\""+$eff+"\",\""+$name+"\")");
+	}
+
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+
+	return $btn;
+}
+//************************************************************************************************************
+//
+
+proc string _createSelectAllButton(string $label, int $x, int $y, string $form, string $com) {
+
+	string $btn = `button -h 15 -w 50 -label $label -c $com`;
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+
+	if ( $label == "C" )
+		button -e -ann "clear" $btn;
+	return $btn;
+}
+//************************************************************************************************************
+//
+
+global proc ResetBody(string $part)
+{
+	string $Attr[] , $buffer[];
+	string $fig , $dstr , $buf ,$fig;
+	string $data[] = _getEffs($part);
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+
+	for($buf in $data)
+		$dstr += ($buf + " ");
+
+	$dstr = `substitute "MASTER" $dstr ""`;
+
+	if(`getAttr ($prefix + $charaCode + "_" + $data[11] + ".solverEnable")`)
+	{
+	 	$dstr = `substitute "arm_left" $dstr ""`;
+	 	$dstr = `substitute "elbow_left" $dstr ""`;
+	 	$dstr = `substitute "FKWristCon_left" $dstr ""`;
+	}
+	else $dstr = `substitute "IKWristCon_left" $dstr ""`;
+
+
+
+	if(`getAttr ($prefix + $charaCode + "_" + $data[17] + ".solverEnable")`)
+	{
+ 	 	$dstr = `substitute "arm_right" $dstr ""`;
+	 	$dstr = `substitute "elbow_right" $dstr ""`;
+	 	$dstr = `substitute "FKWristCon_right" $dstr ""`;
+	}
+	else $dstr = `substitute "IKWristCon_right" $dstr ""`;
+
+
+	clear $data;
+
+	tokenizeList ($dstr , $data);
+
+	string $orgAttr[] = {"translateX","translateY","translateZ","rotateX","rotateY","rotateZ"};
+
+	string $cusAttr[] = {"TRX","TRY","TRZ","ROX","ROY","ROZ"};
+
+	for($buf in $data)
+	{
+		$fig = ($prefix + $charaCode + "_" + $buf);
+		if(`objExists $fig`)
+		{
+			if(($buf == "IKWristCon_right") || ($buf == "IKWristCon_left"))
+			{
+				$Attr = `listAttr -k $fig`;	
+				for($one in $Attr)
+				{
+					for($i = 0 ; $i < 6 ; $i++ )
+					{
+						if($one == $orgAttr[$i])
+						{
+							$val = `getAttr ($fig + "." + $cusAttr[$i])`;
+							setAttr ($fig + "." + $orgAttr[$i]) $val;
+						}
+					}
+				}
+
+			}
+
+			else
+			{
+				$Attr = `listAttr -k $fig`;	
+				for($buf in $Attr)
+				{
+					if($buf == "ik_solver")
+					continue;
+					setAttr ($fig + "." + $buf) 0;
+				}
+			}
+		}
+	}
+}
+
+//************************************************************************************************************
+//
+
+proc string _createRestBodyButton(string $part, int $x, int $y, string $form) {
+
+	string $btn = `button -h 15 -w 50 -label "Reset" -c ("ResetBody " + " body")`;
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+
+	return $btn;
+}
+
+//************************************************************************************************************
+//
+
+global proc ResetFig(string $part)
+{
+	string $Attr[];
+	string $fig ;
+	string $data[] = _getEffs($part);
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+
+	for($buf in $data)
+	{
+		$fig = ($prefix + $charaCode + "_" + $buf);
+		if(`objExists $fig`)
+		{
+			$Attr = `listAttr -k $fig`;	
+			for($buf in $Attr)
+				setAttr ($fig + "." + $buf) 0;
+		}
+	}	
+}
+
+//************************************************************************************************************
+//
+
+proc string _createRestFingerButton(string $part, int $x, int $y, string $form) {
+
+	string $btn = `button -h 15 -w 50 -label "Reset" -c ("ResetFig " + $part)`;
+	formLayout -e -ap $btn "top" $y 0 -ap $btn "left" $x 0 $form;
+
+	return $btn;
+}
+
+
+//************************************************************************************************************
+proc string _createPluralBtn(string $data[], string $label, string $area, int $x, int $y)
+{
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+	if ( gmatch($data[0], ($prefix+"*") )  ) // for with prefix
+		$prefix = "";
+	string $com = "select -cl;";
+	for ($one in $data)
+		$com += "if ( objExists(\"" + $prefix+$charaCode+"_"+$one + "\"" + ") ) select -add \"" + $prefix+$charaCode+"_"+$one + "\";";
+	string $btn = _createSelectAllButton($label, $x, $y, $area, $com);
+	return $btn;
+}
+//************************************************************************************************************
+//
+global proc string[] _getEffs(string $type)
+{
+	string $effs[];
+	if ( $type == "body" ) {
+		$effs = stringArrayCatenate($effs, {
+				"headCon",//"HeadEff",
+				"neckBCon",//"NeckEff",
+				"neckACon",//"SpineEff",
+				"headWholdCon",
+				"chestCon",//"HipsEff"
+				"waistCon",
+				"pelvisCon",
+				"upperBodyCon"
+		});
+	}
+	if ( $type == "body" || $type == "bodyL" ) {
+		$effs = stringArrayCatenate($effs, {
+				"shoulderIkCon_left",//"LeftArmEff",
+				"arm_left",//"LeftForeArmEff",
+				"elbow_left",
+				"FKWristCon_left",//"LeftHandEff",
+				"IKWristCon_left",
+							//"LeftLegEff",
+							//"LeftUpLegEff",
+				"footCon_left"//"LeftFootEff",
+							//"LeftToeBaseEff",
+							//"LeftFingerBaseEff"
+		});
+	}
+	if ( $type == "body" || $type == "bodyR" ) {
+		$effs = stringArrayCatenate($effs, {
+				"shoulderIkCon_right",//"RightArmEff",
+				"arm_right",//"RightForeArmEff",
+				"elbow_right",//"RightHandEff",
+				"FKWristCon_right",//"RightLegEff",
+				"IKWristCon_right",
+							//"RightUpLegEff",
+				"footCon_right"//"RightFootEff",
+							//"RightToeBaseEff",
+							//"RightFingerBaseEff"
+		});
+	}
+
+	if ( $type == "body") {
+		$effs = stringArrayCatenate($effs, {
+				"MASTER"
+		});
+	}
+
+
+	if ( $type == "handL" || $type == "hand" ) {
+		$effs = stringArrayCatenate($effs, {
+			"handCon_left",
+			"thumb1Con_left",
+			"thumb2Con_left",
+			"thumb3Con_left",
+			"index1Con_left",
+			"index2Con_left",
+			"index3Con_left",			
+			"middle1Con_left",
+			"middle2Con_left",
+			"middle3Con_left",
+			"ring1Con_left",
+			"ring2Con_left",
+			"ring3Con_left",		
+			"little1Con_left",
+			"little2Con_left",
+			"little3Con_left"
+
+		});
+	}
+	if ( $type == "handR"||$type == "hand"  ) {
+		$effs = stringArrayCatenate($effs, {
+			"handCon_right",
+			"thumb1Con_right",
+			"thumb2Con_right",
+			"thumb3Con_right",
+			"index1Con_right",
+			"index2Con_right",
+			"index3Con_right",			
+			"middle1Con_right",
+			"middle2Con_right",
+			"middle3Con_right",
+			"ring1Con_right",
+			"ring2Con_right",
+			"ring3Con_right",			
+			"little1Con_right",
+			"little2Con_right",
+			"little3Con_right"		
+			
+		});
+	}
+	if ( $type == "footL" ) {
+		$effs = stringArrayCatenate($effs, {
+			"LeftFootEff",
+			"LeftToeBaseEff",
+			"LeftFootPinky1Eff",
+			"LeftFootRing1Eff",
+			"LeftFootMiddle1Eff",
+			"LeftFootIndex1Eff",
+			"LeftFootThumb1Eff"
+		});
+	}
+	if ( $type == "footR" ) {
+		$effs = stringArrayCatenate($effs, {
+			"RightFootEff",
+			"RightToeBaseEff",
+			"RightFootPinky1Eff",
+			"RightFootRing1Eff",
+			"RightFootMiddle1Eff",
+			"RightFootIndex1Eff",
+			"RightFootThumb1Eff"
+		});
+	}
+
+
+	return $effs;
+}
+
+//************************************************************************************************************
+//
+proc string _createHandFkUI(string $name) {
+
+
+		string $prefix = FBC_getPrefix();
+
+		string $form = `formLayout -numberOfDivisions 100 $name`;
+	 	string $back = `picture -en 0 -w 260 -h 340 -image "FBIK_hand0.bmp"`;
+
+
+
+		string $data[] = _getEffs("hand");
+		string $dataL[] = _getEffs("handL");
+		string $dataR[] = _getEffs("handR");
+//print $data 
+//setParent -q;
+ 
+		string $hcl = _createButton("Hand_",	$data[0],	50, 130, $form ,"FBC_handCon.bmp" , "FBC_handCon_sel.bmp"); //HeadEff headCon "FBC_Btn_FK_Nrm_s.bmp" , "FBC_Btn_FK_Sel_s.bmp"
+
+		string $t1l = _createButton("Hand_",	$data[1],	100, 145, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckBCon
+		string $t2l = _createButton("Hand_",	$data[2],	125, 135, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckACon
+		string $t3l = _createButton("Hand_",	$data[3],	140, 120, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff headWholdCon
+
+		string $i1l = _createButton("Hand_",	$data[4],	105, 85, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //SpineEff chestCon 
+		string $i2l = _createButton("Hand_",	$data[5],	120, 65, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff waistCon
+		string $i3l = _createButton("Hand_",	$data[6],	135, 45, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff pelvisCon 
+
+		string $m1l = _createButton("Hand_",    $data[7],	80, 80, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff upperBodyCon 
+		string $m2l = _createButton("Hand_",    $data[8],	87, 55, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_left 
+		string $m3l = _createButton("Hand_",	$data[9],	93, 35,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftForeArmEff
+
+
+		string $r1l = _createButton("Hand_",	$data[10],	55, 85, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //elbow_left
+		string $r2l = _createButton("Hand_",	$data[11],	53, 60, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_left
+		string $r3l = _createButton("Hand_",	$data[12],	51, 40, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_left
+
+		string $l1l = _createButton("Hand_",	$data[13],	33, 90, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftFootEff
+		string $l2l = _createButton("Hand_",     $data[14],	28, 73, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_right
+		string $l3l = _createButton("Hand_",	$data[15],	22, 55,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //RightForeArmEff
+
+
+ 
+
+		string $hcr = _createButton("Hand_",	$data[16],	170, 300, $form ,"FBC_handCon.bmp" , "FBC_handCon_sel.bmp"); //HeadEff headCon "FBC_Btn_FK_Nrm_s.bmp" , "FBC_Btn_FK_Sel_s.bmp"
+
+		string $t1r = _createButton("Hand_",	$data[17],	135, 310, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckBCon
+		string $t2r = _createButton("Hand_",	$data[18],	110, 295, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckACon
+		string $t3r = _createButton("Hand_",	$data[19],	90, 280, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff headWholdCon
+
+		string $i1r = _createButton("Hand_",	$data[20],	130, 250, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //SpineEff chestCon 
+		string $i2r = _createButton("Hand_",	$data[21],	115, 230, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff waistCon
+		string $i3r = _createButton("Hand_",	$data[22],	100, 210, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff pelvisCon 
+
+		string $m1r = _createButton("Hand_",     $data[23],	155, 245, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff upperBodyCon 
+		string $m2r = _createButton("Hand_",     $data[24],	150, 225, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_left 
+		string $m3r = _createButton("Hand_",	$data[25],	143, 200,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftForeArmEff
+
+
+		string $r1r = _createButton("Hand_",	$data[26],	180, 240, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //elbow_left
+		string $r2r = _createButton("Hand_",	$data[27],	180, 220, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_left
+		string $r3r = _createButton("Hand_",	$data[28],	180, 200, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_left
+
+		string $l1r = _createButton("Hand_",	$data[29],	200, 250, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftFootEff
+		string $l2r = _createButton("Hand_",     $data[30],	208, 235, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_right
+		string $l3r = _createButton("Hand_",	$data[31],	215, 215,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //RightForeArmEff
+
+
+
+		string $all = _createPluralBtn($data, "ALL", $form, 5, 305);
+		string $allL = _createPluralBtn($dataL, "All Left", $form, 190, 35);
+		string $allR = _createPluralBtn($dataR, "All Right", $form,190, 140);
+
+		string $rall = _createRestFingerButton("hand", 5, 320 , $form);
+		string $rallL = _createRestFingerButton("handL" , 190, 50, $form);
+		string $rallR = _createRestFingerButton("handR" ,190, 155, $form);
+
+
+	setParent ..;
+
+	return $form;
+
+
+}
+//************************************************************************************************************
+//
+proc string _createHandUI() {
+
+	string $tab = `frameLayout -label "Hand" -labelAlign "top"  -borderStyle "etchedIn" -collapsable 1 -collapse 0 -pcc ("FBC_minMaxWin(0)") "Hand"`;
+//		string $eff = _createHandEffUI("FBC_HAND_EFF");
+		string $fk  = _createHandFkUI("FBC_HAND_FK");
+	setParent ..;
+
+	return $tab;
+}
+
+//************************************************************************************************************
+//
+proc string _createBodyEffUI(string $name) {
+
+		string $prefix = FBC_getPrefix();
+
+		string $form = `formLayout -numberOfDivisions 100 $name`;
+
+		
+		string $back = `picture -en 0 -w 260 -h 340 -image "FBIK_body0.bmp"`;
+
+		string $data[] = _getEffs("body");
+//print $data 
+
+		string $all = _createPluralBtn($data, "ALL", $form, 3, 2);
+
+		string $ikfkHandleL = _createikfkHandleL("Hand_",200, 195, " Swith hands ik/fk ","FBC_ikfk_L",$form); 
+		string $ikfkHandleR = _createikfkHandleR("Hand_",25, 195, " Swith hands ik/fk ","FBC_ikfk_R",$form); 
+
+
+		string $head = _createButton("Hand_",	$data[0],	115, 20, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HeadEff headCon "FBC_Btn_FK_Nrm_s.bmp" , "FBC_Btn_FK_Sel_s.bmp"
+		string $neckB = _createButton("Hand_",	$data[1],	115, 35, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckBCon
+		string $neckA = _createButton("Hand_",	$data[2],	115, 50, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff neckACon
+		string $headW = _createButton("Hand_",	$data[3],	115, 65, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //NeckEff headWholdCon
+		string $cheat = _createButton("Hand_",	$data[4],	115, 88, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //SpineEff chestCon 
+		string $waist = _createButton("Hand_",	$data[5],	115, 118, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff waistCon
+		string $pelvis = _createButton("Hand_",	$data[6],	115, 136, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff pelvisCon 
+		string $upperBody = _createButton("Hand_",  $data[7],	115, 154, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //HipsEff upperBodyCon 
+
+
+		string $shoulderL = _createButton("Hand_", $data[8],	140, 60, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_left 
+		string $famL = _createButton("Hand_",	$data[9],	160, 80,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftForeArmEff
+		string $ebwL = _createButton("Hand_",	$data[10],	180, 110, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //elbow_left
+		string $wrsL = _createButton("Hand_",	$data[11],	195, 150, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_left
+		string $ikwrsL = _createButton("Hand_",	$data[12],	195, 150, $form ,"FBC_Btn_FKext_Nrm.bmp" , "FBC_Btn_FKext_Sel.bmp"); //FKWristCon_left
+
+		string $fotL = _createButton("Hand_",	$data[13],	165, 310, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //LeftFootEff
+
+		string $shoulderR = _createButton("Hand_", $data[14],	80, 60, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //shoulderIkCon_right
+		string $famR = _createButton("Hand_",	$data[15],	70, 80,  $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //RightForeArmEff
+		string $ebwR = _createButton("Hand_",	$data[16],	50, 110, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //elbow_Right
+		string $wrsR = _createButton("Hand_",	$data[17],	35, 150, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //FKWristCon_Right
+		string $ikwrsR = _createButton("Hand_",	$data[18],	35, 150, $form ,"FBC_Btn_FKext_Nrm.bmp" , "FBC_Btn_FKext_Sel.bmp"); //FKWristCon_right
+
+		string $fotR = _createButton("Hand_",	$data[19],	65, 310, $form ,"FBC_Btn_FK_Nrm.bmp" , "FBC_Btn_FK_Sel.bmp"); //RightFootEff
+
+
+		string $Ms = _createButton("Hand_",	$data[20],	110, 310, $form ,"ICC_Master.bmp" , "ICC_Master_sel.bmp"); //RightFootEff
+
+
+
+		string $all = _createPluralBtn($data, "ALL", $form, 3, 2);
+		string $rallb = _createRestBodyButton("Body", 3, 17 , $form);
+
+//		_createHelpButton(2, 130, $form, "FBC_help(1);");
+
+	setParent ..;
+
+	return $form;
+}
+//************************************************************************************************************
+proc string _createBodyUI() {
+
+	string $tab = `frameLayout -label "Body" -labelAlign "top"  -borderStyle "etchedIn" -collapsable 1 -collapse 0 -pcc ("FBC_minMaxWin(1)") "Body"`;
+		string $eff = _createBodyEffUI("FBC_BODY_EFF");
+//		string $fk  = _createBodyFkUI("FBC_BODY_FK");
+	setParent ..;
+
+	return $tab;
+}
+
+//************************************************************************************************************
+//
+global proc FBC_rebuildTab() {
+
+	select -cl;
+	waitCursor -state on;
+
+	if ( `frameLayout -q -ex "Body"` )
+	 	deleteUI "Body";
+ 	if ( `frameLayout -q -ex "Hand"` )
+		deleteUI "Hand";
+ 	if ( `frameLayout -q -ex "Dis"` )
+		deleteUI "Dis";
+
+	setParent "FBC_TAB";
+		string $body = _createBodyUI();
+
+	float $c1[] = {1.0, 1.0, 0.7}; 
+//	float $c2[] = {1.0, 0.8, 1.0}; 
+
+	frameLayout -borderStyle "in" -collapsable 0 -collapse 0 -lv 0 Dis;  
+
+		rowColumnLayout -nc 3 -cw 1 86 -cw 2 86 -cw 3 86;
+			$skin = `checkBox -l "skin" -h 25 -v 1 -cc ("dis " + "IDMT_Char_skin " + ".skinning_vis") -bgc $c1[0] $c1[1] $c1[2]  IDMT_Char_skin`;
+			$proxy = `checkBox -l "skin proxy" -h 25 -v 0 -cc ("dis " + "IDMT_Char_proxy " + ".skinProxy_vis") -bgc $c1[0] $c1[1] $c1[2]  IDMT_Char_proxy`;
+			$skele = `checkBox -l "skeleton" -h 25 -v 1 -cc ("dis " + "IDMT_Char_skele " + ".skeleton_vis") -bgc $c1[0] $c1[1] $c1[2]  IDMT_Char_skele`;
+		setParent ..;
+	setParent ..;
+
+
+		string $hands = _createHandUI();
+	waitCursor -state off;
+
+}
+
+//************************************************************************************************************
+//
+global proc FBC_updatePrefixMenu(){
+	string $m,$s,$ms[],$ss[]; 
+	string $oldSel; 
+	if ( `optionMenu -q -ni FBC_CHARA` >= 1)
+		$oldSel = `optionMenu -q -v FBC_CHARA`; 
+
+	$ss=`optionMenu -q -ill FBC_CHARA`; 
+	for($s in $ss) deleteUI $s;
+	clear $ss;
+	$ms =`ls "*MASTER" "*:*MASTER" "*:*:*MASTER" "*:*:*:*MASTER" `;
+	for($m in $ms)
+	{
+	if(`objExists ($m + ".skeleton_vis")` && `objExists ($m + ".skinning_vis")` && `objExists ($m + ".skinProxy_vis")`)
+	$ss[size($ss)] = $m;
+
+	}
+
+	int $ct=1, $found=0;
+	for($s in $ss) { 
+		if ( $oldSel == $s ) $found=1; 
+		menuItem -p FBC_CHARA -l $s -ann $s; 
+		$ct++;
+	}
+	if ( $found )  
+		optionMenu -e -v $oldSel FBC_CHARA;
+}
+//************************************************************************************************************
+//
+global proc dis(string $box , string $attr)
+{
+//	float $c2[] = {1.0, 1.0, 0.7}; 
+
+	string $prefix = FBC_getPrefix();
+	string $charaCode = FBC_getCharaCode();
+	int $stat = `checkBox -q -v $box`;
+	setAttr ($prefix + $charaCode + "_" + "MASTER" + $attr) $stat;
+//	checkBox -e -bgc $c2[0] $c2[1] $c2[2] $check;
+
+}
+
+//************************************************************************************************************
+//
+proc string _createInnerUI() {
+
+	float $c1[] = {1.0, 0.8, 1.0}; 
+	float $c2[] = {1.0, 1.0, 0.7}; 
+	string $ret = `frameLayout -borderStyle "etchedOut" -collapsable false -collapse false -lv 0`;
+		columnLayout -adj 0;  
+			$formChara=`formLayout -h 16`; 
+				$rld = `symbolButton -w 16 -h 16 -ann "Update character list" -image "autoload.xpm" -c "FBC_updatePrefixMenu();FBC_rebuildTab();"`; 
+				$lbl = `text -h 16 -al "right" -label " Character : "`;
+				$opm = `optionMenu -h 16 -cc "FBC_rebuildTab();" FBC_CHARA`;
+				FBC_updatePrefixMenu();
+
+				formLayout -e
+					-af	$rld "top" 0		-an	$rld "bottom"
+					-af	$rld "left" 0		-an	$rld "right"
+					-af	$lbl "top" 0		-an	$lbl "bottom"
+					-ac	$lbl "left" 0 $rld	-an	$lbl "right"
+					-af	$opm "top" -4		-af	$opm "bottom" 0
+					-ac	$opm "left" 0 $lbl	-af	$opm "right" 0
+				$formChara;
+			setParent ..;
+
+			separator -h 3 -w 260 -vis 1 -st "in"; 
+
+			columnLayout -adj 0 ;
+			
+
+				frameLayout -borderStyle "in" -collapsable 0 -collapse 0 -lv 0;  
+					columnLayout "FBC_TAB"; 
+							FBC_rebuildTab();
+					setParent  ..;
+				setParent  ..;
+
+			setParent ..;
+		setParent ..;
+/*
+								FBC_switchEffFK(1);
+							setParent ..;
+						setParent ..;
+					setParent ..;
+
+					columnLayout ;
+						frameLayout -borderStyle "etchedOut" -collapsable 0 -collapse 0 -lv 0;
+							_createFBIK_Menus();
+						setParent ..;
+
+						separator -h 2 -vis 1 -st "none";
+						frameLayout -w 100 -borderStyle "etchedOut" -collapsable 0 -collapse 0 -lv 0;
+							columnLayout;
+								radioCollection FBC_MODE;
+								rowColumnLayout -nc 2 -cw 1 45 -cw 2 50;
+									radioButton -h 16 -label "Basic" -data 0 -onc "FBC_setMode(0)" MODE_BASIC;
+									radioButton -h 16 -label "Expert" -data 1 -onc "FBC_setMode(1)" MODE_EXPERT;
+									radioCollection -e -select "MODE_BASIC" FBC_MODE;
+								setParent ..;
+							setParent ..;
+						setParent ..;
+
+						separator -h 2 -vis 1 -st "none";
+						frameLayout -w 100 -borderStyle "etchedOut" -collapsable 0 -collapse 0 -l "Active" -fn "smallPlainLabelFont";
+							rowColumnLayout -nc 2 -cw 1 70 -cw 2 24;
+								checkBox -l "hikHandle" -v 1 FBC_ACTIVE;
+								// Attribute editor button
+								symbolButton -i "cmdWndIcon.xpm" -w 24 -h 16
+									-ann "Show In Attribute Editor" -c ("FBC_openHikAE();");
+							setParent ..;
+						setParent ..;
+
+						separator -h 2 -vis 1 -st "none";
+						frameLayout -w 100 -borderStyle "etchedOut" -collapsable 0 -collapse 0 -l "Keying Mode" -fn "smallPlainLabelFont";
+							columnLayout;
+								radioCollection FBC_KEYMD;
+								radioButton -h 16 -label "Full Body" -onc "optionVar -intValue keyFullBody 1;" KEYMD_FULLBODY;
+								radioButton -h 16 -label "Body Part" -onc "optionVar -intValue keyFullBody 2;" KEYMD_BODYPARTS;
+								radioButton -h 16 -label "Selection" -onc "optionVar -intValue keyFullBody 3;" KEYMD_SELECTION;
+
+								separator -h 2 -vis 1 -st "none";
+								button -h 16 -w 95 -bgc $c2[0] $c2[1] $c2[2] -label "Set Key" -c ("performSetFullBodyIKKeys 0;");
+
+								rowColumnLayout -nc 56 -cw 1 13 -cw 2 13 -cw 3 13 -cw 4 13 -cw 5 13 -cw 6 30;
+									radioCollection FBC_KEYRMD;
+									radioButton -h 16 -label "" -onc "optionVar -intValue setIKKey 1;" -ann "Reach keying mode : IK Key(Reach = 1)" KEYRMD_IK;
+									text -l "IK" -ann "Reach keying mode : IK Key(Reach = 1)" ;
+									radioButton -h 16 -label "" -onc "optionVar -intValue setIKKey 2;" -ann "Reach keying mode : FK Key(Reach = 0)" KEYRMD_FK;
+									text -l "FK" -ann "Reach keying mode : FK Key(Reach = 0)" ;
+									radioButton -h 16 -label "" -onc "optionVar -intValue setIKKey 3;"  -ann "Reach keying mode : Simple Key (Reach not keyed)" KEYRMD_NONE;
+									text -l "simple" -ann "Reach keying mode : Simple Key (Reach not keyed)" ;
+								setParent ..;
+							setParent ..;
+						setParent ..;
+
+						separator -h 2 -vis 1 -st "none";
+						frameLayout -w 100 -borderStyle "etchedOut" -collapsable 0 -collapse 0 -l "Effector Pinning" -fn "smallPlainLabelFont";
+							rowColumnLayout -nc 3 -cw 1 20 -cw 2 20 -cw 3 55;
+								_createTextCheckBox("T", "FBIK_pinningChanged()");
+								_createTextCheckBox("R", "FBIK_pinningChanged()");
+								_createTextCheckBox("Release", "FBIK_releaseChanged()");
+							setParent ..;
+						setParent ..;
+				setParent ..;
+			setParent ..;
+
+			frameLayout -borderStyle "etchedOut" -collapsable 0 -collapse 0 -lv 0;
+				columnLayout;
+					_createSliderBar("sliderT", "Reach T");
+					_createSliderBar("sliderR", "Reach R");
+					_createSliderBar("sliderP", "Pull");
+				setParent ..;
+			setParent ..;
+
+			frameLayout -borderStyle "etchedOut" -collapsable 0 -collapse 0 -lv 0;
+				rowColumnLayout -nc 1 -cw 1 230;
+					button -h 18 -bgc $c1[0] $c1[1] $c1[2] -label "Match Effector" -c ("FBC_MatchEfftoFK();") -ann "Effectors is matched to FK-Joints at current frame." ;
+				setParent ..;
+			setParent ..;
+
+		string $prefix = FBC_getPrefix();
+		_createPoseForm();
+
+		setParent ..;
+	setParent ..;
+*/
+	global string $gFBCFrames;
+	$gFBCFrames = $gFBCFrames + "," + $ret;
+
+	return $ret;
+
+}
+//************************************************************************************************************
+//
+global proc IDMT_CharacterControl() {
+
+	if (( `window -ex FBIK_CharaConWin`) == true) deleteUI FBIK_CharaConWin; 
+
+	// initialize global variables.
+	global string $gFBCFrames;                                
+	global int $gFBIK_pinnJob;                                
+
+	$gFBCFrames = "";                                         
+	$gFBIK_pinnJob = 0;					  
+
+	window -title ("IDMT_CharacterControl v0.1") -tlb 1 -mxb 0 -mnb 0 -height 285 -rtf 1 FBIK_CharaConWin;  
+
+	$form=`formLayout FBC_FORM`;		
+
+		button -h 8 -w 250 -l "" -c ("FBC_minMaxWin(0)") FBC_MIN; 
+		string $bl1 = _createInnerUI(); setParent $form;   
+
+	formLayout -e
+		-attachForm		FBC_MIN	"top" 0			-attachNone		FBC_MIN	"bottom"
+		-attachForm		FBC_MIN	"left" 0		-attachForm		FBC_MIN	"right" 0
+
+		-attachControl	$bl1	"top" 2 FBC_MIN	-attachNone		$bl1	"bottom"
+		-attachForm		$bl1	"left" 2		-attachForm		$bl1	"right" 2
+	$form;
+
+	showWindow FBIK_CharaConWin;
+	FBC_minMaxWin(1);
+	// scriptJob
+	scriptJob -p FBIK_CharaConWin -e "SelectionChanged" ("FBIK_selectChanged();");
+}

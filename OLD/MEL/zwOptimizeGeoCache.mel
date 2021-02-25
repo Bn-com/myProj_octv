@@ -1,0 +1,167 @@
+global proc zwOptimizeCacheBlend()
+{
+	string $attrs[] = {"start", "end", "range"};
+
+	string $buf[] = `ls -type "cacheBlend"`;
+	for ($cacheBlend in $buf)
+	{
+		int $index = -1;
+
+		int $size = `getAttr -size ($cacheBlend + ".cacheData")`;
+		for ($i=0; $i<$size; $i++)
+		{
+			float $weight = `getAttr ($cacheBlend + ".cacheData[" + $i + "].weight")`;
+			if ($weight == 1)
+			{
+				if ($index != -1)
+				{
+					$index = -1;
+					break;
+				}
+				else
+				{
+					$index = $i;
+				}
+			}
+			else if ($weight != 0)
+			{
+				$index = -1;
+				break;
+			}
+		}
+
+		if ($index != -1)
+		{
+			for ($i=0; $i<$size; $i++)
+			{
+				if ($i != $index)
+				{
+					for ($j=0; $j<size($attrs); $j++)
+					{
+						string $connections[] = `listConnections -destination false -plugs true ($cacheBlend + ".cacheData[" + $i + "]." + $attrs[$j])`;
+						for ($k=0; $k<size($connections); $k++)
+						{
+							disconnectAttr $connections[$k] ($cacheBlend + ".cacheData[" + $i + "]." + $attrs[$j]);
+						}
+					}
+					string $connections[] = `listConnections -destination false -plugs true ($cacheBlend + ".inCache[0].vectorArray[" + $i + "]")`;
+					for ($k=0; $k<size($connections); $k++)
+					{
+						disconnectAttr $connections[$k] ($cacheBlend + ".inCache[0].vectorArray[" + $i + "]");
+					}
+				}
+			}
+			evalEcho ("delete \"" + $cacheBlend + "\"");
+		}
+	}
+
+	string $cacheFiles[] = `ls -type "cacheFile"`;
+	for ($cacheFile in $cacheFiles)
+	{
+		string $connections[] = `listConnections -source false $cacheFile`;
+		if (!size($connections))
+		{
+			evalEcho ("delete \"" + $cacheFile + "\"");
+		}
+	}
+}
+
+global proc zwOptimizeCacheFileSelected()
+{
+	string $cacheFiles[] = `ls -sl -type "cacheFile"`;
+	zwOptimizeCacheFileProc $cacheFiles;
+}
+
+global proc zwOptimizeCacheFile()
+{
+	string $cacheFiles[] = `ls -type "cacheFile"`;
+	zwOptimizeCacheFileProc $cacheFiles;
+}
+
+global proc zwOptimizeCacheFileProc(string $cacheFiles[])
+//global proc zwOptimizeCacheFile()
+{
+//	string $cacheFiles[] = `ls -type "cacheFile"`;
+	for ($i=0; $i<size($cacheFiles); $i++)
+	{
+		if (!`objExists $cacheFiles[$i]`)
+		{
+			continue;
+		}
+
+		string $cacheDirectory = `getAttr ($cacheFiles[$i] + ".cachePath")`;
+		string $cacheFile = `getAttr ($cacheFiles[$i] + ".cacheName")`;
+		if (!`filetest -f ($cacheDirectory + "/" + $cacheFile + ".xml")`)
+		{
+			continue;
+		}
+		string $path1 = `idmtFile -fullPath ($cacheDirectory + "/" + $cacheFile + ".xml")`;
+
+		string $buf[];
+		clear $buf;
+		for ($j=$i+1; $j<size($cacheFiles); $j++)
+		{
+			string $path2 = `getAttr ($cacheFiles[$j] + ".cachePath")` + "/" + `getAttr ($cacheFiles[$j] + ".cacheName")` + ".xml";
+			$path2 = `idmtFile -fullPath $path2`;
+			if (tolower($path1) == tolower($path2))
+			{
+				$buf[size($buf)] = $cacheFiles[$j];
+			}
+		}
+		if (!size($buf))
+		{
+			continue;
+		}
+		$buf[size($buf)] = $cacheFiles[$i];
+
+		string $channelNames[] = `cacheFile -fileName ($cacheDirectory + "/" + $cacheFile + ".xml") -query -channelName`;
+		string $cmd = "cacheFile -createCacheNode -fileName \"" + $cacheFile + "\" -directory \"" + $cacheDirectory + "\"";
+		for ($channelName in $channelNames)
+		{
+			$cmd += " -channelName \"" + $channelName + "\"";
+		}
+		string $cacheFileNode = `eval $cmd`;
+
+		for ($cacheFile in $buf)
+		{
+			int $size = `getAttr -size ($cacheFile + ".channel")`;
+			for ($j=0; $j<$size; $j++)
+			{
+				string $channelName = `getAttr ($cacheFile + ".channel[" + $j + "]")`;
+				for ($k=0; $k<size($channelNames); $k++)
+				{
+					if ($channelNames[$k] == $channelName)
+					{
+						string $connections[] = `listConnections -source false -plugs true ($cacheFile + ".outCacheData[" + $j + "]")`;
+						for ($connection in $connections)
+						{
+							evalEcho ("connectAttr -force \"" + $cacheFileNode + ".outCacheData[" + $k + "]\" \"" + $connection + "\"");
+						}
+					}
+				}
+			}
+			string $connections[] = `listConnections -source false -plugs true ($cacheFile + ".start")`;
+			for ($connection in $connections)
+			{
+				evalEcho ("connectAttr -force \"" + $cacheFileNode + ".start\" \"" + $connection + "\"");
+			}
+			$connections = `listConnections -source false -plugs true ($cacheFile + ".end")`;
+			for ($connection in $connections)
+			{
+				evalEcho ("connectAttr -force \"" + $cacheFileNode + ".end\" \"" + $connection + "\"");
+			}
+			$connections = `listConnections -source false -plugs true ($cacheFile + ".inRange")`;
+			for ($connection in $connections)
+			{
+				evalEcho ("connectAttr -force \"" + $cacheFileNode + ".inRange\" \"" + $connection + "\"");
+			}
+			evalEcho ("delete \"" + $cacheFile + "\"");
+		}
+	}
+}
+
+global proc zwOptimizeGeoCache()
+{
+	zwOptimizeCacheBlend;
+	zwOptimizeCacheFile;
+}

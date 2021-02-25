@@ -1,0 +1,84 @@
+//////////////////////////////////////////////////////////////////////////////////
+/*******************************************************************
+LB_ContactShader:
+Work with all type of geometry (NURBS - POLY)
+
+last code 21/08/2007
+*******************************************************************/
+/////////////////////////////////////////////////////////////////////////////////
+
+global proc LB_ContactShader()
+{
+	global string $MSH_obj;
+	global string $MSH_shaded;
+	
+	if (`window -exists contactShader`) deleteUI contactShader;
+	window -title "LB_ContactShader" -wh 320 200 contactShader;
+	columnLayout -adjustableColumn 1;
+	frameLayout -label "Objects:" -cl false -cll true;
+		columnLayout -adjustableColumn 1 -columnAlign "left";
+			textFieldButtonGrp -label "Contact OBJ:" -columnWidth2 50 50 -buttonLabel "Pick" -bc pickOBJ _contact_OBJ;	
+			textFieldButtonGrp -label "Shaded OBJ:" -columnWidth2 50 50 -buttonLabel "Pick" -bc pickShaded _shaded_OBJ;
+		setParent..;
+	setParent..;
+	rowLayout -nc 2;
+	button -label "Create Shader" -w 80 -c createShader;
+	showWindow contactShader;
+}
+
+global proc pickOBJ()
+{
+	string $objects[]=`ls-sl`;
+	textFieldButtonGrp -e -tx $objects[0] _contact_OBJ;  
+}
+
+global proc pickShaded()
+{
+	string $objects[]=`ls-sl`;
+	textFieldButtonGrp -e -tx $objects[0] _shaded_OBJ;  
+}
+
+global proc createShader()
+{
+	global string $MSH_obj;
+	global string $MSH_pGoal;
+	$MSH_obj=`textFieldGrp -q -tx _contact_OBJ`;
+	$MSH_shaded=`textFieldGrp -q -tx _shaded_OBJ`;
+	
+	// Create node for shading
+	
+	string $surfShd=`shadingNode -asShader surfaceShader`;
+	string $rampShd=`shadingNode -asTexture ramp`;
+	string $clampNode=`createNode clamp`;
+	string $samplerInfoNode=`createNode samplerInfo`;
+	string $distanceNode=`createNode distanceBetween`;
+	string $objectShape[]=`listRelatives -s $MSH_obj`;
+	
+	if (`nodeType $objectShape[0]`=="nurbsSurface")
+	{
+			string $closestNode=`createNode closestPointOnSurface`;
+			connectAttr -f ($samplerInfoNode+".pointWorld") ($closestNode+".ip");
+			connectAttr -f ($objectShape[0]+".worldSpace[0]") ($closestNode+".inputSurface");
+			connectAttr -f ($closestNode+".position") ($distanceNode+".point2");
+			connectAttr -f ($samplerInfoNode+".pointWorld") ($distanceNode+".point1");
+			connectAttr -f ($distanceNode+".distance") ($clampNode+".inputR");
+			setAttr ($clampNode+".maxR") 1;
+			connectAttr -f ($clampNode+".outputR") ($rampShd+".uCoord");
+			connectAttr -f ($rampShd+".outColor") ($surfShd+".outColor");
+			setAttr ($rampShd+".type") 1;
+	}
+	
+	if (`nodeType $objectShape[0]`=="mesh")
+	{
+			string $closestNode=`createNode nearestPointOnMesh`;
+			connectAttr -f ($samplerInfoNode+".pointWorld") ($closestNode+".ip");
+			connectAttr -f ($objectShape[0]+".worldMesh[0]") ($closestNode+".inMesh");
+			connectAttr -f ($closestNode+".position") ($distanceNode+".point2");
+			connectAttr -f ($samplerInfoNode+".pointWorld") ($distanceNode+".point1");
+			connectAttr -f ($distanceNode+".distance") ($clampNode+".inputR");
+			setAttr ($clampNode+".maxR") 1;
+			connectAttr -f ($clampNode+".outputR") ($rampShd+".uCoord");
+			connectAttr -f ($rampShd+".outColor") ($surfShd+".outColor");
+			setAttr ($rampShd+".type") 1;
+	}	
+}

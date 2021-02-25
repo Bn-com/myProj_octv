@@ -1,0 +1,136 @@
+// Procs to deal with information from info.txt files from
+
+//  string[] s100PACM_getDicoFromInfoFile(string $infoFile, string $values[])
+// Reads an info.txt file (containing a python format style dictionnary "{'key1':value1, 'key2':value2 ,...} "
+// and returns keys as string array and their relatd values in passed (first empty) var $values[].
+// after stripping the lines and getting rid of "//", "\n", "\r", spaces, ",", ":" etc..
+//
+// ex with :
+// string $infoFile = "Y:/000_3D_BANK/01_Characters/Ant/MA_C_AntOriginal_01/_cache/135357926344/infos.txt";
+// containing : "//{'validated': True, 'dateValidated': '2012-11-22 11:16:17.697000', 'name': u'Cycle_Run_Soldier_01', 'inParis': True}\n"
+/*
+	string $values[] = {} ;
+	string $keys[] = s100PACM_getDicoFromInfoFile( $infoFile, $values );
+// => Returned $keys :
+	validated
+	name
+	inParis
+// + $values got these:
+   True
+   u'Cycle_Run_Soldier_01'
+   True
+*/
+//
+// Then you can use this to fetch the value of any key :
+/*
+	string $key = "inParis";
+	string $val = s100PAC_sameIndexValueBtwnStringArrays( $keys, $values, $key);
+	print ("'"+$val+"'\n");
+*/
+//
+
+global proc string[] s100PACM_getDicoFromInfoFile(string $infoFile, string $values[])
+{
+	string $keys[]={};
+	string $lines = s100_getLinesFromFile(encodeString($infoFile));
+	if (size($lines))
+	{
+		if ( startsWith($lines,"//") )
+			$lines = substring($lines,3,size($lines));
+		$lines = strip($lines);
+		if ( startsWith($lines,"{") )
+			$lines = substring($lines,2,size($lines));
+
+		$lines = substituteAll( "\n", $lines, "");
+		$lines = substituteAll( "\r", $lines, "");
+		$lines = substituteAll( "}", $lines, "");
+
+		string $parts[] = stringToStringArray($lines,",");
+		for ($pt in $parts) // string $pt = $parts[0]
+		{
+			//string $pt = `match $pt ".*'[^']':`.*$";
+			string $kvs[] = stringToStringArray($pt,":");
+			if (size($kvs)==2)
+			{
+				$keys[size($keys)] = strip(substituteAll( "'", $kvs[0], ""));
+				$values[size($values)] = strip($kvs[1]);
+            }
+        }
+    }
+	return $keys;
+}
+
+// returns lines from text file in a string :
+// s100_getLinesFromFile($infoFile)
+//
+global proc string s100_getLinesFromFile(string $infoFile)
+{
+	string $analyse = "";
+	if(`filetest -e $infoFile`)
+	{
+		int $fileId=`fopen $infoFile "r"`;
+		while ( !`feof $fileId` )
+		{
+			string $curLine = `fgetline $fileId`;
+			if (!startsWith($curLine,"//"))
+				$curLine = "//"+$curLine;
+			$analyse += $curLine;
+		}
+		fclose $fileId; // fclose 3
+		print ("// s100_getLinesFromFile >> read analyse from \"" + $infoFile +"\" \r\n") ;
+	}
+	else
+		print ("// s100_getLinesFromFile >> Cannot find text file \""+$infoFile+"\" \r\n");
+	return $analyse;
+}
+
+
+
+// Getting value of a key from an info.txt file
+//
+// string $key = "inParis";
+// string $key = "inParis2";
+// string $val = s100PAC_fetchAttributeValueInInfoFile( $infoFile, $key);
+// print ("'"+$val+"'\n");
+//
+global proc string s100PAC_fetchAttributeValueInInfoFile(string $infoFile, string $key)
+{
+	string $values[] = {} ;
+	string $keys[] = s100PACM_getDicoFromInfoFile( $infoFile, $values );
+
+	string $val = "";
+	int $ok = !catch($val = s100PAC_sameIndexValueBtwnStringArrays( $keys, $values, $key));
+	//print ("'"+$val+"'\n");
+	if ($ok)
+		return $val;
+	else
+		return "";
+}
+
+// string array UTILS :
+//
+
+// string $array[] = $keys;
+// string $item = $key;
+//
+global proc int s100PAC_getIndexOfFirstItemInStringArray( string $array[], string $item)
+{
+	for ($i=0; $i<size($array); $i++)
+	{
+		if ($item == $array[$i])
+			return $i;
+    }
+	return -1;
+}
+
+global proc string s100PAC_sameIndexValueBtwnStringArrays( string $keys[], string $values[], string $key)
+{
+	int $i = s100PAC_getIndexOfFirstItemInStringArray( $keys, $key );
+	if ( $i!=-1 && size($values)>=($i+1))
+		return $values[$i];
+	else if ($i==-1)
+		error ("No key \""+$key+"\" found in passed $keys array!");
+	else
+		error "No similar index to search from in second passed string array !";
+	return "";
+}

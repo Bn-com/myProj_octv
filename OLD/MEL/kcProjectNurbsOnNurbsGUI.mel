@@ -1,0 +1,190 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+proc kcAssignSG(string $shape, string $SG)
+{
+	if (`nodeType $SG` == "shadingEngine")
+		sets -forceElement $SG $shape;
+}
+
+proc string kcGetSG(string $shape)
+{
+	string $nodes[] = `listConnections -source false -destination true ($shape + ".instObjGroups[0]")`;
+
+	for ($item in $nodes)
+		if (`nodeType $item` == "shadingEngine")
+			return $item;
+}
+
+proc kcProjectSurf(string $inNurbsFloor, string $inSurf, string $inLocator, string $focalLocator)
+{
+	string $projectSurf = `createNode projectSurf`;
+
+//	connectAttr -force ($inFloor + ".worldMesh[0]") ($projectSurf + ".inFloor");
+	connectAttr -force ($inNurbsFloor + ".worldSpace") ($projectSurf + ".inNurbsFloor");
+	connectAttr -force ($inLocator + ".worldMatrix") ($projectSurf + ".inLocator");
+	connectAttr -force ($inLocator + ".matrix") ($projectSurf + ".inLocatorOS");
+	connectAttr -force ($focalLocator + ".worldMatrix") ($projectSurf + ".focalLocator");
+	connectAttr -force ($focalLocator + ".matrix") ($projectSurf + ".focalLocatorOS");
+	connectAttr -force ($inSurf + ".worldSpace") ($projectSurf + ".inSurf");
+
+	string $transform = `createNode transform -name ("out_" + $inSurf)`;
+
+	string $tokens[];
+	tokenize $transform "|" $tokens;
+	string $nurbsSurf = `createNode nurbsSurface -parent $transform -name ($tokens[size($tokens) - 1] + "Shape")`;
+
+	connectAttr -force ($projectSurf + ".outSurf") ($nurbsSurf + ".create");
+
+	// assign same shader to projected surface
+
+	string $shapes[] = `listRelatives -shapes $inSurf`;
+	string $SG = kcGetSG($shapes[0]);
+	kcAssignSG($nurbsSurf, $SG);
+
+	// set cast shodow to 0
+
+	setAttr ($nurbsSurf + ".castsShadows") false;
+
+	// make projected surface have same parent as inSurf
+
+	string $newName[];
+
+	string $parents[] = `listRelatives -parent $inSurf`;
+	if (size($parents) > 0)
+	{
+		$newName = `parent $transform $parents[0]`;
+		$transform = $newName[0];
+	}
+
+	// hide and lock transform
+
+	setAttr -lock true -keyable false ($transform + ".tx");
+	setAttr -lock true -keyable false ($transform + ".ty");
+	setAttr -lock true -keyable false ($transform + ".tz");
+	setAttr -lock true -keyable false ($transform + ".rx");
+	setAttr -lock true -keyable false ($transform + ".ry");
+	setAttr -lock true -keyable false ($transform + ".rz");
+	setAttr -lock true -keyable false ($transform + ".sx");
+	setAttr -lock true -keyable false ($transform + ".sy");
+	setAttr -lock true -keyable false ($transform + ".sz");
+	setAttr -lock true -keyable false ($transform + ".v");
+}
+
+global proc kcProjectNurbsOnNurbsCB(string $group1, string $group2, string $group3, string $group4)
+{
+	string $inNurbsFloor = `textFieldButtonGrp -q -text $group1`;
+	string $inSurf = `textFieldButtonGrp -q -text $group2`;
+	string $focalLocator = `textFieldButtonGrp -q -text $group3`;
+	string $inLocator = `textFieldButtonGrp -q -text $group4`;
+
+	if (!`objExists $inNurbsFloor`)
+		error($group1 + " does not exist.");
+
+	if (!`objExists $inSurf`)
+		error($group2 + " does not exist.");
+
+	if (!`objExists $inLocator`)
+		error($group3 + " does not exist.");
+
+	if (!`objExists $focalLocator`)
+		error($group4 + " does not exist.");
+
+	kcProjectSurf($inNurbsFloor, $inSurf, $inLocator, $focalLocator);
+}
+
+global proc kcSelectObjCB(string $group, int $type)
+{
+	string $selected[] = `ls -selection`;
+
+	if (size($selected) > 0)
+	{
+		if (($type == 0) || ($type == 1))
+		{
+			// check must be NURBS surface
+
+			if (!kcIsType($selected[0], "nurbsSurface"))
+			{
+				warning("Please select a NURBS surface.");
+				return;
+			}
+		}
+
+		textFieldButtonGrp -e -text $selected[0] $group;
+	}
+	else
+		warning("No object is selected.");
+}
+
+global proc kcProjectNurbsOnNurbsGUI()
+{
+	if (!`pluginInfo -q -loaded projectSurf`)
+		loadPlugin projectSurf;
+		
+	if (`window -exists kcProjectNurbsOnNurbsGUIWnd`)
+		deleteUI -window kcProjectNurbsOnNurbsGUIWnd;
+
+
+	window -title "PANSHEL: Project Nurbs Surf on Nurbs Surf" -resizeToFitChildren true kcProjectNurbsOnNurbsGUIWnd;
+		string $formLayout = `formLayout`;
+			string $columnLayout = `columnLayout`;
+				text -label "ASSUMPTIONS and TIPS:";
+				text -label "1) Projection is on CVs, make sure enough CVs to define the shape";
+				text -label "2) Minimize the number of CVs on eye/mouth NURBS surface, otherwise it will be slow (watch out for trimmed surface).";
+				text -label "3) The number of CVs on NURBS head does NOT affect speed.";
+				text -label "4) NURBS head MUST be as close to polygonal head possible.";
+				text -label "5)	NURBS head must be constructed with positive U to right and positive V to top.";
+				text -label "6) eye/mouth NURBS MUST be constructed in the top viewport (positive X to right and negative Z to top).";
+				text -label "7) eye/mouth NURBS MUST be centered at world origin (0, 0, 0), its transform will NOT be used.";
+			setParent ..;
+			string $group1 = `textFieldButtonGrp -columnWidth 1 110 -adjustableColumn 2 -label "NURBS head:" -editable false -buttonLabel "Select"`;
+			string $group2 = `textFieldButtonGrp -columnWidth 1 110 -adjustableColumn 2 -label "NURBS eye/mouth:" -editable false -buttonLabel "Select"`;
+			string $group3 = `textFieldButtonGrp -columnWidth 1 110 -adjustableColumn 2 -label "Focal Locator:" -editable false -buttonLabel "Select"`;
+			string $group4 = `textFieldButtonGrp -columnWidth 1 110 -adjustableColumn 2 -label "Manip Locator:" -editable false -buttonLabel "Select"`;
+			$button1 = `button -label "Apply" -command ("kcProjectNurbsOnNurbsCB " + $group1 + " " +$group2 + " " + $group3 + " " + $group4)`;
+			$button2 = `button -label "Cancel" -command ("deleteUI -window kcProjectNurbsOnNurbsGUIWnd")`;
+		setParent ..;
+
+		textFieldButtonGrp -e -buttonCommand ("kcSelectObjCB " + $group1 + " 0") $group1;
+		textFieldButtonGrp -e -buttonCommand ("kcSelectObjCB " + $group2 + " 1") $group2;
+		textFieldButtonGrp -e -buttonCommand ("kcSelectObjCB " + $group3 + " 2") $group3;
+		textFieldButtonGrp -e -buttonCommand ("kcSelectObjCB " + $group4 + " 3") $group4;
+
+		formLayout -edit
+			-attachForm		$columnLayout		"top"		10
+			-attachForm		$columnLayout		"left"		10
+
+			-attachControl	$group1		"top"		10	$columnLayout
+			-attachForm		$group1		"left"		10
+			-attachForm		$group1		"right"		10
+
+			-attachControl	$group2		"top"		10	$group1
+			-attachForm		$group2		"left"		10
+			-attachForm		$group2		"right"		10	
+
+			-attachControl	$group3		"top"		10	$group2
+			-attachForm		$group3		"left"		10
+			-attachForm		$group3		"right"		10
+
+			-attachControl	$group4		"top"		10	$group3
+			-attachForm		$group4		"left"		10
+			-attachForm		$group4		"right"		10	
+
+			-attachControl	$button1		"top"		10	$group4
+			-attachForm		$button1		"left"		10
+			-attachPosition	$button1		"right"		0	50
+
+			-attachControl	$button2		"top"		10	$group4
+			-attachControl	$button2		"left"		0	$button1
+			-attachForm		$button2		"right"		10
+		$formLayout;
+
+	showWindow kcProjectNurbsOnNurbsGUIWnd;
+}

@@ -1,0 +1,97 @@
+global proc ddStretchySplineIKHandle(string $ik)
+{
+ //1.创建curve info连接到curve
+ //3.计算jointChain的个数
+ //4.计算标准单位
+ //5.创建两个multiplyDivide
+ //6.计算出来的将
+ //7.spline ik 
+ int $jointAmount ;
+ float $generalUnit,$originCurveLength ;
+ string $curveShape,$curveInfo,$buffer[],
+ $currentMultiplyDivide,$normalizeMultiplyDivide,
+ $startJoint,$endJoint,$selected[],$tmp ;
+
+
+ //找出curve shape
+ $curveShape = `ikHandle -query -curve $ik` ;
+
+ //为curve创建curveInfo
+ 
+ if(`connectionInfo -isSource ($curveShape + ".worldSpace")`)
+ {
+  //$curveInfo = `connectionInfo -isExactDestination ($curveShape + ".worldSpace")` ;
+  $buffer = `listConnections -destination true -type "curveInfo"($curveShape + ".worldSpace")` ;
+  //print  $curveInfo ;
+  //tokenize $curveInfo "." $buffer ;
+  if (size($buffer) == 0)
+  {
+   $curveInfo = `createNode curveInfo` ;
+   connectAttr -force ($curveShape + ".worldSpace") ($curveInfo + ".inputCurve") ;
+  }
+  else
+  {
+   $curveInfo = $buffer[0] ;
+  }
+ }
+ else
+ {
+  $curveInfo = `createNode curveInfo` ;
+  connectAttr -force ($curveShape + ".worldSpace") ($curveInfo + ".inputCurve") ;
+ }
+
+ //计算joint chain amount
+ $startJoint = `ikHandle -query -startJoint $ik` ;
+ select -hierarchy $startJoint ;
+ $selected = `ls -sl -type "joint"` ;
+ $jointAmount = `size($selected)` ;
+ select -clear ;
+// $endJoint = $selected[$jointAmount-1] ;
+
+ //计算标准单位 unit length of joint
+ $originCurveLength = `getAttr ($curveInfo + ".arcLength")` ;
+ $generalUnit = $originCurveLength/($jointAmount-1) ;
+
+ //
+ $currentMultiplyDivide   = `shadingNode -asUtility multiplyDivide -name ($ik + "_currentMultiplyDivide")` ;
+ $normalizeMultiplyDivide = `shadingNode -asUtility multiplyDivide -name ($ik + "_normalizeMultiplyDivide")` ;
+ setAttr ($currentMultiplyDivide + ".operation")   2 ;
+ setAttr ($normalizeMultiplyDivide + ".operation") 2 ;
+
+ connectAttr -force ($curveInfo + ".arcLength") ($currentMultiplyDivide + ".input1X") ;
+ setAttr ($currentMultiplyDivide + ".input2X") ($jointAmount-1);
+ connectAttr -force ($currentMultiplyDivide + ".outputX") ($normalizeMultiplyDivide + ".input1X") ;
+ setAttr ($normalizeMultiplyDivide + ".input2X") $generalUnit ;
+
+ //连接scale
+ select -hierarchy $startJoint ;
+ $selected = `ls -sl` ;
+ for($tmp in $selected)
+ {
+  connectAttr -force ($normalizeMultiplyDivide + ".outputX") ($tmp + ".sx") ;
+ }
+ select -clear ;
+}
+
+global proc ddStretchySplineIKHandleCMD()
+{
+ //1.创建curve info连接到curve
+ //2.创建joint chain
+ //3.计算jointChain的个数
+ //4.计算标准单位
+ //5.创建两个multiplyDivide
+ //6.计算出来的将
+ string $selected[],$ik ;
+
+ $selected = `ls -sl -type "ikHandle"` ;
+
+ for ($ik in $selected)
+ {
+  ddStretchySplineIKHandle($ik) ;
+ }
+
+
+ select -cl ;
+}
+
+ddStretchySplineIKHandleCMD ;

@@ -1,0 +1,161 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ’‘÷æΩ‹
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//	Script by matt 2d3d annimation
+//
+//	It ask you before to have a directionnal light to be able to make connection 
+//	with that light to but a problem in maya rendering that I don't understand right now made me get that part of the code away.
+//	so you'll use a light directionnal for your main shadow.you can increase the power of the light to have clean shadow
+//	and use the attribute inside the shader if the light burn the object...
+//
+
+// script by matt 2d3d annimations
+//
+// this script is intend to help you create nice shadow at a shader level.
+// what the script does is using the lightShadowFraction out of the light to get the impact the shadow and control 
+// it with attribute instead of of the shadow of the lights. that way you can control the contact shadow of the 
+// dome light and the main lightning. and make any change at a shader level !! great isn't it ??
+//
+// HOW TO USE THE SCRIPT
+//
+// select your lights and plane and run the script
+// you can put it in a shelf since you have to use it for all the shader.
+// the script create 2 extra attributes in your shader shadowColorDomeLight control the shadow of your dome 
+// by puting the color white, those object won't have shadow visible. highlightColor control the color of the 
+// light burning your shader with a surfaceLuminance node.
+
+
+//modified by TaZz(23-04-2004)
+global proc zjConnectLights()
+{ 
+	string $plane[]= `ls -sl -dag -type mesh -type nurbsSurface`;
+	if (`size $plane` != 1)
+	{
+		warning("please select a plane");
+		return;
+	}
+
+	string $shadEG[] = `listConnections -s 0 -d 1 -type shadingEngine $plane[0]`;
+	if (!`objExists $shadEG[0]`)
+	{
+		warning("please assign material to plane");
+		return;
+	}
+	string $shader[] = `listConnections -s 1 -d 0 ($shadEG[0]+".surfaceShader")`;
+	if (size($shader) == 0||$shader[0] == "lambert1")
+	{
+		warning "assign material to plane first.";
+		return;
+	}
+
+	string $light[] = `ls -sl -dag -lights`;
+	if (`size $light` == 0)
+	{
+		warning("please select your lights");
+		return;
+	}
+	
+	string $mnav = $shader[0] + "_averageDomeLight";
+	if (`objExists $mnav`)
+	{
+		//connect lights to plusMinusAverage node
+		for ($item in $light)
+		{
+			string $dest[] = `listConnections -s 0 -d 1 -type plusMinusAverage ($item + ".lightShadowFraction")`;
+			if ($dest[0] != $mnav)
+				connectAttr -force -nextAvailable ($item + ".lightShadowFraction") ($mnav+".input1D");
+		}
+		return;
+	}
+	$mnav = `shadingNode -asUtility plusMinusAverage -n $mnav`;
+	setAttr ($mnav+".operation") 1;
+
+
+	//connect lights to plusMinusAverage node
+	for ($item in $light)
+		connectAttr -force -nextAvailable ($item + ".lightShadowFraction") ($mnav+".input1D");
+	
+	string $inputColor = ".color";
+	if (`nodeType $shader[0]` == "surfaceShader")
+		$inputColor = ".outColor";
+	
+	string $con[] = `listConnections -s 1 -d 0 -plugs 1 ($shader[0] + $inputColor)`;
+	
+	//check if attribute already exist
+
+	if (`attributeExists "shadowColorDomeLight" $shader[0]`)
+		deleteAttr ($shader[0] + ".shadowColorDomeLight");
+
+	if (`attributeExists "highlightColor" $shader[0]`)
+		deleteAttr ($shader[0] + ".highlightColor");
+
+	//add attribute to control the color of the shader
+
+	addAttr -ln  shadowColorDomeLight -at float3 -usedAsColor $shader[0];
+	addAttr -ln  shadowColorDomeLightR -at "float" -parent shadowColorDomeLight $shader[0];
+	addAttr -ln  shadowColorDomeLightG -at "float" -parent shadowColorDomeLight $shader[0];
+	addAttr -ln  shadowColorDomeLightB -at "float" -parent shadowColorDomeLight $shader[0];
+	setAttr ($shader[0]+".shadowColorDomeLight") 0.413 0.413 0.413;
+
+	addAttr -ln highlightColor -at float3 -usedAsColor $shader[0];
+	addAttr -ln highlightColorR -at "float" -parent highlightColor $shader[0];
+	addAttr -ln highlightColorG -at "float" -parent highlightColor $shader[0];
+	addAttr -ln highlightColorB -at "float" -parent highlightColor $shader[0];
+	setAttr ($shader[0]+".highlightColor") 1 1 1;
+
+	// create the necessary nodes
+
+	if (!`objExists surfaceLum_global`)
+	{
+		shadingNode -shared -asUtility surfaceLuminance -name surfaceLum_global;
+	}
+	
+	string $mp1 = `shadingNode -asUtility multiplyDivide -name ("addAverageLight_" + $shader[0] )`;
+	string $blendC1 = `shadingNode -asUtility blendColors -name ("blendAverageLight_" + $shader[0] )`;
+	string $blendC3 = `shadingNode -asUtility blendColors -name ("highlight_" + $shader[0] )`;
+	string $rampLum = `shadingNode -shared -asTexture ramp`;
+
+	setAttr ($rampLum + ".interpolation") 2;
+	setAttr ($rampLum + ".colorEntryList[2].color") 0 0 0;
+	setAttr ($rampLum + ".colorEntryList[0].color") 1 1 1;	
+	setAttr ($rampLum + ".colorEntryList[2].position") 0.520;
+	setAttr ($rampLum + ".colorEntryList[0].position") 1;
+
+	removeMultiInstance -break true ($rampLum + ".colorEntryList[1]");
+
+	string $rampColor = `shadingNode -shared -asTexture ramp -name ("rampColor_" + $shader[0])`;
+	setAttr ($rampColor+".colorEntryList[0].color") 1 1 1;
+
+	removeMultiInstance -break true ($rampColor+".colorEntryList[1]");
+	removeMultiInstance -break true ($rampColor+".colorEntryList[2]");
+
+	// make the connexion.
+	if (`objExists $con[0]`)
+	{
+		disconnectAttr $con[0] ($shader[0]+$inputColor);
+		connectAttr $con[0] ($rampColor+".colorEntryList[0].color");
+	}
+	connectAttr ($mp1 + ".output") ($shader[0]+$inputColor);
+	connectAttr ($rampColor+".outColor") ($mp1 + ".input1");
+	connectAttr ($blendC1+".output" ) ($mp1+".input2");
+	setAttr ($blendC1 +".color2")  1 1 1 ;
+
+	setAttr ($blendC3 +".color2")  1 1 1 ;
+
+	connectAttr -f ($shader[0]+".highlightColor") ($blendC3+".color1");
+	connectAttr -f ($shader[0]+".shadowColorDomeLight") ($blendC1+".color1");
+	connectAttr -f ($blendC3 +".output") ($rampColor+".colorGain");
+	connectAttr -f surfaceLum_global.outValue ($blendC3 +".blender");
+
+	connectAttr -f ($mnav + ".output1D") ($rampLum + ".uvCoord.vCoord");
+	connectAttr -f ($rampLum + ".outColor.outColorR") ($blendC1 +".blender");
+}
+
+

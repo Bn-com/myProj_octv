@@ -1,0 +1,249 @@
+global proc winx2_lightPass(string $lightsofLayer[], string $surfsofLayer[])
+{
+	// Lights Setting
+	if (size($lightsofLayer)){
+		for ($each in $lightsofLayer){
+			editRenderLayerAdjustment ($each +".intensity");
+			catch(`setAttr ($each +".intensity") 1`);
+			if (`gmatch $each "*key*"`){
+				editRenderLayerAdjustment ($each +".color");
+				catch(`setAttr ($each +".color") -type double3 1 0 0`);
+			}
+			if (`gmatch $each "*fill*"`){
+				editRenderLayerAdjustment ($each +".color");
+				catch(`setAttr ($each +".color") -type double3 0 1 0`);
+			}
+			if (`gmatch $each "*rim*"`){
+				editRenderLayerAdjustment ($each +".color");
+				catch(`setAttr ($each +".color") -type double3 0 0 1`);
+			}
+		}
+	}else{
+		$fbString = "No light for Bounce Pass!";
+		iRenderFeedbackDisplay("\n^INF005: 创建Bounce Pass...		//" + $fbString);
+	}
+	// Material Setting
+	string $chr_lambert_lgt = `shadingNode -asShader lambert`;
+	string $chr_lambert_lgtSG = `sets -renderable true -noSurfaceShader true -empty`;
+	connectAttr -f ($chr_lambert_lgt+".outColor") ($chr_lambert_lgtSG+".surfaceShader");
+	setAttr ($chr_lambert_lgt + ".color") -type double3 1 1 1;
+	setAttr ($chr_lambert_lgt + ".diffuse") 1;
+	select -r $surfsofLayer;
+	//hyperShade -assign $chr_lambert_lgt;
+	catch(`sets -e -forceElement $chr_lambert_lgtSG $surfsofLayer`);
+}
+
+global proc winx2_selfShadowPass(string $lightsofLayer[], string $surfsofLayer[])
+{
+	// Lights Setting
+	if (size($lightsofLayer)){
+		for ($each in $lightsofLayer){
+			if (`gmatch $each "*key*"`){
+				editRenderLayerAdjustment ($each+".color");
+				catch(`setAttr ($each +".color") -type double3 0 0 0`);
+				editRenderLayerAdjustment ($each+".shadowColor");
+				catch(`setAttr ($each +".shadowColor") -type double3 1 0 0`);
+
+			}
+			if (`gmatch $each "*fill*"`){
+				catch(`setAttr ($each +".color") -type double3 0 0 0`);
+				editRenderLayerAdjustment ($each+".color");
+				catch(`setAttr ($each +".shadowColor") -type double3 0 1 0`);
+				editRenderLayerAdjustment ($each+".shadowColor");
+			}
+			if (`gmatch $each "*rim*"`){
+				catch(`setAttr ($each +".color") -type double3 0 0 0`);
+				editRenderLayerAdjustment ($each+".color");
+				catch(`setAttr ($each +".shadowColor") -type double3 0 0 1`);
+				editRenderLayerAdjustment ($each+".shadowColor");
+			}
+		}
+	}else{
+		$fbString = "No light for Self-Shadow Pass!";
+		iRenderFeedbackDisplay("\n^INF005: 创建Self-Shadow Pass...		//" + $fbString);
+	}
+	// Material Setting
+	string $chr_lambert_sshd = `shadingNode -asShader lambert`;
+	string $chr_lambert_sshdSG = `sets -renderable true -noSurfaceShader true -empty`;
+	connectAttr -f ($chr_lambert_sshd+".outColor") ($chr_lambert_sshdSG+".surfaceShader");
+	setAttr ($chr_lambert_sshd+".color") -type double3 0.65 0.65 0.65;
+	setAttr ($chr_lambert_sshd+".diffuse") 1;
+	select -r $surfsofLayer;
+	//hyperShade -assign $chr_lambert_sshd;
+	catch(`sets -e -forceElement $chr_lambert_sshdSG $surfsofLayer`);
+}
+
+global proc winx2_ambientPass(string $lightsofLayer[])
+{
+	// Lights Setting
+	if (size($lightsofLayer)){
+		for ($each in $lightsofLayer){
+			if (`objectType $each`=="ambientLight"){
+				editRenderLayerAdjustment ($each+".color");
+				catch(`setAttr ($each +".color") -type double3 1 1 1`);
+				editRenderLayerAdjustment ($each+".intensity");
+				catch(`setAttr ($each +".intensity") 1`);
+				editRenderLayerAdjustment ($each+".ambientShade");
+				catch(`setAttr ($each +".ambientShade") 0`);
+			}				
+		}
+	}else{
+		$fbString = "No light for Ambient Pass!";
+		iRenderFeedbackDisplay("\n^INF005: 创建Ambient Pass...		// " + $fbString);
+	}
+}
+
+global proc winx2_diffusePass(string $surfsofLayer[], string $lightsofLayer[])
+{
+	string $temp[] = `iRenderSelectedObjsMaterials $surfsofLayer`;
+	for ($each in $temp){
+		if (objExists($each+".color")&&objExists($each+".diffuse")){
+			string $connections[] = `listConnections -connections true -source true -destination false -plugs true ($each+".color")`;	
+			if (`size $connections`==2){
+				catch(`disconnectAttr $connections[1] $connections[0]`);
+			}
+			float $dffV = `getAttr ($each+".diffuse")`;
+			editRenderLayerAdjustment ($each+".color");
+			catch(`setAttr ($each+".color") $dffV $dffV $dffV`);
+		}
+	}
+	//Light Setting
+	if (size($lightsofLayer)){
+		for ($each in $lightsofLayer){
+			if (`objectType $each`=="ambientLight"){
+				editRenderLayerAdjustment ($each+".intensity");
+				catch(`setAttr ($each +".intensity") 1`);
+				editRenderLayerAdjustment ($each+".ambientShade");
+				catch(`setAttr ($each +".ambientShade") 0`);				
+			}
+		}
+	}
+}
+
+global proc winx2_specularPass(string $lightsofLayer[])
+{
+	// Lights Setting
+	if (size($lightsofLayer)){
+		for ($each in $lightsofLayer){
+			editRenderLayerAdjustment ($each+".emitDiffuse");
+			catch(`setAttr ($each + ".emitDiffuse") 0`);
+			editRenderLayerAdjustment ($each+".emitSpecular");
+			catch(`setAttr ($each + ".emitSpecular") 1`);
+		}
+	}else{
+		$fbString = "No light for Specular Pass!";
+		iRenderFeedbackDisplay("\n^INF005: Specular Pass...		// " + $fbString);
+	}	
+}
+
+global proc winx2_rimPass()
+{
+	// Lights Setting
+	file -import -type "mayaBinary" -rpr "winx_rimlight" "\\\\File-cluster\\gdc\\Resource\\Support\\Maya\\Import\\winx_rimlight.mb";	
+	string $fbString = "请重新为环境光定位!";
+	iRenderFeedbackDisplay("\n^INF005: Rim Pass...		// " + $fbString);
+}
+
+global proc winx2_eyeLight(string $headrig, string $eye, int $adj)
+{
+	defaultPointLight(.8, 1,1,1, 0, 0, 0,0,0, 1);
+	string $addLight[] = `ls -sl`;
+	setAttr ($addLight[0]+".scaleX") 1;
+	setAttr ($addLight[0]+".scaleY") 1;
+	setAttr ($addLight[0]+".scaleZ") 1;	
+	float $eyeBB[] = `xform -q -ws -bb $eye`;
+
+	string $lightSet[] = `listConnections -type objectSet -p true $addLight[0]`;
+	disconnectAttr ($addLight[0]+".instObjGroups[0]") $lightSet[0];
+	select -r $addLight[0];select -add $eye;
+	zjMakeLightLinks();
+	setAttr ($addLight[0] + ".emitDiffuse") 0;
+	parent $addLight[0] $headrig;
+}
+
+global proc winx2_eyesPass()
+{
+	// Lights Setting
+	string $headrig[] = `ls "*Joint_ANCHOR_HAIRSETUP" "*:*Joint_ANCHOR_HAIRSETUP"`;
+	string $eyesL[] = `ls -sl "*eye_L*" "*:*eye_L*"`;
+	string $eyesR[] = `ls -sl "*eye_R*" "*:*eye_R*"`;
+	if (size($headrig)){
+		currentTime 1001;
+		if (size($eyesL)){
+			winx2_eyeLight($headrig[0], $eyesL[0], 1);
+		}else{
+		string $fbString = "找不到角色左眼!";
+		iRenderFeedbackDisplay("\n^INF005: Rim Pass...		// " + $fbString);
+		}
+		if (size($eyesR)){
+			winx2_eyeLight($headrig[0], $eyesR[0], -1);
+		}else{
+		string $fbString = "找不到角色右眼!";
+		iRenderFeedbackDisplay("\n^INF005: Rim Pass...		// " + $fbString);
+		}
+	}else{
+		string $fbString = "找不到Joint_anchor_hairsetup!";
+		iRenderFeedbackDisplay("\n^INF005: Rim Pass...		// " + $fbString);
+	}
+}
+
+global proc winx2_sssPass(string $lightsofLayer[])
+{
+	// Lights Setting
+	if (size($lightsofLayer)){
+		//editRenderLayerAdjustment ($lightsofLayer[0]+".useDepthMapShadows");
+		catch(`setAttr ($lightsofLayer[0] +".useDepthMapShadows") 1`);
+		//editRenderLayerAdjustment ($lightsofLayer[0]+".dmapResolution");
+		catch(`setAttr ($lightsofLayer[0] +".dmapResolution") 512`);
+		//editRenderLayerAdjustment ($lightsofLayer[0]+".dmapFilterSize");
+		catch(`setAttr ($lightsofLayer[0] +".dmapFilterSize") 50`);
+	}
+	// Material Setting
+	catch(`file -import -type "mayaBinary" -rpr "fake_SSS" "\\\\file-cluster\\GDC\\Resource\\Support\\Maya\\Import\\fake_SSS.mb"`);
+}
+
+global proc iRender4Winx2_RenderLayerSetting(string $layerName, string $fbString)
+{
+	// SOURCE STATEMENT
+	source iRenderScriptsHub.mel;
+	string $fbString;
+	string $temp[];
+
+	// Scene elements
+	string $membersofLayer[] = `editRenderLayerMembers -q $layerName`;
+	string $lightsofLayer[] = `iRenderLayersLights $membersofLayer`;
+	string $surfsofLayer[] = `iRenderLayersGeometry $membersofLayer`;
+
+	// LIGHTS PASS
+	if (`gmatch $layerName "*_lgt"`){
+		winx2_lightPass($lightsofLayer, $surfsofLayer);
+
+	// BOUNCE PASS
+	}else if(`gmatch $layerName "*_bnc"`){
+	
+	// AMBIENT PASS
+	}else if (`gmatch $layerName "*_amb"`){
+		winx2_ambientPass($lightsofLayer);
+
+	// DIFFUSE PASS
+	}else if (`gmatch $layerName "*_dff"`){
+		winx2_diffusePass($surfsofLayer, $lightsofLayer);
+
+	// SPECULAR PASS
+	}else if (`gmatch $layerName "*_spc"`){
+		 winx2_specularPass($lightsofLayer);
+
+	// SELF-SHADOW PASS
+	}else if (`gmatch $layerName "*_sshd"`||`gmatch $layerName "*_cshd"`){
+		winx2_selfShadowPass($lightsofLayer, $surfsofLayer);
+
+	// RIM PASS
+	}else if (`gmatch $layerName "*_rim"`){
+		winx2_rimPass;
+
+	// SUB SUFACE SCATTERING PASS
+	}else if (`gmatch $layerName "*_sss"`){
+		winx2_sssPass($lightsofLayer);
+	}else{
+	}
+}

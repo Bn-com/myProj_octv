@@ -1,0 +1,139 @@
+global proc zwTransparencyMaterial(string $renderLayer)
+{
+	if (!`objExists $renderLayer`)
+	{
+		error ("渲染层不存在：" + $renderLayer);
+	}
+	string $layerMaterial;
+	if ($renderLayer == "AO")
+	{
+		$layerMaterial = "aoShader";
+	}
+	else if ($renderLayer == "normal")
+	{
+		$layerMaterial = "norShader";
+	}
+	else if ($renderLayer == "depth")
+	{
+		$layerMaterial = "ez_depth";
+	}
+	if (!`objExists $layerMaterial`)
+	{
+		error ("层材质不存在：" + $layerMaterial);
+	}
+	string $layerEngine = $layerMaterial + "SG";
+	if (!`objExists $layerEngine`)
+	{
+		error ("shadingEngine不存在：" + $layerEngine);
+	}
+
+	string $materials[] = `ls -materials`;
+	for ($material in $materials)
+	{
+		// 列出transparency通道链接了贴图的材质
+		if (!`objExists ($material + ".transparency")`)
+		{
+			continue;
+		}
+		string $connections[] = `listConnections -destination false -connections true -plugs true ($material + ".transparency")`;
+		if (size($connections) == 0)
+		{
+			continue;
+		}
+
+		// 已经在层里面
+		int $find = false;
+		string $shadingEngines[] = `listConnections -type "shadingEngine" $material`;
+		for ($shadingEngine in $shadingEngines)
+		{
+			string $layers[] = `listConnections ($shadingEngine + ".dagSetMembers")`;
+			for ($layer in $layers)
+			{
+				if ($layer == $renderLayer)
+				{
+					$find = true;
+					break;
+				}
+			}
+			if ($find)
+			{
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+
+	//	for ($i=1; $i<size($connections); $i+=2)
+	//	{
+			string $file = `match "^[^.]+" $connections[1]`;
+			if (`nodeType $file` != "file")
+			{
+				continue;
+			}
+			string $name = "tran";
+			string $buf[] = `duplicate -name $name $file`;
+			$file = $buf[0];
+			setAttr ($file + ".alphaIsLuminance") 1;
+			string $mib_fg_occlusion = `mrCreateCustomNode -asUtility "" mib_fg_occlusion`;
+			connectAttr ($mib_fg_occlusion + ".outValue") ($file + ".colorGain");
+			string $mib_opacity = `mrCreateCustomNode -asUtility "" mib_opacity`;
+			setAttr ($mib_opacity + ".input") -type double3 1 1 1;
+			connectAttr ($file + ".outAlpha") ($mib_opacity + ".opacityA");
+			connectAttr ($file + ".outColor") ($mib_opacity + ".opacity");
+			string $buf[] = `duplicate -name ($material + "Tran") $layerMaterial`;
+			string $tranMat = $buf[0];
+			string $tranEngine = `sets -renderable true -noSurfaceShader true -empty -name ($tranMat + "SG")`;
+			setAttr ($tranEngine + ".miExportMrMaterial") 1;
+			setAttr ($tranEngine + ".miExportShadingEngine") 0;
+			connectAttr -f ($tranMat + ".outColor") ($tranEngine + ".surfaceShader");
+			connectAttr ($mib_opacity + ".outValue") ($tranEngine + ".miMaterialShader");
+	//	}
+	
+		// 建立对应材质球
+	//	string $buf[] = `duplicate -name ($material + "Tran") $layerMaterial`;
+	//	string $tranMat = $buf[0];
+	//	for ($i=1; $i<size($connections); $i+=2)
+	//	{
+	//		connectAttr $connections[$i] ($tranMat + ".outTransparency");
+	//	}
+	//	string $tranEngine = `sets -renderable true -noSurfaceShader true -empty -name ($tranMat + "SG")`;
+	//	connectAttr -f ($tranMat + ".outColor") ($tranEngine + ".surfaceShader");
+
+		// 赋物体
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != "defaultRenderLayer")
+		{
+			editRenderLayerGlobals -currentRenderLayer "defaultRenderLayer";
+		}
+		string $cmds[];
+		clear $cmds;
+		for ($shadingEngine in $shadingEngines)
+		{
+			string $objects[] = `sets -query $shadingEngine`;
+			for ($obj in $objects)
+			{
+			//	string $dagSetMembers[] = `listConnections -plugs true -connections true -type "shadingEngine" $obj`;
+			//	for ($i=0; $i<size($dagSetMembers); $i+=2)
+			//	{
+			//	//	setAttr -lock false $dagSetMembers[$i];
+			//	//	setAttr -lock false $dagSetMembers[$i+1];
+			//		disconnectAttr $dagSetMembers[$i] $dagSetMembers[$i+1];
+			//	}
+				$cmds[size($cmds)] = "sets -edit -forceElement \"" + $tranEngine + "\" \"" + $obj + "\"";
+			}
+		}
+		editRenderLayerGlobals -currentRenderLayer $renderLayer;
+		lockNode -lock false $layerEngine;
+		string $dagSetMembers[] = `listConnections -connections true -plugs true ($layerEngine + ".dagSetMembers")`;
+		for ($i=0; $i<size($dagSetMembers); $i+=2)
+		{
+			catch(`eval ("setAttr -lock false \"" + $dagSetMembers[$i] + "\"")`);
+		}
+		for ($cmd in $cmds)
+		{
+			catch(`evalDeferred $cmd`);
+		}
+	}
+}

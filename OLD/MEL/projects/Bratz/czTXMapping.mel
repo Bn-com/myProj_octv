@@ -1,0 +1,368 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 陈仲
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//-----------------------------------------------------------------------
+//
+//  Creation Date:  June 5th, 2006
+//
+//  Procedure Name:
+//      czTXMapping
+//
+//  Description:
+//
+//		This is for maya users who want to import materials &
+//		textures from another scene without opening another
+//		maya. And this script will generate a "txMapping.txt" file 
+//		with vertex, face and shape name information inside, which
+//		will be used by "zjApplyMaterial".
+//		And also this script will call textureMapping() to generate
+//		txMapping.txt.
+//
+//  Note:
+//		We suggest maya users check the current scene's shape 
+//		names to see if you had got the expected result after 
+//		running this script every time.
+//	
+//  Usage:
+//		Run this script -> UI -> Locate the scene where you want to 
+//		import materials & textures from -> Click Apply button.
+//		Usually you need click some more times to get the expected
+//		result.
+//
+//  Input Arguments: none
+//
+//  Return Value: None.
+//
+//----------------------------------------------------------------------
+global proc czTXMapping()
+{	
+	// --- 
+	// proc: czTXMapping
+	// To create the UI interface for czTextureMapping.
+	// ---
+
+	if ( `window -exists czTextureMappingUI` ) 
+		deleteUI czTextureMappingUI;
+
+	window  
+		-title "Texture Mapping" 
+		-wh 400 150
+		-resizeToFitChildren 0 
+		-maximizeButton 0 
+		-sizeable 0 
+		czTextureMappingUI;
+		
+	// window -q -wh czTextureMappingUI;
+	// window -e -wh 400 150 czTextureMappingUI;
+	// windowPref -remove czTextureMappingUI;
+
+	//menu's in main window
+	menuBarLayout;
+
+		menu -label "Help";
+			menuItem -l "Help..."  ;
+
+
+	formLayout mainForm;	
+	
+ 	textFieldGrp -label "Source File:" -editable true -columnWidth 1 80 -adjustableColumn 2 sourcePath;
+
+	string $symbolButton = `symbolButton -image "navButtonBrowse.xpm" -command "browseFile"`;
+
+	button -l "Export"  -h 20 -c ("getMapping") exportMapBtn;
+
+	button -l "Rename"  -h 20 -c ("applyMapping") applyMapBtn;
+
+	button -l "Close"  -h 20 -c "deleteUI czTextureMappingUI" closeWinBtn;
+
+
+
+	formLayout -e 
+		-af sourcePath "left" 8 
+		-af sourcePath "right" 50
+		-af sourcePath "top"  20
+
+		-ac $symbolButton "left" 2 sourcePath 
+		-af $symbolButton "right" 5
+		-af $symbolButton "top"  20
+
+		-af exportMapBtn "left" 2
+		-af exportMapBtn "right" 260
+		-ac exportMapBtn "top"  25 sourcePath 
+		-af exportMapBtn "bottom" 5 
+
+		-ac applyMapBtn "left" 2 exportMapBtn 
+		-af applyMapBtn "right" 130
+		-ac applyMapBtn "top"  25 sourcePath 
+		-af applyMapBtn "bottom" 5 
+
+		-ac closeWinBtn "left" 2 applyMapBtn 
+		-af closeWinBtn "right" 2
+		-ac closeWinBtn "top"  25 sourcePath 
+		-af closeWinBtn "bottom" 5 
+		mainForm;  
+	     
+	showWindow czTextureMappingUI;
+}
+
+
+
+global proc browseFile()
+{
+	// --- 
+	// proc: browseFile
+	// To browse some file, here is mb file
+	// ---
+
+	string $file = `fileDialog -directoryMask "*.mb"`;
+	if (`filetest -f $file`)
+	{
+		if (`gmatch $file "*.mb"`)
+			textFieldGrp -edit -fileName $file sourcePath;
+		else
+			warning "Not a maya mb file.";
+	}
+}
+
+
+global proc getMapping()
+{
+	// --- 
+	// proc: getMapping
+	// To execute some script in mayabatch mode
+	// ---
+
+	// get the source scene's path for mayabath
+	string $filename = `textFieldGrp -q -fileName sourcePath`;
+
+	// get the path of maya application
+	string $mayalocation =`getenv "MAYA_LOCATION"`;
+
+	if ($filename!="")
+	{
+		// execute script in mayabatch mode
+		string $cmdString = "\"\"" + $mayalocation + "/bin/mayabatch.exe \" -command \"textureMapping\\\"\\\"\" -file " + "\"" + $filename + "\"\"";
+		system $cmdString;
+	}
+	else
+	{
+		warning("请指定源文件，以便导入材质和贴图!");
+		return;
+	}
+
+	string $filename = `internalVar -userAppDir` + "projects/default/scenes/txMapping.txt";
+	if (`filetest -f $filename`)
+	{
+		print("Result: "+$filename);
+		return;
+	}
+}
+
+
+global proc applyMapping()
+{
+	// ---
+	// proc: applyMapping
+	// To read info(VFS) from some file(txMapping) as formula,
+	// and change the shape name of current scene, who got the 
+	// same vertexes and faces,
+	// in order to apply the same textures to the meshes,
+	// having the same VFs in the current scene.
+	// ---
+
+	// remove namespace
+	zjRemoveNamespace;
+
+	// initialize all variables for later use
+	int $i,$j,$m,$fileID;
+	string $fileName,$nextLine;
+	string $allPoly[],$buffer[],$polyInfo[],$polyList[];
+
+	// 1st step: get the poly list
+	$allPoly = `ls -l -ni -type "mesh"`;
+	select -r $allPoly;
+	$allPoly = `pickWalk -d up`;
+	select -clear;
+
+
+	// 2nd step: get its VFS of each item in list
+	for ($each in $allPoly)
+	{
+		int $vCount[] = `polyEvaluate -v $each`;
+		int $fCount[] = `polyEvaluate -f $each`;
+
+		$polyInfo[$i++] = $vCount[0];
+		$polyInfo[$i++] = $fCount[0];
+		$polyInfo[$i++] = $each;
+		//$polyInfo[$i++] = "";
+
+	}
+	clear $allPoly;
+
+	// 3rd step: get string array $polyList[], which
+	// stores the polyList from the txt file
+	$fileName = `internalVar -userAppDir` + "projects/default/scenes/txMapping.txt";
+
+	// 4th step: check if the txMapping.txt file already exists or not
+	int $renameNum = 0;
+	if (!(`filetest -f $fileName`))
+	{
+		warning("找不到文件: "+$fileName);
+		return;
+	}
+	else
+	{
+		$fileID=`fopen $fileName "r"`;
+		if (!$fileID)
+		{
+			error("Fail to open " + $fileName);
+		}
+
+		$j = 0;
+		$nextLine = `fgetline $fileID`;
+		while (size($nextLine)>0)
+		{
+			$polyList[$j++] = $nextLine;
+			$nextLine = `fgetline $fileID`;
+		}
+		fclose $fileID;
+		// 5th step: rename the shape name inside $polyInfo[] from current scene
+		// according to the shape name inside $polyList[] from txt file.
+		int $counter = 0;
+		for ($each in $polyList)
+		{
+			string $temp[];
+			tokenize $each " " $temp;
+			$temp[2] = strip($temp[2]);
+			$temp[3] = strip($temp[3]);
+
+			for ($m=0;$m<size($polyInfo);$m+=3 )
+			{
+				if ($polyInfo[$m]==$temp[0])
+				{
+					if ($polyInfo[$m+1]==$temp[1])
+					{
+						if (`objExists $polyInfo[$m+2]`)
+						{
+							// rename the transform node first
+							string $newName = `rename $polyInfo[$m+2] $temp[2]`; 
+
+							// get the shape node of the transform node
+							string $tmp[] = `listRelatives -ni -c $newName`;
+							
+							// rename the shape node
+							string $shapePath = $newName + "|" + $tmp[0];
+							int $flag = catch(`rename $shapePath $temp[3]`);
+							$renameNum++;
+
+							if ($flag)
+							{
+								$counter++;
+							}
+						}
+
+					}
+				}
+			}
+		}
+		print ("\nRenaming Complete!\n  " + $renameNum + " items have been renamed!\n  "+ $counter + " failed!\n");
+
+
+		checkRenameResult;
+	}
+
+}
+
+
+global proc checkRenameResult()
+{
+	// ---
+	// proc: checkRenameResult
+	// To check check the current scene for meshes
+	// that have not been renamed..
+	// ---
+	
+	int $i,$j,$fileID;
+	string $fileName,$nextLine;
+	string $dropList[],$polyInfo[],$polyList[],$allPolys[];
+	
+	// get the poly list
+	$allPolys = `ls -l -ni -type "mesh"`;
+	select -r $allPolys;
+	$allPolys = `pickWalk -d up`;
+	select -clear;
+
+	// get its VFS of each item in list
+	for ($each in $allPolys)
+	{
+		int $vCount[] = `polyEvaluate -v $each`;
+		int $fCount[] = `polyEvaluate -f $each`;
+
+		$polyInfo[$i++] = $vCount[0];
+		$polyInfo[$i++] = $fCount[0];
+		$polyInfo[$i++] = $each;
+	}
+
+	// get the VFS information ready
+	$fileName = `internalVar -userAppDir` + "projects/default/scenes/txMapping.txt";	
+	$fileID=`fopen $fileName "r"`;
+	if (!$fileID)
+	{
+		error("Fail to open " + $fileName);
+	}
+
+	$j = 0;
+	$nextLine = `fgetline $fileID`;
+	while (size($nextLine)>0)
+	{
+		$polyList[$j++] = $nextLine;
+		$nextLine = `fgetline $fileID`;
+	}
+	fclose $fileID;
+
+
+	// loop to check if there are some meshes
+	// that have not been renamed.
+	for ($each in $polyList)
+	{
+		string $temp[];
+		tokenize $each " " $temp;
+		$temp[2] = strip($temp[2]);
+		$temp[3] = strip($temp[3]);
+
+		for ($m=0;$m<size($polyInfo);$m+=3 )
+		{
+			if ($polyInfo[$m]==$temp[0]&&$polyInfo[$m]!=0)
+			{
+				if ($polyInfo[$m+1]==$temp[1]&&$polyInfo[$m+1]!=0)
+				{
+					string $tmp[] = `listRelatives -ni -c $polyInfo[$m+2]`;
+					if ($tmp[0]!=$temp[3])
+					{
+						$dropList[size($dropList)] = $tmp[0];
+					}
+
+				}
+			}
+		}
+	}
+	
+	if (size($dropList)>0)
+	{
+		print "\n";
+		warning("以下节点重命名失败，请再试一次或者手动重命名!");
+		print "\n";
+		print $dropList;
+
+		print("\nSee the script editor for more information!\n");
+
+	}
+}
+

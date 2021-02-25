@@ -1,0 +1,95 @@
+global proc zwReconnectLightLinker()
+{
+	string $lights[] = `ls -lights`;
+	for ($light in $lights)
+	{
+		string $connections[] = `listConnections -type "lightList" $light`;
+		if (size($connections) == 0)
+		{
+			evalEcho ("connectAttr \"" + $light + ".lightData\" \":lightList1.lights\" -nextAvailable");
+
+			string $parents[] = `listRelatives -fullPath -parent $light`;
+			$connections = `listConnections ($parents[0] + ".instObjGroups")`;
+			if (size($connections) == 0)
+			{
+				evalEcho ("connectAttr \"" + $parents[0] + ".instObjGroups\" \":defaultLightSet.dagSetMembers\" -nextAvailable");
+			}
+		}
+	}
+
+	string $shadingEngines[] = `ls -type "shadingEngine"`;
+	for ($shadingEngine in $shadingEngines)
+	{
+		if ($shadingEngine == "initialParticleSE" || $shadingEngine == "initialShadingGroup")
+		{
+			continue;
+		}
+		
+		string $buf[] = `listConnections -plugs true -connections true -type "lightLinker" ($shadingEngine + ".message")`;
+
+		int $success = false;
+		for ($i=1; $i<size($buf); $i+=2)
+		{
+			if (`match "[.]object$" $buf[$i]` != "")
+			{
+				string $light = `substitute "[^.]+$" $buf[$i] "light"`;
+				string $lights[] = `listConnections -destination false $light`;
+				if (size($lights) == 0)
+				{
+					evalEcho ("connectAttr \"defaultLightSet.message\" \"" + $light + "\"");
+				}
+				$success = true;
+			}
+		}
+		if ($success)
+		{
+			continue;
+		}
+
+		for ($i=1; $i<size($buf); $i+=2)
+		{
+			if (`match "[.]shadowObject$" $buf[$i]` != "")
+			{
+				string $link = `substitute "[.][^.]+[.][^.]+$" $buf[$i] ""`;
+				for ($i=0; ; $i++)
+				{
+					string $objects[] = `listConnections -destination false ($link + ".link[" + $i + "].object")`;
+					string $lights[] = `listConnections -destination false ($link + ".link[" + $i + "].light")`;
+					if (size($objects) == 0 && size($lights) == 0)
+					{
+						evalEcho ("connectAttr \"" + $shadingEngine + ".message\" \"" + $link + ".link[" + $i + "].object\"");
+						evalEcho ("connectAttr \"defaultLightSet.message\" \"" + $link + ".link[" + $i + "].light\"");
+						$success = true;
+						break;
+					}
+				}
+			}
+		}
+		if ($success)
+		{
+			continue;
+		}
+
+		string $link = "lightLinker1";
+		if (`objExists $link`)
+		{
+			for ($i=0; ; $i++)
+			{
+				string $objects[] = `listConnections -destination false ($link + ".link[" + $i + "].object")`;
+				string $lights[] = `listConnections -destination false ($link + ".link[" + $i + "].light")`;
+				if (size($objects) == 0 && size($lights) == 0)
+				{
+					evalEcho ("connectAttr \"" + $shadingEngine + ".message\" \"" + $link + ".link[" + $i + "].object\"");
+					evalEcho ("connectAttr \"defaultLightSet.message\" \"" + $link + ".link[" + $i + "].light\"");
+					$success = true;
+					break;
+				}
+			}
+		}
+	}
+
+	if (!`about -batch`)
+	{
+		LightCentricLightLinkingEditor;
+	}
+}

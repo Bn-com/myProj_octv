@@ -1,0 +1,76 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: 黄仲维
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc zwLambert2Surface()
+{
+	string $lambert[], $buf[];
+	float $color[];
+
+	string $transform[] = `ls -long -transforms "*_c_mouth_project"`;
+	if (!size($transform))
+	{
+		warning "找不到 *_mouth_project";
+		return;
+	}
+	for ($mouth in $transform)
+	{
+		string $shape[] = `listRelatives -fullPath -noIntermediate -shapes -type "mesh" -type "nurbsSurface" $mouth`;
+		if (!size($shape))
+			continue;
+		string $shaingEngine[] = `listConnections -source false -destination true -type "shadingEngine" $shape[0]`;
+		clear $lambert;
+		for ($i=0; $i<size($shaingEngine); $i++)
+		{
+			string $buf[] = `listConnections -type "lambert" -source true -destination false $shaingEngine`;
+			$lambert = `stringArrayCatenate $lambert $buf`;
+		}
+		int $size = size($lambert);
+		if ($size == 0)
+		{
+			warning ("找不到跟" + $mouth + " 相连的lambert 的材质");
+			continue;
+		}
+		else if ($size > 1)
+		{
+			warning ("找到多于一个跟" + $mouth + " 相连的lambert 的材质");
+			continue;
+		}
+		string $attr[] = `listConnections -source true -destination false -connections true -plugs true ($lambert[0] + ".color")`;
+		if (!size($attr))
+			$color = `getAttr ($lambert[0] + ".color")`;
+		string $surfaceShader = `createNode "surfaceShader"`;
+		tokenize $mouth "|" $buf;
+		string $name = $buf[size($buf)-1] + "_surfaceShader";
+		$surfaceShader = `rename $surfaceShader $name`;
+		replaceNode $lambert[0] $surfaceShader;
+		for ($i=1; $i<size($attr); $i+=2)
+			connectAttr -force $attr[$i] ($surfaceShader + ".outColor");
+		if (!size($attr))
+			setAttr ($surfaceShader + ".outColor") $color[0] $color[1] $color[2];
+		delete $lambert[0];
+		print ($surfaceShader + "\n");
+	}
+
+/*	
+	string $buf[] = `ls -type "lambert" "*_mouth_*"`;
+	for ($lambert in $buf)
+	{
+		string $buf[] = `listConnections -source true -destination false -connections true -plugs true ($lambert + ".color")`;
+		string $surfaceShader = `createNode "surfaceShader"`;
+		string $name = `substitute "_lambert" $lambert "_surfaceShader"`;
+		$surfaceShader = `rename $surfaceShader $name`;
+		replaceNode $lambert $surfaceShader;
+		for ($i=1; $i<size($buf); $i+=2)
+			connectAttr -force $buf[$i] ($surfaceShader + ".outColor");
+		delete $lambert;
+		print ($surfaceShader + "\n");
+	}
+*/
+}

@@ -1,0 +1,79 @@
+global proc nurbs_smooth_weights_export ()
+{
+	string $usersel[] = `ls -sl` ;
+
+	for ($element in $usersel)
+	{	
+		string $ShapeOfElement[] = `ls  -dagObjects  -hd 1 -type nurbsSurface $element`;			
+		if ($ShapeOfElement[0] != "")									
+		{	
+			string $objHistory[] = `listHistory $ShapeOfElement[0]`;
+			string $isBound[] = `ls  -typ  skinCluster $objHistory`;
+			string $skincl = $isBound[0];
+			int $totalSkinClustersFound = `size $isBound`;
+			if  ($totalSkinClustersFound != 0)
+			{
+				string $pts[] = `ls ($ShapeOfElement[0]+".cv[0:*][0:*]")`;
+				select $pts;
+				string $expandedSel[] = `filterExpand -ex 1 -sm 28`;  
+				int $nVerts = `size $expandedSel`; 
+				select -r $ShapeOfElement[0];
+				if ($nVerts <= 0)
+				{
+					error -sl 1 ("There are no CV's on selected!");
+					return;
+				}
+				string $directory = `workspace -q -dir`;	
+				string $PointWeightsFileName = ( `substitute "scenes" $directory "pwt"` + $element +".pwt" );	
+								
+				/* open output file */
+				$fileId=`fopen $PointWeightsFileName "w"`;
+
+				if ($fileId == 0) 
+				{
+					error -sl 1 ("Error Opening File: "+$PointWeightsFileName);
+					return;
+				}    
+				fprint $fileId "// OUTPUT Script.\n\n";
+
+				fprint $fileId "global proc reloadWeights(string $skincl)\n";
+				fprint $fileId "{\n";
+				fprint $fileId "    waitCursor -state on;\n\n";    
+
+				//waitCursor -state on; 
+				
+				for ($vsel in $expandedSel) 
+				{
+
+					// What joints are being used?
+					$cmd = "skinPercent -q -t "+$skincl+" "+$vsel; 
+					$joints = eval($cmd);
+					// And what are their skinPercent weights?
+					$cmd = "skinPercent -q -v "+$skincl+" "+$vsel; 
+					$weights = eval($cmd);
+					string $output;
+					$output = "skinPercent ";
+					for ($n=0; $n < size($joints); ++$n) 
+					{
+						if ($weights[$n] != 0.0)
+						$output = $output + ("-tv "+$joints[$n]+" "+$weights[$n]+" ");
+					}
+					$output = $output+("$skincl "+$vsel+";\n");  // note here we print
+					fprint $fileId ("    "+$output);		// write to file
+				}
+				fprint $fileId "\n    waitCursor -state off;\n";
+				fprint $fileId "    print \"importWeights - done.\\n\";\n";
+				fprint $fileId "}\n\n";
+				fclose $fileId;
+
+				print ("\nOUTPUT TO FILE: "+$PointWeightsFileName+"\n");
+				//waitCursor -state off; 
+
+			}
+		}
+		print ("\nFINISHED WRITING PWT FILE FOR: "+$element+"\n");
+	}
+	if (size($usersel)>0)
+		select $usersel;
+}
+

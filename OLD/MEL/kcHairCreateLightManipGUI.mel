@@ -1,0 +1,140 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: Kiem Ching
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc kcHairCreateLightManip(string $brushes[])
+{
+//	string $origSelection[] = `ls -selection`;
+
+	string $hairLightDirManip = `curve -name "hairLightDirManip" -d 1 -p -5 0 -1 -p -5 0 1 -p 3 0 1 -p 3 0 2 -p 5 0 0 -p 3 0 -2 -p 3 0 -1 -p -5 0 -1 -k 0 -k 1 -k 2 -k 3 -k 4 -k 5 -k 6 -k 7`;
+
+	// set manipulator to red color
+
+	setAttr ($hairLightDirManip + ".overrideEnabled") 1;
+	setAttr ($hairLightDirManip + ".overrideColor") 13;
+
+	// create manipulator text
+
+	string $hairLightDirText[] = `textCurves -name "hairLightDirText" -constructionHistory 0 -font "Times New Roman|h-13|w400|c0" -text "Hair Light Dir"`;
+
+	setAttr ($hairLightDirText[0] + ".tx") -3.333;
+	setAttr ($hairLightDirText[0] + ".tz") 0.248;
+	setAttr ($hairLightDirText[0] + ".rx") -90;
+	setAttr ($hairLightDirText[0] + ".sx") 0.278;
+	setAttr ($hairLightDirText[0] + ".sy") 0.278;
+	setAttr ($hairLightDirText[0] + ".sz") 0.278;
+
+	// lock and hide all channels of manipulator text
+
+	select -hierarchy $hairLightDirText[0];
+	string $selected[] = `ls -selection -type transform`;
+
+	for ($item in $selected)
+	{
+		setAttr -keyable false -lock true ($item + ".tx");
+		setAttr -keyable false -lock true ($item + ".ty");
+		setAttr -keyable false -lock true ($item + ".tz");
+		setAttr -keyable false -lock true ($item + ".rx");
+		setAttr -keyable false -lock true ($item + ".ry");
+		setAttr -keyable false -lock true ($item + ".rz");
+		setAttr -keyable false -lock true ($item + ".sx");
+		setAttr -keyable false -lock true ($item + ".sy");
+		setAttr -keyable false -lock true ($item + ".sz");
+		setAttr -keyable false -lock true ($item + ".visibility");
+	}
+
+	// group
+
+	parent $hairLightDirText[0] $hairLightDirManip;
+
+	// create vector product node
+
+	string $vectorProduct = `createNode vectorProduct`;
+	setAttr ($vectorProduct + ".operation") 3;		// vector matrix product
+	setAttr ($vectorProduct + ".input1X") 1;
+
+	connectAttr -force ($hairLightDirManip + ".worldMatrix[0]") ($vectorProduct + ".matrix");
+
+	// create connection to brush light direction
+
+	for ($item in $brushes)
+	{
+		setAttr ($item + ".realLights") false;
+		connectAttr -force ($vectorProduct + ".output") ($item + ".lightDirection");
+	}
+
+	select $hairLightDirManip;
+}
+
+global proc kcHairCreateLightManipCB(string $radioButtonGrp)
+{
+	string $brushes[];
+
+	int $option = `radioButtonGrp -q -select $radioButtonGrp`;
+
+	if ($option == 2)
+	{
+		// all
+
+		$brushes = `ls -type brush`;
+	}
+	else
+	{
+		// selected
+
+		string $selected[] = `ls -selection`;
+
+		if (size($selected) == 0)
+			error("Please select at least a stroke or brush");
+
+		for ($item in $selected)
+			if ((kcIsType($item, "stroke") == true) || (`nodeType $item` == "stroke"))
+			{
+				string $source[] = `listConnections -source true -destination false ($item + ".brush")`;
+				
+				if (size($source) > 0)
+					$brushes[size($brushes)] = $source[0];
+			}
+			else
+			{
+				if (`nodeType $item` == "brush")
+					$brushes[size($brushes)] = $item;
+			}
+	}
+
+	if (size($brushes) > 0)
+		kcHairCreateLightManip($brushes);
+}
+
+global proc kcHairCreateLightManipGUI()
+{
+	if (`window -exists kcHairCreateLightManipWnd`)
+		deleteUI -window kcHairCreateLightManipWnd;
+
+	window -title "Create Paint Effect Light Direction Manipulator" -resizeToFitChildren true kcHairCreateLightManipWnd;
+		
+		string $formLayout = `formLayout`;
+
+			string $radioButtonGrp = `radioButtonGrp -numberOfRadioButtons 2 -select 1 -label "Stroke or Brush:  " -labelArray2 "selected" "all"`;
+			string $button = `button -label "Disable Real Light and Create Light Direction Manipulator" -command ("kcHairCreateLightManipCB " + $radioButtonGrp)`;
+
+		setParent ..;
+
+		formLayout -edit
+			-attachForm		$radioButtonGrp	"top"	5
+			-attachForm		$radioButtonGrp	"left"	5
+			-attachForm		$radioButtonGrp	"right"	5
+
+			-attachControl	$button		"top"		5	$radioButtonGrp
+			-attachForm		$button		"left"		5
+			-attachForm		$button		"right"		5
+		$formLayout;
+
+	showWindow kcHairCreateLightManipWnd;
+}

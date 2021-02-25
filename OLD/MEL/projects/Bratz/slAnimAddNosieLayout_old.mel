@@ -1,0 +1,129 @@
+global proc slAnimAddNosieLayout()
+{
+	int $sf = `playbackOptions -q -min`;
+	int $ef = `playbackOptions -q -max`;
+	
+	if(`window -exists slAnimAddNosie`)
+		deleteUI slAnimAddNosie;
+	window -title "Add Noise" -mb true -s false slAnimAddNosie;
+		menu -label "Help";
+			menuItem -label "Help on Add Noise..." -command "zjHelpCallback slAddNoise";
+
+		columnLayout -adjustableColumn true -rs 5;
+			text -label "请选择需要添加noise的物体";
+			//textFieldGrp -label "Noise 范围:" -text ($sf+"-"+$ef) -cw2 100 100 range;
+			textFieldGrp -label "Noise 强度:" -text ("1") -cw2 100 100 intensity;
+			textFieldGrp -label "Noise 频率:" -text ("6") -cw2 100 100 frequency;
+			checkBoxGrp	-ncb 3 -label "Noise 类型:" -labelArray3 "前后" "上下" "旋转" -v1 1 -v2 1 -v3 1 -cw4 100 50 50 50 style;
+			button -label "添加 noise" -h 30 -command ("slAnimAddNosie");
+			//button -label "删除 noise" -command ("");
+		setParent ..;
+	window -e -h 180 -w 300 slAnimAddNosie;
+	showWindow slAnimAddNosie;
+}
+
+
+global proc slAnimAddNosie()
+{
+	string $object[] = `ls -sl`;
+	if (!`objExists $object[0]`)
+		error "!";
+	string $parent[] = `listRelatives -p $object[0]`;
+	if ($parent[0] !=  "noiseGroup" && $object[0] != "noiseGroup")
+	{
+		group -n noiseGroup $object;
+		setAttr -keyable false -channelBox false "noiseGroup.tx";
+		setAttr -keyable false -channelBox false "noiseGroup.ty";
+		setAttr -keyable false -channelBox false "noiseGroup.tz";
+		setAttr -keyable false -channelBox false "noiseGroup.rx";
+		setAttr -keyable false -channelBox false "noiseGroup.ry";
+		setAttr -keyable false -channelBox false "noiseGroup.rz";
+		setAttr -keyable false -channelBox false "noiseGroup.sx";
+		setAttr -keyable false -channelBox false "noiseGroup.sy";
+		setAttr -keyable false -channelBox false "noiseGroup.sz";
+		setAttr -keyable false -channelBox false "noiseGroup.v";
+	}
+	
+	
+	if (!`objExists noiseGroup.intensity`)
+	{
+		addAttr -ln intensity -at double -min 0  noiseGroup;
+		setAttr -e -keyable true noiseGroup.intensity;
+		addAttr -ln frequency -at long -min 1 noiseGroup;
+		setAttr -e -keyable true noiseGroup.frequency;
+	}
+
+	float $ins = `textFieldGrp -q -text intensity`;
+	float $fre = `textFieldGrp -q -text frequency`;
+	setAttr noiseGroup.intensity $ins;
+	setAttr noiseGroup.frequency $fre;
+	
+	int $min = `playbackOptions -q -min`;
+	currentTime $min;
+	if (`objExists noiseExpress`)
+		delete noiseExpress;
+	slAddNoiseExpression();
+	
+	select -r noiseGroup;
+}
+
+global proc slAddNoiseExpression()
+{
+	
+	int $type1 = `checkBoxGrp -q -v1 style`;
+	int $type2 = `checkBoxGrp -q -v2 style`;
+	int $type3 = `checkBoxGrp -q -v3 style`;
+	
+	string $exp;
+	$exp += "int $time = `currentTime -q`;\n";
+	$exp += "float $ins = `getAttr noiseGroup.intensity`;\n";
+	$exp += "int $fre = `getAttr noiseGroup.frequency`;\n";
+	$exp += "int $min = `playbackOptions -q -min`;\n";
+	$exp += "int $cycle,$sf;\n";
+	$exp += "float $noise;\n";
+	$exp += "if ($time == $min)\n";
+	$exp += "{\n";
+	$exp += "\t$cycle= $fre;\n";
+	$exp += "\t$sf = $min;\n";
+	$exp += "\t$noise = 1 ;\n";
+	$exp += "}\n";
+	$exp += "if ((($time-$sf)/$cycle/2) == (1.0*($time-$sf)/$cycle/2))\n";
+	$exp += "{\n";
+	$exp += "\t$cycle= `getAttr noiseGroup.frequency`;\n";
+	$exp += "\t$sf = `currentTime -q`;\n";
+	$exp += "\t$noise = 0.5*noise($time);\n";
+	$exp += "}\n";
+	if ($type1)
+		$exp += "noiseGroup.tz = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);\n";
+	if ($type2)
+		$exp += "noiseGroup.ty = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);\n";
+	if ($type3)
+	{
+		$exp += "noiseGroup.rx = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);\n";
+		$exp += "noiseGroup.ry = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);\n";
+		$exp += "noiseGroup.rz = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);\n";
+	}
+	expression -s  $exp -o ""   -n "noiseExpress" -ae 1 -uc all;
+}
+
+
+/*
+//Noise Expression
+int $time = `currentTime -q`;
+float $ins = `getAttr noiseGroup.intensity`;
+int $fre = `getAttr noiseGroup.frequency`;
+int $min = `playbackOptions -q -min`;
+int $cycle,$sf;
+float $noise;
+if ($time == $min)
+{	$cycle= $fre;		
+	$sf = $min;
+	$noise = 1 ;
+}
+if ((($time-$sf)/$cycle/2) == (1.0*($time-$sf)/$cycle/2))
+{	$cycle= `getAttr noiseGroup.frequency`;		
+	$sf = `currentTime -q`;
+	$noise = noise($time);
+}
+noiseGroup.translateZ = $noise*$ins*sin(($time-$sf)*3.14159/$cycle+3.15159/2);
+*/

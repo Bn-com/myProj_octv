@@ -1,0 +1,90 @@
+global proc ysMakeEyes()
+{	
+	source "//File-cluster/GDC/Resource/Support/Maya/projects/Enyo/ysMakeEyes.mel";
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zxEdgeConstrain.mel";
+	// Make matte shader and assign it to objects
+	if(!(`objExists "MatteSG"`) && !(`objExists "Matte"`))
+	{
+		shadingNode -asShader lambert -name Matte;
+		setAttr "Matte.color" -type double3 0 0 0 ;
+		setAttr Matte.matteOpacityMode 0;
+		sets -renderable true -noSurfaceShader true -empty -name "MatteSG";
+		connectAttr -force Matte.outColor MatteSG.surfaceShader;
+	}
+	string $allObjects[] = `ls -geometry`;
+	string $allEyes[] = `ls -geometry "*eye_L*" "*:*_eye_L*"`;
+	string $rEye[] = `ls -geometry "*eye_R*" "*:*_eye_R*"`;
+	int $countEyes = size($rEye);
+	appendStringArray($allEyes, $rEye, $countEyes);
+	string $allObjects[] = stringArrayRemove($allEyes, $allObjects);
+
+	//Create Eye's render layer
+	createRenderLayer -name "CharEyes" -number 1 -makeCurrent -noRecurse $allObjects $allEyes `ls -lights`;
+	setAttr "defaultRenderLayer.renderable" 0;
+	sets -e -forceElement MatteSG  $allObjects;
+	
+	// Looking for namespace of reference nodes 
+	string $rfNodes[] = `ls -type "reference" "ey_c*"`;
+	for($item in $rfNodes)
+	{
+		string $rfName = `referenceQuery -filename $item`;	
+		string $rfSN = `file -query -namespace $rfName`;
+		string $leftEye_01 = $rfSN + ":MSH_eye_L_";
+		string $rightEye_01 = $rfSN + ":MSH_eye_R_";		
+		
+		//Eyes of Agaya class  
+		if((`gmatch $rfSN "*agaya_?"`)||
+		   (`gmatch $rfSN "*1ito_?"`) || 
+		   (`gmatch $rfSN "*enyo_?"`))
+		{
+			$leftEyeEdgeL_01 = $rfSN + ":MSH_eye_L_.e[739]" ;
+			$leftEyeEdgeR_01 = $rfSN + ":MSH_eye_L_.e[749]" ;
+			$rightEyeEdgeL_01 = $rfSN + ":MSH_eye_R_.e[739]" ;
+			$rightEyeEdgeR_01 = $rfSN + ":MSH_eye_R_.e[749]";
+			select $leftEyeEdgeL_01 $leftEyeEdgeR_01;
+			ysApplyPointLight($leftEye_01);	
+			select $rightEyeEdgeL_01 $rightEyeEdgeR_01;
+			ysApplyPointLight($rightEye_01);	
+		}
+		
+		//Eyes of Quagnaga class
+		if(`gmatch $rfSN "*quagnaga_0"`)
+		{
+			$leftEyeEdgeL_01 = $rfSN + ":MSH_eye_L_.e[401]" ;
+			$leftEyeEdgeR_01 = $rfSN + ":MSH_eye_L_.e[381]" ;
+			$rightEyeEdgeL_01 = $rfSN + ":MSH_eye_R_.e[781]" ;
+			$rightEyeEdgeR_01 = $rfSN + ":MSH_eye_R_.e[761]";
+			select $leftEyeEdgeL_01 $leftEyeEdgeR_01;
+			ysApplyPointLight($leftEye_01);	
+			select $rightEyeEdgeL_01 $rightEyeEdgeR_01;
+			ysApplyPointLight($rightEye_01);	
+		}		
+	}
+}
+
+global proc ysApplyPointLight(string $item)
+{
+	zxEdgeConstrain;
+	string $locGrp = `rename zxEdgeCons1 LocGrp`;
+	string $pLight = `pointLight`;
+	parent $pLight $locGrp;
+	$pLightTransform = `listRelatives -parent $pLight`;
+	string $listLights[] = `listConnections -s on -d off "defaultLightSet.dagSetMembers"`;
+	int $countLight = size($listLights)-1;
+	if($countLight != 0)
+	{
+		disconnectAttr ($pLightTransform[0] + ".instObjGroups") ("defaultLightSet.dagSetMembers["+$countLight+"]");
+	}
+	if($countLight == 0)
+	{
+		disconnectAttr ($pLightTransform[0] + ".instObjGroups") ("defaultLightSet.dagSetMembers[0]");
+	}
+	setAttr ($pLight + ".emitDiffuse") 0;
+	setAttr ($pLightTransform[0] + ".rotateX")	0;
+	setAttr ($pLightTransform[0] + ".rotateY")	0;	
+	setAttr ($pLightTransform[0] + ".rotateZ")	0;
+	setAttr ($pLightTransform[0] + ".translateX") -8.62;
+	setAttr ($pLightTransform[0] + ".translateY") -0.796;
+	setAttr ($pLightTransform[0] + ".translateZ") 0;
+	lightlink -make -light $pLightTransform -object $item;
+}

@@ -1,0 +1,242 @@
+
+
+global proc S100VRcreateNodeForAtmosphereEffect(string $object, string $ctrl, int $obj, int $numb)
+{
+
+/*
+$object = "locator1";
+$ctrl = "ctrl" ;
+$obj = 1 ;
+$numb  = 3 ;
+
+
+*/
+
+
+float $fO = $obj  ;
+float $fN = $numb ;
+float $div =   $fO / $numb ;
+
+
+creaAttrFloat($ctrl,("overLapsMax" ) , 0, 5, 2 ) ;
+
+//rotation World Ctrl MD
+$mdWorldRotCtrl  =  `createNode -n ($object + "_rotWorldCtrl_md") multiplyDivide` ;
+s100VRSuperConnecterRot($mdWorldRotCtrl , $object,"1") ;
+setAttr ($mdWorldRotCtrl +".input2X") 0;
+setAttr ($mdWorldRotCtrl +".input2Y") 0;
+setAttr ($mdWorldRotCtrl +".input2Z") 0;
+
+
+
+
+//rotation Ctrl MD
+$mdRotCtrl  =  `createNode -n ($object + "_rotCtrl_md") multiplyDivide` ;
+s100VRSuperConnecterRot($mdRotCtrl , $mdWorldRotCtrl,"1") ;
+
+
+//world Amplitude MD
+$mdWorldAmp  =  `createNode -n ($object + "_worldAmp_md") multiplyDivide` ;
+s100VRSuperConnecterRot($mdWorldAmp , $mdRotCtrl,"1") ;
+
+//local GRadient MD
+$mdLocalGradient  =  `createNode -n ($object + "_ctrlMainAmp_md") multiplyDivide` ;
+s100VRSuperConnecterRot($mdLocalGradient , $mdWorldAmp,"1") ;
+
+//anim Curve Main
+$mainAnimCurvX = S100VRcreateAnMainCurveFAE ($object , "rx") ;
+$mainAnimCurvZ = S100VRcreateAnMainCurveFAE ($object , "rz") ;
+
+
+
+
+// plus minus average WORLD
+$avrWorld =  `createNode -n ($object + "_world_avg") plusMinusAverage` ;
+s100VRSuperConnecterRot($avrWorld , $mdLocalGradient,"1") ;
+
+
+
+
+
+
+//connect anniv curve
+connectAttr ($mainAnimCurvX +".output") ($avrWorld +".input3D[0].input3Dx") ;
+connectAttr ($mainAnimCurvZ +".output") ($avrWorld +".input3D[0].input3Dz") ;
+
+
+//s100VRSuperConnecterRot($avrWorld , $mdLocalGradient,"1") ;
+
+
+// plus minus time Local
+$avrLocalT  =  `createNode -n ($object + "_localTime_avg") plusMinusAverage` ;
+connectAttr ($avrLocalT + ".output3Dx") ($mainAnimCurvX +".input") ;
+connectAttr ($avrLocalT + ".output3Dz") ($mainAnimCurvZ +".input") ;
+
+// plus minus time World
+$avrWorldT  =  `createNode -n ($object + "_worldTime_avg") plusMinusAverage` ;
+//s100VRSuperConnecterRot($avrWorldT , $avrLocalT,"1") ;
+
+
+// plus minus average LocalAll
+$avrLocalAll =  `createNode -n ($object + "_allTime_avg") plusMinusAverage` ;
+s100VRSuperConnecterRot($avrWorldT , $avrLocalAll,"0") ;
+s100VRSuperConnecterRot($avrLocalAll , $avrLocalT,"1") ;
+
+
+//overLaps MD
+$mdOvervelaps  =  `createNode -n ($object + "_worldAmp_md") multiplyDivide` ;
+s100VRSuperConnecterRot($mdOvervelaps , $avrLocalT,"2") ;
+
+
+//CREATE ATTR & CONNECT
+creaAttrCtrl($ctrl) ;
+creaAttrFloat($object ,("amplitude" ) , 0, 1, 1 ) ;
+creaAttrFloat($ctrl ,("amplitude" ) , 0, 1, 1 ) ;
+
+
+	connectAttr ($object +".amplitude" ) ($mdRotCtrl +".input2X") ;
+	connectAttr ($object +".amplitude" ) ($mdRotCtrl +".input2Y") ;
+	connectAttr ($object +".amplitude" ) ($mdRotCtrl +".input2Z") ;
+
+
+
+	connectAttr ($ctrl +".amplitude" ) ($mdLocalGradient +".input2X") ;
+	connectAttr ($ctrl +".amplitude" ) ($mdLocalGradient +".input2Y") ;
+	connectAttr ($ctrl +".amplitude" ) ($mdLocalGradient +".input2Z") ;
+
+
+//overlaps
+
+$multOverLap =  1 - $div ;
+creaAttrFloat($object,("overLap") , 0, 1, $multOverLap ) ;
+
+
+
+
+
+	connectAttr ($object +".overLap") ($mdOvervelaps +".input2X") ;
+	connectAttr ($object +".overLap") ($mdOvervelaps +".input2Y") ;
+	connectAttr ($object +".overLap") ($mdOvervelaps + ".input2Z") ;
+
+	connectAttr ($ctrl + ".overLapsMax")   ($mdOvervelaps + ".input1X") ;
+	connectAttr ($ctrl + ".overLapsMax")   ($mdOvervelaps + ".input1Y") ;
+	connectAttr ($ctrl + ".overLapsMax")   ($mdOvervelaps + ".input1Z") ;
+
+}
+
+
+global proc s100VRSuperConnecterRot(string $from, string $to, int $dest)
+{
+/*
+$from = $avrWorld ;
+$to = $object ;
+*/
+$typeFrom = `nodeType $from`;
+$typeTo = `nodeType $to`;
+
+
+string $attrFrom[];
+string $attrTo[];
+
+$attrFrom = s100VRSCGetAttrFrom($typeFrom ) ;
+$attrTo = s100VRSCGetAttrTo($typeTo, $dest) ;
+
+	for ($i = 0 ; $i < 3 ; $i++)
+		connectAttr ($from + $attrFrom[$i] ) ($to +  $attrTo[$i]) ;
+
+}
+
+
+global proc string[] s100VRSCGetAttrFrom(string $type)
+{
+string $attrRetun[];
+	if ($type == "transform")
+	{
+	$attrRetun = {".rx",".ry",".rz"} ;
+    }
+
+	if ($type == "plusMinusAverage")
+	{
+	$attrRetun = {".output3Dx",".output3Dy",".output3Dz"} ;
+    }
+
+	if ($type == "multiplyDivide")
+	{
+	$attrRetun = {".outputX",".outputY",".outputZ"} ;
+    }
+	if ($type == "animCurveTL")
+	{
+	$attrRetun = {".output",".output",".output"} ;
+    }
+
+return $attrRetun ;
+
+}
+
+global proc string[] s100VRSCGetAttrTo(string $type,int $channel)
+{
+string $attrRetun[];
+	if ($type == "transform")
+	{
+	$attrRetun = {".rx",".ry",".rz"} ;
+    }
+
+	if ($type == "plusMinusAverage")
+	{
+	$attrRetun = {(".input3D["+$channel+"].input3Dx") ,(".input3D["+$channel+"].input3Dy"),(".input3D["+$channel+"].input3Dz")} ;
+    }
+
+
+	if ($type == "multiplyDivide")
+	{
+	$attrRetun = {(".input" +$channel +"X")  ,(".input"+ $channel +"Y"),(".input" +$channel +"Z")} ;
+    }
+
+return $attrRetun ;
+
+}
+
+global proc string S100VRcreateAnMainCurveFAE(string $object,string $canal)
+{
+
+//$canal = "rx" ;
+$node = `createNode -n ($object +"_" + $canal +"_Main_anim") animCurveTL`;
+float $randK = 1;
+float $randT = 1 ;
+int $frameMax = 200;
+float $k1 = 10 ;
+float $t1 = 0 ;
+$j = 1 ;
+
+//select $node ;
+
+
+	for ($i = 0 ; $i < $frameMax ; $i += 10 )
+	{
+	$t1 = $i ;
+		if($j > 0 )
+		{
+		$k1 = 10 ;
+        } else{
+		$k1 = -10 ;
+        }
+
+	$t1 = $t1 - ` rand($randK ) - 1 `;
+	$k1 = $k1 - ` rand($randT ) - 1 `;
+			if($i == 0)
+			$t1 = 0 ;
+	setKeyframe -v $k1 -t $t1 $node ;
+	$j = $j * -1 ;
+	}
+
+
+float $get = `getAttr -t 0 ($node +".output") ` ;
+
+setKeyframe -v $get -t $frameMax $node ;
+select -cl ;selectKey -add -k $node ;
+keyTangent -itt plateau -ott plateau;
+setInfinity -pri cycle -poi cycle;
+
+return $node ;
+}
+

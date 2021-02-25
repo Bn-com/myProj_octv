@@ -1,0 +1,287 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÒüêÉ
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc ycRebuildJoint()
+{
+	if(!`window -exists ycRebuildJoint`)
+	{
+		window -menuBar true -title "Rebuild Joint" -width 445 -height 200 ycRebuildJoint;
+			menu -label "Help";
+				menuItem -label "Help on Rebuild Joint..." -command "zjHelpCallback ycRebuildJoint";
+			formLayout formLayout1;
+				columnLayout columnLayout1;
+					intSliderGrp -label "Number of Spans" -field true -value 10 -minValue 0 -maxValue 100 -sliderStep 10  SpansOfLine;
+					checkBoxGrp -label "Rebulid curve" -ncb 1 -value1 1 -l1 ""  RebulidCurve;
+					checkBoxGrp -label "Add IK Spline" -ncb 1 -value1 1 -l1 ""  AddIkSpline;
+				setParent ..;
+				string $button1 = `button -label "Rebuild Joint" -command "RebuildJoint;\ndeleteUI ycRebuildJoint;"`;
+				string $button2 = `button -label "Apply" -command "RebuildJoint"`;
+				string $button3 = `button -label "Close" -command "deleteUI ycRebuildJoint;"`;
+
+			formLayout -edit
+				-attachForm	columnLayout1	"top"		5
+				-attachForm	columnLayout1	"left"		5
+
+				-attachForm	$button1	"left"		5
+				-attachForm	$button1	"bottom"	5
+				-attachPosition	$button1	"right"		5	33
+
+				-attachControl	$button2	"left"		5	$button1
+				-attachForm	$button2	"bottom"	5
+				-attachPosition	$button2	"right"		5	67
+
+				-attachControl	$button3	"left"		5	$button2
+				-attachForm	$button3	"bottom"	5
+				-attachForm	$button3	"right"		5
+			formLayout1;
+	}
+	showWindow;
+}
+
+global proc RebuildJoint()
+{
+	string $SelectObj[]=`ls -sl`;
+	//print $SelectObj;
+	string $SelectShapeNurbs[]=`listRelatives -type "nurbsSurface" $SelectObj`;
+	string $SelectShapeMesh[]=`listRelatives -type "mesh" $SelectObj`;
+	if (size($SelectShapeNurbs)>0&&size($SelectShapeMesh)>0)
+	{
+		return;
+	}
+	if(size($SelectShapeNurbs)>0&&size($SelectShapeMesh)==0)
+	{
+		cthair("ycCreateCurves","ycCreateJoint");	
+	}
+	if(size($SelectShapeNurbs)==0&&size($SelectShapeMesh)>0)
+	{
+		UsePloyCreateCurve;
+	}
+	
+	string $SelectShape[]=`listRelatives  -type "nurbsCurve" $SelectObj`;
+	if ($SelectShape[0]=="")
+	{
+		print "not only one";
+		//return;
+	}
+	
+	select -cl;
+	if (`objExists yc_head_joint_demo`)
+	{
+		delete yc_head_joint_demo;
+	}
+	joint -p 0 0 0 -n yc_head_joint_demo;	//create joint
+
+	string $SelectLine[];
+	clear $SelectLine;
+	int $LineNumber=0;
+	for ($i=0;$i<size($SelectObj);$i++)
+	{
+		string $NurbsCurveShape[]=`listRelatives  -c $SelectObj[$i]`;
+		//print $NurbsCurveShape;
+		string $NurbsCurveNodeType=`nodeType $NurbsCurveShape[0]`;
+		//print $NurbsCurveNodeType;
+		//print "ttt\n";
+		if ($NurbsCurveNodeType=="nurbsCurve")
+		{
+			$SelectLine[$LineNumber]=$SelectObj[$i];
+			$LineNumber++;
+		}
+	}
+	//print $SelectLine;
+	//print "-------";
+	int $SpansNumber=0;
+	int $curve_span=0;
+
+	string $JointGroupName=`group -em -name "YcJointGroup#"`;
+	string $SplineIkGroupName=`group -em -name "YcSplineGroup#"`;
+	print $SplineIkGroupName;
+	print "\n";
+	if (`checkBoxGrp -q -v1 RebulidCurve`)
+	{
+		for ($i=0;$i<size($SelectLine);$i++)
+		{
+			$SpansNumber=`intSliderGrp -q -value SpansOfLine`;
+			rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 2 -kcp 0 -kep 1 -kt 0 -s $SpansNumber -d 3 -tol 0.01 $SelectLine[$i];
+		}
+
+		$curve_span=$SpansNumber;
+		string $joint_number_name[];
+		for ($i=0;$i<=$curve_span;$i++)
+		{
+			$joint_number_name[$i]="joint_"+$i;
+		}
+		select -cl;
+		float $EditPointPosition[3];
+		for ($i=0;$i<size($SelectLine);$i++)
+		{
+			for ($j=0;$j<=$curve_span;$j++)
+			{
+				$EditPointPosition = `pointOnCurve -parameter $j -position  $SelectLine[$i]`;
+				if (`objExists ($SelectLine[$i]+"_"+$joint_number_name[$j])`)
+				{
+					delete ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				}
+				joint  -p $EditPointPosition[0] $EditPointPosition[1] $EditPointPosition[2] -name ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				select -cl;
+			}
+			parent ($SelectLine[$i]+"_joint_0") $JointGroupName;
+			for ($j=$curve_span;$j>0;$j--)
+			{
+				parent ($SelectLine[$i]+"_"+$joint_number_name[$j]) ($SelectLine[$i]+"_"+$joint_number_name[$j-1]);
+			}
+			if (`checkBoxGrp -q -value1 AddIkSpline`)
+			{
+				string $HeadJoint=($SelectLine[$i]+"_joint_0");
+				string $EndJointList[]=`listRelatives -allDescendents $HeadJoint`;
+				string $ikhandle=setJointIKSpline($HeadJoint,$EndJointList[0], $SelectLine[$i]);
+				parent $ikhandle $SplineIkGroupName;
+			}
+			select -cl;		
+		}
+	}
+	else
+	{
+		for ($i=0;$i<size($SelectLine);$i++)
+		{
+			$curve_span=`getAttr ($SelectLine[$i]+".spans")`;
+			string $joint_number_name[];
+			for ($j=0;$j<=$curve_span;$j++)
+			{
+				$joint_number_name[$j]="joint_"+$j;
+			}
+			select -cl;
+			float $EditPointPosition[3];
+			for ($j=0;$j<=$curve_span;$j++)
+			{
+				$EditPointPosition = `pointOnCurve -parameter $j -position  $SelectLine[$i]`;
+				if (`objExists ($SelectLine[$i]+"_"+$joint_number_name[$j])`)
+				{
+					delete ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				}
+				joint  -p $EditPointPosition[0] $EditPointPosition[1] $EditPointPosition[2] -name ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+				select -cl;
+			}
+			parent ($SelectLine[$i]+"_joint_0") $JointGroupName;
+			for ($j=$curve_span;$j>0;$j--)
+			{
+				parent ($SelectLine[$i]+"_"+$joint_number_name[$j]) ($SelectLine[$i]+"_"+$joint_number_name[$j-1]);
+			}
+			if (`checkBoxGrp -q -value1 AddIkSpline`)
+			{
+				string $HeadJoint=($SelectLine[$i]+"_joint_0");
+				string $EndJointList[]=`listRelatives -allDescendents $HeadJoint`;
+				string $ikhandle=setJointIKSpline($HeadJoint,$EndJointList[0], $SelectLine[$i]);
+				parent $ikhandle $SplineIkGroupName;
+			}
+			select -cl;		
+		}
+	}
+	delete yc_head_joint_demo;
+	//select $SelectObj[0];
+}
+
+global proc string setJointIKSpline ( string $joint1st, string $jointend, string $ikcurve)
+{
+	select -r ( $joint1st + ".rotatePivot" );
+	select -add ( $jointend + ".rotatePivot" );
+	select -add $ikcurve;
+	string $ikName[]=`ikHandle -sol ikSplineSolver -ccv false -pcv false -n ($ikcurve+"_ikHandle")`;
+	return $ikName[0];
+}
+//ycRebuildJoint;
+
+global proc RebuildJointCommand()
+{
+	string $SelectObj[]=`ls -sl`;
+	//print $SelectObj;
+	string $SelectShapeNurbs[]=`listRelatives -type "nurbsSurface" $SelectObj`;
+	string $SelectShapeMesh[]=`listRelatives -type "mesh" $SelectObj`;
+	if (size($SelectShapeNurbs)>0&&size($SelectShapeMesh)>0)
+	{
+		return;
+	}
+	if(size($SelectShapeNurbs)>0&&size($SelectShapeMesh)==0)
+	{
+		cthair("ycCreateCurves","ycCreateJoint");	
+	}
+	if(size($SelectShapeNurbs)==0&&size($SelectShapeMesh)>0)
+	{
+		UsePloyCreateCurve;
+	}
+	
+	string $SelectShape[]=`listRelatives  -type "nurbsCurve" $SelectObj`;
+	if ($SelectShape[0]=="")
+	{
+		print "not only one";
+		//return;
+	}
+	
+	select -cl;
+	if (`objExists yc_head_joint_demo`)
+	{
+		delete yc_head_joint_demo;
+	}
+	joint -p 0 0 0 -n yc_head_joint_demo;	//create joint
+
+	string $SelectLine[];
+	clear $SelectLine;
+	int $LineNumber=0;
+	for ($i=0;$i<size($SelectObj);$i++)
+	{
+		string $NurbsCurveShape[]=`listRelatives  -c $SelectObj[$i]`;
+		//print $NurbsCurveShape;
+		string $NurbsCurveNodeType=`nodeType $NurbsCurveShape[0]`;
+		//print $NurbsCurveNodeType;
+		//print "ttt\n";
+		if ($NurbsCurveNodeType=="nurbsCurve")
+		{
+			$SelectLine[$LineNumber]=$SelectObj[$i];
+			$LineNumber++;
+		}
+	}
+	int $SpansNumber=0;
+	int $curve_span=0;
+
+	string $JointGroupName=`group -em -name "YcJointGroup#"`;
+	string $SplineIkGroupName=`group -em -name "YcSplineGroup#"`;
+	for ($i=0;$i<size($SelectLine);$i++)
+	{
+		$curve_span=`getAttr ($SelectLine[$i]+".spans")`;
+		string $joint_number_name[];
+		for ($j=0;$j<=$curve_span;$j++)
+		{
+			$joint_number_name[$j]="joint_"+$j;
+		}
+		select -cl;
+		float $EditPointPosition[3];
+		for ($j=0;$j<=$curve_span;$j++)
+		{
+			$EditPointPosition = `pointOnCurve -parameter $j -position  $SelectLine[$i]`;
+			if (`objExists ($SelectLine[$i]+"_"+$joint_number_name[$j])`)
+			{
+				delete ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+			}
+			joint  -p $EditPointPosition[0] $EditPointPosition[1] $EditPointPosition[2] -name ($SelectLine[$i]+"_"+$joint_number_name[$j]);
+			select -cl;
+		}
+
+		parent ($SelectLine[$i]+"_joint_0") $JointGroupName;
+		for ($j=$curve_span;$j>0;$j--)
+		{
+			parent ($SelectLine[$i]+"_"+$joint_number_name[$j]) ($SelectLine[$i]+"_"+$joint_number_name[$j-1]);
+		}
+		string $HeadJoint=($SelectLine[$i]+"_joint_0");
+		string $EndJointList[]=`listRelatives -allDescendents $HeadJoint`;
+		string $ikhandle=setJointIKSpline($HeadJoint,$EndJointList[0], $SelectLine[$i]);
+		parent $ikhandle $SplineIkGroupName;
+		select -cl;		
+	}
+	delete yc_head_joint_demo;	
+}

@@ -1,0 +1,186 @@
+
+
+global proc  Pfx_model()
+
+{
+
+//	Define groups with specifed condition
+
+	string $anemone_A_data[]=`ls -sl  "*Anemone_A*"`;
+	string $anemone_B_data[]=`ls -sl  "*Anemone_B*"`;
+	string $anemone_C_data[]=`ls -sl  "*Anemone_C*"`;
+	string $anemone_D_data[]=`ls -sl  "*Anemone_D*"`;
+	string $floatgrass_A_data[]=`ls -sl  "*Float_grass_A*"`;
+	string $floatgrass_B_data[]=`ls -sl  "*Float_grass_B*"`;
+	string $floatgrass_C_data[]=`ls -sl  "*Float_grass_C*"`;
+	string $floatgrass_D_data[]=`ls -sl  "*Float_grass_D*"`;
+    string $floatgrass_E_data[]=`ls -sl  "*Float_grass_E*"`;
+
+//	Transfer programme with parameter
+
+	anemone_A_tools($anemone_A_data);
+	anemone_B_tools($anemone_B_data);
+	anemone_C_tools($anemone_C_data);
+	anemone_D_tools($anemone_D_data);
+	floatgrass_A_tools($floatgrass_A_data);
+	floatgrass_B_tools($floatgrass_B_data);
+	floatgrass_C_tools($floatgrass_C_data);
+	floatgrass_D_tools($floatgrass_D_data);
+    floatgrass_E_tools($floatgrass_E_data);
+	select -cl;
+	deleteEmptyGroups;
+
+}
+
+global proc string[] listEmptyGroups( string $uiString ) 
+//
+//	Lists groups with no relatives or connections,
+//	and supplies them to the calling proc to
+//	do with as needed.
+//
+{
+	//	Are we being called during an Optimize Scene Size operation?
+	// 	If so, we need to display progress information.  This was done
+	//	as a global variable to avoid having to change the signature of
+	//	the proc, as that could break many scripts, both internal and
+	//	customer-written.
+	//
+	int $showProgress = cleanUp_ShouldReportProgress();
+
+	string $obj;
+	string $unused[];
+	string $xforms[] = `ls -transforms -leaf`;
+
+	int $interrupted = 0;
+
+	if( $showProgress )
+	{
+		cleanUp_StartProgress( size($xforms), $uiString, 1 );
+	}
+
+	int $i = 0;
+
+	for( $obj in $xforms ) {
+
+		if( $showProgress )
+		{
+			if( cleanUp_SetProgress($i) ) 
+			{
+				$interrupted = 1;
+				break;
+			}
+		}
+
+		if( size( listRelatives("-c", $obj) ) == 0 ) {
+			if( `objectType $obj` == "transform") {
+				string $conn[] = `listConnections($obj)`;
+				if( size( $conn ) == 0 ) {
+					$unused[size($unused)] = $obj;
+				} else if( (size( $conn ) == 1)
+					   &&  (`objectType $conn[0]` == "displayLayer") ) {
+					$unused[size($unused)] = $obj;
+				} else if( (size( $conn ) == 1)
+					   &&  (`objectType $conn[0]` == "renderLayer") ) {
+					$unused[size($unused)] = $obj;
+				}
+			}
+		}
+
+		$i++;
+	}
+
+	if( $showProgress )
+	{
+		cleanUp_EndProgress();
+	}
+
+	if( !$interrupted )
+	{
+		return $unused;
+	}
+	else
+	{
+		return {};
+	}
+}
+
+
+global proc int deleteEmptyGroups( ) 
+//
+//	Deletes anything returned by listEmptyGroups,
+//	until the list itself is empty
+//
+{
+	//	Are we being called during an Optimize Scene Size operation?
+	// 	If so, we need to display progress information.  This was done
+	//	as a global variable to avoid having to change the signature of
+	//	the proc, as that could break many scripts, both internal and
+	//	customer-written.
+	//
+	int $showProgress = cleanUp_ShouldReportProgress();
+
+	int $iteration = 1;
+	string $uiString = ("Finding empty groups (iteration " + $iteration + ")");
+
+	int $i;
+	string $unused[] = listEmptyGroups( $uiString );
+	//int $numTransf = size(`ls -transforms`);
+	int $numUnused = size($unused);
+
+	int $interrupted = 0;
+	int $totalNumDeleted = 0;
+
+	while ( $numUnused > 0 ) {
+		int $numDeleted = 0;
+
+		if( $showProgress )
+		{
+			cleanUp_StartProgress( size($unused), ("Deleting empty groups (iteration " + $iteration + ")"), 1 );
+		}
+
+		for ($i = 0; $i < size($unused); $i++) {
+
+			if( $showProgress )
+			{
+				if( cleanUp_SetProgress($i) )
+				{
+					$interrupted = true;
+					break;
+				}
+			}
+
+			$numDeleted += 
+				deleteIfNotReferenced( $unused[$i] );
+		}
+
+		$totalNumDeleted += $numDeleted;
+
+		if( $interrupted )
+		{
+			break;
+		}
+
+		$iteration++;
+
+		if( $numDeleted == 0 )
+		{
+			//	There used to be a much more expensive loop exit test
+			//	here that involved `ls -transforms`, but we removed it.
+			//	If we didn't delete anything in the last pass, then 
+			//	subsequent passes will not have any effect, so we exit.
+			//
+			break;
+		}
+
+		$uiString = ("Finding empty groups (iteration " + $iteration + ")");
+		$unused = listEmptyGroups( $uiString );
+	}
+
+	if( $showProgress )
+	{
+		cleanUp_EndProgress();
+	}
+
+	return $totalNumDeleted;
+}
+

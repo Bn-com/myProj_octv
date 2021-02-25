@@ -1,0 +1,222 @@
+global proc rnd_wx2_ysSetFursDensity()
+{
+	string $iconPath = "\\\\File-cluster\\GDC\\Resource\\Support\\Maya\\icons\\wxII\\";
+	if(`window -exists optimizeHairAndFurUI`)
+	{
+		deleteUI optimizeHairAndFurUI;
+	}
+
+	window -title "WinX Optimize Hair and Fur" -sizeable false -resizeToFitChildren true optimizeHairAndFurUI;
+		string $mainColumnLayout = `columnLayout -adjustableColumn true -rowSpacing 1 -width 228`;
+			string $hairFrameLayout = `frameLayout -label "NarrowDown Hairs Number" -labelAlign "top" -collapsable false -borderStyle "etchedIn" -width 228 -height 100`;
+				string $hairGridLayout = `gridLayout -numberOfColumns 3 -cellWidthHeight 76 76`;
+					iconTextButton -label "Full" -align "left" -style "iconOnly" -image1 ($iconPath + "01.Full.bmp") -command ("rnd_wxII_ysNarrowDownHairs(1.5)");
+					iconTextButton -label "Half" -align "left" -style "iconOnly" -image1 ($iconPath + "01.Half.bmp") -command ("rnd_wxII_ysNarrowDownHairs(2)");
+					iconTextButton -label "Distance" -align "left" -style "iconOnly" -image1 ($iconPath + "01.Distance.bmp") -command ("rnd_wxII_ysNarrowDownHairs(3)");
+					separator;
+				setParent..;
+			setParent..;
+
+			string $furFrameLayout = `frameLayout -label "Reduce Furs Number" -labelAlign "top" -collapsable false -borderStyle "etchedIn" -width 228 -height 95`;
+				string $hairGridLayout = `gridLayout -numberOfColumns 2 -cellWidthHeight 114 75 `;
+					string $hairGridLayout = `gridLayout -numberOfColumns 3 -cellWidthHeight 76 76`;
+					iconTextButton -label "Full" -align "left" -style "iconOnly" -image1 ($iconPath + "02.Marion.Full.bmp") -command ("rnd_wxII_ysNarrowDownHairs(1.5);  rnd_wx2_ysOptimizeMarion(1.5); ");
+					iconTextButton -label "Half" -align "left" -style "iconOnly" -image1 ($iconPath + "02.Marion.half.bmp") -command ("rnd_wxII_ysNarrowDownHairs(2);  rnd_wx2_ysOptimizeMarion(2); ");
+					iconTextButton -label "Close" -align "left" -style "iconOnly" -image1 ($iconPath + "02.Marion.close.bmp") -enable false -command ("rnd_wx2_ysReduceFursDensity");
+					separator;
+				setParent..;
+			setParent..;
+	setParent..;
+
+			string $furBardnessLayout = `frameLayout -label "Fur剃毛" -labelAlign "top" -collapsable false -borderStyle "etchedIn" -width 228 -height 240`;
+
+				columnLayout ;
+					rowLayout -numberOfColumns 3 -columnWidth3 180 50 50;
+					columnLayout ;
+						iconTextButton -label "Full"  -w 180 -h 180 -style "iconOnly" -image1 ($iconPath + "03.Fur.BaldNess.bmp") 		-command ("source \"//file-cluster/GDC/Resource/Support/Maya/projects/ROMA/rnd_wxII_RenderTools.mel\";wxII_PaintFurBaldness();") ;
+						iconTextButton -label "Full"  -w 180 -h 40 -style "iconOnly" -image1 ($iconPath + "03.Fur.BaldNessRestore.bmp") 	-command ("source \"//file-cluster/GDC/Resource/Support/Maya/projects/ROMA/rnd_wxII_RenderTools.mel\";wxII_PaintFurBaldnessRestore();") ;
+					setParent..;
+					iconTextButton -label "Full"  -w 50 -h 220 -style "iconOnly" -image1 ($iconPath + "03.Fur.BaldNess.help.bmp")  -command ("system(\"start \\\"C:/Program Files (x86)/Internet Explorer/IEXPLORE.EXE\\\" \\\\\\\\File-cluster/gdc/Resource/Support/Maya/projects/WinxClubII/help/fur(剃毛)在镜头中的优化.mht\")");
+
+				setParent..;
+				separator;
+			setParent..;
+	setParent..;
+
+	separator;
+	button -label "返回原始状态" -height 40 -command ("rnd_wx2_ysRollbackHairsAndFur");
+	button -label "Close" -height 40 -command ("deleteUI -window optimizeHairAndFurUI");
+	showWindow optimizeHairAndFurUI;
+}
+
+global proc rnd_wx2_ysOptimizeFursDensity()
+{
+	//First filter all fur descriptions to meshes
+	int $i = 0;
+	int $originFurNumber;
+	string $mesh[];
+	global string $allMeshs[];
+	string $furs[] = `ls -type "FurDescription"`;
+	if(`pluginInfo -query -loaded "Fur"` == 0)
+	{
+		loadPlugin "Fur";
+	}
+	if(size($furs) != 0)
+	{
+		for($item in $furs)
+		{
+			$originFurNumber = `getAttr ($item + ".Density")`;
+			string $mesh[] = `listConnections -source on ($item + ".dagSetMembers[0]")`;
+			for($item in $mesh)
+			{
+				$allMeshs[$i++] = $item;
+			}
+		}
+
+		//Second add face number attibute to the mesh node of original status
+		for($item in $allMeshs)
+		{
+			if(!(`objExists ($item + ".faceOriginalNum")`))
+			{
+				//Add face number on transform node
+				addAttr -longName "originFurNumber"  -attributeType  long -defaultValue $originFurNumber $item;
+				int $faceNum[] = `polyEvaluate -face $item`;
+				addAttr -longName "faceOriginalNum"  -attributeType long  -defaultValue $faceNum[0] $item;
+				setAttr -lock on ($item + ".faceOriginalNum");
+			}
+		}
+		rnd_wx2_ysAddNumOfCurrentFace;
+		rnd_wx2_ysReduceFursDensity;
+	}
+}
+
+global proc rnd_wx2_ysAddNumOfCurrentFace()
+{
+	global string $allMeshs[];
+	for($item in $allMeshs)
+	{
+		if(!(`objExists ($item + ".currentFaceNum")`))
+		{
+			int $currentFaceNum[] = `polyEvaluate -face $item`;
+			addAttr -longName "currentFaceNum" -attributeType long -defaultValue $currentFaceNum[0] $item;
+		}
+	}
+}
+
+global proc rnd_wx2_ysReduceFursDensity()
+{
+	global string $allMeshs[];
+	// Reduce fur number
+	for($item in $allMeshs)
+	{
+		int $currentFaceNum[] = `polyEvaluate -face $item`;
+		setAttr ($item + ".currentFaceNum") $currentFaceNum[0];
+		$itemShape = `listRelatives -shapes $item`;
+		float $CurrentFaceNum = `getAttr ($item + ".currentFaceNum")`;
+		float $originFaceNum = `getAttr ($item + ".faceOriginalNum")`;
+		$furDescriptionNode = `listConnections -destination on ($itemShape[0] + ".uvSet[0].uvSetName")`;
+		int $furNum = `getAttr ($furDescriptionNode[0] + ".Density")`;
+
+		// The same numbers
+		if($CurrentFaceNum/$originFaceNum != 1)
+		{
+			string $confirmResult = `confirmDialog -title "Reduce fur" -message "Do you really want reduce fur?"
+				-button "Yes" -button "No" -defaultButton "Yes"
+				-cancelButton "No" -dismissString "No"`;
+			if($confirmResult == "No")
+			{
+				return;
+			}
+
+
+			float $reduceScalar = $CurrentFaceNum / $originFaceNum;
+			if($reduceScalar <= 0.5)
+			setAttr ($furDescriptionNode[0] + ".Density") 1500000;
+			if($reduceScalar <= 0.4)
+			setAttr ($furDescriptionNode[0] + ".Density") 1000000;
+			if($reduceScalar <= 0.3)
+			setAttr ($furDescriptionNode[0] + ".Density") 800000;
+			if($reduceScalar <= 0.2)
+			setAttr ($furDescriptionNode[0] + ".Density") 600000;
+			if($reduceScalar <= 0.1)
+			setAttr ($furDescriptionNode[0] + ".Density") 500000;
+		}
+	}
+}
+
+global proc rnd_wxII_ysNarrowDownHairs(float $scaleNumber)
+{
+	string $pp[] = `ls -type "hairSystem"`;
+	for($item in $pp)
+	{
+		int $perClump = `getAttr ($item + ".hairsPerClump")`;
+		float $hairWidth = `getAttr ($item + ".hairWidth")`;
+		if(!(`objExists ($item + ".originalPreClump")`))
+		{
+			addAttr -longName "originalPreClump" -attributeType long -defaultValue $perClump $item;
+			addAttr -longName "originalHairWidth" -attributeType "float" -defaultValue $hairWidth $item;
+		}
+
+		if($perClump>1)
+		{
+			setAttr ($item + ".hairsPerClump") ($perClump/$scaleNumber);
+			setAttr ($item + ".hairWidth") ($hairWidth*$scaleNumber);
+		}
+	}
+}
+
+global proc rnd_wx2_ysOptimizeMarion(float $scalarFactor)
+{
+	rnd_wx2_ysOptimizeFursDensity;
+	string $furs[] = `ls -type "FurDescription"`;
+	for($item in $furs)
+	{
+		setAttr ($item + ".BaseWidth") 0.06 ;
+		setAttr ($item + ".TipWidth") 0.02 ;
+		if($scalarFactor == 1.5)
+		{
+			setAttr ($item + ".Density") 3000000;
+		}
+		if($scalarFactor == 2)
+		{
+			setAttr ($item + ".Density") 2000000;
+		}
+	}
+}
+
+global proc rnd_wx2_ysRollbackHairsAndFur()
+{
+	global string $allMeshs[];
+	string $pp[] = `ls -type "hairSystem"`;
+	for($item in $pp)
+	{
+		if(`objExists ($item + ".originalPreClump")`)
+		{
+			int $originalPreClump = `getAttr ($item + ".originalPreClump")`	;
+			float $originalHairWidth = `getAttr ($item + ".originalHairWidth")`;
+			setAttr ($item + ".hairsPerClump") $originalPreClump;
+			setAttr ($item + ".hairWidth") $originalHairWidth;
+		}
+	}
+
+	if(`pluginInfo -query -loaded "Fur"` == 0)
+	{
+		loadPlugin "Fur";
+	}
+	string $furs[] = `ls -type "FurDescription"`;
+	if(size($furs) != 0)
+	{
+		for($item in $allMeshs)
+		{
+			if(`objExists ($item + ".originFurNumber")`)
+			{
+				int $originFurNumber = `getAttr ($item + ".originFurNumber")`;
+				$itemShape = `listRelatives -shapes $item`;
+				$furDescriptionNode = `listConnections -destination on ($itemShape[0] + ".uvSet[0].uvSetName")`;
+				setAttr ($furDescriptionNode[0] + ".Density") $originFurNumber;
+				setAttr ($furDescriptionNode[0]  + ".BaseWidth") 0.03 ;
+				setAttr ($furDescriptionNode[0]  + ".TipWidth") 0.01 ;
+			}
+		}
+	}
+}

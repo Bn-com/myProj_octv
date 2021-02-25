@@ -1,0 +1,346 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+global proc vvModelReplaceRefernce()
+{
+	if (`window -q -ex vvModelReplaceRefernceUI`)
+		deleteUI vvModelReplaceRefernceUI;
+
+
+	window -t "replace reference tools" vvModelReplaceRefernceUI;
+	columnLayout -adj 1;
+		button -l "copy->reference" -c "vvModelReplaceRefernceCTR(\"h\")";
+		button -l "H" -c "vvModelReplaceRefernceHML(\"h\")";
+		button -l "M" -c "vvModelReplaceRefernceHML(\"m\")";
+		button -l "L" -c "vvModelReplaceRefernceHML(\"l\")";
+		separator -st "double";
+		separator -st "double";
+		button -l "Load SelectedLoc" -c "vvModelReplaceRefernceLoadSelectedLoc";
+		button -l "Unload SelectedLoc" -c "vvModelReplaceRefernceUnloadSelectedLoc";
+	
+	showWindow vvModelReplaceRefernceUI;
+	eval "source zwNamespace.mel";
+}
+
+global proc vvModelReplaceRefernceCTR(string $ver)
+{
+	string $realver="";
+	if ($ver=="h")
+	{
+		$realver="";
+	}
+	else 
+	{
+		$realver="_"+$ver;
+	}
+	
+	string $sel[] = `ls -sl -l`;
+	if (!size($sel))
+		error "请选择需要替换的组";
+	
+	
+	string $alltask="";
+	for ($p in $sel)
+	{
+		int $single=0;
+		string $children[] = `listRelatives -f -c $p`;
+		if (match("_[aA][lL][lL]$",$p) == "")
+		{
+			$children = {$p};
+			$single=1;
+		}
+		else
+		{
+			string $buff1[]=stringToStringArray($p,"|");
+			string $buff2[] = stringToStringArray($buff1[size($buff1)-1],"_");
+			$alltask = substituteAllString($buff1[size($buff1)-1],("_"+$buff2[size($buff2)-1]),"");//+$realver;
+		}
+		for ($c in $children)
+		{
+			if (!`referenceQuery -inr $c`)
+			{
+				string $buff1[]=stringToStringArray($c,"|");
+				string $buff2[] = stringToStringArray($buff1[size($buff1)-1],"_");
+				string $taskname = substituteAllString($buff1[size($buff1)-1],("_"+$buff2[size($buff2)-1]),"");//+$realver;
+				if (size($alltask))
+				{
+					$taskname = $alltask;
+				}
+				string $assetname = "vv-"+$taskname+$realver+"-shading"+".ma";
+				string $assetfile = `idmtService "GetAssetPath" $assetname`;
+				string $match=match(("[0-9][0-9][0-9][\\]"+$taskname),$assetfile);
+				if ($match !="")
+				{
+					$assetfile = substituteAllString($assetfile,$match,$taskname);
+				}
+				if (`filetest -r $assetfile`)
+				{
+					string $namespace = `zwGetNamespaceByPath $assetfile`;
+					$namespace = `zwValidateNamespace $namespace`;	
+					
+					file -r -ns $namespace -shd "shadingNetworks" $assetfile;
+
+					string $copy[] = `ls ($namespace+":*"+$taskname+"_ctrl")`;
+					print $copy;
+					if (size($copy))
+					{       
+						string $pcon[] = `parentConstraint -w 1 $c $copy[0]`;
+						string $scon[] = `scaleConstraint -offset 1 1 1 -w 1 $c $copy[0]`;
+						delete $pcon;
+						delete $scon;
+					}
+					
+					string $all[] = `ls -as ($namespace+":*")`;
+					
+					if ($single)
+					{
+						string $parent[] = `listRelatives -f -p $c`;
+						if (size($parent))
+						{
+							parent $all[0] $parent[0];
+							parent -w $all[0];
+							parent $all[0] $parent[0];
+						}
+					}
+					else 
+					{
+						parent $all[0] $p;
+						parent -w $all[0];
+						parent $all[0] $p;
+					}
+					delete  $c;
+				}
+			}
+		}
+	}
+}
+
+global proc vvModelReplaceRefernceHML(string $ver)
+{
+	string $realver="";
+	if ($ver=="h")
+	{
+		$realver="";
+	}
+	else 
+	{
+		$realver="_"+$ver;
+	}
+	
+	
+	string $sel[] = `ls -sl -l`;
+	if (!size($sel))
+		error "请选择需要替换的组";
+	
+	for ($p in $sel)
+	{
+		if (match("_[aA][lL][lL]$",$p) != "")
+		{
+			vvModelReplaceRefernceCTR($ver);
+
+			string $children[] = `listRelatives -f -c $p`;
+			for ($c in $children)
+			{
+				if (`referenceQuery -inr $c`)
+				{
+					string $reffile = `referenceQuery -f $c`;
+					string $match = match("01_main_pack.*$",$reffile);
+					string $buff[] = stringToStringArray($match,"\\/");
+					string $assetold=$buff[size($buff)-1];
+					string $task=$buff[2];
+					string $assetnew = $task+$realver+".ma";
+
+					if (match($assetnew,$reffile)=="")
+					{
+						string $newfile = substituteAllString($reffile,$assetold,$assetnew);
+						//$newfile = substituteAllString($newfile,"_m_",("_"+$ver+"_"));
+						//$newfile = substituteAllString($newfile,"_l_",("_"+$ver+"_"));
+						//string $buff[] = stringToStringArray($newfile,"{}");
+						//$newfile = $buff[0];
+						
+						if (`filetest -r $newfile`)
+						{
+							string $grp[] = vvModelReplaceRefernceGetRefTop($c);
+							
+							string $rfn = `referenceQuery -rfn $c`;
+							file -lr $rfn $newfile;
+
+							string $en[] = `referenceQuery -n $grp[1]`;
+							string $first[] = stringToStringArray($en[0],"|");
+							string $ps[] = `listRelatives  -f -p $first[0]`;
+							if ($grp[0]!= "NULL" && $ps[0]!=$grp[0])
+							{
+
+								parent $first[0] $grp[0];
+							}
+						}
+					}
+				}
+			}
+		}
+		else 
+		{
+			if (!`referenceQuery -inr $p`)
+			{
+				vvModelReplaceRefernceCTR($ver);
+			}
+			else
+			{
+				string $reffile = `referenceQuery -f $p`;
+				string $match = match("01_main_pack.*$",$reffile);
+				string $buff[] = stringToStringArray($match,"\\/");
+				string $assetold=$buff[size($buff)-1];
+				string $task=$buff[2];
+				string $assetnew = $task+$realver+".ma";
+
+				if (match($assetnew,$reffile)=="")
+				{
+					string $newfile = substituteAllString($reffile,$assetold,$assetnew);
+
+					if (`filetest -r $newfile`)
+					{
+						string $grp[] = vvModelReplaceRefernceGetRefTop($p);
+
+						string $rfn = `referenceQuery -rfn $p`;
+						file -lr $rfn $newfile;
+
+						string $en[] = `referenceQuery -n $grp[1]`;
+						string $first[] = stringToStringArray($en[0],"|");
+						string $ps[] = `listRelatives  -f -p $first[0]`;
+						if ($grp[0]!= "NULL" && $ps[0]!=$grp[0])
+						{
+							parent $first[0] $grp[0];
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+global proc string[] vvModelReplaceRefernceGetRefTop(string $obj)
+{
+	string $return[]={"",""};
+	string $rfn = `referenceQuery -rfn $obj`;
+	string $en[] = `referenceQuery -n $rfn`;
+	string $buff[] = stringToStringArray($en[0],"|");
+	$return[1]=$rfn;
+
+	string $parent[] = `listRelatives -p -f $buff[0]`;
+	if (!size($parent))
+		$return[0]="NULL";
+	else
+		$return[0]=$parent[0];
+
+	return $return;
+}
+
+global proc vvModelReplaceRefernceCombine()
+{
+	string $sel[]=`ls -sl -l`;
+	for ($se in $sel)
+	{
+	    string $children[] = `listRelatives -f -c $se`;
+	    string $polys[] = `polySphere -r 1 -sx 20 -sy 20 -ax 0 1 0 -cuv 2 -ch 1`;
+	    parent $polys[0] $se;
+	    for($c in $children)
+	    {
+		string $gcs[] = `listRelatives -f -ad -type mesh $c`;
+		string $trans[]={};
+		for ($gc in $gcs)
+		{
+		    string $pgc[] = `listRelatives -f -p $gc`;
+		    $trans[size($trans)]=$pgc[0];
+		}
+		$trans = stringArrayRemoveDuplicates($trans);
+		print $trans;
+		
+		if (size($trans)>1)
+		{
+			string $unites[] = `polyUnite -ch 0 -mergeUVSets 1 $trans`;
+			parent $unites[0] $se;
+			select -r $unites[0];
+			zjBasePivot;
+		}
+		else if (size($trans)==1)
+		{
+			string $unites[] = `duplicate -rr $trans[0]`;
+			parent $unites[0] $se;
+			select -r $unites[0];
+			zjBasePivot;
+		}
+		if (objExists($c))
+		{
+			delete $c;
+		}
+	    }
+	    delete $polys;
+	}
+}
+
+global proc vvModelReplaceRefernceLoadSelectedLoc()
+{
+	string $selected[]= `ls -sl`;
+	
+	string $referenceNodes[]  = `ls -type reference`;
+	for ($rfn in $referenceNodes)
+	{
+		if (match("sharedReferenceNode",$rfn) == "")
+		{
+			string $en[] = `referenceQuery -sdp 1 -en -ec "setAttr" $rfn`;
+			//if (size($en) && objExists($en[0]) )//&& `referenceQuery -inr $en[0]`)
+			//{
+				//print $rfn;
+				for ($s in $selected)
+				{
+					if (match( ($s+"|"),$en[0]) != "")
+					{
+						catchQuiet(`file -lr $rfn`);
+						break;
+					}
+				}
+			//}
+		}
+	}
+}
+
+global proc vvModelReplaceRefernceUnloadSelectedLoc()
+{
+	string $selected[]= `ls -sl`;
+	for ($sl in $selected)
+	{
+		string $children[] = `listRelatives -f -ad $sl`;
+		string $referenceNodes[]={};
+		string $topReferenceNodes[]={};
+		for ($c in $children)
+		{
+			if (`referenceQuery -inr $c`)
+			{
+				string $rfn = `referenceQuery -rfn $c`;
+				$referenceNodes[size($referenceNodes)]=$rfn;
+				
+				string $trRfn = `referenceQuery -tr -rfn $c`;
+				if ($rfn != $trRfn)
+					$topReferenceNodes[size($topReferenceNodes)] = $trRfn;
+			}
+		}
+		$referenceNodes = stringArrayRemoveDuplicates($referenceNodes);
+		$topReferenceNodes = stringArrayRemoveDuplicates($topReferenceNodes);
+		$referenceNodes = stringArrayRemove($topReferenceNodes,$referenceNodes);
+
+		//print $referenceNodes;
+		for ($r in $referenceNodes)
+		{
+			file -ur $r;
+		}
+	}
+}

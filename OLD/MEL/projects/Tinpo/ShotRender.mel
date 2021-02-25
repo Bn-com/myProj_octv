@@ -1,0 +1,3139 @@
+// ShotRender.mel (c) 2004 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	Take a completed shot group, optimizes it,  and submits a qube job to render one shot
+Use:
+	ShotRender argList
+Options:
+	argList (string)- A semicolon delimited string containing all the arguments
+	
+	argList construction	- someVar=someValue;nextVar=nextValue
+	
+	arguments:
+	***	- fileName		(string) The file to operate on - this should be the _lit.ma
+	***	- sequenceid		(int)	 The insight sequence id
+		- seqxml		(string) For testing, read this on disk sequence xml instead of asking insight.
+	***	- shotNumber		(string) The shot that we want to render
+	***	- host			(string) Who is calling this process? "insight" or "maya"
+		- overrideFrameStart	(int)	If specified, start rendering from this frame instead of the shot's FrameRangeStart
+		- overrideFrameEnd	(int)	If specified, end rendering at this frame instead of the shot's FrameRangeEnd
+		- renderWranglers	(string) Comma delimited list of the email addresses of people to email when this render completes, or fails
+		- optimizationSupervisor(string) Comma delimited list of people to email if the optimization procedure traps an error before launching a render
+	***	- completionCallBack	(string) The web service to call if the render completes
+	***	- completionArgs	(string) The arguments to send to the completion callback
+	***	- submissionCallback	(string) The web service to call if the render is successfully submitted
+	***	- submissionArgs	(string) The arguments to send to the submission callback
+		- rlcService		(string) The web service to call to retrieve the render layer config for this render (NOT IMPLEMENTED)
+		- rlcArgs		(string) The args to send to the RLC service
+	***	- rlcxml		(string) If we want to do it the old way (read RLC xml for an on disk file). The full path of the xml file
+		- jobName		(string) If specified, name the render qube job this
+		- renderGlobals		(string) Use this alternate render globals file if specified
+		- useRenderLayers	(int) 	 If set to 0, don't set up render layers, render flat instead (defaults to 1)
+	***	- jobCode		(string) What subjob of the shot render is this..e.g. R01J01. This is appended to the end of the maya shot render scene name.
+		- destDir		(string) The directory to render to. If not specified one will be derived from the file name.
+		- renderFile		(string) If specified, the render ready file will be saved to this location. Derived from other args by default
+		- render_priority	(int)	 The priority to give the render job, 4000 by default
+		- render_cpus		(int)	 The number of cpus to give the render job, one for each frame by default
+		- useBots		(int)	 If on, use bots for everything but the environment
+		
+		*** = Must be specified if called from Insight, in addition either rlcService and rlcArgs OR rlcxml must be specified, unless
+		useRenderLayers is sent a 0.
+	
+Documentation:
+	
+Examples:
+
+Dependancies
+	isStaticChannel
+	stringArrayFindIndex
+	mentalRayRenderLayers
+	setupRenderLayers
+	setupRenderLayers_MR
+	bakeCameraMainNew
+	moveSceneToOrigin
+	fileIO
+	parseXML
+	findAssetsByType
+	fixCachedConstraints
+	assetListFromRLC
+	selectiveFileLoad
+	setAndKeyAttr
+	html_log
+	argList
+	listReferences
+	insightGetSequenceXML
+	setTexturesToLive
+	optimizeEnvironmentTextures
+	mail
+	submitRender
+	importReferences_subRefs
+	selectiveFileLoad_subRefs
+	getAnimCacheStatus
+	saveRenderVersionData
+	
+	..list incomplete 09/16/05
+Notes:
+	In no particular order:
+	
+	- call pre and post optimization mel callbacks if they exist
+	- call per layer mel callbacks if they exist
+	- sets the render globals
+	- sets up render layers
+	- Import all the references. If they are deferred, look for presence of the ".dontReload" attribute on the reference node to decide whether
+	to load them.
+	- reads the shot cast and deletes whatever is not in it
+	- resets the textures to what is found in the live file
+	- read the LOD_settings.xml for each asset, read the distance info table, and perform LOD optimization. Store a log for before and
+	after optimization
+	- bakes the animation cache, and disables cache reading
+	- calls set accessory visibility to switch all the characters into their right gear
+	
+Bugs:
+
+Original:	09/24/04
+Revisions:	10/04/04	Rev 1.0
+		- Read new preset format render globals files
+		- Respect protected render globals (protection set by lighters)
+		
+		10/14/04	Rev 1.1
+		- Validate the cache (make sure it exists and is newer than the ani file)
+		
+		(many revisions)
+		.
+		.
+		07/28/05
+		- Adding the ability to specify resolution and aspect ratio from the argList
+		
+		09/13/05
+		- Updating to deal with proxy references, point caching, and unloaded references
+		- Optimizing so that if new render layers are specified, never load them in the first place.
+		- Fixing reset textures so that not having the asset in the scene doesn't hurt
+		
+		09/16/05
+		- Tidying up with calls to more compact html log output procs
+		
+		10/06/05
+		- Adding ability to render scattered frames when launched from render layer launcher.
+		
+		10/31/05
+		- Adding support for air
+		- Tidying up render submission call
+		
+		11/17/05
+		- Added point cache archiving functionality.
+		- Sending all jobs to render with shave reservation.
+		
+		01/25/06
+		- Modified to deal with nested references.
+		
+		03/24/06
+		- Hooked up rlc alpha
+
+		08/24/06
+		- Replaced old cache validation (based on old cache and php) with new.
+
+		01/18/07
+		- Inserting call to read custom mental ray render settings.
+
+		02/12/07
+		- Implemented version lock (only works for fur right now)
+
+		03/06/07
+		- Turned off pointCache archiving (no longer needed now that the pointCache is versioned)
+
+		03/20/07
+		- Removed redundant [old]shot number from path of callbacks
+
+		03/21/07
+		- Hooked up saving of render version data
+
+		03/29/07
+		- Discontinued use of keyPointCacheNodes
+		
+		
+To-do's:
+		- Change shot cast deletion so that if a character group is not in the shot cast, but has children character groups that are,
+		then the child character groups are not deleted.
+		- Shot Cast deletion: add a check, when dealing with instances, that you haven't accidentally spread out into another set dressing
+*/
+// ---------------------------------------------------------------------------------------------------
+// includes
+// always include all source's here so that dependancies may be seen easily.
+//source loadAllPlugins.mel;
+source parseXML.mel;
+source fileIO.mel;
+source html_log.mel;
+source argList.mel;
+// source a.mel;
+// source b.mel
+
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// prefix all global variables with an abbreviation of the script name so they don't clash with global variables
+// used by other scripts.
+// global variables need only be defined here if they need to be initialized to something when the script is first sourced
+
+//global string $TMP_b = "foo";
+//global float $TMP_c = 1.999;
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	/*
+	global string $SR_renderer;
+	if ($SR_renderer == "mentalRay")
+	{
+		if( ! `pluginInfo -q -l "Mayatomr"` )
+			loadPlugin "Mayatomr";
+		miCreateDefaultNodes();	
+	}
+	*/
+	
+	print ("Loading Mayatomr, and creating default nodes...\n");
+	if (!`pluginInfo -q -l "Mayatomr"`)
+		loadPlugin "Mayatomr";
+	miCreateDefaultNodes();	
+}
+// -----------------------------------------------------------------------------------------------
+proc string stripProj (string $path)
+{
+	string $outPath;
+	string $tokens[];
+	
+	tokenize ($path,"/",$tokens);
+	int $start = 0;
+	for ($dir in $tokens)
+	{
+		if ($dir == "cpsv")
+			$start = 1;
+		if ($start)
+			$outPath += "/"+$dir;	
+	}	
+	return $outPath;
+}
+// -----------------------------------------------------------------------------------------------
+global proc getAssetMembership (string $assetPaths[],string $refNodes[], string $namespaces[], int $assetTypes[], int $assetDeferred[])
+{
+	// modifying to detect deferred references
+	// modified 05/27/05 - to work with maya 6.5 when there are multiple references.
+	// getOccurenceNum is no longer needed. file -q -r appends the copy number for you, rather than returning duplicates as it did in 5.0
+	
+	for ($i=0;$i<size($assetPaths);$i++)
+	{
+		print ("getAssetMemberShip: Current asset: "+$assetPaths[$i]+"\n");
+		 
+		$refNodes[$i] = `file -q -rfn ($assetPaths[$i])`;
+		 
+		$assetDeferred[$i] = `file -q -dr ($assetPaths[$i])`;
+		$namespaces[$i] = `file -q -ns ($assetPaths[$i])`;
+		string $tokens[];
+	
+		// figure out the type from the path
+		tokenize ($assetPaths[$i],"/",$tokens);
+			
+		for ($j=0;$j<size($tokens);$j++)
+		{
+			if ($tokens[$j]=="cpsv")
+			{
+				switch	($tokens[$j+1]) 
+				{
+					case "characters":
+						$assetTypes[$i] = 1;
+						break;
+					case "vehicles":
+						$assetTypes[$i] = 2;
+						break;
+					case "props":
+						$assetTypes[$i] = 3;
+						break;
+					case "sets":
+						$assetTypes[$i] = 4;
+						break;
+					default:
+						$assetTypes[$i] = 5;
+						break;
+				}
+				if ($assetTypes[$i]) break;
+			}
+		}
+	}
+}
+// -----------------------------------------------------------------------------------------------
+//
+// -----------------------------------------------------------------------------------------------
+global proc int numFramesFromFramesStr(string $frames)
+{
+	string $buf[];
+	tokenize ($frames,",",$buf);
+	
+	int $count = 0;
+	for ($i=0;$i<size($buf);$i++)
+	{
+		string $buf2[];
+		tokenize ($buf[$i],"-",$buf2);
+		if (size($buf2)==1)
+			$count ++;
+		else if (size($buf2)>1)
+		{
+			$count += ((int)$buf2[1]-(int)$buf2[0]+1);	
+		}
+				
+	}	
+	return $count;
+}
+// -----------------------------------------------------------------------------------------------
+//
+// -----------------------------------------------------------------------------------------------
+proc mailSupervisor (string $address, string $message, string $sequence, string $shotGroup, string $shot)
+{
+	if (!(`about -nt`))
+	{
+		string $subj = "Pre Render Setup Failure Notification: "+$sequence+"_"+$shotGroup+"_"+$shot;
+		string $mailCmd = "php /diskx/film/apps/reelfx/php/mail.php "+$address+" \""+$subj+"\" \""+$message+"\" PreRenderSetup";
+		system ($mailCmd);
+	}
+	
+}
+// -----------------------------------------------------------------------------------------------
+proc int[] queryLODOptimization (float $minDist, string $LOD_settingsFile)
+{
+	// returns 2 values. 1. The texture setting to use: 0,1,2 = low,medium,high
+	// 2. The smooth setting to use 0,1,2
+	
+	// read the LOD_settings xml
+	string $xml = readXML($LOD_settingsFile,0);
+	
+	string $smoothXML[] = xml_getTag($xml,"smooth");
+	string $processed = substituteAll (" = ",$smoothXML[0],"=");
+
+
+	float $smoothHi = (float)xml_getVar($processed,"hiThresh");
+	float $smoothMed = (float)xml_getVar($processed,"medThresh");
+	
+	string $textureXML[] = xml_getTag($xml,"texture");
+	$processed = substituteAll (" = ",$textureXML[0],"=");
+	float $textureHi = (float)xml_getVar($processed,"hiThresh");
+	float $textureMed = (float)xml_getVar($processed,"medThresh");	
+	
+	int $settings[2];
+	
+	if ($minDist <= $textureHi)
+		$settings[0] = 2;
+	else if ($minDist > $textureHi && $minDist <= $textureMed)
+		$settings[0] = 1;
+	else
+		$settings[0] = 0;
+		
+	if ($minDist <= $smoothHi)
+		$settings[1] = 2;
+	else if ($minDist > $smoothHi && $minDist <= $smoothMed)
+		$settings[1] = 1;
+	else
+		$settings[1] = 0;
+	
+	return $settings;
+}
+// -----------------------------------------------------------------------------------------------
+proc setTextureOptimization (string $namespace, int $setting, int $cap)
+{
+	// cap is how high we can go...just in case we have to kill the high res textures
+	$setting = min($setting,$cap);
+	string $subdirs[] = {"lowRes","mediumRes","highRes"};
+	
+	string $fileNodes[] = `ls -type file ($namespace+":*")`;
+	
+	for ($file in $fileNodes)
+	{
+		string $path = `getAttr ($file+".ftn")`;
+		string $textureBasename = basename ($path,"");
+		
+		$path = dirname ($path);	
+		
+		// check that the texture isn't already in one of the subdirs, just in case setTexturesToLive didn't get it
+		string $tokens[];
+		tokenize ($path,"/",$tokens);
+		
+		int $index = stringArrayFindIndex ($tokens[size($tokens)-1],$subdirs);
+		if ($index != -1)
+		{
+			// remove the subdir from the path
+			$path = substring($path,1,size($path)-size($subdirs[$index])-1);
+		}
+		
+		$path += "/"+$subdirs[$setting]+"/"+$textureBasename;
+		
+		if (`filetest -f $path`)
+			setAttr -type "string" ($file+".ftn") $path;
+		else
+			warning ($path+" doesn't exist. Skipping LOD optimization on this texture.\n");
+		
+	} 	
+}
+// -----------------------------------------------------------------------------------------------
+global proc setEnvTextureRes()
+{
+	string $subdirs[] = {"lowRes","mediumRes","highRes"};
+	int $setting = 1;
+	
+	string $sets[] = findAssetsByType ("efs",0);	
+	
+	for ($i=0;$i<size($sets);$i++)
+	{
+		print ("Setting environment "+$sets[$i]+" to medium res.\n");
+		string $tokens[];
+		tokenize ($sets[$i],":",$tokens);
+		string $ns = $tokens[0];
+		
+		// get all file nodes in this namespace
+		string $fileNodes[] = `ls -type file ($ns+":*")`;
+		for ($file in $fileNodes)
+		{
+			string $path = `getAttr ($file+".ftn")`;
+			string $textureBasename = basename ($path,"");
+		
+			$path = dirname ($path);
+			
+			int $index = stringArrayFindIndex ($tokens[size($tokens)-1],$subdirs);
+			if ($index != -1)
+			{
+				// remove the subdir from the path
+				$path = substring($path,1,size($path)-size($subdirs[$index])-1);
+			}
+			
+			$path += "/"+$subdirs[$setting]+"/"+$textureBasename;
+			
+			if (`filetest -f $path`)
+				setAttr -type "string" ($file+".ftn") $path;
+			else
+				warning ($path+" doesn't exist. Skipping LOD optimization on this texture.\n");
+				
+		}
+	}
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc setLowRes (string $charGrp)
+{
+	// set the res attribute to low
+	if (!`objExists ($charGrp+".res")`)
+		return;
+		
+	string $names[];
+	string $tmp = `addAttr -q -en ($charGrp+".res")`;
+	
+	tokenize ($tmp,":",$names);
+	
+	for ($i=0;$i<size($names);$i++)
+	{
+		if (tolower ($names[$i]) == "low")
+		{
+			// unlock the attribute
+			if (`getAttr -l  ($charGrp+".res")`)
+			{
+				if (!`reference -q -inr $charGrp`)
+					setAttr -l 0 ($charGrp+".res");
+				else
+				{
+					warning ("Can't set "+$charGrp+".res. Node is locked. \n");
+					break;	
+				}
+			}	
+			// break any incoming connections
+			string $inPlug[] = `listConnections -s 1 -d 0 -p 1 ($charGrp+".res")`;
+			if (size($inPlug))
+				disconnectAttr $inPlug[0] ($charGrp+".res");
+			// set to low res
+			setAttr ($charGrp+".res") $i;
+			break;
+		}	
+	}
+	
+	// done
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc string setReadyToRender (string $charGrp)
+{
+	string $knownResSettings[] =
+	{
+		"Low",
+		"High",
+		"Lo+HiFace",
+		"Render"
+	};
+	
+	string $warning = "";
+	
+	for ($i=0;$i<=1 && `objExists ($charGrp+".res")`;$i++)
+	{
+		print ("addAttr -q -en "+$charGrp+".res\n");
+		string $tmp = `addAttr -q -en ($charGrp+".res")`;	
+		string $resSettings[];
+		tokenize ($tmp,":",$resSettings);
+		
+		print ("getAttr "+$charGrp+".res\n");
+		int $cur = `getAttr ($charGrp+".res")`;
+		string $curSetting = $resSettings[$cur];
+		
+		print ("curSetting = "+$resSettings[$cur]+"\n");
+		
+		// is this a known setting, if not leave it alone...
+		int $index = stringArrayFindIndex($curSetting,$knownResSettings);
+		
+		if ($index == -1)
+		{
+			$warning = $charGrp+".res is set to a unknown setting of "+$curSetting+". Leaving it alone.\n";
+			break;	
+		}
+		
+		int $setting = -1;
+		$setting = stringArrayFindIndex("Render",$resSettings);
+		
+		if ($setting == -1)
+		{
+			$warning = $charGrp+".res doesn't have a setting of \"Render\".\n";
+			$setting = stringArrayFindIndex("High",$resSettings);
+			if ($setting == -1)
+			{
+				$warning += $charGrp+".res doesn't have a setting of \"High\". Leaving it alone.\n";
+				break;
+			}
+		}
+		
+		if (`getAttr -l  ($charGrp+".res")`)
+		{
+			if (!`reference -q -inr $charGrp`)
+			{
+				print ("setAttr -l 0 "+$charGrp+".res\n");
+				setAttr -l 0 ($charGrp+".res");
+			}
+			else
+			{
+				warning ($charGrp+".res can not be set. Attribute is locked. Skipping.\n");
+				continue;	
+			}
+		}
+		print ("listConnections -s 1 -d 0 -p 1 "+$charGrp+".res\n");
+		string $inplug[] = `listConnections -s 1 -d 0 -p 1 ($charGrp+".res")`;
+		if (size($inplug))
+		{
+			print ("disconnectAttr "+$inplug[0]+" "+$charGrp+".res\n");
+			disconnectAttr $inplug[0] ($charGrp+".res");
+			
+		}
+		print ("setAttr "+$charGrp+".res "+$setting+"\n");
+		setAttr ($charGrp+".res") $setting;
+		print ("Done setting "+$charGrp+".res\n");
+	}
+	
+	// set visibility
+	// 06/27/05 - if the visibility is keyed, and non-static, leave it alone
+	print ("isStaticChannel\n");
+	if (!isStaticChannel($charGrp+".v"))
+		return $warning;
+		
+	if (`getAttr -l ($charGrp+".v")`)
+	{
+		if (!`reference -q -inr $charGrp`)
+		{
+			print ("setAttr -l 0 "+$charGrp+".v\n");
+			setAttr -l 0 ($charGrp+".v");
+		}
+		else
+		{
+			warning ($charGrp+".v can not be set. Attribute is locked. Skipping.\n");
+			return $warning;	
+		}
+	
+	}
+	print ("listConnections -s 1 -d 0 -p 1 "+$charGrp+".v\n");
+	string $inplug[] = `listConnections -s 1 -d 0 -p 1 ($charGrp+".v")`;
+	if (size($inplug))
+	{
+		disconnectAttr $inplug[0] ($charGrp+".v");
+		print ("disconnectAttr "+$inplug[0]+" "+$charGrp+".v\n");
+	}
+	print ("setAttr "+$charGrp+".v 1\n");
+	setAttr ($charGrp+".v") 1;
+	
+	return $warning;
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc string[] findAssetsNotInShotCast(string $shotCast[], string $add[], string $remove[])
+{
+	// do some additional parsing to flatten the shot cast into a list of character groups
+	string $charGrpsInCast[];
+	
+	for ($i=0;$i<size($shotCast);$i++)
+	{
+		$charGrpsInCast[$i] = xml_getVar($shotCast[$i],"CharGrp");	
+	}
+	
+	print ("Characters in main cast:\n");
+	print $charGrpsInCast;
+	for ($i=0;$i<size($add);$i++)
+	{
+		$charGrpsInCast[size($charGrpsInCast)]=xml_getVar($add[$i],"CharGrp");	
+	}
+	string $tmp[];
+	for ($i=0;$i<size($remove);$i++)
+	{	
+		$tmp[$i] =  xml_getVar($remove[$i],"CharGrp");		
+	}
+	print ("Characters to remove from cast:\n");
+	print $tmp;
+	
+	$charGrpsInCast = stringArrayRemove ($tmp,$charGrpsInCast);
+	
+	print ("Cast after removals:\n");
+	print $charGrpsInCast;
+	
+	
+	// get a list of all the assets we are interested in
+	// characters, props, vehicles, and set dressings
+	string $charGrpsNotInCast[] = findAssetsByType ("cpdv",0);
+	
+	print ("All character groups:\n");
+	print $charGrpsNotInCast;
+	
+	$charGrpsNotInCast = stringArrayRemove($charGrpsInCast,$charGrpsNotInCast);
+	
+	print ("Items to delete \n");
+	print $charGrpsNotInCast;
+	
+	return $charGrpsNotInCast;
+}
+// -----------------------------------------------------------------------------------------------
+global proc string findUniqueParent (string $obj, string $topObj)
+{
+// returns the first parent that is not an instance, but stops at topObj
+
+	string $uniqueParent;
+	
+	string $tokens[];
+	tokenize ($obj,"|",$tokens);
+	
+	while (size($tokens)>1)
+	{
+		$uniqueParent = "";
+		string $curObj = "";
+		string $curObjShort = $tokens[size($tokens)-2];
+		for ($i=0;$i<size($tokens)-1;$i++)
+			$curObj += "|"+$tokens[$i];	
+		
+		// is curObj equal to topObj?
+		if ($curObjShort == $topObj)
+			break;
+		
+		if (size(`listRelatives -ap $curObj`)<2)
+		{
+			$uniqueParent = $curObj;
+			break;	
+		}
+		
+		clear $tokens;
+		tokenize ($curObj,"|",$tokens);
+	}	
+	
+	//print ($uniqueParent+"\n");
+	return $uniqueParent;
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc removeChildSetDressings (string $charGrp, string $objList[])
+{
+	// get all set dressings
+	string $setDressings[] = findAssetsByType ("d",0);
+	
+	// find out which are children of char grp
+	string $childSetDressings[];
+	string $topLongName[] = `ls -l $charGrp`;
+	
+	for ($i=0;$i<size($setDressings);$i++)
+	{
+		if ($setDressings[$i] == $charGrp)
+			continue;
+		string $longName[] = `ls -l $setDressings[$i]`;
+		
+		if (gmatch ($longName[0],($topLongName[0]+"*")))
+			$childSetDressings[size($childSetDressings)]=$setDressings[$i];	
+	}	
+	
+	// remove all the objects that are children of the child set dressings from the object list
+	for ($i=0;$i<size($childSetDressings);$i++)
+	{
+		string $rem[] = `listRelatives -ad -f $childSetDressings[$i]`;	
+		$rem = `ls -l -ap -type nurbsSurface -type mesh -type subdiv $rem`;
+		$objList = stringArrayRemove ($rem,$objList);
+		
+	}
+	//print ("Child set dressings of "+$charGrp+" are :\n");
+	//print $childSetDressings;
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc deleteAsset (string $charGrp)
+{
+	// check that we haven't accidentally left our character group when dealing with instances
+	// get all objects to delete
+	string $objects[] = `listRelatives -ad -f $charGrp`;
+	$objects = `ls -l -ap -type nurbsSurface -type mesh -type subdiv $objects`;
+	//select -cl;
+	
+	// deal with cases where there are child set dressings under the character group
+	// remove these from the list, they need to be dealt with as their own entities...for example, what if a parent set dressing
+	// is not in the shot cast, but some of it's child set dressings are.
+	
+	removeChildSetDressings($charGrp, $objects);
+	
+	// if it isn't a set or set dressing, we can safely turn off the top character group, so joints, constraints, etc, will not evaluate
+	// NOT! lights!
+	/*
+	
+	string $assetType = `getAttr ($charGrp+".character")`;
+	if ($assetType != "set" && $assetType != "setDressing")
+	{
+		setAttr -l 0 ($charGrp+".v");
+		string $inputs[] = `listConnections -s 1 -d 0 -p 1 ($charGrp+".v")`;
+		if (size($inputs))
+			disconnectAttr $inputs[0] ($charGrp+".v");
+		setKeyframe -v 0 ($charGrp+".v"); 	
+	}
+	*/
+	
+	//print ("Size of objects "+size($objects)+"\n");
+	//select -r $objects;
+	int $nothing = 0;
+	int $doesntExist = 0;
+	int $deleted = 0;
+	int $instances = 0;
+	for ($obj in $objects)
+	{
+		string $objectToDelete = "";
+		if (`objExists $obj`)
+			$objectToDelete = $obj;
+		else
+		{
+			$doesntExist ++;	
+			continue;
+		}
+			
+		// is it an instance? If so, find the first transform above it that isn't...but only inside this character group
+		if (size(`listRelatives -ap $objectToDelete`)>1)
+		{
+			$instances ++;
+			$objectToDelete = findUniqueParent ($objectToDelete, $charGrp);
+			
+		}
+		
+		// have we somehow left the hierarchy of $charGrp
+		string $search = "*"+$charGrp+"*";
+		if (!gmatch ($objectToDelete,$search))
+			continue;
+
+			
+		//select -add $objectToDelete;
+		if (!size($objectToDelete))
+		{
+			$nothing ++;
+			continue;
+		}
+			
+		if (`objExists $objectToDelete`)
+		{
+			delete $objectToDelete;
+			$deleted ++;
+			continue;
+		}
+		else
+		{
+			$doesntExist ++;	
+		}
+	}
+	//print ("Returned nothing "+$nothing+" times\n");
+	print ("Doesn't exist "+$doesntExist+" \n");
+	print ("Deleted "+$deleted+"\n");
+	print ("Instances "+$instances+"\n");
+	
+
+}
+// -----------------------------------------------------------------------------------------------
+global proc string readFrameRange (string $file)
+{
+	// file is the render layer config xml file
+	global int $frameStart;
+	global int $frameEnd;
+	global string $SR_frames;
+	
+	string $message = "Reading render layer config "+$file+" for frame range.\n";
+	print $message;
+	
+	// do we have a render layer config file?
+	if (!`filetest -f $file`)
+	{
+		print ("No render layer config exists. Getting the frame range from the sequence xml instead.\n");
+		$message += ("No render layer config exists. Getting the frame range from the sequence xml instead.\n");
+		return $message;	
+	}
+	
+	string $xml = readXML($file,0);
+	
+	string $header[] = xml_getTag ($xml,"header");
+	
+	if (!size($header))
+	{
+		print ($file+" is an invalid render layer config. Getting the frame range from the sequence xml instead.\n");
+		$message += ($file+" is an invalid render layer config. Getting the frame range from the sequence xml instead.\n");
+		return $message;	
+	}
+	
+	string $frameRange = xml_getVar ($header[0],"frames");
+	$frameRange = substituteAll (" ",$frameRange,"");
+	
+	if (!size($frameRange))
+	{
+		print ($file+" doesn't contain frame range information. Getting the frame range from the sequence xml instead.\n");
+		$message += ($file+" doesn't contain frame range information. Getting the frame range from the sequence xml instead.\n");
+		return $message;	
+	}
+	
+	// if we've gotten this far, let's say we can trust what was grabbed
+	// if the frame range is something like 91-250, we need to plug it into frame start and end
+	// if it is something like 1,3,7-11,19-30,32 we need to plug it into frames
+	
+	// for the first scenario to be true it should have one hyphen and no commas
+	string $tokensHyphen[];
+	tokenize ($frameRange,"-",$tokensHyphen);
+	
+	string $tokensComma[];
+	tokenize ($frameRange,",",$tokensComma);
+	
+	if (size($tokensHyphen)==2 && size($tokensComma)==1)
+	{
+		$frameStart = (int)$tokensHyphen[0];
+		$frameEnd = (int)$tokensHyphen[1];	
+	}
+	else if (size($tokensHyphen)==1 && size($tokensComma)==1)
+	{	
+		// it's just a single number, e.g. "220"
+		$frameStart = (int)$frameRange;
+		$frameEnd = (int)$frameRange;	
+	}
+	else
+		$SR_frames = $frameRange;
+	
+	string $text = "frames (from RLC) = "+$frameRange+"\n";
+	$text += "frameStart = "+$frameStart+"\n";
+	$text += "frameEnd = "+$frameEnd+"\n";
+	$text += "SR_frames = "+$SR_frames+"\n\n";
+	
+	$message += $text;
+	print ($text);
+	
+	return $message;
+	// done
+}
+// -----------------------------------------------------------------------------------------------
+proc generateEmailReport (string $body[], string $subj[])
+{
+	global string $SR_renderFile;
+	global string $SR_fileName;
+	global string $SR_sequence;
+	global string $SR_shotGroup;
+	global string $SR_destDir;
+	global string $SR_shotNumber;
+	global string $SR_jobName;
+	
+	string $buf[];
+	tokenize ($SR_destDir,"/",$buf);
+	string $layerName = "";
+	string $passName = "";
+	if (size($buf)>=2)
+	{	
+		$layerName = $buf[size($buf)-2];
+		$passName = $buf[size($buf)-1];
+	}
+	// subject
+	$subj[0] = "Rendering complete: "+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+", "+$layerName+", "+$passName;	
+	
+	// body
+	string $text = 	"Rendering Report<BR>";
+	$text += 	"----------------<BR><BR>";
+	$text +=	"Sequence: "+$SR_sequence+"<BR>";
+	$text +=	"Shot Group: "+$SR_shotGroup+"<BR>";
+	$text +=	"Shot: "+$SR_shotNumber+"<BR>";
+	$text +=	"Render scene: "+$SR_renderFile+"<BR>";
+	$text +=	"Render directory: "+$SR_destDir+"<BR>";
+	$text +=	"Render job: "+$SR_jobName+"<BR><BR>";
+	//$text +=	"Time submitted: "+(getSystemDate("both"))+"<BR>";
+	//$text +=	"Time submitted: "+(php_systemDate())+"<BR>";
+	
+	$body[0] = $text;
+}
+// -----------------------------------------------------------------------------------------------
+proc generatePreRenderMail (string $jobNum)
+{
+	global string $SR_renderFile;
+	global string $SR_fileName;
+	global string $SR_sequence;
+	global string $SR_shotGroup;
+	global string $SR_destDir;
+	global string $SR_shotNumber;
+	global string $SR_jobName;
+	global string $SR_renderInitiationEmail;
+	global string $SR_artist;
+	global int $SR_noRender;
+	
+	if ($SR_renderInitiationEmail == "")
+		return;
+	
+	string $subject;
+	if ($SR_noRender)
+		$subject = "Shot Opt complete: "+$SR_sequence+"_"+$SR_shotGroup;
+	else
+		$subject = "Render process initiated: "+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+" ("+$jobNum+")";
+	
+	string $text;
+	if ($SR_noRender)
+	{
+		$text = "Shot Opt process complete, no render launched<BR>";	
+	}
+	else
+		$text = "Rendering Process Launched<BR>";
+	$text += 	"----------------<BR><BR>";
+	$text +=	"Submitted by: "+$SR_artist+"<BR>";
+	$text +=	"Sequence: "+$SR_sequence+"<BR>";
+	$text +=	"Shot Group: "+$SR_shotGroup+"<BR>";
+	$text +=	"Shot: "+$SR_shotNumber+"<BR>";
+	$text +=	"Render scene: "+$SR_renderFile+"<BR>";
+	if (!$SR_noRender)
+	{
+	 $text +=	"Render directory: "+$SR_destDir+"<BR>";
+	 $text +=	"Render job number: "+$jobNum+"<BR>";
+	 $text +=	"Render job name: "+$SR_jobName+"<BR><BR>";
+	}
+	
+	mail ($SR_renderInitiationEmail,$subject,$text);
+	
+}
+// -----------------------------------------------------------------------------------------------
+proc breakCameraApertureConnections (string $camShape)
+{
+	lockNode -l 0 $camShape;
+	string $attrs[] = {"cameraAperture","horizontalFilmAperture","verticalFilmAperture"};
+	for ($attr in $attrs)
+	{
+		if (`getAttr -l ($camShape+"."+$attr)`)
+		{
+			if (!`reference -q -inr $camShape`)
+				setAttr -l 0 ($camShape+"."+$attr);
+			else
+			{
+				warning ($camShape+"."+$attr+"  can not be set. Attribute is locked. Skipping.\n");
+				continue;	
+			}
+		}
+		string $in[] = `listConnections -s 1 -d 0 -p 1 ($camShape+"."+$attr)`;
+		if (size($in))
+		{
+			disconnectAttr $in[0] ($camShape+"."+$attr);
+		}	
+	}
+}
+// -----------------------------------------------------------------------------------------------
+global proc keyPointCacheNodes(int $startTime, int $endTime)
+{
+	return;
+	if (!`pluginInfo -q -l "pointCache"`)
+		return;
+
+	string $pcNodes[] = `ls -type pointCache`;
+	for ($node in $pcNodes)
+	{
+		string $inPlug[] = `listConnections -s 1 -d 0 -p 1 ($node+".inTime")`;
+		if (size($inPlug))
+			disconnectAttr $inPlug[0] ($node+".inTime");
+
+		setKeyframe -t ($startTime-100) -v ($startTime-100) ($node+".inTime");
+		setKeyframe -t ($endTime+100) -v ($endTime+100) ($node+".inTime");
+
+		string $animCurve[] = `listConnections -s 1 -d 0 ($node+".inTime")`;
+		if (size($animCurve))
+		{
+			keyTangent -index 0 -inTangentType linear $animCurve[0] ;
+			keyTangent -index 1 -inTangentType linear $animCurve[0] ;
+			keyTangent -index 0 -outTangentType linear $animCurve[0] ;
+			keyTangent -index 1 -outTangentType linear $animCurve[0];
+			// set infintity types to linear
+			setAttr ($animCurve[0]+".preInfinity") 1;
+			setAttr ($animCurve[0]+".postInfinity") 1;
+
+		}
+	}
+
+}
+// -----------------------------------------------------------------------------------------------
+proc string[] getFileTextures()
+{
+	string $nodes[] = `ls -type file`;
+
+	if (!`pluginInfo -q -l "Mayatomr"`)
+		return $nodes;
+	
+	string $mrTex[] = `ls -type mentalrayTexture`;
+	
+	for ($i=0;$i<size($mrTex);$i++)
+	{
+		if (`getAttr ($mrTex[$i]+".miWritable")`)
+			continue;
+		$nodes[size($nodes)] = $mrTex[$i];
+	}
+	return $nodes;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string getExtension (string $path)
+{
+	string $buf[];
+	tokenize ($path,".",$buf);
+
+	return $buf[size($buf)-1];
+}
+// ---------------------------------------------------------------------------------------------------
+proc setMapsToMasterRes ()
+{
+	string $nodes[] = getFileTextures();
+	for ($i=0;$i<size($nodes);$i++)
+	{
+		string $tex = `getAttr ($nodes[$i]+".ftn")`;
+		string $ext = getExtension ($tex);
+		if ($ext != "map")
+			continue;
+
+		string $dir = dirname ($tex);
+		string $basename = basename ($tex,"");
+		string $last_dir = basename ($dir,"");
+
+		if ($last_dir != "mediumRes")
+			continue;
+
+		string $master_dir = dirname ($dir);
+		string $newPath = $master_dir+"/"+$basename;
+
+		setAttr -type "string" ($nodes[$i]+".ftn") $newPath;
+	}
+}
+// -----------------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------------------
+// Reads render settings, and sets the global variable which is used by submitRender
+// ---------------------------------------------------------------------------------------------------
+proc renderSettingsRead (string $seq, string $shot, string $jobCode)
+{
+	global string $gExtraRendererArgs;
+
+	$gExtraRendererArgs = "";	// reset so that the value from previous passes isn't retained if there is no new one
+
+	// places to look
+	string $files[3];
+	$files[0] = getPath ("ProjectGlobals",{})+"/renderSettings.txt";
+	$files[1] = getPath ("ShotInfoDir",{$seq,$shot})+"/"+$seq+"_"+$shot+"_renderSettings.txt";
+	$files[2] = getPath ("ShotInfoDir",{$seq,$shot})+"/"+$jobCode+"_renderSettings.txt";
+
+	string $file;
+	for ($i=0;$i<3;$i++)
+	{
+		if (`filetest -f $files[$i]`)
+		{
+			string $contents = readFile ($files[$i]);
+			$contents = strip($contents);
+			if ($contents != "")
+				$gExtraRendererArgs = $contents;
+		}
+
+		
+	}
+}
+// ---------------------------------------------------------------------------------------------------
+// do_preRenderSetup - main proc
+// ---------------------------------------------------------------------------------------------------
+proc int do_preRenderSetup(string $logFile[], string $errReason[], string $argList)
+{
+	
+	global string $SR_fileName;
+	global int $SR_sequenceid;
+	global string $SR_shotNumber;
+	global string $SR_host;
+	global int $SR_overrideFrameStart;
+	global int $SR_overrideFrameEnd;
+	global string $SR_frames;
+	global string $SR_renderWranglers;
+	global string $SR_optimizationSupervisor;
+	global string $SR_completionCallBack;
+	global string $SR_completionArgs;
+	global string $SR_rlcService;
+	global string $SR_rlcArgs;
+	global string $SR_rlcxml;
+	global string $SR_jobName;
+	global string $SR_renderGlobals;
+	global int $SR_useRenderLayers;
+	global string $SR_sequence;
+	global string $SR_shotGroup;
+	global string $SR_jobCode;
+	global string $SR_destDir;
+	global string $SR_renderFile;
+	global string $SR_seqXML;
+	global int $SR_renderPriority;
+	global int $SR_render_numCpus;
+	global string $SR_submissionCallBack;
+	global string $SR_submissionArgs;
+	global string $SR_renderQuality;
+	global string $SR_renderResolution;
+	global int $SR_useBots;
+	global string $SR_renderer;
+	global int $SR_overrideRenderGlobals;
+	global string $SR_imageName;
+	global string $SR_useNewRenderLayers;
+	global string $SR_mrCluster;
+	global int $SR_centerScene;
+	global int $SR_renderWidth;
+	global int $SR_renderHeight;
+	global float $SR_renderAspect;
+	global int $SR_useApiCacheBaker;
+	global int $SR_useShotCast;
+	global string $SR_renderInitiationEmail;
+	global string $SR_artist;
+	global string $SR_camera;
+	global int $SR_archivePointCache;
+	global int $SR_noRender;
+	global string $SR_outputFmt;
+	int $explicitPath = 0;
+	
+	
+	print ("preRenderSetup: Started...\n");
+
+	string $config;		// the render layer xml contents.
+	int $doNormalLoad = true;
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 1. Open the file.
+	// ###########################################################
+	// -----------------------------------------------------------
+	// 09/13/05 - we will start with no scene open. Load the scene, here. If new render layers are specified, only load what is not omitted.
+	
+	if ($SR_useRenderLayers)
+	{
+		print ("preRenderSetup: Checking existance of rlc...\n");
+		// make sure an existing render layer config file has been passed.
+		if (!`filetest -f $SR_rlcxml`)
+		{
+			if (!`filetest -f $SR_rlcxml`)
+			{
+				$msg = "\nPre Render Setup: Error - Render Layer Config "+$SR_rlcxml+" doesn't exist.\n\n";	
+				print ($msg);
+				$errReason[0] = $msg;
+				return false;	
+			}
+		}
+		// if we are using the new render layers we can do the selective load.
+		if ($SR_useNewRenderLayers)
+		{	
+			$doNormalLoad = false;	// we can do the selective load - we are using new render layers and the config exists.	
+		}
+		// regardless of whether we are using new or old render layers, we can go ahead and read the rlc.
+		print ("preRenderSetup: Reading rlc...\n");
+		$config = readXML ($SR_rlcxml,0);
+		print ("preRenderSetup: Successfully read rlc...\n");
+	}
+	// check for the presence of the file before we load it
+	if (!`filetest -f $SR_fileName`)
+	{
+		$msg = "\nPre Render Setup: Error - Lit file "+$SR_fileName+" doesn't exist.\n\n";	
+		print ($msg);
+					
+		$errReason[0] = $msg;
+		return false;
+	}
+	if ($doNormalLoad)
+	{
+		// just open the file.
+		print ("PreRenderSetup: Normal File Open...\n");
+		print ("Current file: "+(`file -q -sn`)+"\n");
+		global int $gSyncLatestOrLive = 1;	// sync to highest version, not live version. Only works for fur right now.
+		file -f -o $SR_fileName;	
+	
+		// lock versions - only works for fur.
+		fileInfo "versionLock" 1;
+	}
+	else
+	{
+		// parse the render layer xml, and call selectiveFileLoad to open the file selectively.
+		string $rlc_namespaces[]; string $dummy[];
+		print ("preRenderSetup: Retrieving asset list from rlc...\n");
+		assetListFromRLC ($config,$rlc_namespaces,$dummy,0);
+		// do the selective load. Don't import for now.
+		print ("preRenderSetup: Load list from rlc (namespaces)\n");
+		print $rlc_namespaces;
+		
+		int $import = 0;
+		print ("PreRenderSetup: Selective File Open...\n");
+		//print ("Current file: "+(`file -q -sn`)+"\n");
+		global int $gDeferCachingFileOpen;
+		$gDeferCachingFileOpen = 1;
+		
+		if (!`filetest -f $SR_fileName`)
+		{
+			$msg = "\nPre Render Setup: Error opening Lit file "+$SR_fileName+".\n\n";print ($msg);
+			$errReason[0] = $msg; return false;
+		}
+		
+		selectiveFileLoad_subRefs($SR_fileName, $config);
+		
+		
+		// load any other references that are depended upon by the references we have loaded, through constraints or shared shaders.
+		loadDependentReferences();
+		// now load any references depended on by objects in the root namespaces...e.g. a light is constrained to a reference which
+		// is not to be rendered in this pass.
+		loadDependantReferencesRootNamespace ($config);
+		
+		// now bake in the cache, etc
+		$gDeferCachingFileOpen = 0;
+		global int $gSyncLatestOrLive = 1;	// sync to highest version, not live version. Only works for fur right now.
+		cachingFileOpen();
+
+		// lock versions - only works for fur.
+		fileInfo "versionLock" 1;
+		
+	}
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 1. Setup variables, make sure we have everything we need
+	// ###########################################################
+	// -----------------------------------------------------------
+	// load Mayatomr
+	loadPlugins;
+	print ("ShotRender: Successfully loaded mayatomr.\n");
+	// -----------------------------------------------------------
+	// shotGroup and sequence - now that we know we have a file name, we can tokenize it to get these
+	// 09/13/05 - bullet proofing for more underscores.
+	string $buf[];
+	string $basename = basename($SR_fileName,"");
+	tokenize ($basename,"_",$buf);
+	string $tmp_seq = "",$tmp_shotGroup;
+	for ($i=0;$i<size($buf)-2;$i++)
+	{
+		if ($i)
+			$tmp_seq += "_";
+		$tmp_seq += $buf[$i];	
+	}
+	$tmp_shotGroup = $buf[size($buf)-2];
+	
+	if ($SR_shotGroup == "")
+		$SR_shotGroup = $tmp_seq;
+		
+	if ($SR_sequence == "")
+		$SR_sequence = $tmp_shotGroup;
+	
+	
+	// -----------------------------------------------------------
+	string $shotGroupDir = `workspace -q -act`+"/showWork/seq"+$SR_sequence+"/sg"+$SR_shotGroup;
+	// -----------------------------------------------------------
+	// verify that we have had a shot number passed to us
+	if (!size($SR_shotNumber))
+	{
+		$errReason[0] = "No shot number was specified.\n\n"+argListDump($argList);
+		print $errReason[0];
+		return false;		
+	}
+	// -----------------------------------------------------------
+	// verify that we have had a job code passed to us
+	if (!size($SR_jobCode))
+	{
+		// try to extract it from the rlc xml name if one was specified
+		if (size($SR_rlcxml))
+			$SR_jobCode = basename($SR_rlcxml,".xml");
+		else
+		{	
+			$errReason[0] = "No job code was specified (e.g. R01J01).\n\n"+argListDump($argList);
+			print $errReason[0];
+			return false;	
+		}	
+	}
+	// -----------------------------------------------------------
+	// jobName
+	if (!size($SR_jobName))
+	{
+		$SR_jobName = $SR_host+"_"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+"_mrRender";	
+		
+	}
+	// -----------------------------------------------------------
+	// destination dir
+	if (!size($SR_destDir))
+	{
+		if (`about -nt`)
+			$SR_destDir = "Y:";	
+		else
+			$SR_destDir = "/renders";
+		string $projPart = `workspace -q -active`;
+		$projPart = substitute ("X:",$projPart,"");
+		$projPart = substitute ("/diskx",$projPart,"");
+		$projPart = substitute ("/animation",$projPart,"");
+		
+		$SR_destDir += $projPart+"/show/seq"+$SR_sequence+"/sg"+$SR_shotGroup+"/shot"+$SR_shotNumber+"/";
+			
+	}
+	else
+		$explicitPath = 1;
+
+	// make the directory if it doesn't already exist.
+		
+	if (!`filetest -d $SR_destDir`)
+		sysFile -makeDir $SR_destDir;
+	// -----------------------------------------------------------
+	// render file
+	if (!size($SR_renderFile))
+	{
+		// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+		
+		//$SR_renderFile = dirname ($SR_fileName)+"/renderScenes/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+".mb";
+		$SR_renderFile = $shotGroupDir+"/renderScenes/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+".ma";
+		
+		
+	}
+	if (!`filetest -d (dirname ($SR_renderFile))`)
+		sysFile -makeDir (dirname ($SR_renderFile));
+	if (!`filetest -d (dirname ($SR_renderFile))`)
+	{
+		$errReason[0] = "Couldn't create directory for render file:\n"+$SR_renderFile+".\n\n"+argListDump($argList);
+		print $errReason[0];
+		return false;		
+	}	
+	// -----------------------------------------------------------
+	// Does the lighter want to use his render globals.. if so we don't need to check for the render globals file
+	// -------------
+	// make sure the render globals exist
+	if (!`filetest -f $SR_renderGlobals` && !`objExists defaultRenderGlobals.protectRenderGlobals` && $SR_overrideRenderGlobals)
+	{
+		$errReason[0] = "Render Globals file: "+$SR_renderGlobals+" doesn't exist.\n\n"+argListDump($argList);
+		print $errReason[0];
+		return false;	
+	}
+	// -----------------------------------------------------------
+	// start our log
+	// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+	
+	//$logFile[0] = dirname ($SR_fileName)+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+"_PreRenderSetup_log.html";
+	$logFile[0] = $shotGroupDir+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+"_PreRenderSetup_log.html";
+	
+	string $msg;
+	html_log_init ("Pre Render Setup Log",$logFile[0]);
+	string $html_bodyBegin,$html_head,$html_content,$html_bodyEnd,$html_end;
+	
+	html_log_bold_output ("Pre Render Setup Log\n\n"+$SR_fileName+"\n\n");
+	html_log_bold_output ($SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$SR_jobCode+"\n\n");
+	html_log_output ( getSystemDate("both")+"\n\n");
+	html_log_write();
+	// -----------------------------------------------------------
+	// write args to log
+	html_log_bold_output ("Shot Render was called with the following arguments:\n\n");
+	html_log_output ( argListDump($argList));
+	
+	html_log_write();
+	// -----------------------------------------------------------
+	
+	// -----------------------------------------------------------
+	// 11/19/05 - if desired, copy the point cache to an archive directory for rendering.
+	//
+	// 03/06/07 - Not needed anymore now that we have our nifty pointCache versioning...
+	if ($SR_archivePointCache && (false))
+	{
+		string $target = `workspace -q -act`+"/showWork/seq"+$SR_sequence+"/sg"+$SR_shotGroup+"/renderScenes/"+$SR_jobCode+"_cache/point";
+		html_log_bold_output( "Pre Render Setup: Archiving the point cache to "+$target+" for rendering.\n\n");
+		preRenderPointCacheArchive ($SR_sequence, $SR_shotGroup, $SR_jobCode);
+		// disable point cache synching, so that cachingFileOpen doesn't re-sync the pointCache back to the normal location
+		// this will cause cachingFileOpen to just perform dirmaping if necessary, no other modification of the path.
+		//fileInfo "pointCacheSynching" "disabled";
+		// 11/21/05 - change the location the point cache syncs from
+		fileInfo "pointCacheBaseDir" $target;
+	}
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 2. Read the sequence xml
+	// ###########################################################
+	// -----------------------------------------------------------
+	
+	// don't need to read the sequence xml if an override start and end frame has been passed
+	
+	// -----------------------------------------------------------
+	global int $frameStart;
+	global int $frameEnd;
+	$frameStart = $SR_overrideFrameStart;
+	$frameEnd = $SR_overrideFrameEnd;
+	
+	// read the render layer config to figure out the frame range...unless override frame start and end has been specified
+	
+	// 06/24/06 - get the frame range for the full-shot. This is always needed, even if we are only rendering a subset of the frames
+	// ------------------------
+	int $data[];
+	print ("getInsightShotGroupLength args: "+$SR_sequence+" "+$SR_shotGroup+"\n");
+	global int $gUseStructureFile;
+	$gUseStructureFile = true;
+	int $success = getInsightShotGroupLength ($SR_sequence,$SR_shotGroup,$data);
+	if (!$success)
+	{
+		print ("ShotRender: Couldn't connect to Insight for frame range info. Can't continue... \n");
+		return false;		
+	}
+	$shotFrameStart = $data[0];
+	$shotFrameEnd = $data[1];
+	// ------------------------
+
+	if ($frameStart == -9999 && $frameEnd == -9999 && $SR_frames == "")
+	{
+		html_log_bold_output( "Pre Render Setup: Attempting to read frame range from RLC: "+$SR_rlcxml+"\n\n");
+		html_log_write();
+		// try reading the render layer config for the frame range. If we don't get what we want back, read the sequence xml
+		$msg = readFrameRange ($SR_rlcxml);
+		
+		html_log_output ($msg);
+		html_log_write();
+		
+		
+		if (($frameStart == -9999 || $frameEnd == -9999))
+		{
+			html_log_bold_output ("Pre Render Setup: Not happy with what we got back from the RLC, reading sequence xml for frame range instead.\n\n");
+			html_log_write();
+			
+			/*
+			string $xml;
+			if (!size($SR_seqXML))
+			{
+				//$xml = insightGetSequenceXML  ($SR_sequence);
+				// get shot group structure file instead
+				string $struc = $shotGroupDir+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_structure.xml";
+				$xml = readXML ($struc,0);
+				
+			}
+			else
+			{
+				// test that the file is there
+				if (!`filetest -f $SR_seqXML`)
+				{
+					html_log_bold_output( "\nPre Render Setup: Error - Couldn't find Sequence XML file "+$SR_seqXML+"\n");	
+					html_log_write ();
+					
+					$errReason[0] = "\nPre Render Setup: Error - Couldn't find Sequence XML file "+$SR_seqXML+"\n";
+					return false;	
+				} 
+				
+				html_log_bold_output ("\nPre Render Setup: Reading sequence xml file:\n\n" + $SR_seqXML+"\n");
+				html_log_write();
+				
+				$xml = readXML ($SR_seqXML,0);	
+			}
+			// -----------------------------------------------------------
+			// parse the xml and find the shot start and end
+			// -----------------------------------------------------------
+			string $shotXML[] = xml_getTag($xml,"Shot");
+			
+			if (!size($shotXML))
+			{
+				html_log_bold_output( "\nPre Render Setup: Error - Couldn't find any shots in the sequence xml.\n");	
+				html_log_write();
+					
+				$errReason[0] = "\nPre Render Setup: Error - Couldn't find any shots in the sequence xml.\n";
+				return false;		
+			}
+			
+			string $curShotXML = "";
+			for ($i=0;$i<size($shotXML);$i++)
+			{
+				if (xml_getVar($shotXML[$i],"ShotNumber") == $SR_shotNumber)
+				{
+					$curShotXML = $shotXML[$i];
+					break;	
+				}
+			}
+			// make sure we found the shot
+			if (!size($curShotXML))
+			{
+				html_log_bold_output( "\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the sequence xml.\n");	
+				html_log_write();
+						
+				$errReason[0] = "\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the sequence xml.\n";
+				return false;	
+			}
+			*/
+
+			// parse the shot xml for the start and end frame
+			//$frameStart = (int)xml_getVar($curShotXML,"FrameRangeStart");
+			//$frameEnd = (int)xml_getVar($curShotXML,"FrameRangeEnd");
+			$frameStart = $shotFrameStart;
+			$frameEnd = $shotFrameEnd;
+		
+		}
+		// end if the frame range isn't found in the rlc
+	}
+	// end if start and end frame != -9999
+	// output info on frame ranges
+	html_log_bold_output( "\nPre Render Setup: Successfully established frame range for shot "+$SR_shotNumber+".\n\n");
+	html_log_output( "Start Frame: "+$frameStart+"\n");
+	html_log_output( "End Frame: "+$frameEnd+"\n");
+	html_log_write();
+	
+	// ###########################################################
+	// 2a. Validate the cache
+	// ###########################################################
+	// -----------------------------------------------------------
+	// 09/13/05A - We will need to validate the point cache too - if specified.
+	
+	html_log_bold_output( "\nPre Render Setup: Validating the animation cache:\n\n");
+	html_log_write();
+	
+	// modified 05/27/05 - to work for special renders...the lit file is somewhere else
+	//string $aniFile = substitute ("_lit",$SR_fileName,"_ani");
+	
+	string $aniFile = $shotGroupDir+"/"+$SR_sequence+"_"+$SR_shotGroup+"_ani.ma";
+	
+	int $result = getAnimCacheStatus ($SR_sequence, $SR_shotGroup, "", -1, -1, {});
+	//getAnimCacheStatus( string $seq, string $shotGroup, string $shot, int $fs, int $fe, string $info[]) 
+	if ($result == 0)
+	{
+		html_log_bold_output ( "\nPre Render Setup: Cache passed validation.\n\n");
+		html_log_write();
+	}
+	else
+	{
+		html_log_bold_output ( "\nPre Render Setup: Cache failed validation. Rendering Aborted!\n\n");
+		html_log_output ( "Resubmit the animation playblast to get an up to date cache.\n\n");
+
+		html_log_write();
+		
+		$errReason[0] = "\nPre Render Setup: Cache failed validation. Rendering Aborted!\n\n";
+		return false;	
+		
+	}
+	
+
+
+	
+	// ###########################################################
+	// 3. Get asset membership
+	// ###########################################################
+	// -----------------------------------------------------------
+	string $assetPaths[];
+	string $refNodes[];
+	string $namespaces[];
+	int $assetTypeIDs[];
+	int $assetDeferred[];
+	
+	string $assetTypes[] = {"Characters","Vehicles","Props","Sets","Other"};
+	
+	// 09/13/05 - modify to deal with proxy references
+	//string $assetPaths[] = `file -q -r`;
+	$assetPaths = listReferences (0);	// 0 = in the case of reference proxies, return the original.
+
+	// XXX
+   // find the sub-parts so they can LOD
+	//
+	string $allAssetPaths[]; clear $allAssetPaths;
+	string $visitedRefs[]; clear $visitedRefs;
+	for($i=0;$i<size($assetPaths);$i++)
+	{
+ 	 string $allRef[]=`file -q -r $assetPaths[$i]`;
+ 	 if(size($allRef)){
+     $allRef[size($allRef)]=$assetPaths[$i];
+  	  for($a=0;$a<size($allRef);$a++)
+     {
+      string $refNode = `file -q -rfn $allRef[$a]`;
+      string $relatedProxies[]=getRelatedProxies($refNode); 
+
+      if(size($relatedProxies)){
+       for($r=0;$r<size($relatedProxies);$r++)
+       {
+        if(stringArrayFindIndex ($relatedProxies[$r],$visitedRefs) != -1)
+         continue; 
+	
+        if(isActiveProxy ($relatedProxies[$r])){
+         $allAssetPaths[size($allAssetPaths)]=$allRef[$a];
+         $visitedRefs = stringArrayCatenate($visitedRefs,$relatedProxies);
+         break; 		
+        }
+       } 
+      }else{
+       $allAssetPaths[size($allAssetPaths)]=$assetPaths[$i];
+      }
+     }
+    }else{
+     $allAssetPaths[size($allAssetPaths)]=$assetPaths[$i];
+    }
+   }
+
+   $assetPaths = $allAssetPaths;
+
+
+	
+	getAssetMembership ($assetPaths,$refNodes, $namespaces, $assetTypeIDs, $assetDeferred);
+	
+	html_log_bold_output( "\nPre Render Setup: Found the following assets in the scene:\n\n");
+	
+	
+	$msg = "";
+	for ($i=0;$i<size($assetPaths);$i++)
+	{
+		html_log_output ("Namespace: "+$namespaces[$i]+"\n");
+		html_log_output ( "Filename: "+$assetPaths[$i]+"\n");
+		html_log_output ( "Type of Asset: "+$assetTypes[$assetTypeIDs[$i]]+"\n");
+		html_log_output ("Reference Unloaded?: "+$assetDeferred[$i]+"\n\n");
+	}
+	
+	html_log_write();
+	
+	
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 5. Import all references - obselete
+	// ###########################################################
+	// -----------------------------------------------------------
+	
+	// ###########################################################
+	// 5a. Source the preSetup mel callback if it exists
+	// ###########################################################
+	// -----------------------------------------------------------
+	// moved to after importing the references, so we can delete objects if necessary
+	// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+	
+	//string $melCallback = dirname ($SR_fileName)+"/mel/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_preRenderSetup.mel";
+	string $melCallback = $shotGroupDir+"/mel/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_preRenderSetup.mel";
+	
+	if (`filetest -f $melCallback`)
+	{
+		html_log_bold_output ("\nPre Render Setup: Executing the pre Render Setup callback:\n\n");
+		html_log_output ( $melCallback+"\n");
+		html_log_write();
+		
+		string $sourceCmd = "source \""+$melCallback+"\"";
+		eval $sourceCmd;
+	}
+	else
+	{
+		html_log_bold_output ("\nPre Render Setup: No pre Render Setup callback found for this shot.\n\n");
+		html_log_output ("To execute a callback, create the mel script in this location:\n"+$melCallback+"\n");
+		html_log_write();
+	}
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 6. Read the shot cast, and delete whatever is not in it.
+	// ###########################################################
+	// -----------------------------------------------------------
+	// 09/13/05 - Add the option to have this behavior off or on. Turn it off for the Wild.
+	print("USE SHOT CAST = "+$SR_useShotCast+"\n");
+	if ($SR_useShotCast)
+		{
+		// 09/13/05 - Start of shot cast stuff
+		html_log_bold_output ("\nPre Render Setup: Reading the Shot Cast\n\n");	
+		html_log_write();
+		
+		// Read the Shot Group XML
+		// modified - making it work even when the lit is not in the right place - for special renders
+		//string $shotGroupXML = dirname ($SR_fileName)+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_structure.xml";
+		string $shotGroupXML = $shotGroupDir+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_structure.xml";
+		// check that it exists
+		if (!`filetest -f $shotGroupXML`)
+		{
+			html_log_bold_output("\nPre Render Setup: Error - Shot Group xml file "+$shotGroupXML+" doesn't exist!\n");	
+			html_log_write();
+						
+			$errReason[0] = "\nPre Render Setup: Error - Shot Group xml file "+$shotGroupXML+" doesn't exist!\n";
+			return false;		
+		}
+		
+		// parse the xml to find the shot we are rendering
+		string $xml = readXML ($shotGroupXML,0);
+		
+		string $shotXML[] = xml_getTag($xml,"Shot");
+			
+		if (!size($shotXML))
+		{
+			html_log_bold_output("\nPre Render Setup: Error - Couldn't find any shots in the Shot Group xml.\n");	
+			html_log_write();
+					
+			$errReason[0] = "\nPre Render Setup: Error - Couldn't find any shots in the Shot Group xml.\n";
+			return false;		
+		}
+			
+		string $curShotXML = "";
+		for ($i=0;$i<size($shotXML);$i++)
+		{
+			if (xml_getVar($shotXML[$i],"ShotNumber") == $SR_shotNumber)
+			{
+				$curShotXML = $shotXML[$i];
+				break;	
+			}
+		}
+		// make sure we found the shot
+		if (!size($curShotXML))
+		{
+			html_log_bold_output("\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the Shot Group xml.\n");	
+			html_log_write();
+					
+			$errReason[0] = "\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the Shot Group xml.\n";
+			return false;	
+		}
+		
+		// now that we've found the shot, extract the shot cast
+		
+		string $shotCast[] = xml_getTag($curShotXML,"Member");
+		
+		// read the shot cast revisions file made by the lighter
+		html_log_bold_output("\nPre Render Setup: Reading the Shot Cast Revisions (made by the lighter)\n\n");	
+		html_log_write();
+		
+		// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+		
+		//string $shotCastRevisionsXML = dirname ($SR_fileName)+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_revisions.xml";
+		string $shotCastRevisionsXML = $shotGroupDir+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_revisions.xml";
+		
+		string $shotCastAdditions[];
+		string $shotCastRemovals[];
+		
+		print ("Looking for shot cast revisions file :\n");
+		print ($shotCastRevisionsXML+"\n");
+		
+		if (!`filetest -f $shotCastRevisionsXML`)
+		{
+			html_log_output ( "\nPre Render Setup: Warning: Shot Cast Revisions not found.\n\n");	
+			html_log_write();	
+		}
+		else
+		{
+			print ("Reading the shot cast revisions file\n");
+			string $xml = readXML ($shotCastRevisionsXML,0);
+		
+			string $shotXML[] = xml_getTag($xml,"Shot");
+			
+			for ($i=0;$i<=1;$i++)
+			{
+				
+				if (!size($shotXML))
+				{
+					html_log_output ("\nPre Render Setup: Warning - Couldn't find any shots in the Shot Cast Revisions xml.\n");	
+					html_log_write();
+							
+					break;
+				}
+					
+				string $curShotXML = "";
+				for ($j=0;$j<size($shotXML);$j++)
+				{
+					if (xml_getVar($shotXML[$j],"ShotNumber") == $SR_shotNumber)
+					{
+						$curShotXML = $shotXML[$j];
+						break;	
+					}
+				}
+				// make sure we found the shot
+				if (!size($curShotXML))
+				{
+					html_log_output( "\nPre Render Setup: Warning - Couldn't find requested shot "+$SR_shotNumber+" in the Shot Cast Revisions xml.\n");	
+					html_log_write();
+							
+					break;
+				}	
+				// now that we have the shot grab the additions and removals
+				string $shotCastAddXML[] = xml_getTag($curShotXML,"Add");
+				$shotCastAdditions = xml_getTag ($shotCastAddXML[0],"Member");
+				
+				string $shotCastRemoveXML[] = xml_getTag($curShotXML,"Remove");
+				$shotCastRemovals = xml_getTag ($shotCastRemoveXML[0],"Member");
+			}
+			
+		}
+		
+		// now we have the shot cast, the additions, and the removals
+		// build a list of assets not in the shot cast
+		
+		print ("Figuring out which assets to delete\n");
+		
+		string $assetsToDelete[] = findAssetsNotInShotCast($shotCast,$shotCastAdditions,$shotCastRemovals);
+		
+		// now delete them
+		// get the number of renderable objects before the optimization
+		int $objCountBefore = size(`ls -ap -type nurbsSurface -type mesh -type subdiv`);
+		
+		html_log_bold_output ("\nPre Render Setup: Deleting assets not in the shot cast.\n\n");	
+		html_log_write();
+		for ($i=0;$i<size($assetsToDelete);$i++)
+		{
+			html_log_output ( "\nPre Render Setup: Deleting "+$assetsToDelete[$i]+"...\n\n");	
+			html_log_write();	
+			
+			deleteAsset ($assetsToDelete[$i]);
+		}
+		print ("Done deleting assets...\n");
+		int $objCountAfter = size(`ls -ap -type nurbsSurface -type mesh -type subdiv`);
+		float $optimization = 0.0;
+		if ($objCountBefore !=  $objCountAfter)
+			$optimization = (float)($objCountBefore-$objCountAfter)/(float)$objCountBefore;
+		
+		html_log_output ("\nPre Render Setup: Successfully removed assets not in shot cast.\n\n");
+		html_log_output ("Object Count Before: "+$objCountBefore+" After: "+$objCountAfter+"\n");	
+		html_log_write();	
+		// end of shot cast code
+	}
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 7. Do Pre LOD optimization - resetting textures
+	// ###########################################################
+	// -----------------------------------------------------------
+	// 09/13/05 - Modify so that an asset that doesn't exist, but exists in the shot group xml doesn't cause an error.
+	// set all the textures back to what is in the live file
+	
+	// 02/01/06 - Skipping - no texture lod on Yankee
+	// 03/31/06 Don't skip for Boz
+	if (0)
+	{
+		html_log_bold_output ("\nPre Render Setup: LOD optimization - Resetting textures to live state...\n\n");
+		html_log_write();	
+		
+		float $startTime = `timerX`;
+		for ($i=0;$i<size($namespaces);$i++)
+		{
+		   // only reset the textures if we are on the parent reference node. Since all of the textureLOD's are stored in the 
+		   // main assets textureInfo.xml we can skip the parts
+		   //
+			print("RESET TEXTURES: "+$namespaces[$i]+"\n");
+			print("  assetPaths[$i]: "+$assetPaths[$i]+"\n");
+
+			string $pns[]=`file -q -pns $assetPaths[$i]`;
+
+			//if(!size(`file -q -pns $assetPaths[$i]`)) << doesn't work. Not sure, maybe something changed in 6.5
+			if($pns[0] == "")
+			{
+				print(" setTexturesToLive("+$namespaces[$i]+","+$assetPaths[$i]+"\n");
+				int $result = setTexturesToLive($namespaces[$i],$assetPaths[$i]);
+				html_log_write();
+				html_log_output ("Resetting "+$namespaces[$i]+" ("+$assetPaths[$i]+")...\n\n");	
+			
+				if ($result)
+				{
+					html_log_bold_output( "Pre Render Setup: Error. Couldn't reset textures for the following reason:\n\n");
+					if ($result == 1)
+						html_log_output ( "Some or all of the file textures no longer exist!\n\n");
+					if ($result == 2)
+						html_log_output ( "The textureInfo.xml file doesn't exist for asset.\n\n");
+				
+				
+					html_log_write();	
+					$errReason[0] = "Pre Render Setup: Error. Couldn't reset textures. See log for more details\n";
+					return false;
+				}
+			}
+		}
+		
+		html_log_output ( "\nPre Render Setup: Successfully reset textures to live state. Process took "+(`timerX -st $startTime`)+" seconds.\n\n");
+		html_log_write();	
+	
+	}
+	// -----------------------------------------------------------
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 8. Read the distance info table
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output ( "\nPre Render Setup: LOD optimization - Reading the Distance Info XML...\n\n");
+	html_log_write();
+	
+	// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+	
+	string $distInfoXML = $shotGroupDir+"/shotGroupInfo/"+$SR_sequence+"_"+$SR_shotGroup+"_distanceInfo.xml";
+	
+	// check that it exists
+	if (!`filetest -f $distInfoXML`)
+	{
+		html_log_bold_output ( "\nPre Render Setup: Error - Distance Info xml file "+$distInfoXML+" doesn't exist!\n");	
+		html_log_write();
+					
+		$errReason[0] = "\nPre Render Setup: Error - Distance Info xml file "+$distInfoXML+" doesn't exist!\n";
+		return false;		
+	}
+	
+	// parse the xml to find the shot we are rendering
+	string $xml = readXML ($distInfoXML,0);
+	
+	string $shotXML[] = xml_getTag($xml,"Shot");
+		
+	if (!size($shotXML))
+	{
+		html_log_bold_output ("\nPre Render Setup: Error - Couldn't find any shots in the Distance Info xml.\n");	
+		html_log_write();
+				
+		$errReason[0] = "\nPre Render Setup: Error - Couldn't find any shots in the Distance Info xml.\n";
+		return false;		
+	}
+		
+	string $curShotXML = "";
+	for ($i=0;$i<size($shotXML);$i++)
+	{
+		if (xml_getVar($shotXML[$i],"ShotNumber") == $SR_shotNumber)
+		{
+			$curShotXML = $shotXML[$i];
+			break;	
+		}
+	}
+	// make sure we found the shot
+	if (!size($curShotXML))
+	{
+		html_log_bold_output ( "\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the Distance Info xml.\n");	
+		html_log_write();
+				
+		$errReason[0] = "\nPre Render Setup: Error - Couldn't find requested shot "+$SR_shotNumber+" in the Distance Info xml.\n";
+		return false;	
+	}
+	
+	// now that we've found the shot, extract the name spaces, character group names, and min dist values
+	string $LOD_nameSpaces[];
+	string $LOD_charGrps[];
+	float $LOD_minDist[];
+	string $LOD_settingsXML[];
+	
+	string $assetsXML[] = xml_getTag ($curShotXML,"Asset");
+	
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		string $cur_LOD_charGrp = xml_getVar($assetsXML[$i],"CharGrp");
+		
+		if (`objExists $cur_LOD_charGrp`)
+		{
+			int $c = size($LOD_charGrps);
+			$LOD_charGrps[$c] = $cur_LOD_charGrp;
+			$LOD_nameSpaces[$c] = xml_getVar($assetsXML[$i],"Namespace");
+			$LOD_minDist[$c] = (float)xml_getVar($assetsXML[$i],"MinDist");	
+		}
+	}
+	
+	// build an array of the names of the LOD_settings files that go with the LOD arrays
+	
+	// 09/13/05
+	print("namespaces are:\n");
+	print($namespaces);
+	print("LOD_nameSpaces are:\n");
+	print($LOD_nameSpaces);
+	for ($i=0;$i<size($LOD_nameSpaces);$i++)
+	{
+	   print("LOD_nameSpaces[$i] = "+$LOD_nameSpaces[$i]+"\n");
+		// find the index of this namespace into the main asset arrays
+		int $index = stringArrayFindIndex ($LOD_nameSpaces[$i],	$namespaces);
+		print(" index is "+$index+"\n");
+		if ($index != -1)
+		{
+			$LOD_settingsXML[$i] = dirname($assetPaths[$index])+"/assetInfo/LOD_settings.xml";
+			$LOD_settingsXML[$i] = substitute ("cpsv",$LOD_settingsXML[$i],"work");	
+			if (`about -nt`)
+				$LOD_settingsXML[$i] = substitute ("/diskx/",$LOD_settingsXML[$i],"X:/");
+			else
+				$LOD_settingsXML[$i] = substitute ("X:/",$LOD_settingsXML[$i],"/diskx/");
+				
+			
+		}
+		
+	}
+	
+	html_log_bold_output ("\nPre Render Setup: LOD optimization - Successfully read the Distance Info XML...\n\n");
+	html_log_write();
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 9. Apply the LOD optimization settings
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output( "\nPre Render Setup: LOD optimization - Applying optimization settings...\n\n");
+	html_log_write();
+	
+	for ($i=0;$i<size($LOD_nameSpaces);$i++)
+	{
+		print(" Applying the LOD: "+$LOD_nameSpaces[$i]+"\n");
+		print(" checking for LOD_settingsXML file here: "+$LOD_settingsXML[$i]+"\n");
+		// check that the LOD settings xml is there
+		if (!`filetest -f $LOD_settingsXML[$i]`)
+		{
+			html_log_bold_output( "\nPre Render Setup: Warning  - Couldn't find LOD settings xml file for "+$LOD_charGrps[$i]+"\n\n");
+			html_log_bold_output( "Skipping LOD optimization for this asset.\n");
+			html_log_write();
+			continue;	
+		}
+		
+		print ("Figuring out optimization...\n");
+		// find out what settings to use	
+		int $LOD_settings[] = queryLODOptimization ($LOD_minDist[$i],$LOD_settingsXML[$i]);
+		
+		html_log_output( $LOD_charGrps[$i]+"\tTexture Optimization: "+$LOD_settings[0]+"\tSmoothing Optimization: "+$LOD_settings[1]+"\n");
+		html_log_write();
+		
+		int $textureCap = 1;
+
+		// cap at medium res
+		setTextureOptimization ($LOD_nameSpaces[$i], $LOD_settings[0], $textureCap);
+		
+		// set the smoothing
+		if (!`objExists ($LOD_charGrps[$i]+".globalSmooth")`)
+			continue;
+		
+		if (`getAttr -l ($LOD_charGrps[$i]+".globalSmooth")`)
+		{
+			if (!`reference -q -inr $LOD_charGrps[$i]`)
+				setAttr -l 0 ($LOD_charGrps[$i]+".globalSmooth");
+			else
+			{
+				warning ($LOD_charGrps[$i]+".globalSmooth is locked. Can't set attribute. Skipping.\n");
+				continue;	
+			}
+		
+		}
+		string $inplug[] = `listConnections -s 1 -d 0 -p 1 ($LOD_charGrps[$i]+".globalSmooth")`;
+		if (size($inplug))
+			disconnectAttr $inplug[0] ($LOD_charGrps[$i]+".globalSmooth");
+		print("   setAttr "+$LOD_charGrps[$i]+".globalSmooth "+$LOD_settings[1]+"\n");
+		setAttr ($LOD_charGrps[$i]+".globalSmooth") $LOD_settings[1];
+		
+	}
+
+   // set the set and sub-parts to smooth to 1 for now, until we get parts LOD's
+	//
+	// XXX
+	string $bSetDressing[]= findAssetsByType ("seft",0);
+	for($d=0;$d<size($bSetDressing);$d++)
+	{
+	  // find the LOD settings xml for the currect asset
+	  //
+
+	  // use the lod settings if we have them
+	  //
+	  
+	  // set the smoothing
+	  if (!`objExists ($bSetDressing[$d]+".globalSmooth")`)
+			continue;
+
+		if (!`reference -q -inr $bSetDressing[$d]`){
+		 setAttr -l 0 ($bSetDressing[$d]+".globalSmooth");
+		}
+
+		string $inplug[] = `listConnections -s 1 -d 0 -p 1 ($bSetDressing[$d]+".globalSmooth")`;
+		if (size($inplug))
+			catch(`disconnectAttr $inplug[0] ($bSetDressing[$d]+".globalSmooth")`);
+		print("setting globalSmooth for "+$bSetDressing[$d]+" to 1\n");
+		setAttr ($bSetDressing[$d]+".globalSmooth") 1; 
+	}
+
+
+	// ---------------------------------------------------------
+	// ###########################################################
+	// knock environment down to medium res
+	// ###########################################################
+	setEnvTextureRes();
+	html_log_bold_output( "\nPre Render Setup: Optimizing environment textures...\n\n");
+	html_log_write();
+	
+	//optimizeEnvironmentTextures();
+	
+	print ("Successfully set environment res.\n");
+	
+	
+	html_log_bold_output( "\nPre Render Setup: LOD optimization complete.\n\n");
+	html_log_write();
+	
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 10. Set all assets ready to render (turn on visibility, set res attribute)
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output( "\nPre Render Setup: Setting assets ready to render...\n\n");
+	html_log_write();
+	
+	string $assets[] = findAssetsByType ("cpvsdt",0);
+	// removed a - accessories
+	// added t - new sub-parts identifier
+	
+	// save out prior to setReadyToRender
+	//
+	if ($SR_sequence == "100_0064")
+	{
+		//print ("Debug. Saving out the file now.\n");
+		//file -rename $SR_renderFile;
+		//file -f -save -options "v=0" -type "mayaAscii";
+	}
+	//
+	for ($i=0;$i<size($assets);$i++)
+	{
+		html_log_output("\nSetting "+$assets[$i]+" ready to render...\n\n");
+		html_log_write();
+		
+		string $warnings = setReadyToRender ($assets[$i]);
+		if (size($warnings))
+		{
+			html_log_output ($warnings);
+			html_log_write();
+		}
+	}
+	
+	html_log_bold_output("\nPre Render Setup: LOD optimization - Successfully set all assets ready to render.\n\n");
+	html_log_write();
+	
+	// 10/06/05 - turning on CHARACTERS, PROPS, etc
+	string $groups[]=  {"CHARACTERS","PROPS","SETS","VEHICLES"};
+	for ($i=0;$i<size($groups);$i++)
+	{
+		html_log_output("\nPre Render Setup: Turning on "+$groups[$i]+" ...\n\n");
+		html_log_write();
+		if (`objExists $groups[$i]`)
+			setAndKeyAttr (($groups[$i]+".v"),1);	
+	}
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 10a. BOTs and Shadow-maps
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output( "\nPre Render Setup: Creating script nodes for dmap handling\n\n");	
+	html_log_write();
+	
+	// decide whether to use bots depending on how heavy the scene is. More than 4 characters = use bots
+	string $tmpChars[] = findAssetsByType ("c",0);
+	int $numChars = 0;
+	int $useBots;
+	// don't count characters that have been deleted due to not being in the shot cast.
+	for ($char in $tmpChars)
+	{
+		if (size(`listRelatives -ad -f -type "mesh" $char`)>5)
+			$numChars ++;	
+	}
+	// Note - SR_useBots is always 0 if the renderer is mentalRay
+	if ($numChars > 4 && $SR_useBots)
+		$useBots = 1;
+	else
+		$useBots = 0;
+		
+	
+	if ($useBots)
+		print ("Turning on BOTS for everything but the environment\n");
+	else
+		print ("Not using BOTS\n");
+	//int $useBots = 1;
+	
+	int $writeDmaps = 1;
+	// for now - only touch dmaps if the renderer is not mentalRay
+	//if ($SR_renderer != "mentalRay")
+	//	setUpCustomScriptNodes ($useBots,$writeDmaps);
+	
+	// 10/31/05 - only do this if the renderer is specifically maya
+	if ($SR_renderer == "maya")
+	{
+		//setUpCustomScriptNodes ($useBots,$writeDmaps);	
+		setUpCustomScriptNodes (0,$writeDmaps);	
+	}
+	
+	
+	// -----------------------------------------------------------
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 13. Create a script node that will email if the project can't be set
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output( "\nPre Render Setup: Creating Project Check script node\n\n");	
+	html_log_write();
+	
+	string $cmd = "string $curProj = `workspace -q -active`;";
+	$cmd += "if ($curProj == \"default\" || !size($curProj)){";
+	$cmd += "string $homeDir = getenv (\"HOME\");";
+	$cmd += "string $mailFile = $homeDir+\"/tmp.php\";";
+	$cmd += "string $host = system (\"hostname\");";
+	$cmd += "$host = substitute (\"\\r\\n\",$host,\"\");";
+	$cmd += "string $to = \"george@reelfx.com,kevinm@reelfx.com\";";
+	$cmd += "string $subj = $host+\" can't set project\";";
+	$cmd += "int $f = fopen ($mailFile,\"w\");";
+	$cmd += "fprint ($f,\"<?php\\n\");";
+	$cmd += "fprint ($f,\"mail (\"";
+	$cmd += "+\"\\\"\"+$to+\"\\\",\"";
+	$cmd += "+\"\\\"\"+$subj+\"\\\",\"";
+	$cmd += "+\"\\\"\"+\"";
+	$cmd += "Working on "+$SR_fileName;
+	$cmd += "\\\");\\n\"";
+	$cmd += ");";
+	$cmd += "fprint ($f,\"?>\");";
+	$cmd += "fclose ($f);";
+	$cmd += "string $sysCmd = \"php \"+$mailFile;";
+	$cmd += "system ($sysCmd);";
+	$cmd += "print ($to+\" \"+$subj);";
+	$cmd += "}";
+	
+	scriptNode -n "RFXProjectCheck" -st 1 -bs $cmd;
+	
+	html_log_output( "\nPre Render Setup: Done creating unset project alert script node.\n\n");	
+	html_log_write();
+
+	// -----------------------------------------------------------------------------
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 14. Call accessoryVisibility
+	// ###########################################################
+	// -----------------------------------------------------------
+	//html_log_bold_output("\nPre Render Setup: Setting accessory visibility...\n\n");
+	//html_log_write();
+	
+	//$msg = accessoryVisibility ($SR_sequence, $SR_shotGroup);
+	
+	//html_log_output($msg);
+	//html_log_write();
+	
+	// -----------------------------------------------------------------------------
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 14. Set render globals
+	// ###########################################################
+	// -----------------------------------------------------------
+	// Does the lighter want to protect the render globals?
+	/*
+	if (`objExists defaultRenderGlobals.protectRenderGlobals` || $SR_overrideRenderGlobals)
+	{
+		html_log_bold_output( "\nPre Render Setup: Render Globals protected (or overrideRenderGlobals is set to 0). Not setting to the defaults\n\n");
+		html_log_write();
+
+		//print("Turning off motionBlur\n");
+		//catch (`setAttr -l 0 "mentalrayGlobals.motionBlur"`);
+		//catch (`setAttr -l 0 "defaultRenderGlobals.motionBlur"`);
+		//catch (`setAttr "mentalrayGlobals.motionBlur" no`);
+		//catch (`setAttr "defaultRenderGlobals.motionBlur" no`);
+	}
+	else
+	{
+		//html_log_bold_output("\nPre Render Setup: Reading the render globals from "+$SR_renderGlobals+".\n\n");
+		//html_log_write();
+		
+		if ($SR_renderer == "mentalRay")
+		{
+			select -r mentalrayGlobals;
+		}
+		else
+		{
+			select -r defaultRenderGlobals;
+		}
+		
+		string $srcCmd = "source \""+$SR_renderGlobals+"\"";
+		evalEcho ($srcCmd);
+		
+		// render quality
+		////html_log_bold_output( "\nPre Render Setup: Reading the render quality from "+$SR_renderQuality+".\n\n");
+		//html_log_write();
+		
+		if ($SR_renderer == "mentalRay")
+		{
+			select -r miDefaultOptions;	
+		}
+		else
+		{
+			select -r defaultRenderQuality;
+		}
+		string $srcCmd = "source \""+$SR_renderQuality+"\"";
+		evalEcho ($srcCmd);
+	}
+	*/
+
+	// render resolution is set regardless
+	/*
+	if ($SR_overrideRenderGlobals)
+	{
+	
+		html_log_output(  "\nPre Render Setup: Reading the render resolution settings from "+$SR_renderResolution+".\n\n");
+		html_log_write();
+			
+		if ($SR_renderer == "mentalRay")
+		{
+			select -r miDefaultFramebuffer;
+		}
+		else
+		{
+			select -r defaultResolution;
+		}
+		string $srcCmd = "source \""+$SR_renderResolution+"\"";
+		evalEcho ($srcCmd);
+		
+		// Only do this for Maya renders, until we can come up with a list of mentalRay absolutes
+		if ($SR_renderer != "mentalRay")
+		{
+			// the following attributes are set anyway
+			select -r defaultRenderGlobals;
+				catch (`setAttr ".imageFormat" 13`);
+				catch (`setAttr ".animation" yes`);
+				catch (`setAttr ".startFrame" $frameStart`);
+				catch (`setAttr ".endFrame" $frameEnd`);
+				catch (`setAttr -keyable on ".byFrame" 1`);
+				catch (`setAttr ".animationRange" 1`);
+				catch (`setAttr -l 0 ".byFrameStep"`);
+				catch (`setAttr -keyable on ".byFrameStep" 1`);
+				catch (`setAttr ".modifyExtension" no`);
+				catch (`setAttr ".startExtension" 1`);
+				catch (`setAttr -keyable on ".byExtension" 1`);
+				catch (`setAttr ".extensionPadding" 4`);
+				catch (`setAttr -keyable on ".fieldExtControl" 0`);
+				catch (`setAttr -keyable on ".stereoExtControl" 0`);
+				catch (`setAttr -keyable on ".outFormatControl" 0`);
+				catch (`setAttr ".oddFieldExt" -type "string" ""`);
+				catch (`setAttr ".evenFieldExt" -type "string" ""`);
+				catch (`setAttr ".leftStereoExt" -type "string" ""`);
+				catch (`setAttr ".rightStereoExt" -type "string" ""`);
+				catch (`setAttr ".outFormatExt" -type "string" ""`);
+				catch (`setAttr ".useMayaFileName" yes`);
+				catch (`setAttr ".useFrameExt" no`);
+				catch (`setAttr ".putFrameBeforeExt" yes`);
+				catch (`setAttr ".periodInExt" yes`);
+				catch (`setAttr ".imageFilePrefix" -type "string" ""`);
+				print("ShotRender setting composite to 1\n");
+				catch (`setAttr "defaultRenderGlobals.composite" 1`);
+				catch (`setAttr "defaultRenderGlobals.smoothValue" 0`);
+				
+				//print("Turning off motionBlurfor the second time.\n");
+				catch (`setAttr -l 0 ".motionBlur"`);
+				catch (`setAttr ".motionBlur" 1`);
+				catch (`setAttr -keyable on ".motionBlurByFrame" 1`);
+				catch (`setAttr -keyable on ".blurLength" 0.5`);
+				catch (`setAttr -keyable on ".blurSharpness" 1`);
+				catch (`setAttr -keyable on ".smoothValue" 0`);
+				catch (`setAttr -keyable on ".useBlur2DMemoryCap" yes`);
+				catch (`setAttr -keyable on ".blur2DMemoryCap" 200`);
+				catch (`setAttr ".motionBlurType" 0`);
+				catch (`setAttr ".smoothColor" no`);
+				
+				catch (`setAttr ".renderLayerEnable" no`);
+				catch (`setAttr ".renderGlobalPassEnable" no`);
+				catch (`setAttr ".renderLayerSubdirs" no`);
+				catch (`setAttr ".renderAll" no`);
+				
+			select -r defaultResolution;
+				catch (`setAttr ".deviceAspectRatio" 1.6`);
+			
+		
+			select -cl;
+			
+			catch (`setAttr "defaultRenderGlobals.numCpusToUse" 2`);
+		}
+	}
+	*/
+	
+	// added 11/05/04
+	// turning off glow
+	/*
+	string $shaderGlow[] = `ls -type shaderGlow`;
+	for ($node in $shaderGlow)
+	{
+		if (`objExists ($node+".glowType")`)
+		{
+			setAttr -l 0 ($node+".glowType");
+			setAttr  ($node+".glowType") 0;
+		}
+		if (`objExists ($node+".haloType")`)
+		{
+			setAttr -l 0 ($node+".haloType");
+			setAttr  ($node+".haloType") 0;
+		}	
+	}
+	*/
+	
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 15. Set up render layers
+	// ###########################################################
+	// -----------------------------------------------------------
+	string $MR_layer = "";
+	if ($SR_useRenderLayers)
+	{
+		html_log_bold_output ("\nPre Render Setup: Setting up Render Layers.\n\n");
+		html_log_write();
+		
+		// read the RLC xml 
+		
+		// call render layers script
+		string $tmp[];
+		$tmp[0] = $html_content;
+		if ($SR_useNewRenderLayers)
+		{
+			if ( $SR_renderer == "maya")
+			{
+				// set the general render globals
+				//
+		
+				// find out if this layer is protected
+				string $settingsXML[] = xml_getTag ($config,"settings");
+				string $protectGlobals = xml_getVar ($settingsXML[0],"protectGlobals");
+				if ($protectGlobals == "")
+					$protectGlobals = "0";				
+	
+				if ($protectGlobals)
+				{
+					// source the min render globals
+	
+					// render globals
+					unlockAttrs "defaultRenderGlobals";
+					$SR_renderGlobals = `workspace -q -active`+"/mel/renderGlobals/DefaultFinalRenderGlobalsProtected.mel";
+					select -r defaultRenderGlobals;
+					if (`filetest -f $SR_renderGlobals`)
+					{
+						string $srcCmd = "source \""+$SR_renderGlobals+"\"";
+						evalEcho ($srcCmd);
+					}
+	
+					// render quality
+					unlockAttrs "defaultRenderQuality";
+					$SR_renderQuality = `workspace -q -active`+"/mel/renderGlobals/DefaultFinalRenderQualityProtected.mel";
+					select -r defaultRenderQuality;
+					if (`filetest -f $SR_renderQuality`)
+					{
+						string $srcCmd = "source \""+$SR_renderQuality+"\"";
+						evalEcho ($srcCmd);
+					}
+	
+					// render resolution -- set these no matter what
+					unlockAttrs "defaultResolution";
+					select -r defaultResolution;
+					string $srcCmd = "source \""+$SR_renderResolution+"\"";
+					evalEcho ($srcCmd);
+				}
+				else
+				{
+					// source the full render globals
+				
+					// render globals
+					unlockAttrs "defaultRenderGlobals";
+					select -r defaultRenderGlobals;
+					string $srcCmd = "source \""+$SR_renderGlobals+"\"";
+					evalEcho ($srcCmd);
+			
+					// render quality
+					unlockAttrs "defaultRenderQuality";
+					select -r defaultRenderQuality;
+					string $srcCmd = "source \""+$SR_renderQuality+"\"";
+					evalEcho ($srcCmd);
+	
+					// render resolution
+					unlockAttrs "defaultResolution";
+					select -r defaultResolution;
+					string $srcCmd = "source \""+$SR_renderResolution+"\"";
+					evalEcho ($srcCmd);
+				}
+				// DO THIS NO MATTER WHAT GLOBALS ARE USED------------------------------------------------------------
+				// turning off glow
+						//
+				string $shaderGlow[] = `ls -type shaderGlow`;
+				for ($node in $shaderGlow)
+				{
+					if (`objExists ($node+".glowType")`)
+					{
+						setAttr -l 0 ($node+".glowType");
+						setAttr  ($node+".glowType") 0;
+					}
+					if (`objExists ($node+".haloType")`)
+					{
+						setAttr -l 0 ($node+".haloType");
+						setAttr  ($node+".haloType") 0;
+					}	
+				} 
+			
+				select -r defaultRenderGlobals;
+				catch (`setAttr ".startFrame" $frameStart`);
+				catch (`setAttr ".endFrame" $frameEnd`);
+			// ---------------------------------------------------------------------------------------------------
+			}
+			// end if ( $SR_renderer == "maya")
+
+			global string $gLayerName;
+			global int $gMotionVector;
+			global int $gFinalGather;
+			global int $gMotionBlur;
+			global int $gColor;
+			global int $gBroadLight;
+			global int $gTightLight;
+			global int $gWhiteLambert;
+			global int $gMayaRender;
+			global string $gRenderType;
+			$MR_layer = mentalRayRenderLayers ($SR_rlcxml);
+			print ("After setting up render layers, renderer is "+$SR_renderer+"\n");
+
+			// 01.12.06 - add all of the lights to the defaultLightSet so we don't need to do mentalRay lightLinking
+			//
+			/*
+			string $lights[]=`ls -lights`;
+			for($q=0;$q<size($lights);$q++)
+			{
+			 print("curLight = "+$lights[$q]+"\n");
+			 if(`objExists $lights[$q]`){
+			  string $parent[]=`listRelatives -p -pa $lights[$q]`;
+			  if($parent[0] != ""){
+				if(`objExists $parent[0]`){
+			    print(" --Adding "+$lights[$q]+" to the defaultLightSet. (Vis = "+`getAttr ($lights[$q]+".visibility")`+" ).\n");
+			    sets -in "defaultLightSet" $parent[0];
+				}
+			  }else{
+			   print("  got back an empty parent for "+$lights[$q]+"\n");
+			  }
+			 }
+			}
+			*/
+				
+			print ("Setting default mental ray render globals.\n");
+			
+			if ($SR_renderer == "mentalRay")
+			{	
+				string $settingsXML[] = xml_getTag ($config,"settings");
+				string $protectGlobals = xml_getVar ($settingsXML[0],"protectGlobals");
+				string $rapidScanline = xml_getVar ($settingsXML[0],"rapidScanline");
+				if ($protectGlobals == "")
+					$protectGlobals = "0";				
+				if ($rapidScanline == "")
+					$rapidScanline  = "0";
+				mentalRayRenderGlobals ($gRenderType,$gFinalGather, (int)$protectGlobals, (int)$rapidScanline);
+			}
+			
+		}
+		else
+		{
+			// backward compatibility for Insight render layers
+			if ($SR_renderer == "mentalRay")
+			{
+				$MR_layer = setupRenderLayers_MR( $config, 1, $logFile[0],($html_head+$html_bodyBegin),$tmp,($html_bodyEnd+$html_end));	
+			}
+			else
+			{
+				setupRenderLayers( $config, 1, $logFile[0],($html_head+$html_bodyBegin),$tmp,($html_bodyEnd+$html_end));
+			}	
+		}
+		
+	}
+	else
+	{
+		html_log_bold_output ( "\nPre Render Setup: Use Render Layers is set to OFF - rendering flat.\n\n");
+		html_log_write();
+		
+		setAttr ":defaultRenderGlobals.renderLayerEnable" 0;
+		
+	}
+	// -----------------------------------------------------------
+	// 06/27/05 - turn on Render All in case it has inadvertantly been left at Render Active
+	if ($SR_renderer == "mentalRay")
+	{
+		setAndKeyAttr ("mentalrayGlobals.renderableObjects", 0);
+	
+	}
+	//setAndKeyAttr ("defaultRenderGlobals.renderAll",yes);	
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 16. Create render camera
+	// ###########################################################
+	// -----------------------------------------------------------
+	html_log_bold_output ( "\nPre Render Setup: Creating render camera from cameraMain.\n\n");
+	html_log_write();
+	
+	// bake cam
+	// 09/14/06 - Bake camera main for the entire frame range, regardless of the frame range requested for rendering. This protects against the following problem
+	//	1. Shot Opt and Render 1 frame. 2. Send w/o Shot Opt for the whole range.
+	bakeCameraMainNew ($shotFrameStart,$shotFrameEnd);
+	//bakeCameraMainNew ($frameStart,$frameEnd);
+	
+	
+	html_log_output ("\nPre Render Setup: Done setting up render camera...\n\n");
+	html_log_write();
+	
+	// RLC - set alpha
+	/*
+		This is done AFTER bakeCameraMainNew (which duplicates cameraMain to perform constraint flip suppression
+	*/
+	string $settingsXML[] = xml_getTag ($config,"settings");
+	int $alpha = (int)xml_getVar($settingsXML[0],"alpha");
+	
+	catch (`setAttr cameraMainShape.mask $alpha`);
+	
+	// ###########################################################
+	// 16. Source the postSetup mel callback if it exists
+	// ###########################################################
+	// -----------------------------------------------------------
+	
+	// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+	
+	string $melCallback = $shotGroupDir+"/mel/"+$SR_sequence+"_"+$SR_shotGroup+"_postRenderSetup.mel";
+	
+	if (`filetest -f $melCallback`)
+	{
+		html_log_bold_output ( "\nPre Render Setup: Executing the post Render Setup callback:\n\n");
+		html_log_output( $melCallback+"\n");
+		html_log_write();
+		
+		string $sourceCmd = "source \""+$melCallback+"\"";
+		eval $sourceCmd;
+	}
+	else
+	{
+		html_log_bold_output ("\nPre Render Setup: No post Render Setup callback found for this shot.\n\n");
+		html_log_output("To execute a callback, create the mel script in this location:\n");
+		html_log_output( $melCallback+"\n");
+		html_log_write();
+	}
+	 
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 16a. Perform per layer mel callbacks
+	// ###########################################################
+	// -----------------------------------------------------------
+	string $renderLayers[];
+	if ($SR_renderer == "mentalRay" || ( $SR_useNewRenderLayers))
+		$renderLayers = {$MR_layer};
+	else 
+		$renderLayers = `ls -type renderLayer`;
+	
+	// modifying 05/27/05 - making it work for cases where the lit file isn't in the right place..for special renders
+	
+	//string $baseCbPath =  dirname ($SR_fileName)+"/mel/"+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_";
+	string $baseCbPath =  $shotGroupDir+"/mel/"+$SR_sequence+"_"+$SR_shotGroup+"_";
+	
+	for ($layer in $renderLayers)
+	{
+		$melCallback = $baseCbPath+$layer+".mel";
+		if (`filetest -f $melCallback`)
+		{
+			html_log_bold_output ("\nPre Render Setup: Executing the per layer callback for "+$layer+":\n\n");
+			html_log_output($melCallback+"\n");
+			html_log_write();
+			
+			string $sourceCmd = "source \""+$melCallback+"\"";
+			eval $sourceCmd;	
+		}
+		else
+		{
+			html_log_bold_output ("\nPre Render Setup: No post per layer callback found for "+$layer+".\n\n");
+			html_log_output( "To execute a callback, create the mel script in this location:\n");
+			html_log_output( $melCallback+"\n");
+			html_log_write();
+		}	
+	}
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// set only cameraMain to renderable
+	// ###########################################################
+	// -----------------------------------------------------------
+	print ("Setting cameraMain to renderable, setting all other cameras to non-renderable\n");
+	string $allCams[] = `ls -type camera`;
+	for ($cam in $allCams)
+		setAttr ($cam+".renderable") false;
+	
+	//setAttr ("cameraMain.renderable") true;
+	setAttr ($SR_camera+".renderable") true;
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 17. Save file
+	// ###########################################################
+	// -----------------------------------------------------------
+	
+	
+	// deleting unknown nodes - removed permanently...certain mental ray nodes are unknown in batch mode.
+	
+	// ----------------------------------------------------------------------
+	// turn off asset synching on the render file
+	fileInfo "assetSynching" "disabled";
+	fileInfo "cacheSynching" "disabled";
+	fileInfo "pointCacheSynching" "disabled";
+	fileInfo "versionLock" 1;	// only works for fur right now
+	print ("Disabling asset synching on the render file.\n");
+	// ----------------------------------------------------------------------
+	// delete imagePlanes
+	string $imagePlanes[] = `ls -type imagePlane`;
+		
+	if (size($imagePlanes))
+	{
+		html_log_bold_output( "\nPre Render Setup: Warning: Deleting the following imagePlanes:\n\n");
+		html_log_write();
+		for ($i=0;$i<size($imagePlanes);$i++)
+		{
+			if (`objExists ($imagePlanes[$i]+".protected")`)
+			{
+				html_log_output( $imagePlanes[$i]+" - skipped because it is marked as protected.\n");	
+			}
+			else
+				html_log_output(  $imagePlanes[$i]+"\n");
+		}	
+		html_log_write();
+		// 06/15/05 - don't delete imagePlanes with the protected attribute
+		for ($i=0;$i<size($imagePlanes);$i++)
+		{
+			if (!`objExists ($imagePlanes[$i]+".protected")`)
+				delete $imagePlanes[$i];
+		}
+	}
+	
+	// ----------------------------------------------------------------------
+	
+	
+	if ($SR_centerScene)
+	{
+		html_log_bold_output ("\nPre Render Setup: Centering the scene so that cameraMain is at the origin:\n\n");
+		html_log_write();
+		moveSceneToOrigin;	
+	}
+	// ----------------------------------------------------------------------
+	//global int $SR_renderWidth;
+	//global int $SR_renderHeight;
+	//global float $SR_renderAspect;
+	if ($SR_renderWidth != 0 && $SR_renderHeight != 0)
+	{
+		if ($SR_renderAspect == 0)
+			$SR_renderAspect = (float)$SR_renderWidth / (float)$SR_renderHeight;
+		
+		// 11/17/05 if this is a standard def render, adjust the horizontal film aperture accordingly.
+		if ($SR_renderWidth == 720 && $SR_renderHeight == 486)
+		{
+			string $camShape[] = `listRelatives -s $SR_camera`;
+			$camShape = `ls -type camera $camShape`;
+			if (size($camShape))
+			{
+				breakCameraApertureConnections ($camShape[0]);
+				float $vertApertureVal = `getAttr ($camShape[0]+".verticalFilmAperture")`;
+				float $horApertureVal = $vertApertureVal * 1.3333333333333333;
+				setAttr ($camShape[0]+".horizontalFilmAperture") $horApertureVal;
+				
+				html_log_bold_output ( "\nPre Render Setup: Adjusting  film aperture for 4:3 render to "+$horApertureVal+"\n\n");
+				html_log_write();
+			}	
+			
+		}
+		else if (($SR_renderWidth == 2322 && $SR_renderHeight == 988) || ($SR_renderWidth == 1161 && $SR_renderHeight == 494))
+		{
+			string $camShape[] = `listRelatives -s $SR_camera`;
+			$camShape = `ls -type camera $camShape`;
+			if (size($camShape))
+			{
+				breakCameraApertureConnections ($camShape[0]);
+				float $vertApertureVal = `getAttr ($camShape[0]+".verticalFilmAperture")`;
+				float $horApertureVal = $vertApertureVal * 2.35;
+				setAttr ($camShape[0]+".horizontalFilmAperture") $horApertureVal;
+				
+				html_log_bold_output ( "\nPre Render Setup: Adjusting  film aperture for 2.35 render to "+$horApertureVal+"\n\n");
+				html_log_write();
+			}	
+			
+		}
+		
+		html_log_bold_output ( "\nPre Render Setup: Overriding resolution settings to "+$SR_renderWidth+" x "+$SR_renderHeight+", "+$SR_renderAspect+"\n\n");
+		html_log_write();	
+		
+		// set both maya and mental ray render globals accordingly
+		setAndKeyAttr ("defaultResolution.width",$SR_renderWidth);
+		setAndKeyAttr ("defaultResolution.height",$SR_renderHeight);
+		setAndKeyAttr ("defaultResolution.deviceAspectRatio",$SR_renderAspect);
+		//
+		setAndKeyAttr ("miDefaultFramebuffer.width",$SR_renderWidth);
+		setAndKeyAttr ("miDefaultFramebuffer.height",$SR_renderHeight);
+		setAndKeyAttr ("miDefaultFramebuffer.deviceAspectRatio",$SR_renderAspect);
+		
+	}
+	//
+	// DEBUGGING
+	int $mbVal = `getAttr "defaultRenderGlobals.motionBlur"`;
+	float $blVal = `getAttr "defaultRenderGlobals.blurLength"`;
+	int $maskVal = `getAttr "cameraMainShape.mask"`;
+	print ("ShotRender (DEBUG): Right before saving, motion blur value is "+$mbVal+", blurLength is "+$blVal+"\n");
+	print ("ShotRender (DEBUG): and cameraMainShape.mask is "+$maskVal+"\n");
+	print ("ShotRender (DEBUG): composite is "+`getAttr defaultRenderGlobals.composite`+"\n");
+	
+	// fix the locking off the motion blur attribute
+	print ("ShotRender: Inserting script node to set defaultRenderGlobals.motionBlur\n");
+	string $mbCmd = "setAttr -l 0 defaultRenderGlobals.motionBlur;";
+	$mbCmd +=	"setAttr defaultRenderGlobals.motionBlur "+$mbVal+";";
+	$mbCmd +=	"setAttr -l 0 defaultRenderGlobals.blurLength;";
+	$mbCmd +=	"setAttr defaultRenderGlobals.blurLength "+$blVal+";";
+	// mask too
+	$mbCmd +=	"setAttr cameraMainShape.mask "+$maskVal+";";
+	
+	createNode script -n "RFXFixMotionBlurScriptNode";
+		setAttr -type "string" "RFXFixMotionBlurScriptNode.b"  $mbCmd;
+		setAttr "RFXFixMotionBlurScriptNode.st" 1;
+	// ----------------------------------------------------------------------
+	// ----------------------------------------------------------------------
+	// keyframe the pointCache nodes - under Maya 7.0, time1 tends to get sleepy
+	//print ("PreRenderSetup: Keying point cache nodes.\n");
+
+	//keyPointCacheNodes ($shotFrameStart,$shotFrameEnd);
+
+	// -------------------------------------------------------------------
+	// Knock all textures down to midres
+	//setTextureRes ("medium");
+	setTextureRes ("master");
+
+	// set surface approv to parametric 2x2
+	//socom_setSurfaceApprox();
+	// ------------------------------------------------------------------
+	// but not .maps
+	//setMapsToMasterRes ();
+	// ----------------------------------------------------------------------
+	// ----------------------------------------------------------------------
+	html_log_bold_output ("\nPre Render Setup: Saving the file as "+$SR_renderFile+" for rendering.\n\n");
+	html_log_write();
+	
+	// make the directory if it doesn't exist
+	string $renderFileDir = dirname ($SR_renderFile);
+	if (!`filetest -d $renderFileDir`)
+		system (("mkdir "+$renderFileDir));
+	
+	file -rename $SR_renderFile;
+	//file -f -save -options "v=0" -type "mayaAscii";
+	// 08/28/06
+	/*
+		v=0 changed to v=1 in options. This causes maya to save with long attribute names. For reasons that aren't understood yet, files modified on the farm are getting saved
+		with different shortnames for certain attributes (this has been noted on mib_amb_occlusion - the outValue attribute gets saved as S08 on the desktops, and S11 on the farm)
+		This change should suppress this behavior until we understand what is going on.
+	*/
+	file -f -save -options "v=1" -type "mayaAscii";
+	
+	// end 05/25/05
+	
+	html_log_output ( "\nPre Render Setup: Checking for existance of saved file.\n\n");
+	html_log_write();
+	
+	if (!`filetest -f $SR_renderFile`)
+	{
+		html_log_bold_output ( "\nPre Render Setup: Error - File save was unsuccessful.\n\n");	
+		html_log_write();
+				
+		$errReason[0] = "\nPre Render Setup: Error - File save was unsuccessful.\n\n";
+		return false;	
+	}
+	
+	html_log_output ( "\nPre Render Setup: File Save was successful.\n\n");
+	html_log_write();
+	
+	// -----------------------------------------------------------
+	// ###########################################################
+	// 18. Submit render
+	// ###########################################################
+	// -----------------------------------------------------------
+	if (!$SR_noRender)
+	{
+		html_log_bold_output ("\nPre Render Setup: Submitting "+$SR_renderFile+" to the farm for rendering.\n\n");
+		html_log_bold_output ( "Rendering using "+$SR_renderer+"\n\n");
+	}
+	
+	html_log_write();
+	
+	string $imDir = "";
+	string $imName = "";
+	
+	// build the email report to send to the callback
+	string $emailBody[],$emailSubj[];
+	generateEmailReport ($emailBody, $emailSubj);
+	
+	// if cpus is -1, set it to number of frames
+	if ($SR_render_numCpus == -1)
+		$SR_render_numCpus = $frameEnd - $frameStart + 1;
+		
+	if ($SR_frames != "")
+	{
+		int $frameCount = numFramesFromFramesStr ($SR_frames);
+		$SR_render_numCpus = ($SR_render_numCpus > $frameCount)?$frameCount:$SR_render_numCpus;
+	}
+	else
+	{
+		int $frameCount = $frameEnd - $frameStart + 1;
+		$SR_render_numCpus = ($SR_render_numCpus > $frameCount)?$frameCount:$SR_render_numCpus;	
+	}
+			
+			
+	// setup imageDir and imageName
+	// ----------------------------------------------------------------------
+	$imDir = $SR_destDir;
+	$layerName = $MR_layer;
+	
+	if (!$explicitPath)
+	{
+		$imDir+= $SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"/";
+		
+		if (!$SR_useRenderLayers)
+			$layerName = "layer1";
+		
+		$imDir+= $layerName+"/beauty/";
+	}
+	if (!`filetest -d $imDir`)
+		sysFile -makeDir $imDir;
+	
+	string $last = substring ($imDir,size($imDir),size($imDir));
+	if ($last!= "/")
+		$imDir += "/";
+		
+	$imName = $imDir+$SR_sequence+"_"+$SR_shotGroup+"_"+$SR_shotNumber+"_"+$layerName+"_beauty";
+	if ($SR_imageName != "")
+	{
+		$imName = $imDir+$SR_imageName;	
+	}
+		
+	// ----------------------------------------------------------------------
+	// --------------
+	// submit the render
+	// --------------
+	
+	// callback args
+	string $cbArgs = "";
+	if (size($SR_renderWranglers))
+		$cbArgs += ";renderWranglers="+$SR_renderWranglers;
+	if (size($SR_completionCallBack))
+		$cbArgs += ";completionCallback="+$SR_completionCallBack;
+	if (size($SR_completionArgs))
+		$cbArgs += ";completionArgs="+$SR_completionArgs;
+	$cbArgs += ";email_body="+$emailBody[0];
+	$cbArgs += ";email_subj="+$emailSubj[0];
+	
+	string $postCallback = "php "+`workspace -q -act`+"/php/postRenderCallback_MR.php \\\\\\\""+$cbArgs+"\\\\\\\" ";
+	string $rangeStr = ($SR_frames!="")?$SR_frames:($frameStart+"-"+$frameEnd);
+	// sending with shave reservations for ice age 2 - assumes all jobs have fur
+	string $extraQubeArgs = "";
+	string $proj = `workspace -q -act`;
+	// search for render settings for this pass
+	// $SR_jobCode, $SR_sequence, $SR_shotGroup
+	renderSettingsRead ($SR_sequence, $SR_shotGroup, $SR_jobCode);
+	
+	int $jobNum = 0;
+	if (!$SR_noRender)
+	{	
+		//$SR_outputFmt
+		global string $gOutputFormat; // output format is sent to submitRender as a global string to avoid changing signature.
+		$gOutputFormat = $SR_outputFmt;
+		$jobNum = submitRender(
+			$SR_renderer,
+			$SR_jobName,
+			$SR_render_numCpus,
+			$SR_renderPriority,
+			$rangeStr,
+			$SR_mrCluster,
+			"",
+			$postCallback,
+			$extraQubeArgs,
+			$imName,
+			$SR_renderFile
+		);
+		print ("Job number: "+$jobNum+"\n");
+	}
+
+	print ("Job number: "+$jobNum+"\n");
+
+	// save version data for this pass
+	string $jobNumStr = ($jobNum=="")?"":(string)$jobNum;
+	saveRenderVersionData( $SR_sequence, $SR_shotGroup, $SR_jobCode, $jobNumStr); 
+
+	// submitRender args: renderer, jobName,numCpus,priority,range,cluster,preCallback,postCallback,imageName,scene
+	generatePreRenderMail ($jobNum);	
+	
+	/*
+	string $renderer,
+	string	$jobName,
+	int	$numCpus,
+	int	$priority,
+	string	$range,
+	string 	$cluster,
+	string	$preCallback,
+	string	$postCallback,
+	string	$imageName,
+	string	$scene
+	*/
+	
+	html_log_bold_output( "\nPre Render Setup: DONE.\n\n");
+	html_log_write();
+	
+	return true;
+	
+}
+// -----------------------------------------------------------------------------------------------
+global proc ShotRender(string $argList) 
+{
+	print ("ShotRender: started.\n");
+	
+	/*
+	Load plug-ins
+	*/
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+	
+
+	// turn off undo queue
+	undoInfo -state off;
+	
+	print ("ShotRender: Parsing the argument list.\n");
+	// ------------------------
+	global string $SR_renderer;
+	$SR_renderer = getArgValueDefault ($argList,"renderer","mentalRay");
+	// ------------------------
+	global int $SR_overrideRenderGlobals;
+	$SR_overrideRenderGlobals = (int)getArgValueDefault ($argList,"overrideRenderGlobals","0");
+	// ------------------------
+	global string $SR_useNewRenderLayers;
+	$SR_useNewRenderLayers = (int)getArgValueDefault ($argList,"useNewRenderLayers","0");
+	// ------------------------
+	global string $SR_mrCluster;
+	$SR_mrCluster = getArgValueDefault ($argList,"mrCluster","");
+	// ------------------------
+	global int $SR_centerScene;
+	$SR_centerScene = (int)getArgValueDefault ($argList,"centerScene","0");
+	// ------------------------
+	global int $SR_mr_mvMaxDisplace;
+	$SR_mr_mvMaxDisplace = (int)getArgValueDefault ($argList,"mr_mvMaxDisplace","64");
+	// ------------------------
+	global int $SR_renderWidth;
+	$SR_renderWidth = (int)getArgValueDefault ($argList,"renderWidth","0");
+	// ------------------------
+	global int $SR_renderHeight;
+	$SR_renderHeight = (int)getArgValueDefault ($argList,"renderHeight","0");
+	// ------------------------
+	global float $SR_renderAspect;
+	$SR_renderAspect = (float)getArgValueDefault ($argList,"renderAspect","0.0");
+	// ------------------------
+	// 09/13/05 - Scene will not be opened with the file.
+	global string $SR_fileName;
+	$SR_fileName = getArgValue ($argList,"fileName");
+	// ------------------------
+	global int $SR_sequenceid;	// not currently used
+	$SR_sequenceid = (int)getArgValueDefault ($argList,"sequenceid","-1");
+	// ------------------------
+	global string $SR_shotNumber;
+	$SR_shotNumber = getArgValue ($argList,"shotNumber");
+	// ------------------------
+	global string $SR_host;
+	$SR_host = getArgValueDefault ($argList,"host","maya");
+	// ------------------------
+	global int $SR_overrideFrameStart;
+	$SR_overrideFrameStart = (int)getArgValueDefault ($argList,"overrideFrameStart","-9999");
+	// ------------------------
+	global int $SR_overrideFrameEnd;
+	$SR_overrideFrameEnd = (int)getArgValueDefault ($argList,"overrideFrameEnd","-9999");
+	// ------------------------
+	global string $SR_frames;
+	$SR_frames = getArgValueDefault ($argList,"frames","");
+	// ------------------------
+	global string $SR_renderWranglers;	// make sure Harry gets emailed when renders are done.
+	$SR_renderWranglers = getArgValueDefault ($argList,"renderWranglers","harry@reelfx.com");
+	if (!gmatch ($SR_renderWranglers,"*harry*"))
+		$SR_renderWranglers = "harry@reelfx.com,"+$SR_renderWranglers;
+	// ------------------------
+	global string $SR_optimizationSupervisor; // make sure Harry gets emailed when there is a problem.
+	$SR_optimizationSupervisor = getArgValueDefault ($argList,"optimizationSupervisor","harry@reelfx.com");
+	if (!gmatch ($SR_optimizationSupervisor,"*harry*"))
+		$SR_optimizationSupervisor = "harry@reelfx.com,"+$SR_optimizationSupervisor;
+	// ------------------------
+	global string $SR_completionCallBack;
+	$SR_completionCallBack =  getArgValue ($argList,"completionCallBack");
+	// ------------------------
+	global string $SR_completionArgs;
+	$SR_completionArgs =  getArgValue ($argList,"completionArgs");
+	// ------------------------
+	global string $SR_rlcxml;
+	$SR_rlcxml = getArgValue ($argList,"rlcxml");
+	// ------------------------
+	global string $SR_jobName;
+	$SR_jobName = getArgValue ($argList,"jobName");
+	// ------------------------
+	global string $SR_renderGlobals;
+	if ($SR_renderer == "mentalRay")
+		$SR_renderGlobals = `workspace -q -active`+"/mel/renderGlobals/mentalrayGlobalsProduction.mel";	
+	else
+		$SR_renderGlobals = `workspace -q -active`+"/mel/renderGlobals/DefaultFinalRenderGlobals.mel";
+	$SR_renderGlobals = getArgValueDefault ($argList,"renderGlobals",$SR_renderGlobals);
+
+	// ------------------------
+	global string $SR_renderQuality;
+	if ($SR_renderer == "mentalRay")
+		$SR_renderQuality = `workspace -q -active`+"/mel/renderGlobals/miDefaultOptionsProduction.mel";	
+	else
+		$SR_renderQuality = `workspace -q -active`+"/mel/renderGlobals/DefaultFinalRenderQuality.mel";
+	// ------------------------
+	global string $SR_renderResolution;
+	if ($SR_renderer == "mentalRay")
+		$SR_renderResolution = `workspace -q -active`+"/mel/renderGlobals/miDefaultFramebufferProduction.mel";
+	else
+		$SR_renderResolution = `workspace -q -active`+"/mel/renderGlobals/DefaultFinalRenderResolution.mel";
+	// ------------------------
+	global int $SR_useRenderLayers;
+	$SR_useRenderLayers = (int)getArgValueDefault ($argList,"useRenderLayers","1");
+	// ------------------------
+	global string $SR_jobCode;
+	$SR_jobCode = getArgValue ($argList,"jobCode");
+	// ------------------------
+	global string $SR_destDir;
+	$SR_destDir = getArgValue ($argList,"destDir");
+	// ------------------------
+	global string $SR_renderFile;
+	$SR_renderFile = getArgValue ($argList,"renderFile");
+	// ------------------------
+	global string $SR_seqXML;	
+	$SR_seqXML = getArgValue ($argList,"seqxml");
+	// ------------------------
+	global int $SR_renderPriority;
+	$SR_renderPriority = (int)getArgValueDefault ($argList,"render_priority","4000");
+	// ------------------------
+	global int $SR_render_numCpus;
+	$SR_render_numCpus = (int)getArgValueDefault ($argList,"render_cpus","-1");
+	// ------------------------
+	global string $SR_submissionCallBack;
+	$SR_submissionCallBack = getArgValue ($argList,"submissionCallBack");
+	// ------------------------
+	global string $SR_submissionArgs;
+	$SR_submissionArgs = getArgValue ($argList,"submissionArgs");
+	// ------------------------
+	global int $SR_useBots;
+	string $botDefault = ($SR_renderer=="mentalRay")?"0":"1";
+	$SR_useBots = (int)getArgValueDefault ($argList,"useBots",$botDefault);
+	// ------------------------
+	global string $SR_imageName;
+	$SR_imageName = getArgValue ($argList,"imageName");
+	// ------------------------
+	global string $SR_sequence ;
+	$SR_sequence = getArgValue ($argList,"sequence");
+	// ------------------------
+	global string $SR_shotGroup;
+	$SR_shotGroup = getArgValue ($argList,"shotGroup");
+	// ------------------------
+	global int $SR_useShotCast;
+	$SR_useShotCast = (int)getArgValueDefault ($argList,"useShotCast","0");
+	// ------------------------
+	global string $SR_renderInitiationEmail;
+	//$SR_renderInitiationEmail = getArgValueDefault ($argList,"preRenderEmail","chrisk@reelfx.com,harry@reelfx.com");
+	$SR_renderInitiationEmail = getArgValueDefault ($argList,"preRenderEmail","harry@reelfx.com");
+	// ------------------------
+	global string $SR_artist;
+	$SR_artist = getArgValue ($argList,"artist");
+	// ------------------------
+	global string $SR_camera;
+	$SR_camera = getArgValueDefault ($argList,"camera","cameraMain");
+	// ------------------------
+	global int $SR_archivePointCache;
+	$SR_archivePointCache = (int)getArgValueDefault ($argList,"archivePointCache","1");
+	// ------------------------
+	global int $SR_noRender;
+	$SR_noRender = (int)getArgValueDefault ($argList,"noRender","0");
+	// ------------------------
+	global string $SR_outputFmt;
+	$SR_outputFmt = getArgValueDefault ($argList,"outputFormat","openEXR");
+	
+	// do it
+	string $log[];
+	string $errReason[];
+	
+	print ("ShotRender: Calling preRenderSetup.\n");
+	int $pass = do_preRenderSetup($log,$errReason,$argList);
+	
+	if (!$pass)
+		 mailSupervisor ($SR_optimizationSupervisor,$errReason[0], $SR_sequence, $SR_shotGroup, $SR_shotNumber);
+	
+}

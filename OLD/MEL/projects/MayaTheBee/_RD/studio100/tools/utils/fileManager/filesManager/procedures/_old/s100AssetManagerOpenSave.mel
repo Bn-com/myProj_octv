@@ -1,0 +1,759 @@
+global proc s100FMASOpenScene()
+{
+	string $file = `file -q -sn -shortName`;
+	string $sceneTab[];
+	string $scene[];
+	$pathBase = `s100FMGLgetProdInfo`;
+		$type = `optionMenu -q -v s100FileManagerUIOMType`;
+		$name = `optionMenu -q -v s100FileManagerUIOPName`;
+		$state = `optionMenu -q -v s100FileManagerUIOMState`;
+		$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+	$refPath = ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" + $name +"/");
+
+
+
+	$scene = `textScrollList -q -selectItem s100FileManagerUITSExplore`;
+	$way = `textField -q -tx s100FileManagerUITFPathAsset`;
+
+	$sceneTab = stringToStringArray($scene[0],":");
+
+	if(size($sceneTab) > 0)
+	{
+		$sceneO = $sceneTab[1];
+
+		// QA addendum : in case of "subRef" scene : warning : this kind of scenes are NOT safe to be saved as ref:
+		if($sceneTab[0] == "_subRef_")
+		{
+			int $open = s100FMASwarningForSubRefSceneOpening();
+			if ($open==0)
+				return ;
+		}
+
+		$conf = `confirmDialog -title "Save Changes" -message ("Save changes to" + $file)
+		-button "Save" -button "Don't Save" -button "Cancel" -defaultButton "Save"
+		-cancelButton "Cancel" -dismissString "No"`;
+
+		if($conf == "Save" || $conf == "Don't Save")
+			{
+				if($conf == "Save")
+					file -f -save ;
+				if(size($sceneO) > 0)
+					{
+						if($sceneTab[0] == "wip")
+						{
+							file -force -open ($way + "_wip/" + $sceneO);
+							s100FMconformFolderForAssetAndSetProjet ;
+						}
+						else if ( $sceneTab[0] == "ref")
+						{
+							file -force -open ($refPath + $sceneO);
+							s100FMconformFolderForAssetAndSetProjet;
+						}
+						// QA addendum:
+						else if ( $sceneTab[0] == "_subRef_")
+						{
+							//print ("// path : '"+$refPath +"00_subRefs/"+ $sceneO +"' \n") ;
+							file -force -open ($refPath +"00_subRefs/"+ $sceneO);
+							s100FMconformFolderForAssetAndSetProjet;
+
+							s100FMAStagSubRefSceneTopNodeFromCurrentFileName();
+						}
+						else
+						{
+							file -force -open ($way + $sceneO);
+							s100FMconformFolderForAssetAndSetProjet;
+						}
+					}
+
+            }
+		else
+			warning "canceled";
+		}
+	else
+		warning "no scene selected";
+
+	s100FMASsetFileIdOnOptionMenu;
+}
+
+
+// QA addendum : warning that scene is a "subRef" one = things were deleted in it in purpose
+//
+global proc int s100FMASwarningForSubRefSceneOpening()
+{
+	string $conf = `confirmDialog -title "WARNING SUBREF SCENE!"
+		-message ("Selected scene is a 'subRef' one!\nThings has been deleted in it in purpose.\nPlease do NOT save it as 'ref'!")
+		-button "Open anyway" -button "Cancel" -defaultButton "Cancel"
+		-cancelButton "Cancel" -dismissString "No"`;
+
+	if($conf == "Open anyway")
+	{
+		return 1;
+	}
+	else
+	{
+		warning "'SubRef' scene opening Canceled by user.";
+		return 0;
+    }
+}
+
+
+
+global proc s100FMASOpenLastScene()
+{
+	string $file = `file -q -sn -shortName`;
+	string $state[];
+	string $value[];
+	string $listA[];
+	$pathBase = `s100FMGLgetProdInfo`;
+	string $way;
+	$type = `optionMenu -q -v s100FileManagerUIOMType`;
+	$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+	$name = `optionMenu -q -v s100FileManagerUIOPName`;
+	$refPath = `textField -q -tx s100FileManagerUITFPathAsset`;
+	$refPathTab = stringToStringArray($refPath,"/");
+	stringArrayRemoveAtIndex((size($refPathTab)-1),$refPathTab);
+	$refPath = stringArrayToString($refPathTab, "/");
+	$refPath = ($refPath +"/");
+	//($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" +$name+"/");
+
+	$state = `optionMenu -q -itemListShort s100FileManagerUIOMState`;
+	for($obj in $state)
+	{
+		$value[size($value)] =`menuItem -q -label $obj`;
+    }
+
+	$value = sort($value) ;
+	$listRef = `getFileList -fld ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" +$name+"/")`;
+	for($i = (size($value)-1) ; $i >= 0 ; $i--)
+	{
+		//print ("\n" + ($refPath + $value[$i] + "/_wip/\n"));
+		$filetest = `filetest -d ($refPath + $value[$i] + "/_wip")`;
+
+		$list = `getFileList -fld ($refPath + $value[$i] + "/_wip/")`;
+		$listRefPb = `getFileList -fld ($refPath + $value[$i] + "/")`;
+
+		for($obj in $listRefPb)
+		{
+			if(fileExtension($obj) == "ma")
+				$listA[size($listA)] = ($refPath + $value[$i])+ "/" + ($obj);
+		}
+
+		if($filetest == 0)
+		{
+			for($obj in $list)
+			{
+				if(fileExtension($obj) == "ma")
+					$listA[size($listA)] = ($refPath + $value[$i] + "/_wip/") + ($obj);
+			}
+		}		//$way = ($refPath + $value[$i] + "/_wip/");
+
+		if(size($listA)>0)
+			break;
+	}
+
+	if(size($listA) == 0)
+	{
+		for($obj in $listRef)
+		{
+			if(fileExtension($obj) == "ma")
+					$listA[size($listA)] = ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" +$name+"/") + ($obj);
+		}
+    }
+
+	$listA = sort($listA);
+	$conf = `confirmDialog -title "Save Changes" -message ("Save changes to" + $file)
+			-button "Save" -button "Don't Save" -button "Cancel" -defaultButton "Save"
+			-cancelButton "Cancel" -dismissString "No"`;
+
+	if($conf == "Save" || $conf == "Don't Save")
+	{
+		if($conf == "Save")
+			file -f -save ;
+
+		if(size($listA) > 0)
+		{
+			file -force -open ($listA[size($listA)-1]);
+			s100FMconformFolderForAssetAndSetProjet ;
+			print ($listA[size($listA)-1] + " was opened\n");
+		}
+		else
+			warning "no wip scene exists";
+	}
+	else
+		warning "canceled";
+
+	s100FMASsetFileIdOnOptionMenu;
+}
+
+
+global proc s100FMAOpenFolder()
+{
+	$way = `textField -q -tx s100FileManagerUITFPathAsset`;
+	system ("load" + $way);
+}
+
+
+global proc string  s100FMAconformFXName()
+{
+	$prodName = `optionMenu -q -v s100FileManagerUIOMProd`;
+	$prodName = startString($prodName,2);
+		$ss = startString($prodName,1);
+		$ss = capitalizeString($ss);
+		$es = endString($prodName,1);
+		$es = capitalizeString($es);
+		$prodName = ($ss + $es);
+
+
+	string $typeTab[];
+	$type = `optionMenu -q -v s100FileManagerUIOMType`;
+	$typeTab = stringToStringArray($type, "_");
+		$type = startString($typeTab[1],1);
+	$type = capitalizeString($type);
+
+	$name = ($prodName + "_" + $type + "_");
+
+	return $name;
+}
+
+
+global proc s100FMASsaveWipScene()
+{
+	//s100deleteMainFloatingWindowMan;
+
+	string $vegetation[];
+	string $scene[];
+	string $sceneTabList[];
+	string $nameFileTab[];
+	int $inc;
+	$fileNameLong = `file -q -sceneName `;
+
+		$way = `textField -q -tx s100FileManagerUITFPathAsset`;
+		$way = ($way + "_wip");
+		$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+		$type = `optionMenu -q -v s100FileManagerUIOMType`;
+		$name = `optionMenu -q -v s100FileManagerUIOPName`;
+		$stateStr = `optionMenu -q -v s100FileManagerUIOMState`;
+		$lod = `optionMenu -q -v s100FileManagerUIOMLod`;
+
+		$stateTab = stringToStringArray($stateStr, "_");
+
+	// Getting only wip: scenes from UI scrollList:
+	$scene = `textScrollList -q -allItems s100FileManagerUITSExplore`;
+	for($obj in $scene)
+	{
+		$sceneTab = stringToStringArray($obj,":");
+		if($sceneTab[0] == "wip")
+			$sceneTabList[size($sceneTabList)] = $sceneTab[1];
+	}
+	$sceneTabList = sort($sceneTabList);
+
+	$int = 10;
+	if(size($sceneTabList) > 0)
+	{
+		$nameFileTab = stringToStringArray($sceneTabList[size($sceneTabList)-1],"_");
+		$nameFileTab = stringToStringArray($nameFileTab[size($nameFileTab)-1],".");
+		$int = `match"[0-9]+$" $nameFileTab[0]`;
+		$int = $int + 1;
+	}
+	else
+		$int = 1;
+	// print $int; print $nameFileTab;
+
+	$padding = padNumber($int,3);
+
+
+	$stateU = $stateTab[0];
+	if(size($stateTab[0])>0)
+		$stateU = $stateTab[1];
+
+	$vegetation = stringToStringArray($type, "_");
+
+	string $nameSave;
+	if($vegetation[1] == "Vegetations")
+		$nameSave = $name + "_" + $lod + "_" + $stateU + "_" +$padding;
+	else
+		$nameSave = $name + "_"+ $stateU + "_" +$padding;
+
+	if($name == "_crowd")
+	{
+		$prodS = `s100FMAconformFXName`;
+		$nameSave = ($prodS + $sub + "CrowdOriginal_" + $stateU + "_" +$padding);
+	}
+
+	$fileTest = `filetest -d $way`;
+	if($fileTest == 0)
+		sysFile -makeDir $way;
+
+
+	s100_unlockCurrentScene();
+
+	if(size($nameSave) > 0)
+	{
+		file -rename ($way +"/" + $nameSave) ;
+		file -f -save -type "mayaAscii";
+		s100FMconformFolderForAssetAndSetProjet ;
+	}
+	print  ("scene saved as : " + $nameSave +"\n");
+
+
+	$textScrollList = s100FMASListMayaObject();
+	s100FMASlistMayaPathEdit($textScrollList);
+
+	//creation du log
+	s100log("Save Increment", $nameSave,"s100FileManagerUITFPathAsset",$fileNameLong);
+}
+
+
+global proc s100FMASwarnPublishStateScene()
+{
+	if(!`s100FMASGetIfThereIsAtagSubRefSceneTopNode`)
+	{
+	$sceneName = `file -q -sceneName -shortName`;
+	size $sceneName;
+	if(size($sceneName) > 0)
+	{
+		$confirm = `confirmDialog -t "confirm" -message "do you want to publish this scene?"  -button "Yes" -button "No" -defaultButton "No" -cancelButton "No" -dismissString "No"`;
+		if ($confirm == "Yes")
+		{
+			s100FMASpublishStateScene;
+			s100FMconformFolderForAssetAndSetProjet ;
+        }
+		else
+		{
+        	warning "scene not published";
+        }
+	}
+	else
+		$confirm = `confirmDialog -t "error" -message "save before as wip scene"  -button "Ok" -defaultButton "Ok"`;
+    }
+	else
+	{
+		warning "top node contains attribute relatives to Sub Reference, check for scene to publish it as ref";
+    }
+}
+
+
+global proc s100FMASpublishStateScene()
+{
+	//supprime les ui si le bouton est active
+	if(`checkBox -q -v s100FMASCKDELUI `)
+		s100deleteMainFloatingWindowMan;
+
+	$fileNameLong = `file -q -sceneName `;
+
+	$pathBase = `s100FMGLgetProdInfo`;
+	//// POUR GUILLAUME
+	string $prod = $pathBase[0] + "/" + $pathBase[1] + "/";
+	s100FMASprepublish($prod);
+	////
+	string $vegetation[];
+
+	$way = `textField -q -tx s100FileManagerUITFPathAsset`;
+	$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+	$type = `optionMenu -q -v s100FileManagerUIOMType`;
+	$name = `optionMenu -q -v s100FileManagerUIOPName`;
+	$stateA = `optionMenu -q -v s100FileManagerUIOMState`;
+	$lod = `optionMenu -q -v s100FileManagerUIOMLod`;
+
+	$stateTab = stringToStringArray($stateA, "_");
+	$stateU = $stateTab[0];
+	if(size($stateTab[0])>0)
+		$stateU = $stateTab[1];
+
+	$vegetation = stringToStringArray($type, "_");
+
+	string $nameSave;
+	if($vegetation[1] == "Vegetations")
+		$nameSave = $name + "_" + $lod + "_" + $stateU;
+	else
+		$nameSave = $name + "_"+ $stateU;
+
+	if($name == "_crowd")
+	{
+		$prodS = `s100FMAconformFXName`;
+		$nameSave = ($prodS + $sub + "CrowdOriginal_" + $stateU);
+	}
+
+	if(size($nameSave) > 0)
+	{
+		string $sceneName = `file -q -sceneName -shortName`;
+		$fileTest = `filetest -d ($way + "_info")`;
+		if($fileTest == 0)
+			sysFile -makeDir ($way + "_info");
+		if(size($sceneName) > 0)
+		{
+			$listFolderAddO = `fopen ($way + "_info/info_ref.txt") "w"`;
+			$folderAddlist = `fwrite $listFolderAddO $sceneName`;
+			fclose $listFolderAddO;
+		}
+		//if(`filetest -e ($way +"/" + $nameSave)`)
+			s100AMSsaveBckUpScn(($way),($nameSave + ".ma"));
+
+		file -rename ($way +"/" + $nameSave) ;
+		file -f -save -type "mayaAscii";
+		s100FMconformFolderForAssetAndSetProjet ;
+	}
+
+	print  ("scene saved as : " + $nameSave +"\n");
+
+	$textScrollList = s100FMASListMayaObject();
+	s100FMASlistMayaPathEdit($textScrollList);
+
+	//creation du log
+	s100log("Publish STATE", $nameSave, "s100FileManagerUITFPathAsset",$fileNameLong);
+}
+
+
+global proc s100FMASprepublish(string $prod)
+{
+	s100_unlockCurrentScene();
+}
+
+
+
+global proc s100FMASgetThumbNail()
+{
+	string $list[];
+	string $listWip[];
+
+	$tmp = stringToStringArray( `getenv XBMLANGPATH`,";") ;
+	$thumbSnapShot = ($tmp[0] + "/logo/s100logo_snapshot.bmp");
+	$pathBase = `s100FMGLgetProdInfo`;
+
+		$type = `optionMenu -q -v s100FileManagerUIOMType`;
+		$name = `optionMenu -q -v s100FileManagerUIOPName`;
+		//$stateU = `optionMenu -q -v s100FileManagerUIOMState`;
+		$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+		$lod = `optionMenu -q -v s100FileManagerUIOMLod`;
+
+	$typeTab = stringToStringArray($type,"_");
+	$refPath = ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" +$name+"/_Thumbnails/");
+
+	$fileTest = `filetest -d ($refPath)`;
+	if($fileTest == 1)
+	{
+		$img = ($name + "_prev.bmp");
+		$fileTestI = `filetest -f ($refPath + "/" + $img)`;
+		if($fileTestI == 1)
+			iconTextButton  -e -vis 1 -image ($refPath + "/" + $img) -highlightImage ($refPath + "/" + $img)  s100FileManagerUIIThumbnails;
+		else
+			iconTextButton  -e -vis 1 -image ($tmp[0] + "/noImage_prev.bmp") -highlightImage $thumbSnapShot s100FileManagerUIIThumbnails;
+	}
+	else
+		iconTextButton  -e -vis 1 -image ($tmp[0] + "/noImage_prev.bmp") -highlightImage $thumbSnapShot s100FileManagerUIIThumbnails;
+}
+
+
+global proc s100FMAScreateThumb()
+{
+	string $tab[];
+	string $file = `file -q -sn`  ;
+	$tab[0] = $file;
+	if(`saveChanges("")` )
+	{
+		s100createThumbnails($tab,"prev");
+	}
+
+	if(`file -q -sn` != $file)
+		file -f -o $file;
+	s100FMASgetThumbNail;
+}
+
+
+
+global proc s100FMASpublishDefVersion()
+{
+	if(`checkBox -q -v s100FMASCKDELUI `)
+		s100deleteMainFloatingWindowMan;
+	$fileNameLong = `file -q -sceneName `;
+
+	// unsmooth , wireframe , deal with s100subRefType attributes, etc.
+	s100FAMprePublishAction;
+
+	$pathBase = `s100FMGLgetProdInfo`;
+	string $vegetation[];
+
+		$type = `optionMenu -q -v s100FileManagerUIOMType`;
+		$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+		$name = `optionMenu -q -v s100FileManagerUIOPName`;
+		$lod = `optionMenu -q -v s100FileManagerUIOMLod`;
+
+	$refPath = ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" + $name +"/");
+	$fileName = ($name + ".ma");
+
+	$fileTestI = `filetest -e  ($refPath +$fileName)`;
+	$pathTemp =  ($refPath + $fileName);
+	string $chOver = "Yes" ;
+
+	if($fileTestI)
+	{
+		$chOver = `confirmDialog -title ("Save " + $pathTemp ) -message ($pathTemp +" already exists.\nDo You want to replace it?")
+		-button "Yes" -button "No" -defaultButton "Yes"
+		-cancelButton "No" -dismissString "No"`;
+    }
+
+	$fileTestU = `filetest -d ($refPath + "_info")`;
+	if($fileTestU == 0)
+		sysFile -makeDir ($refPath + "_info");
+
+	$vegetation = stringToStringArray($type, "_");
+
+	string $nameSave;
+		if($vegetation[1] == "Vegetations")
+			$fileName = ($name + "_" + $lod + ".ma");
+		if($name == "_crowd")
+		{
+			$prodS = `s100FMAconformFXName`;
+			$fileName = ($prodS + $sub + "CrowdOriginal.ma");
+		}
+
+	string $sceneName = `file -q -sceneName -shortName`;
+	$save = 0 ;
+	$fileUp = `s100FMASpublishTestOtherState`;
+	if($chOver ==  "Yes")
+	{
+		//j ai modifie ca j ai rajoute || $fileUp == "none"
+		if($fileUp != "none" || $fileUp == "none")
+		{
+			$fileUpTab = stringToStringArray($fileUp, "_");
+			$fileUpTest = `filetest -f ($refPath + "/" + $fileUp + "/" + $name + "_" + $fileUpTab[1] + ".ma")`;
+
+			if($fileUpTest == 1)
+			{
+				$confirm = `confirmDialog -t "confirm" -message ("another file exist in subfolder : " + $fileUp + " do you want to continue?")  -button "Yes" -button "No" -defaultButton "No" -cancelButton "No" -dismissString "No"`;
+					if ($confirm == "Yes")
+					{
+						if(size($sceneName) > 0)
+						{
+							$listFolderAddO = `fopen ($refPath + "_info/info_ref.txt") "w"`;
+							fwrite $listFolderAddO $sceneName;
+							fclose $listFolderAddO;
+						}
+
+						s100AMSsaveBckUpScn($refPath,$fileName);
+						//file -rename ($refPath +  $fileName); file -f -save -type "mayaAscii";
+						print  ("scene saved as : " + $fileName +"\n");
+					}
+					else
+						warning "scene not published";
+			}else if(size($sceneName) > 0)
+			{
+					$listFolderAddO = `fopen ($refPath + "_info/info_ref.txt") "w"`;
+					fwrite $listFolderAddO $sceneName;
+					fclose $listFolderAddO;
+			}
+			s100AMSsaveBckUpScn($refPath,$fileName);
+			file -rename ($refPath + $fileName);
+			file -f -save -type "mayaAscii";
+			print ("\nscene saved as : " + $fileName);
+			$save = 1;
+		}
+	}
+
+	s100FMASchangeOptionMenu("lod") ;
+
+	//creation du log
+	s100log("Publish Ref", $sceneName,"s100FileManagerUITFPathAsset",$fileNameLong);
+
+	if($save)
+	{
+		s100_ExportSubRefIfPublish ;
+    }
+}
+
+
+
+global proc s100_ExportSubRefIfPublish()
+{
+	if(`s100FM_ExportsubRefGetIfSubExists`> 0)
+	{
+		$conf = `confirmDialog -title "Sub REF need to be re-export" -message "You maybe have to re generate sub ref?"
+		-button "Yes" -button "No" -defaultButton "Yes"
+		-cancelButton "No" -dismissString "No"`;
+
+		if($conf == "Yes")
+		{
+			s100FM_exportSubRefUI ;
+			string $child[] = `formLayout -q -childArray  s100FM_exportSubRefUIFormLayout`;
+			for($tmp in $child)
+				if(`gmatch $tmp "s100FMexportSubRefUICk*"`)
+					checkBox -e -v 0 $tmp;
+		}
+    }
+}
+
+
+global proc s100AMSsaveBckUpScn(string $path, string $fileName)
+{
+	$pathCopy = ($path + "_pbBckUp/");
+	$nfn = ("sv_001_" + $fileName);
+	if(`filetest -d $pathCopy`)
+	{
+		$list = `getFileList -fld $pathCopy -filespec "*.ma"`;
+		if(size($list) > 0)
+		{
+	 		$list = sort($list);
+			$listTb = stringToStringArray($list[size($list) -1], "_");
+			int $int = $listTb[1];
+			$padding = padNumber(($int +1),3);
+			$listTb[1] = $padding;
+			$nfn = stringArrayToString($listTb, "_");
+			if(size($list)>9)
+				sysFile -delete ($pathCopy + $list[0]);
+        }
+		$create = `sysFile -copy ($pathCopy + $nfn) ($path + $fileName)`;
+	}
+	else
+	{
+		sysFile -makeDir $pathCopy;
+		$create = `sysFile -copy ($pathCopy + $nfn) ($path + $fileName)`;
+    }
+}
+
+
+//shutil.copyfile(\"" + ($pathCopy + $nfn) + "\",\""  + ($path + $fileName) + "\")")
+
+
+global proc string s100FMASpublishTestOtherState()
+{
+	string $stateArray[];
+	string $stateString;
+	$list = `optionMenu -q -itemListShort s100FileManagerUIOMState`;
+	$stateString = `optionMenu -q -v s100FileManagerUIOMState`;
+	$stateArray = stringToStringArray($stateString, "_");
+
+	int $number = `match "[0-9]+$" $stateArray[0]`;
+	$number = $number + 1;
+	$padding = padNumber($number,2);
+	//print $padding;
+	string $up = "none";
+
+	for($i = 0; $i < size($list); $i++)
+	{
+		$item =`menuItem -q -label $list[$i]`;
+		$tabList = stringToStringArray($item, "_");
+		if($tabList[0] == $padding)
+			$up = `menuItem -q -label $list[$i]`;
+	}
+	return($up);
+}
+
+
+global proc s100FMASwarnPublishRefScene()
+{
+	s100_unlockCurrentScene;
+
+	if(!`s100FMASGetIfThereIsAtagSubRefSceneTopNode`)
+	{
+		$sceneName = `file -q -sceneName -location`;
+		$sceneTab = stringToStringArray($sceneName, "/");
+		$pathBase = `s100FMGLgetProdInfo`;
+
+		int $wip = 0;
+		int $prod = 0;
+
+		for($obj in $sceneTab)
+		{
+			if($obj == "_wip")
+				$wip = 1;
+			if($obj == $pathBase[1]);
+				$prod = 1;
+		}
+
+		//size $sceneName;
+		if(size($sceneName) > 0 && $wip == 0 && $prod == 1)
+		{
+			$confirm = `confirmDialog -t "confirm" -message "do you want to publish this scene?"  -button "Yes" -button "No" -defaultButton "No" -cancelButton "No" -dismissString "No"`;
+			if ($confirm == "Yes")
+			{
+				s100FMASpublishDefVersion;
+			}
+			else
+			{
+				warning "scene not published";
+			}
+
+		}
+		else
+			$confirm = `confirmDialog -t "error" -message "publish as state scene before"  -button "Ok" -defaultButton "Ok"`;
+    }
+	else
+	{
+		warning "top node contains attribute relatives to Sub Reference, check for scene to publish it as ref";
+    }
+}
+
+
+
+global proc s100FMASrefreshRefFrom()
+{
+	$pathBase = `s100FMGLgetProdInfo`;
+	$type = `optionMenu -q -v s100FileManagerUIOMType`;
+	$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+	$name = `optionMenu -q -v s100FileManagerUIOPName`;
+
+	$refPath = ($pathBase[0] +"/"+$pathBase[1] +"/" + $type + "/"+$sub +"/" + $name +"/");
+
+	string $folderopenlist = "unknow";
+
+	$fileTest = `filetest -f ($refPath + "_info/info_ref.txt")`;
+	if($fileTest == 1)
+	{
+		$listFolderO = `fopen ($refPath + "_info/info_ref.txt") "r"`;
+		$folderopenlist = `fread $listFolderO $folderopenlist`;
+		fclose $listFolderO;
+	}
+	textField -e -tx $folderopenlist s100FileManagerUITFpublishedFromRef;
+}
+
+
+global proc s100FMASsaveScene()
+{
+	$pathBase = `s100FMGLgetProdInfo`;
+
+	$type = `optionMenu -q -v s100FileManagerUIOMType`;
+	$sub = `optionMenu -q -v s100FileManagerUIOPSub`;
+	$name = `optionMenu -q -v s100FileManagerUIOPName`;
+	$state = `optionMenu -q -v s100FileManagerUIOMState`;
+
+	$fileName = `file -q -sn`;
+	$fileShortName = `file -q -sn -shortName `;
+
+	string $fileNameTab[];
+	$fileNameTab = stringToStringArray($fileName,"/");
+	$contain = stringArrayContains($pathBase[1],$fileNameTab);
+
+	if($contain == 1)
+	{
+		s100_unlockCurrentScene();
+		file -f -s;
+    }
+	else
+	{
+		$confirm = `confirmDialog -t "confirm" -message ("scene not in pipe do you want to increment it in : \n" + $type + "/" + $sub + "/" +$name + "/" +$state + "?")  -button "Yes" -button "No" -defaultButton "No" -cancelButton "No" -dismissString "No"`;
+			if ($confirm == "Yes")
+			{
+				s100FMASsaveWipScene;
+            }else{
+				warning "scene not saved";
+            }
+	}
+}
+
+
+global proc s100_unlockCurrentScene()
+{
+	// ---------------------- Global treatement scene ----------------
+	// unlock file !
+	if (`file -q -lf`)
+	{
+		  print ("!! Current scene was LOCKED ! => Trying to unlock it...");
+		  int $ok = !catch(`file -lf 0`);
+		  if (`file -q -lf`==0)
+				print " Current scene is UNLOCKED.\n";
+		  else
+				print " Couldn't.. Current scene STILL LOCKED !\n";
+	}
+	else
+		  print "// Current scene already is UNLOCKED.\n";
+}

@@ -1,0 +1,277 @@
+global proc int s100optimizeGeoCachesEvaluationInScene()
+{
+	string $caches[] = `ls -type cacheFile`;
+	int $nb = s100optimizeGeoCachesEvaluationP($caches);
+	return $nb;
+}
+
+global proc int s100optimizeGeoCachesEvaluationP(string $caches[])
+{
+	int $ok = 0;
+	for ($c in $caches)
+	{
+		print ("// - treating cache '"+$c+"': \n");
+		int $localOK = !catch(`setAttr ($c+".displayLoadProgress") 0 `);
+		$localOK = !catch(`setAttr ($c+".displayLoadProgress") 0 `);
+		$localOK *= !catch(`setAttr ($c+".multiThread") 0 `);
+		$localOK *= !catch(`setAttr ($c+".caching") 0 `);
+
+		$ok += $localOK;
+	}
+	return $ok;
+}
+
+
+
+global proc string s100CMgetFirstCachePathFromRN( string $refNode )
+{
+	string $path = "";
+	string $nameSpace = s100findNamespaceForOnlyOneRef($refNode);
+ 	string $list[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+	for ($mesh in $list) // string $mesh = $list[0]
+	{
+		$path = s100CMgetFirstCachePathFromMesh( $mesh );
+		if (size($path))
+			return $path;
+    }
+	return "";
+}
+
+
+
+global proc string s100CMgetFirstCachePathFromMesh( string $mesh )
+{
+	string $path = "";
+	string $cacheFile = "";
+	string $shapes[] = `listRelatives -s -ni $mesh`;
+	for ($sh in $shapes) // $sh = $shapes[0]
+	{
+		string $hist[] = `listHistory $sh`;
+		for ($his in $hist)
+		{
+			if (objectType($his)=="cacheFile")
+			{
+				$cacheFile = $his;
+				break;
+            }
+        }
+		if (size($cacheFile))
+			$path = `getAttr ($cacheFile+".cachePath")`;
+    }
+	if ( size($path) && !endsWith($path,"/") )
+		$path = $path + "/";
+
+	return $path;
+}
+
+
+
+
+// Updating cache files path if needed :
+//
+// checking if an info.txt file (saved with any pose, anim or cache file)
+// is "valid" according to studio100 Paris : i.e : has the key "inParis" set to "True"
+// or (for Caches) is located into "Y:/005_EPISODES_Caches/"...
+// Ex:
+//	string $refNode = $refNodeToSwitch[$j];  int $j=0; $j++
+//  string $refNode = "MA_C_AntOriginal_01_00RN";
+//  string $infoFile = "Y:/005_EPISODES_Caches/Ep047_TheQueensScepter/Sq004A/Sc004/_Data/Cache/MA_C_WilliOriginal_01/001/info.txt"
+//   s100CM_updateCachesIfNeeded($refNode);
+//
+// returns "already OK", or "wrong path", or "paths update OK" or "paths update failed"
+//
+global proc string s100CM_updateCachesIfNeeded(string $refNode)
+{
+	print ("// s100CM_updateCachesIfNeeded : \n");
+
+	string $goodLoc = "Y:/005_EPISODES_Caches/*";
+
+	string $cachePath = s100CMgetFirstCachePathFromRN($refNode);
+	string $newCachePath = "";
+	string $okPath = "already OK";
+	string $infoFile = "";
+
+
+	// if original cachePath was not ok, being interested of the potentially new info.txt file path to analyse:
+	int $inEpCach = ` gmatch $cachePath $goodLoc `;
+
+	if ($inEpCach==0)
+	{
+		// copy/pasting if needed all the cache files into $goodLoc and returning new info.txt path:
+		int $okGet = !catch( $infoFile = s100CM_getInfoFilePathFromRefNode($refNode) ); // string $infoFile = "error";
+		$newCachePath = `match "^.*/" $infoFile`;
+
+		print ("// s100CM_updateCachesIfNeeded >> reference node \""+$refNode+"\" does NOT use caches located in \""+$goodLoc+"\". Enquirying more...\n");
+		if(`filetest -e $infoFile`)
+		{
+			string $val = s100PAC_fetchAttributeValueInInfoFile( $infoFile, "inParis");
+			if ($val=="True") // print "ok"
+			{
+				print ("// s100CM_updateCachesIfNeeded >> geoCaches now related to \""+$refNode+"\" seems to use caches known 'inParis' (=True in their info.txt file).\n");
+			}
+			else
+			{
+				print ("// s100CM_updateCachesIfNeeded >> reference node \""+$refNode+"\" does NOT seem to use caches known 'inParis' neither!\n");
+				if ($newCachePath==$cachePath)
+				{
+					print ("// s100CM_updateCachesIfNeeded >> cache path didn't change on top of that. Definitely a wrong cache path!\n");
+					$okPath = "wrong path";
+                }
+            }
+
+			if ($newCachePath!=$cachePath)
+			{
+				print ("// s100CM_updateCachesIfNeeded >> caches path changed anyway. So they are to be updated in Scene.\n");
+				$okPath = "to update";
+			}
+		}
+		else
+		{
+			if ($infoFile=="error")
+			{
+				warning  ("s100CM_updateCachesIfNeeded >> an error occured dealing with 'info.txt' file for caches used by reference node \""+$refNode+"\"!");
+				$okPath = "paths update failed";
+            }
+			else
+			{
+				warning  ("s100CM_updateCachesIfNeeded >> cannot find any 'info.txt' file for caches used by reference node \""+$refNode+"\" seems to use caches known 'inParis'!");
+				$okPath = "wrong path";
+            }
+		}
+	}
+	else
+	{
+		print ("// s100CM_updateCachesIfNeeded >> reference node \""+$refNode+"\" seems to be now able to use caches located in \""+$goodLoc+"\". Checking if node paths are matching...\n");
+		$newCachePath = $cachePath ;
+		$okPath = "to update";
+	}
+
+	// In case we wanna check/update cache node paths :
+	//
+	if ($okPath=="to update")
+	{
+		print ("// s100CM_updateCachesIfNeeded >> caches paths are to be updated with new path \""+$newCachePath+"\":\n");
+
+		int $singleCachename = 0;
+		// if caches were created by switching then only one xml file is used
+		if ($inEpCach)
+			$singleCachename = 1;
+		// else, not sure it's not the case anyway :
+		// => searching for every xml file in newCachePath, if only one is found, considering it is THE one:
+		else
+		{
+			string $xmls[] = `getFileList -folder $newCachePath -filespec "*.xml"`;
+			if (size($xmls)==1)
+				 $singleCachename = 1;
+			else if (size($xmls)>1)
+				 $singleCachename = 0;
+		}
+		int $okUpdate = s100CM_fixReassignCacheOnRefNode( $refNode, $singleCachename, $newCachePath);
+		if ($okUpdate)
+			$okPath="paths update OK"; // to be tested by  : int $update = ` gmatch $okPath "*OK*" `;
+		else
+			$okPath = "paths update failed";
+    }
+
+	return $okPath;
+}
+
+
+// (to test)
+// s100CM_fixReassignCacheOnRefNode :
+// 	lists every cachenode of passed refNode and update them with $basePath (in their ".cachePath" attr)
+//  returns 1 if all are set the same at the end
+// ex:
+// 	string $basePath = $newCachePath;
+//   s100CM_fixReassignCacheOnRefNode( $refNode, $singleCachename, $basePath);
+//
+global proc int s100CM_fixReassignCacheOnRefNode( string $refNode, int $singleCachename, string $basePath)
+{
+	int $ok = 1;
+
+	// checking caches on which meshes :
+	string $nameSpace = `s100findNamespaceForOnlyOneRef($refNode) `;
+	string $selToTreat[] = `s100Set_retrieveSetMembers($nameSpace +":geoCacheSet")`;
+
+	/*
+	print "// DEBUG s100CM_fixReassignCacheOnRefNode :\n";
+	print ("// $refNode : "+$refNode+"\n");
+	print ("// $singleCachename : "+$singleCachename+"\n");
+	print ("// $basePath : "+$basePath+"\n");
+	*/
+
+	if (size($selToTreat)==0)
+	{
+		warning  ("s100CM_fixReassignCacheOnRefNode >> No mesh found to check geoCache into with reference node '"+$refNode+"'. Skipped.");
+		return 0;
+    }
+
+	string $caches[] = `ls -type "cacheFile"`; //print $caches;
+	for ($cache in $caches) // string $cache = $caches[0] ; select -r $cache
+	{
+		string $meshes[] = `cacheFile -q -gm $cache`;
+		if (size($meshes))
+		{
+			string $parent[] = `listRelatives -p -pa $meshes[0]`;
+			if (size($parent)==1)
+			{
+				if (!stringArrayContains($parent[0],$selToTreat))
+				{
+					//print ("// found transform '"+$parent[0]+"' NOT in selection - skipped\n");
+					continue;
+				}
+				//print ("//\t Found transform '"+$parent[0]+"' IS related to one of the cache file :\n");
+
+
+				// Setting them :
+				//
+				if (size($basePath))
+				{
+					if (`getAttr ($cache+".cachePath")` == $basePath )
+					{
+						print ("// - \""+($cache+".cachePath")+"\" already is set to \""+$basePath+"\".\n");
+						continue;
+                    }
+
+					int $okLocal = !catch(`setAttr -type "string" ($cache+".cachePath") $basePath `);
+					if ($okLocal)
+						print ("// - successfully setting \""+($cache+".cachePath")+"\" to \""+$basePath+"\"\n");
+					else
+						warning ("Could NOT set \""+($cache+".cachePath")+"\" to \""+$basePath+"\" !");
+					$ok *= $okLocal;
+				}
+				else
+					print ("//\t\t no proper new cache PATH found for current mesh '"+$parent[0]+"'\n");
+			}
+			else
+				print ("//\t no transform found for shape '"+$meshes[0]+"'\n");
+		}
+		else
+			print ("// * no MESH found for cache '"+$cache+"'\n");
+	}
+	return $ok;
+}
+
+// tries to get a info.txt file path in the cache path related to the passed reference node.
+// If that info file contains key and value 'inParis':True : its path is returned
+// if NOT does the following :
+// - if its path is not under "Y:/005_EPISODES_Caches/*" will try to copy cache files under "Y:/005_EPISODES_Caches/Ep000_SharedCaches/"
+//   into folders organized like Ep/Sq/shot/takes of current scene if it's available/knowable
+// - create/update a info.txt file there (destination location) containing a python style dictionnary :
+//  { 'name': nameOfCache, 'inParis': inParisValue,
+//    'copied2sync':True, 'oldPath':oldCachePath,
+//    'validated':True, 'dateValidated: currentCopyDate  }
+//
+global proc string  s100CM_getInfoFilePathFromRefNode(string $refNode)
+{
+	string $cachePath = s100CMgetFirstCachePathFromRN($refNode);
+	python("import s100API");
+	python("skeleton = s100API.Skeleton()");
+	python("t = skeleton.api.checkGeoCacheInParis('"+$refNode+"','"+$cachePath+"')");
+	string $ret = python("t.run()");
+	// making sure every "\" into "/" :
+	string $buf[];
+	tokenize($ret, "\\", $buf);
+	return (stringArrayToString($buf,"/") ) ;
+}
+

@@ -1,0 +1,661 @@
+global proc wxII_TurnOffEmitDiffuse()
+{
+	string $lights[] = `ls -type light`;
+	int $isOn=1;
+
+	for ($a in $lights)
+	{
+		if (`attributeExists emitDiffuse $a`)
+		{
+			$isOn=getAttr ($a+".emitDiffuse") ;
+			break;
+		}
+	}
+
+	for ($a in $lights)
+	{
+		if (`attributeExists emitDiffuse $a`)
+		{
+			setAttr ($a+".emitDiffuse") (1-$isOn);
+		}
+	}
+}
+global proc wxII_TurnOffEmitSpecular()
+{
+	string $lights[] = `ls -type light`;
+	int $isOn=1;
+
+	for ($a in $lights)
+	{
+		if (`attributeExists emitSpecular $a`)
+		{
+			$isOn=getAttr ($a+".emitSpecular") ;
+			break;
+		}
+	}
+
+	for ($a in $lights)
+	{
+		if (`attributeExists emitSpecular $a`)
+		{
+			setAttr ($a+".emitSpecular") (1-$isOn);
+		}
+	}
+
+
+
+}
+
+global proc wxII_OpenFinishingPath()
+{
+	string $proj=`workspace -query -fullName`;
+	$proj = `match "[^/\\]+$" $proj`;
+	$proj=`match "roma_sq_[0-z]*_sc_[0-z]*" $proj`;
+	string $projSplit[]=stringToStringArray($proj,"_");
+	string $path="\\\\file-cluster\\GDC\\Projects\\ROMA\\PRJ_roma\\SHOT_roma\\SQ_"+$projSplit[2]+"\\"+$proj+"\\scenes\\finishing";
+	if (`filetest -d $path`)
+	{
+		system("load " + $path );
+	}
+}
+
+global proc lighting_DeleteUnusedNode()
+{
+
+	string $refs[]=`file -q -r`;
+	while (`size $refs`!=0)
+	{
+		for ( $ref in $refs )
+		{
+			if ( `file -q -dr $ref` )
+			{
+				string $xxx=`file -q -rfn $ref`;
+				file -lr $xxx;
+			}
+			file -ir $ref;
+		}
+		$refs=`file -q -r`;
+	}
+
+	string $SG[]=`ls -type shadingEngine`;
+	catchQuiet(`delete $SG`);
+	delete `ls -type ramp`;
+	delete `ls -type file`;
+	select `ls -type "nurbsSurface" -type "mesh"`;
+	source "zzjIdPassInfo.mel";
+	zzjIDPass_Material_Assign("lambert");
+	source "hyperShadePanel.mel";
+	hyperShadePanelMenuCommand("hyperShadePanel1", "deleteUnusedNodes");
+}
+
+
+global proc wxII_TurnBackLightColor()
+{
+	string $lights[] = `ls -type light`;
+	for ($a in $lights)
+	{
+		if (`attributeExists color $a`)
+		{
+			setAttr ($a+".color") -type double3 1 1 1;
+		}
+		if (`attributeExists shadowColor $a`)
+		{
+			setAttr ($a+".shadowColor") -type double3 0 0 0;
+		}
+	}
+}
+
+
+global proc wxII_eyeTools()
+{
+	if(`objExists "Roma_Eyes_AmbLight"`!=1)
+	{
+		//delete all light
+		string $lights[]=`ls -type "light"`;
+		if(`size $lights`>0)
+		{
+			for($eachLight in $lights)
+			{
+				select $eachLight;
+				pickWalk -d up;
+				doDelete;
+			}
+		}
+		string $eye[] = `ls -sl`;
+		if (`size $eye`==2)
+		{
+			for($eachEye in $eye)
+			{
+				select -r 	($eachEye + ".e[114]") ;
+				select -tgl 	($eachEye + ".e[115]") ;
+				py_makeButton();
+				pickWalk -d up;
+				string $tmpR[]=`ls -sl`;
+				$jointR=$tmpR[0];
+				float $p1[]=`xform -q -ws -t ($eachEye +".vtx[56]")`;
+				float $p2[]=`xform -q -ws -t ($eachEye +".vtx[57]")`;
+				float $p3[]={(4*$p2[0]-$p1[0])/3,(4*$p2[1]-$p1[1])/3,(4*$p2[2]-$p1[2])/3};
+				defaultPointLight(1, 1,1,1, 0, 0, 0,0,0, 1, 0);
+				string $lName[]=`ls -sl`;
+				string $dagNames[]=`listConnections -d 1 -s 0 -p 1 ($lName[0]+".instObjGroups[0]")`;
+				disconnectAttr ($lName[0]+".instObjGroups[0]") $dagNames[0];
+				setAttr ($lName[0]+".emitDiffuse") 0;
+				setAttr ($lName[0]+".translateX") $p3[0];
+				setAttr ($lName[0]+".translateY") $p3[1];
+				setAttr ($lName[0]+".translateZ") $p3[2];
+
+				select -tgl $jointR;parent;
+				select -tgl ($eachEye) ;
+				zjMakeLightLinks;
+			}
+		}
+		else
+			{confirmDialog    -title "出错了!!!"    -message "请先选择两个眼球"    -button "OK"     -defaultButton "OK"   -bgc 0.8 0.5 0.5;}
+
+		if (`size $eye`==2)
+		{
+			defaultAmbientLight(1, 0.0, 1,1,1, "0", 0,0,0, "1");
+			string $ambLight[] = `ls -sl`;
+			rename ("|"+$ambLight[0]) "Roma_Eyes_AmbLight";
+		}
+		select -cl  ;
+	}
+}
+global proc wxII_SetFarClipOfCamera()
+{
+	string $currentModelPanel=`getActiveModelPanel`;
+	string $camInModelPanel=`modelPanel -q -cam $currentModelPanel`;
+
+	setAttr ($camInModelPanel+".bestFitClippingPlanes") 0;
+	setAttr ($camInModelPanel+".nearClipPlane") 1;
+	setAttr ($camInModelPanel+".farClipPlane") 1000000;
+}
+
+global proc string getActiveModelPanel()
+{
+	string $activeModelPanel = "";
+
+	// First get the panel that currently has focus
+	string $panel = `getPanel -wf`;
+
+	// Compare the panel's type to confirm it is a "modelPanel"
+	if ( "modelPanel" == `getPanel -to $panel` )
+	{
+		$activeModelPanel = $panel;
+	}
+
+	return $activeModelPanel;
+}
+
+global proc importKikoLight()
+{
+	string $root="//file-cluster/GDC/Resource/Support/Maya/projects/ROMA/import/lighting/";
+	string $kikoName="Kiko_light_rig_test.mb";
+	string $kikoFullName=$root+$kikoName;
+	file -import -type "mayaBinary" -rpr $kikoName -options "v=0"  $kikoFullName;
+
+}
+
+global proc wxII_ImportRenderCam()
+{
+////file;
+//	string $currentWorkSpace=`file -q -sn -shn`;
+//	$currentWorkSpace=`match "^.*[^/]" $currentWorkSpace`;
+//
+//	string $currentProj=`match "[^//]*$" $currentWorkSpace`;
+//	string $currentProjs[]=stringToStringArray($currentProj,"_");
+//	int $test=0;
+//	if (($currentProjs[0]=="lighting")&&($currentProjs[3]=="1001"))
+//	{
+//		 $test=1;
+//	}
+//	else
+//	{
+////currentProject;
+//		$currentWorkSpace=`workspace -q -rd`;
+//		$currentWorkSpace=`match "^.*[^/]" $currentWorkSpace`;
+//
+//		$currentProj=`match "[^//]*$" $currentWorkSpace`;
+//		$currentProjs=stringToStringArray($currentProj,"_");
+//		$test=2;
+//
+//		if (($currentProjs[0]!="roma")||($currentProjs[1]!="sq")||($currentProjs[3]!="sc"))	error "当前工程目录错误";
+//
+//	}
+//
+////onlineProject;
+//	string $dataInProjOnline="";
+//	if ($test==1)
+//	{$dataInProjOnline="//file-cluster/GDC/Projects/ROMA/PRJ_roma/SHOT_roma/sq_"+$currentProjs[1]+"/roma_sq_"+$currentProjs[1]+"_sc_"+$currentProjs[2]+"/scenes/finishing/";}
+//	if ($test==2)
+//	{$dataInProjOnline="//file-cluster/GDC/Projects/ROMA/PRJ_roma/SHOT_roma/sq_"+$currentProjs[2]+"/roma_sq_"+$currentProjs[2]+"_sc_"+$currentProjs[4]+"/scenes/finishing/";}
+//	string $onlineCacheTmp[]=`getFileList -folder $dataInProjOnline`;
+//	if (!`size $onlineCacheTmp`)	error "网上没有相关目录";
+
+	eval "source \"zwGetPath.mel\"";
+	string $dataInProjOnline = `zwGetPath "stereo_cams_approved" ""`;
+
+//CamOnline;
+	string $onlineCam[]=`getFileList -folder $dataInProjOnline -filespec "*CAM*.mb"`;
+
+//	if (`size $onlineCam`>=1)
+//	{
+		if (`window -ex wxIIImportRndCamUI`) deleteUI wxIIImportRndCamUI;
+		window -title "WXII Import Camera" -s 1 -mxb false wxIIImportRndCamUI;
+			columnLayout -rs 5 -adj 1;
+				text -label "   Camera:" -w 45  -align "left";
+			 	textScrollList  -font plainLabelFont  -allowMultiSelection 1 -nr (`size $onlineCam`+1) wxIIIRCtextSL;
+			 	textScrollList  -font plainLabelFont  -allowMultiSelection 1 -vis 0 wxIIIRCtextSLRecord;
+
+			 button -l "import" -c "wxII_ImportRenderCamCMD";
+		window -e -w 270 -h 180 wxIIImportRndCamUI;
+		showWindow wxIIImportRndCamUI;
+
+		for ($a in $onlineCam)
+		{
+			textScrollList -e -append $a wxIIIRCtextSL;
+		}
+		if (`size $onlineCam`>=1)
+		textScrollList -e -selectItem $onlineCam[0] wxIIIRCtextSL;
+		for ($b in $onlineCam)
+		{
+			textScrollList -e -append ($dataInProjOnline+$b) wxIIIRCtextSLRecord;
+		}
+//	}
+}
+
+global proc wxII_ImportRenderCamCMD()
+{
+	int $slCAMIndex[]=`textScrollList -q -selectIndexedItem wxIIIRCtextSL`;
+
+	for ($c in $slCAMIndex)
+	{
+		textScrollList -e -da wxIIIRCtextSLRecord;
+		textScrollList -e -sii $c wxIIIRCtextSLRecord;
+		string $camPaths[]=`textScrollList -q -si wxIIIRCtextSLRecord`;
+		textScrollList -e -da wxIIIRCtextSLRecord;
+
+	//	string $olds[] = `ls -cameras`;
+
+		file -import -type "mayaBinary"  -options "v=0" $camPaths[0];
+		string $cams[]=`ls -dag -type camera "RendercamBake*"`;
+		for ($a in $cams)
+		{
+			select $a;
+			rename `ls -sl` "RendercamShape";
+			pickWalk -d up;
+			rename `ls -sl` "Rendercam";
+
+			select -cl;
+		}
+
+	// 20110512，黄仲维，未启用
+	//	string $news[] = `ls -cameras`;
+	//	for ($new in $news)
+	//	{
+	//		int $find = false;
+	//		for ($old in $olds)
+	//		{
+	//			if ($old == $new)
+	//			{
+	//				$find = true;
+	//				break;
+	//			}
+	//		}
+	//		if (!$find)
+	//		{
+	//			string $lodGroups[] = `ls -type "lodGroup"`;
+	//			for ($lodGroup in $lodGroups)
+	//			{
+	//				string $buf[] = `listConnections -destination false  -type "camera" ($lodGroup + ".cameraMatrix")`;
+	//				if (size($buf))
+	//				{
+	//					evalEcho ("connectAttr -force \"" + $new + ".worldMatrix\" \"" + $lodGroup + ".cameraMatrix\"");
+	//				}
+	//			}
+	//		}
+	//	}
+	}
+}
+
+global proc wxII_DeleteMMExtraChannels()
+{
+	zzjDelAllExtraChanls;
+}
+
+//global proc wxII_zDepth()
+//{
+//	string $shape[]=`ls -type "pfxHair" -ni`;
+//	int $i = 0;
+//	string $GEOs[]={};
+//	for ($a in $shape)
+//	{
+//		string $temp[]=`listRelatives  -f -p $a`;
+//		$GEOs[$i++]=$temp[0];
+//	}
+//	if (`pluginInfo -q -loaded Fur`)
+//	{
+//		string $FurShape[]=`ls -type "FurDescription" `;
+//		for ($b in $FurShape)
+//		{
+//			$GEOs[$i++]=$b;
+//		}
+//	}
+//
+//	string $ShaveShape[]=`ls -type mesh "shave*_importArchive_*"`;
+//	for ($c in $ShaveShape)
+//	{
+//		string $Trans[]=`listRelatives  -f -p $c`;
+//		$GEOs[$i++]=$Trans[0];
+//	}
+//
+//
+//	if (`size $GEOs`)
+//	{
+//		select $GEOs;
+//		MayaManAddModelAttributes(1, 0);
+//
+//		string $MayaManAttri[]=`listConnections -d 0 -s 1 ($GEOs[0]+".MayaManAttsNode")`;
+//		setAttr ($MayaManAttri[0]+".mmma_MaterialOverride") 1;
+//		source "AEMayaManAttributesTemplate.mel";
+//		mmmaCreateShadingGroup ($MayaManAttri[0]+".mmma_Material");
+//		string $MayaManSG[]=`listConnections -d 0 -s 1 ($MayaManAttri[0]+".mmma_Material")`;
+//
+//		string $mmShader=`shadingNode -asShader MayaManCustomShader`;
+//
+//		connectAttr -f ($mmShader+".outColor") ($MayaManSG[0]+".surfaceShader");
+//	//	create a polyCube to get the MMshader avoid to be deleted.
+//		string $MMcube[]=`polyCube -n "zDepth"`;
+//		string $MMcubeShape[]=`listRelatives -shapes $MMcube[0]`;
+//		sets -forceElement $MayaManSG[0] $MMcube[0];
+//		setAttr ($MMcubeShape[0]+".castsShadows") 0;
+//		setAttr ($MMcubeShape[0]+".receiveShadows") 0;
+//		setAttr ($MMcubeShape[0]+".motionBlur") 0;
+//		setAttr ($MMcubeShape[0]+".primaryVisibility") 0;
+//		setAttr ($MMcubeShape[0]+".smoothShading") 0;
+//		setAttr ($MMcubeShape[0]+".visibleInReflections") 0;
+//		setAttr ($MMcubeShape[0]+".visibleInRefractions") 0;
+//		setAttr ($MMcubeShape[0]+".doubleSided") 0;
+//		setAttr ($MMcubeShape[0]+".visibility") 0;
+//	//	setAttr ($MMcubeShape[0]+".intermediateObject") 1;
+//
+//		source "AEMayaManCustomShaderTemplate.mel";
+//		AEMayaManCustomShaderBrowseFile ($mmShader+".ShaderFile") "\\\\file-cluster\\gdc/Resource/Support/AnimalLogic/mayaman2.0.7/shaders/prman13.5/RBW_Zdepth_Hairs.slo" "RenderMan Shader";
+//		string $newMMShader[]=`listConnections -d 0 -s 1 ($MayaManSG[0]+".surfaceShader")`;
+//
+//		MayaManUpdateCustomShader $newMMShader[0] "RBW_Zdepth_Hairs";
+//	}
+//
+//}
+
+
+global proc wxII_mBlur()
+{
+	string $shape[]=`ls -type "pfxHair" -type "mesh" -type "nurbsSurface" -ni`;
+	int $i = 0;
+	string $GEOs[]={};
+	for ($a in $shape)
+	{
+		string $temp[]=`listRelatives -f  -p $a`;
+		$GEOs[$i++]=$temp[0];
+	}
+	select $GEOs;
+	MayaManAddModelAttributes(1, 0);
+
+	string $MayaManAttri[]=`listConnections -d 0 -s 1 ($GEOs[0]+".MayaManAttsNode")`;
+	setAttr ($MayaManAttri[0]+".mmma_MaterialOverride") 1;
+	source "AEMayaManAttributesTemplate.mel";
+	mmmaCreateShadingGroup ($MayaManAttri[0]+".mmma_Material");
+	string $MayaManSG[]=`listConnections -d 0 -s 1 ($MayaManAttri[0]+".mmma_Material")`;
+
+	string $mmShader=`shadingNode -asShader MayaManCustomShader`;
+
+	connectAttr -f ($mmShader+".outColor") ($MayaManSG[0]+".surfaceShader");
+//	create a polyCube to get the MMshader avoid to be deleted.
+	string $MMcube[]=`polyCube -n "mBlur"`;
+	string $MMcubeShape[]=`listRelatives -shapes $MMcube[0]`;
+	sets -forceElement $MayaManSG[0] $MMcube[0];
+	setAttr ($MMcubeShape[0]+".castsShadows") 0;
+	setAttr ($MMcubeShape[0]+".receiveShadows") 0;
+	setAttr ($MMcubeShape[0]+".motionBlur") 0;
+	setAttr ($MMcubeShape[0]+".primaryVisibility") 0;
+	setAttr ($MMcubeShape[0]+".smoothShading") 0;
+	setAttr ($MMcubeShape[0]+".visibleInReflections") 0;
+	setAttr ($MMcubeShape[0]+".visibleInRefractions") 0;
+	setAttr ($MMcubeShape[0]+".doubleSided") 0;
+	setAttr ($MMcubeShape[0]+".visibility") 0;
+//	setAttr ($MMcubeShape[0]+".intermediateObject") 1;
+
+	source "AEMayaManCustomShaderTemplate.mel";
+	AEMayaManCustomShaderBrowseFile ($mmShader+".ShaderFile") "\\\\file-cluster\\gdc/Resource/Support/AnimalLogic/mayaman2.0.7/shaders/prman13.5/RBW_MotionVector.slo" "RenderMan Shader";
+	string $newMMShader[]=`listConnections -d 0 -s 1 ($MayaManSG[0]+".surfaceShader")`;
+
+	setAttr "MayaManNugget.MotionBlurOn" 1;
+	setAttr "MayaManNugget.VertexBlurOn" 1;
+	setAttr "MayaManNugget.CameraBlurOn" 1;
+//	defaultNavigation -defaultTraversal -destination "MayaManAttributes1.mmma_Material";
+//	select $newMMShader[0];
+	MayaManUpdateCustomShader $newMMShader[0] "RBW_MotionVector";
+}
+
+global proc wxII_MMmatte()
+{
+	string $shape[]=`ls -type "mesh" -type "nurbsSurface" -ni`;
+	int $i = 0;
+	string $GEOs[]={};
+	for ($a in $shape)
+	{
+		string $temp[]=`listRelatives  -f -p $a`;
+		$GEOs[$i++]=$temp[0];
+	}
+	select $GEOs;
+	MayaManAddModelAttributes(1, 0);
+
+	string $MayaManAttri[]=`listConnections -d 0 -s 1 ($GEOs[0]+".MayaManAttsNode")`;
+	setAttr ($MayaManAttri[0]+".mmma_MatteObject") 1;
+
+}
+
+global proc wxII_selected_MMmatte()
+{
+	string $shape[]=`ls -sl -dag -type "mesh" -type "nurbsSurface" -ni`;
+	int $i = 0;
+	string $GEOs[]={};
+	for ($a in $shape)
+	{
+		string $temp[]=`listRelatives  -f -p $a`;
+		$GEOs[$i++]=$temp[0];
+	}
+	select $GEOs;
+	MayaManAddModelAttributes(1, 0);
+
+	string $MayaManAttri[]=`listConnections -d 0 -s 1 ($GEOs[0]+".MayaManAttsNode")`;
+	setAttr ($MayaManAttri[0]+".mmma_MatteObject") 1;
+
+}
+
+global proc wxII_ImportLGTLightCMD( string $fileName, string $fileType )
+{
+	file -import -type "mayaBinary"  $fileName;
+}
+global proc wxII_ImportLGTLight()
+{
+	fileBrowserDialog -m 0 -fc "wxII_ImportLGTLightCMD" -an "specify";
+}
+
+
+
+
+
+global proc wxII_PaintFurBaldness()
+{
+	string $filename=`file -q -sn`;
+	if ($filename=="")
+	{
+		error "请先保存文件";
+	}
+
+	string $slOBJ[]=`ls -sl`;
+
+	if (`size $slOBJ`==0)	error"请选择要长毛的面";
+
+	optionVar -clearArray "wxII_PaintFurBaldness_slOBJ";
+	for ($a in $slOBJ)
+	{
+		optionVar -sva "wxII_PaintFurBaldness_slOBJ" $a;
+	}
+
+//	source "//file-cluster/GDC/Resource/Support/Maya/8.5/scripts/FurPluginCreateUI.mel";
+	string $slTools=`currentCtx`;
+	optionVar -sv "wxII_PaintFurBaldness_slTool" $slTools;
+
+	art3dPaintToolScript 3;
+
+	evalDeferred -lowestPriority ("delayedCMD ");
+
+//	file -f -save -type "mayaBinary";
+}
+
+global proc delayedCMD()
+{
+//	zjRemoveNamespace;
+
+	string $slOBJ[]= `optionVar -q "wxII_PaintFurBaldness_slOBJ"`;
+
+	string $slOBJ[]=`ls -sl`;
+	string $slFurFace=`match "^[^\.]*" $slOBJ[0]`;
+
+	select $slFurFace;
+	string $dupFace[]=`duplicate -rr`;
+
+//	Create a new Shade
+	string $tmpShade=`shadingNode -asShader lambert`;
+	$tmpShade=`rename $tmpShade "fur_tmp"`;
+	string $tmpSG=`sets -renderable true -noSurfaceShader true -empty -name ($tmpShade+"SG")`;
+	connectAttr -f ($tmpShade+".outColor") ($tmpSG+".surfaceShader");
+
+	select $dupFace;
+	sets -e -forceElement $tmpSG;
+
+	string $slFurFace_ext[]={};
+	int $i=0;
+	for ($o in $slOBJ)
+	{
+		$slFurFace_ext[$i++]=$dupFace[0] + `match "\\..*" $o`;
+	}
+
+	select $slFurFace_ext;
+
+	setToolTo "art3dPaintContext";
+	art3dPaintAssignFileTextureNow;
+
+	float $c[3] = { 0 , 0 , 0 };
+	eval("art3dPaintCtx" + " -e -rgbflood " + $c[0] + " " + $c[1] + " " + $c[2] + " `currentCtx`");
+	art3dPaintCtx -e -floodall `currentCtx`;
+
+	float $c[3] = { 1 , 1 , 1 };
+	eval("art3dPaintCtx" + " -e -rgbflood " + $c[0] + " " + $c[1] + " " + $c[2] + " `currentCtx`");
+	art3dPaintCtx -e -floodselect `currentCtx`;
+
+	select $dupFace;
+	hyperShade -smn "";
+	string $materails[]=`ls -sl`;
+	string $files[]=`listConnections ($materails[0]+".color")`;
+	if (`nodeType $files[0]`=="tripleShadingSwitch")
+	{
+		$files=`listConnections -d 0 -s 1 -type "file" $files[0]`;
+	}
+
+	string $temp[]=`duplicate $files[0]`;
+	string $FurBaldness_Tex =`rename $temp[0] "wxII_FurBaldness_Tex"`;
+
+	setAttr ($FurBaldness_Tex+".filterType") 0;
+	art3dPaintCtx -e -savetexture `currentCtx`;
+//	查询修改file贴图路径
+
+
+	string $file_path=`getAttr ($files[0]+".fileTextureName")`;
+	string $file_path_ext=`match "[^/\\]*$" $file_path`;
+
+	string $current_project=`workspace -q -rd`;
+
+	string $fileName= `file -q -sn -shn`;
+	$fileName=`match "^[^\.]*" $fileName`;
+
+	string $new_file_path=$current_project+"sourceImages/"+$fileName+"_"+$file_path_ext;
+
+	sysFile -copy $new_file_path $file_path;
+
+	setAttr ($FurBaldness_Tex+".fileTextureName") -type "string" $new_file_path;
+
+	delete $files[0];
+	delete $tmpShade;
+	delete $tmpSG;
+
+//	#########################
+
+	string $furNode="";
+
+	string $rv[]=`listHistory -future 1 $slFurFace`;
+	for ($r in $rv)
+	{
+		if (`nodeType $r`=="FurDescription")
+		{
+			$furNode=$r;
+			break;
+		}
+	}
+
+	if ($furNode!="")
+	{
+		string $lc[]=`listConnections -plugs 1 -d 0 -s 1 ($furNode+".Baldness")`;
+		if (`size $lc`)
+		{
+			disconnectAttr $lc[0] ($furNode+".Baldness");
+		}
+
+		connectAttr -f ($FurBaldness_Tex+".outAlpha") ($furNode+".Baldness");
+//		bakeMappedAttribute($furNode,"Baldness",0,{0},{""},{""});
+
+		string $fur_file=`getAttr ($FurBaldness_Tex+".fileTextureName")`;
+		string $fur_tmp=`match "[^/\\]*$" $fur_file`;
+
+		string $fur_file_path="sourceImages/"+$fur_tmp;
+		setAttr -lock 0 ($furNode+".bm[0]");
+		setAttr ($furNode+".bm[0]") -type "string"  $fur_file_path;
+		setAttr -lock 1 ($furNode+".bm[0]");
+
+	}
+
+
+//	#########################
+	string $slTools =`optionVar -q "wxII_PaintFurBaldness_slTool"`;
+	setToolTo $slTools;
+	select $slOBJ;
+
+	delete $dupFace;
+}
+
+global proc wxII_PaintFurBaldnessRestore()
+{
+	if ((size(`ls -sl`))!=1)
+	{
+		error "请选择fur";
+	}
+	string $his[]=listHistory();
+	string $FurDescription="";
+	for ($h in $his)
+	{
+		if (`nodeType $h `=="FurDescription")
+		$FurDescription=$h;
+	}
+
+	if ($FurDescription!="")
+	{
+		setAttr -lock 0 ($FurDescription+".BaldnessMap[0]");
+		setAttr -type "string" ($FurDescription+".BaldnessMap[0]") "";
+
+		string $tex[]=`listConnections -s 1 -d 0 ($FurDescription+".Baldness")`;
+		disconnectAttr ($tex[0]+".outAlpha") ($FurDescription+".Baldness");
+	}
+}

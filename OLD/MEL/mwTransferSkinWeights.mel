@@ -1,0 +1,157 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: mw
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+global proc mwTransferSkinWeights(int $z)
+{
+	$tmp = `ls -sl`;
+	string $cv;
+	if($z==0)
+	{
+		$cv = $tmp[0];
+	}
+	else
+	{
+		$cv = $tmp[1];
+	}
+	print ("CV: "+$cv+"\n");
+	string $name_parts[];
+	int $tok = tokenize($cv, ".", $name_parts);
+	string $shape[] = `listRelatives -c $name_parts[0]`;
+	string $pt = ($shape[0]+"."+$name_parts[1]);
+	string $cons[] = `listHistory -il 1 $shape[0]`;
+	string $cluster;
+	for($con in $cons)
+	{
+		string $type[] = `ls -st $con`;
+		int $comp = `strcmp "skinCluster" $type[1]`;
+		if($comp==0)
+		{
+			$cluster = $con;
+			print ("SKIN CLUSTER: "+$cluster+"\n");
+			break;
+		}
+	}
+	string $trans[] = `skinPercent -ib 0.00001 -q -t $cluster $pt`;
+	string $tran;
+	int $spacing = 0;
+	for($tran in $trans)
+	{
+		if(`size $tran`>$spacing)
+		{
+			$spacing = `size $tran`;
+		}
+	}
+	$spacing = $spacing + 5;
+	string $val_list[];
+	int $v = 0;
+	for($tran in $trans)
+	{
+		if(`size $tran`<$spacing)
+		{
+			float $val = `skinPercent -t $tran -q $cluster $pt`;
+			print ("JOINT: "+$tran);
+			for($i=`size $tran`;$i<$spacing;$i++)
+			{
+				print " ";
+			}
+			print ("WEIGHT: "+$val+"\n");
+			$val_list[$v] = $val;
+			$v++;
+		}
+	}
+
+	//COPY TO SECOND CV
+	string $cv1;
+	if($z==0)
+	{
+		$cv1 = $tmp[1];
+	}
+	else
+	{
+		$cv1 = $tmp[0];
+	}
+	print ("COPYING WEIGHTS TO CV: "+$cv1+"\n");
+	string $name_parts1[];
+	int $tok = tokenize($cv1, ".", $name_parts1);
+	string $shape1[] = `listRelatives -c $name_parts1[0]`;
+	string $pt1 = ($shape1[0]+"."+$name_parts1[1]);
+	string $cons1[] = `listHistory -il 1 $shape1[0]`;
+	string $cluster1;
+	for($con1 in $cons1)
+	{
+		string $type[] = `ls -st $con1`;
+		int $comp = `strcmp "skinCluster" $type[1]`;
+		if($comp==0)
+		{
+			$cluster1 = $con1;
+			print ("SKIN CLUSTER: "+$cluster1+"\n");
+			break;
+		}
+	}
+
+	//CHECK TRANSFORMS
+	string $trans1[] = `skinPercent -ib 0.00001 -q -t $cluster1 $pt1`;
+	if(`size $trans`>=`size $trans1`)
+	{
+		string $tList[];
+		int $t = 0;
+		for($tran in $trans)
+		{
+			int $match = 0;
+			for($tran1 in $trans1)
+			{
+				if(`strcmp $tran $tran1`==0)
+				{
+					$match = 1;
+					break;
+				}
+			}
+			if($match==0)
+			{
+				print ("ADDING INFLUENCE: "+$tran+" TO CLUSTER: "+$cluster1+"\n");
+				$tList[$t] = $tran;
+				$t++;
+			}
+		}
+		skinCluster -e -ai $tList $cluster1;
+	}
+	if(`size $trans`<=`size $trans1`)
+	{
+		string $tList[];
+		int $t = 0;
+		for($tran1 in $trans1)
+		{
+			int $match = 0;
+			for($tran in $trans)
+			{
+				if(`strcmp $tran $tran1`==0)
+				{
+					$match = 1;
+					break;
+				}
+			}
+			if($match==0)
+			{
+				print ("REMOVING INFLUENCE: "+$tran1+" FROM CLUSTER: "+$cluster1+"\n");
+				$tList[$t] = $tran;
+				$t++;
+			}
+		}
+		skinCluster -e -ri $tList $cluster1;
+	}
+
+	string $cmd = "skinPercent ";
+	for($i=0;$i<$v;$i++)
+	{
+		$cmd = ($cmd+"-tv "+$trans[$i]+" "+$val_list[$i]+" ");
+	}
+	$cmd = ($cmd+$cluster1+" "+$cv1);
+	eval $cmd;
+}

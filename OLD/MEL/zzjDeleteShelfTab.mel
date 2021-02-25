@@ -1,0 +1,80 @@
+global proc int zzjDeleteShelfTab(string $shelfName)
+{
+	int $returnStatus = 0;
+	global string $gShelfForm;
+	global string $gShelfTopLevel;
+
+	setParent $gShelfTopLevel;
+	string $shelves[] = `tabLayout -q -ca $gShelfTopLevel`;
+	int $numShelves = size($shelves);
+
+	int $indexArr[];
+	int $index = 0;
+	int $nItems = 0;
+
+
+	// Confirm the delete
+	if(!`exists shelfLabel_melToUI` ){
+		source "shelfLabel.mel";
+	}
+
+	string $msg        = (uiRes("m_deleteShelfTab.kDeletionConfirmMsg"));
+	string $shelfLabel = `shelfLabel_melToUI $shelfName`;
+	string $dlgMsg     = `format -s $shelfLabel $msg`;
+	string $cancel     = (uiRes("m_deleteShelfTab.kCancel"));
+
+	// Okay, now we can delete the shelf tab
+
+	int $i = 0;
+	int $nShelves = 0;
+	int $shelfNum = 0;
+
+	deleteUI -layout ($gShelfTopLevel + "|" + $shelfName);
+
+	//  update the preferences.
+	//
+	$nShelves = `optionVar -q numShelves`;
+	for ($shelfNum = 1; $shelfNum <= $nShelves; $shelfNum++) {
+		if ($shelfName == `optionVar -q ("shelfName" + $shelfNum)`) {
+			break;
+		}
+	}
+	for ($i = $shelfNum; $i <= $nShelves; $i++) {
+		optionVar
+			-iv ("shelfLoad" + $i) `optionVar -q ("shelfLoad" + ($i+1))`
+			-sv ("shelfName" + $i) `optionVar -q ("shelfName" + ($i+1))`
+			-sv ("shelfFile" + $i) `optionVar -q ("shelfFile" + ($i+1))`;
+	}
+	optionVar -remove ("shelfLoad" + $nShelves)
+		-remove ("shelfName" + $nShelves)
+		-remove ("shelfFile" + $nShelves);
+	$nShelves--;
+	optionVar -iv numShelves $nShelves;
+
+	string $shelfDirs = `internalVar -userShelfDir`;
+	string $shelfArray[];
+	string $PATH_SEPARATOR = `about -win`? ";" : ":";
+	tokenize($shelfDirs, $PATH_SEPARATOR, $shelfArray);
+	for( $i = 0; $i < size($shelfArray); $i++ ) {
+		$fileName = ($shelfArray[$i] + "shelf_" + $shelfName + ".mel");
+		string $deletedFileName = $fileName + ".deleted";
+
+		//	Fix for bug #125494.  Remove the .deleted file if it already exists.
+		//
+		if (`filetest -r $deletedFileName`) {
+			sysFile -delete $deletedFileName;
+		}
+
+		if (`file -q -exists $fileName`) {
+			sysFile -rename $deletedFileName $fileName;
+			break;
+		}
+	}
+
+	//  Make sure the new active shelf tab has buttons.
+	shelfTabChange();
+
+	$returnStatus = 1;
+
+	return $returnStatus;
+}

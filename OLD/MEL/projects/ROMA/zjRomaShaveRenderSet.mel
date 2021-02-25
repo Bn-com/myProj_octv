@@ -1,0 +1,92 @@
+proc zjRemoveShaveCache()
+{
+	select`ls -type transform -dag "GRP_shaveDisplay"`;
+	catchQuiet(`deleteGeometryCache`);
+
+	select`ls -type transform -dag "GRP_Ribboxes"`;
+	catchQuiet(`deleteGeometryCache`);
+
+//	select`ls -type transform -dag "shave_importArchive_GROUP"`;
+//	catchQuiet(`deleteGeometryCache`);
+//	*************************************************************************
+	string $deforms[]=`ls -type mesh "shave?isplay*Deformed*"`;
+	if (`size $deforms`)	delete $deforms;
+	string $shavedisShape[]=`ls -type mesh "shave*isplay*"`;
+	for ($a in $shavedisShape)
+	{
+		setAttr ($a+".intermediateObject") 0;
+	}
+//	*************************************************************************
+	string $deforms[]=`ls -type mesh "shave*_importArchive_*eformed*"`;
+	if (`size $deforms`)	delete $deforms;
+	string $shavedisShape[]=`ls -type mesh "shave*_importArchive_*"`;
+	for ($a in $shavedisShape)
+	{
+		setAttr ($a+".intermediateObject") 0;
+		setAttr ($a+".lodVisibility") 0;
+	}
+//	*************************************************************************
+
+}
+global proc zjRomaShaveRenderSet()
+{
+	string $fileRef[]=`file -q -r`;
+	
+	for ($item in $fileRef)
+	{
+		file -importReference $fileRef;
+	}
+	zjRemoveNamespace;
+	zjRemoveShaveCache;
+	
+	if (`pluginInfo -q -loaded "shaveNode.mll"`)
+		setAttr -type "string" shaveGlobals.ribStuff "";
+	//设置毛发渲染属性
+	string $scencename=`file -query -shortName -sceneName`;
+	string $buffer[];
+	$numTokens = `tokenize $scencename "." $buffer`;
+	string $rendererNamesGUI[] = `MayaManInfo -rendererguinames`;
+	setAttr -type "string" shaveGlobals.ribStuff "";
+	setAttr "MayaManNugget.Renderer" -type "string" $rendererNamesGUI[10];
+//	setAttr "MayaManNugget.RibBase" -type "string" $buffer[0];
+	string $RibBase = zwGetPath("RibBase", "");
+	zwSetAttrStr "MayaManNugget.RibBase" $RibBase;
+
+	string $cmd = "string $proPath = \"D:\/MAYAMAN\/RIB\/\";\n";
+	$cmd += "string $sceneName = `file -q -sn -shn`;\n";
+	$cmd += "string $shn = basename($sceneName , \".mb\");\n";
+	$cmd += "string $sfolder = $proPath + $shn + \"/\" + `currentTime -q`;\n";
+	$cmd += "if (!`filetest -d $sfolder`) {\n";
+	$cmd += "	sysFile -makeDir $sfolder;\n";
+	$cmd += "}\n";
+	$cmd += "string $sd[] = `ls -tr -ni \"*GRP_shaveDisplay\" \"*GRP_shavedisplay\"`;\n";
+	$cmd += "string $shaveDisplayItem[] = `listRelatives -c -type transform -ni $sd[0]`;\n";
+	$cmd += "int $curFrame = `currentTime -q`;\n";
+	$cmd += "for ($i=0;$i<size($shaveDisplayItem);$i++)\n";
+	$cmd += "{\n";
+	$cmd += "	setAttr ($shaveDisplayItem[$i] + \".visibility\") 1;\n";
+	$cmd += "	for ($j=0;$j<size($shaveDisplayItem);$j++)\n";
+	$cmd += "	{\n";
+	$cmd += "		if ($j != $i)\n";
+	$cmd += "			setAttr ($shaveDisplayItem[$j] + \".visibility\") 0;\n";
+	$cmd += "	}\n";
+//	$cmd += "	shaveWriteRib -b -gz -n -opa -rtc -wc -isg ($proPath + \"/$(SCENENAME)/$(FRAME)/\" + $shaveDisplayItem[$i] + \".rib\");\n";
+	$cmd += "	shaveWriteRib -b -gz -n -opa -rtc -wc -isg ($sfolder + \"/\" + $shaveDisplayItem[$i] + \".rib\");\n";
+	$cmd += "}\n";
+	$cmd += "for ($i=0;$i<size($shaveDisplayItem);$i++)\n";
+	$cmd += "{\n";
+	$cmd += "	setAttr ($shaveDisplayItem[$i] + \".visibility\") 1;\n";
+	$cmd += "}";
+	setAttr -type "string" "MayaManNugget.PreFrameScript" $cmd ;
+	setAttr -type "string" "MayaManNugget.PreRenderScript" "" ;
+
+	string $optionstr = "\n	Attribute \"user\" \"float sigmaHiding\" [1] # SIGMA HIDING ON/OFF\n";
+	$optionstr += "	IfBegin \"$user:sigmaHiding != 0\"\n\n";
+	$optionstr += "	Hider \"stochastic\" \"int sigma\" [1] \"float sigmablur\" [1.5]\n";
+	$optionstr += "	IfEnd\n\n";
+	$optionstr += "	Hider \"hidden\" \"int samplemotion\" [0]\n";
+	setAttr -type "string" "MayaManNugget.UserRibOptions" $optionstr ;
+
+	print "MayaMan设置Shave渲染设置完成";
+}
+

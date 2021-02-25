@@ -1,0 +1,993 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddBratzSetupTools
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: June 10 2006
+//	Changed Projcet Date: June 22 2006
+//	Last Updated: January 13 2007
+//	Update/Change this file at: Julii FreeMAN
+//	Note:Bratz Setup Tools Pack 包括以下东东
+//		导入基本joint 工具
+//		统一轴向工具
+//		导入控制器工具
+//		手臂与腿部的工具
+//		set创建工具
+//		bindPose数据备份工具及-31,0帧keyframe工具
+//		处理proxy hair
+//		添加smooth Node工具
+//		创建层工具
+//
+//	modify record:
+//		2007-1-13 修改upper_Body控制器上的smooth属性为unkeyable-display
+//		以解决动画误keyframe的问题
+//////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzBaseJoint
+// 
+// 导入基本骨骼
+// Arguments :
+//  $charName 角色名
+// Return : NULL
+//////////////////////////////////////////////////////////
+global proc ddBratzBaseJoint(string $charName)
+{
+ if(`objExists ($charName + "_lobackA")`)
+ {
+  error "骨骼已经存在!" ;
+ }
+ //导入bratz的基本骨架
+ file -import "Z://Resource//Support//Maya//Import//Lionelville//bratz_base_joint.ma" ;
+ source ddBatchRename ;
+ ddBatchRename "bratzBaseJoint_MASTER" "" "" "bratzBaseJoint" $charName ;
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzLayer
+// 
+// 创建角色层
+//
+// Arguments:
+//  $charName 角色名 
+//////////////////////////////////////////////////////////
+global proc ddBratzLayer(string $charName)
+{
+ if(!`objExists ($charName + "_skeleton")`)
+ {
+  createDisplayLayer -name ($charName + "_skeleton") -number 1 -empty ;
+ }
+ if(!`objExists ($charName + "_skinning")`)
+ {
+  createDisplayLayer -name ($charName + "_skinning") -number 2 -empty ;
+ }
+ if(!`objExists ($charName + "_skinProxy")`)
+ {
+  createDisplayLayer -name ($charName + "_skinProxy") -number 3 -empty ;
+ }
+ /*if(!`objExists ($charName + "_hairProxy")`)
+ {
+  createDisplayLayer -name ($charName + "_hairProxy") -number 4 -empty ;
+ }*/
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddOrientBratzJoint
+// 
+// 整理
+//
+// Arguments:
+//  $charName 角色名 
+//////////////////////////////////////////////////////////
+global proc ddOrientBratzJoint(string $charName)
+{
+ string $selected[] ;
+ source ddOrientJointTools ;
+ 
+ select -r ($charName + "_eyeJoint") ;
+ parent -w ;
+
+ select -r ($charName + "_MASTER") ;
+
+ makeIdentity -apply true
+	      -t 1
+	      -r 1
+	      -s 1
+	      -n 0
+	      -jointOrient ;
+ 
+ parent ($charName + "_eyeJoint") ($charName + "_head") ;
+
+ select -r ($charName + "_arm_l") ;
+
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "yup" ;
+ 
+ joint -edit -orientJoint xyz -secondaryAxisOrient "zup" ($charName + "_elbow_l") ;
+
+ /*
+ select -r   ($charName + "_arm1_l") ;
+ select -tgl ($charName + "_arm2_l") ;
+ select -tgl ($charName + "_arm3_l") ;
+ select -tgl ($charName + "_arm4_l") ;
+ select -tgl ($charName + "_forearm1_l") ;
+ select -tgl ($charName + "_forearm2_l") ;
+ select -tgl ($charName + "_forearm3_l") ;
+ select -tgl ($charName + "_forearm4_l") ;
+ joint -edit -orientJoint none ;
+ */
+
+ select -cl ;
+ for($i=1;$i<8;$i++)
+ {
+  if(objExists ($charName + "_arm" + $i + "_l"))
+  {
+   select -tgl ($charName + "_arm" + $i + "_l") ;
+  }
+
+  if(objExists ($charName + "_forearm" + $i + "_l"))
+  {
+   select -tgl ($charName + "_forearm" + $i + "_l") ;
+  }
+  
+ }
+
+ $selected = `ls -sl` ;
+ if(size($selected))
+ {
+  joint -edit -orientJoint none ;
+ }
+
+ //thumb 处理拇指
+ float $dot1[3],$dot2[3] ;
+ string $locatorName[1] ;
+ $locatorName = `spaceLocator -p 0 0 0` ;
+ $dot1 = `joint -q -p ($charName + "_thumbA_l")` ;
+ $dot2 = `joint -q -p ($charName + "_thumbD_l")` ;
+ select -r $locatorName[0] ;
+ move -ws -absolute ($dot1[0] + ($dot2[0] - $dot1[0])/2)
+	($dot1[1] + ($dot2[1] - $dot1[1])/2)
+	($dot1[2] + ($dot2[2] - $dot1[2])/2) ;
+ select -r ($charName + "_thumbA_l") ;
+ ddOrientJoint("ddOJT_xyz",8,$locatorName[0],1,1,0,1) ;
+ delete $locatorName[0] ;
+ select -r   ($charName + "_thumbA_l.rotateAxis") ;
+ select -tgl ($charName + "_thumbB_l.rotateAxis") ;
+ select -tgl ($charName + "_thumbC_l.rotateAxis") ;
+ rotate -r -os -180 0 0 ;
+
+ delete ($charName + "_shoulder_r") ;
+
+ select -r ($charName + "_shoulder_l") ;
+ mirrorJoint -mirrorYZ
+	     -mirrorBehavior
+	     -searchReplace "_l" "_r" ;
+
+
+ //处理leg
+ select -r ($charName + "_leg_l") ;
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "zdown" ;
+
+ select -r ($charName + "_toe_l") ;
+ joint -edit -orientJoint xyz -children -secondaryAxisOrient "yup" ;
+
+
+ joint -edit -orientJoint none ($charName + "_ankle_l") ;
+
+ delete ($charName + "_leg_r") ;
+ 
+ select -r ($charName + "_leg_l") ;
+ mirrorJoint -mirrorYZ
+	     -mirrorBehavior
+	     -searchReplace "_l" "_r" ;
+ rename ($charName + "_reg_r") ($charName + "_leg_r") ;
+ select -r ($charName + "_lobackA") ; ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzControlObject
+// 
+// 导入控制器
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddBratzControlObject(string $charName)
+{
+ float $tempArray[] ;
+ if(!`objExists ($charName + "_lobackA")`)
+ {
+  error "基本骨骼不存在!" ;
+ }
+ if(`objExists ($charName + "_Upper_Body")`)
+ {
+  error "控制器已经存在!" ;
+ }
+ //导入bratz基本控制器
+ file -import "Z://Resource//Support//Maya//Import//Lionelville//bratzControlCurve.mb" ;
+ source ddBatchRename ;
+
+ ddBatchRename "base_eyeCTRL" "" "" "base" $charName ;
+ ddBatchRename "base_Upper_Body" "" "" "base" $charName ;
+ //ddBatchRename "base_Pelvis" "" "" "base" $charName ;
+ //ddBatchRename "base_Chest" "" "" "base" $charName ;
+
+ //$tempArray = `xform -query -absolute ($charName + "_lobackA")` ;
+ //move
+ 
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzArmLegSetup
+// 
+// 创建手臂与脚部的设置
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddBratzArmLegSetup(string $charName)
+{
+ source ddBratzArmSetup ;
+ source ddLegSetup ;
+ 
+ ddBratzArmSetup $charName "l" ;
+ ddBratzArmSetup $charName "r" ;
+ 
+ ddLegSetup $charName "l" ;
+ ddLegSetup $charName "r" ;
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzAddArmLegPoleVecter
+// 
+// 添加pole Vector 控制
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddBratzAddArmLegPoleVecter(string $charName)
+{
+ float $tempFloatArray[3],$tempFloat ;
+ //定位腿部分poleVectorCon
+ //left leg
+ spaceLocator -position 0 0 0 -name ($charName + "_legPoleVecterCon_l") ;
+ spaceLocator -position 0 0 0 -name ($charName + "_legPoleVecterConAim_l") ;
+ spaceLocator -position 0 0 0 -name ($charName + "_legAimConstraintCon_l") ;
+
+ $tempFloatArray = `joint -query -position ($charName + "_leg_l")` ;
+ $tempFloatArray2 = `joint -query -position ($charName + "_ankle_l")` ;
+ $tempFloat = `ddObjectDistance ($charName + "_leg_l") ($charName + "_kneeA_l")` ;
+ $tempFloat2 = `ddObjectDistance ($charName + "_ankle_l") ($charName + "_toe_l")` ;
+ 
+ move -absolute -worldSpace $tempFloatArray[0] ($tempFloatArray[1] - $tempFloat) ($tempFloatArray[2] + $tempFloat*2/3) ($charName + "_legPoleVecterCon_l") ;
+ move -absolute -worldSpace $tempFloatArray[0] $tempFloatArray[1] $tempFloatArray[2] ($charName + "_legPoleVecterConAim_l") ;
+ parent ($charName + "_legPoleVecterCon_l") ($charName + "_legPoleVecterConAim_l") ;
+ move -absolute -worldSpace ($tempFloatArray2[0] + $tempFloat2/2) $tempFloatArray2[1] $tempFloatArray2[2] ($charName + "_legAimConstraintCon_l") ;
+
+ aimConstraint -maintainOffset -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject ($charName + "_legAimConstraintCon_l") ($charName + "_leg_ikHandle_l") ($charName + "_legPoleVecterConAim_l") ;
+ poleVectorConstraint -weight 1 ($charName + "_legPoleVecterCon_l") ($charName + "_leg_ikHandle_l") ;
+
+ group -name ($charName + "_legPoleVecterConGrp_l") ($charName + "_legPoleVecterConAim_l") ;
+
+ parent ($charName + "_legPoleVecterConGrp_l") ($charName + "_lobackA") ;
+ parent ($charName + "_legAimConstraintCon_l") ($charName + "_footCon_l") ;
+/* 
+   //leg_r
+ spaceLocator -p 0 0 0 -name ($charName + "_legPoleVecterCon_r") ;
+ spaceLocator -p 0 0 0 -name ($charName + "_legPoleVecterConAim_r") ;
+ spaceLocator -p 0 0 0 -name ($charName + "_legAimConstraintCon_r") ;
+ 
+ $tempFloatArray = `joint -query -position ($charName + "_leg_r")` ;
+ $tempFloatArray2 = `joint -query -position ($charName + "_ankle_r")` ;
+ $tempFloat = `ddObjectDistance ($charName + "_leg_r") ($charName + "_kneeA_r")` ;
+ $tempFloat2 = `ddObjectDistance ($charName + "_ankle_r") ($charName + "_toe_r")` ;
+ 
+ move -absolute -worldSpace $tempFloatArray[0] ($tempFloatArray[1] - $tempFloat) ($tempFloatArray[2] + $tempFloat*2/3) ($charName + "_legPoleVecterCon_r") ;
+ move -absolute -worldSpace $tempFloatArray[0] $tempFloatArray[1] $tempFloatArray[2] ($charName + "_legPoleVecterConAim_r") ;
+ parent ($charName + "_legPoleVecterCon_r") ($charName + "_legPoleVecterConAim_r") ;
+ move -absolute -worldSpace ($tempFloatArray2[0] - $tempFloat2/2) $tempFloatArray2[1] $tempFloatArray2[2] ($charName + "_legAimConstraintCon_r") ;
+
+ aimConstraint -mo -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject ($charName + "_legAimConstraintCon_r") ($charName + "_leg_ikHandle_r") ($charName + "_legPoleVecterConAim_r") ;
+ poleVectorConstraint -weight 1 ($charName + "_legPoleVecterCon_r") ($charName + "_leg_ikHandle_r") ;
+
+ group -name ($charName + "_legPoleVecterConGrp_r") ($charName + "_legPoleVecterConAim_r") ;
+
+ parent ($charName + "_legPoleVecterConGrp_r") ($charName + "_lobackA") ;
+ parent ($charName + "_legAimConstraintCon_r") ($charName + "_footCon_r") ;
+
+
+
+  //定位手部分poleVectorCon
+
+   //arm_l
+ spaceLocator -p 0 0 0 -name ($charName + "_armPoleVecterCon_l") ;
+ spaceLocator -p 0 0 0 -name ($charName + "_armPoleVecterConAim_l") ;
+ spaceLocator -p 0 0 0 -name ($charName + "_armAimConstraintCon_l") ;
+
+ $tempFloatArray = `joint -query -position ($charName + "_arm_l")` ;
+ $tempFloatArray2 = `joint -query -position ($charName + "_wrist_l")` ;
+ $tempFloat = `ddObjectDistance ($charName + "_arm_l") ($charName + "_wrist_l")` ;
+
+ move -absolute -worldSpace $tempFloatArray[0] ($tempFloatArray[1] - $tempFloat) ($tempFloatArray[2] + $tempFloat*2/3) ($charName + "_armPoleVecterCon_l") ;
+ move -absolute -worldSpace ($tempFloatArray[0]+$tempFloat) $tempFloatArray[1] ($tempFloatArray[2]-$tempFloat*3/4) ($charName + "_armPoleVecterConAim_l") ;
+ move -absolute -worldSpace $tempFloatArray2[0] ($tempFloatArray2[1] + $tempFloat/5) $tempFloatArray2[2] ($charName + "_armAimConstraintCon_l") ;
+ parent ($charName + "_armPoleVecterCon_l") ($charName + "_armPoleVecterConAim_l") ;
+
+ aimConstraint -mo -weight 1 -aimVector 1 0 0 -upVector 0 1 0 -worldUpType "object" -worldUpObject ($charName + "_armAimConstraintCon_l") ($charName + "_armHandle_l") ($charName + "_armPoleVecterConAim_l") ;
+ poleVectorConstraint -weight 1 ($charName + "_armPoleVecterCon_l") ($charName + "_armHandle_l") ;
+
+ group -name ($charName + "_armPoleVecterConGrp_l") ($charName + "_armPoleVecterConAim_l") ;
+
+ parent ($charName + "_armPoleVecterConGrp_l") ($charName + "_shoulder_l") ;
+ parent ($charName + "_armAimConstraintCon_l") ($charName + "_MASTER") ;
+*/
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzSet
+// 
+// 创建角色set
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+global proc ddBratzSet(string $charName)
+{
+ if(`objExists ($charName + "_MASTER")`)
+ {
+  
+ 
+
+ if(`objExists ($charName + "_set")`)
+ {
+  delete ($charName + "_set") ;
+ }
+ 
+ select -r ($charName + "_MASTER") ;
+ select -tgl ($charName + "_Upper_Body") ;
+ select -tgl ($charName + "_Chest") ;
+ select -tgl ($charName + "_Pelvis") ;
+
+ select -tgl ($charName + "_footCon_l") ;
+ select -tgl ($charName + "_footCon_r") ;
+
+ select -tgl ($charName + "_neckA") ;
+ select -tgl ($charName + "_neckB") ;
+ select -tgl ($charName + "_head") ;
+ select -tgl ($charName + "_eyeCTRL") ;
+ select -tgl ($charName + "_l_eye") ;
+ select -tgl ($charName + "_r_eye") ;
+
+ select -tgl ($charName + "_shoulder_l") ;
+ select -tgl ($charName + "_arm_l") ;
+ select -tgl ($charName + "_elbow_l") ;
+ select -tgl ($charName + "_thumbA_l") ;
+ select -tgl ($charName + "_thumbB_l") ;
+ select -tgl ($charName + "_thumbC_l") ;
+ select -tgl ($charName + "_finger1A_l") ;
+ select -tgl ($charName + "_finger1B_l") ;
+ select -tgl ($charName + "_finger1C_l") ;
+ select -tgl ($charName + "_finger2A_l") ;
+ select -tgl ($charName + "_finger2B_l") ;
+ select -tgl ($charName + "_finger2C_l") ;
+ select -tgl ($charName + "_finger3A_l") ;
+ select -tgl ($charName + "_finger3B_l") ;
+ select -tgl ($charName + "_finger3C_l") ;
+ select -tgl ($charName + "_finger4A_l") ;
+ select -tgl ($charName + "_finger4B_l") ;
+ select -tgl ($charName + "_finger4C_l") ;
+ select -tgl ($charName + "_wristCon_l") ;
+
+ select -tgl ($charName + "_shoulder_r") ;
+ select -tgl ($charName + "_arm_r") ;
+ select -tgl ($charName + "_elbow_r") ;
+ select -tgl ($charName + "_thumbA_r") ;
+ select -tgl ($charName + "_thumbB_r") ;
+ select -tgl ($charName + "_thumbC_r") ;
+ select -tgl ($charName + "_finger1A_r") ;
+ select -tgl ($charName + "_finger1B_r") ;
+ select -tgl ($charName + "_finger1C_r") ;
+ select -tgl ($charName + "_finger2A_r") ;
+ select -tgl ($charName + "_finger2B_r") ;
+ select -tgl ($charName + "_finger2C_r") ;
+ select -tgl ($charName + "_finger3A_r") ;
+ select -tgl ($charName + "_finger3B_r") ;
+ select -tgl ($charName + "_finger3C_r") ;
+ select -tgl ($charName + "_finger4A_r") ;
+ select -tgl ($charName + "_finger4B_r") ;
+ select -tgl ($charName + "_finger4C_r") ;
+ select -tgl ($charName + "_wristCon_r") ;
+
+ select -tgl ($charName + "_world_wristCon_l") ;
+ select -tgl ($charName + "_world_wristCon_r") ;
+
+/*($charName + "_leg_l")
+($charName + "_kneeA_l")
+($charName + "_kneeB_l")
+($charName + "_ankle_l")
+($charName + "_toe_l")
+
+($charName + "_leg_r")
+($charName + "_kneeA_r")
+($charName + "_kneeB_r")
+($charName + "_ankle_r")
+($charName + "_toe_r")
+
+
+
+($charName + "_Left_Eye")
+($charName + "_Right_Eye")
+($charName + "_CtrlX_Lips")
+($charName + "_Lip_Twist_Up_Down")
+
+($charName + "_U")
+($charName + "_M")
+($charName + "_FV")
+($charName + "_OOO")
+
+($charName + "_Jaw_Rot")
+
+($charName + "_R_Smile_Sad")
+($charName + "_L_Smile_Sad")
+
+($charName + "_Ctrl_L_Lids")
+
+($charName + "_Ctrl_R_Lids")
+($charName + "_Lip_In_Kiss")
+
+($charName + "_T_L")
+($charName + "_L_sneer")
+($charName + "_EEE")
+($charName + "_R_sneer")
+($charName + "_Puff_O_Smile")
+*/
+
+ sets -name ($charName + "_set") ;
+ select -cl ;
+
+ }
+ else
+ {
+  error "角色名可能选择错误在或者不存在！" ;
+ }
+ 
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzBindPose
+// 
+// 备份 bindPose 数据及 -31,0 帧 keyframe
+//
+// Arguments:
+//	$charName 角色名
+// Return :
+//	null
+//////////////////////////////////////////////////////////
+global proc ddBratzBindPose(string $charName)
+{
+  if(`objExists ($charName + "_set")`)
+  {
+   select -r ($charName + "_set") ;
+   slSavePose ;
+   slKeyInitial ;
+  }
+  else
+  {
+   error ($charName + "_set 并未建立！") ;
+  }
+
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzAddSmooth
+// 
+// 为polygon物体添加smooth node
+//
+// Arguments:
+//	$charName 角色名
+// Return :
+//	null
+//////////////////////////////////////////////////////////
+global proc ddBratzAddSmooth(string $charName)
+{
+ int $sign = 0;
+ string $selected[],$temp1,$temp2,$tempSmooth[],$tempArray[],$historyTemp[] ;
+
+ if(objExists ($charName + "_MASTER"))
+ {
+  select -r ($charName + "_MASTER") ;
+ }
+ else
+ {
+  error "缺少MASTER!或者角色选择错误!" ;
+ }
+ 
+ if(objExists ($charName + "_MISC"))
+ {
+  select -tgl ($charName + "_MISC") ;
+ }
+ else if(objExists ($charName + "_GEO"))
+ {
+  select -tgl ($charName + "_GEO") ;
+ }
+ else
+ {
+  error "缺少GEO!" ;
+ }
+ 
+ select -hi ;
+ $selected = `ls -sl` ;
+
+ for($temp1 in $selected)
+ {
+  if(`nodeType $temp1` == "mesh")
+  {
+   $tempArray = `listHistory $temp1` ;
+  
+   for($temp2 in $tempArray)
+   {
+    if(`nodeType $temp2` == "polySmoothFace")
+    {
+     $sign = 1 ;
+     if(`isConnected ($charName + "_Upper_Body.Smooth") ($temp2 + ".divisions")`)
+     {
+      break ;
+     }
+     else
+     {
+      connectAttr ($charName + "_Upper_Body.Smooth") ($temp2 + ".divisions") ;
+      break ;
+     }
+    }
+
+   }
+   
+   if($sign != 1)
+   {
+    $tempSmooth = `polySmooth -mth 0
+ 			      -dv 1
+			      -c 1
+			      -kb 0
+			      -ksb 1
+			      -khe 0
+			      -kt 1
+			      -kmb 1
+			      -suv 1
+			      -sl 1
+			      -dpe 1
+			      -ps 0.1
+			      -ro 1
+			      -ch 1
+			      $temp1 ` ;
+    connectAttr ($charName + "_Upper_Body.Smooth") ($tempSmooth[0] + ".divisions") ;
+    $sign = 0 ;
+   }
+
+  }
+ }
+
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzLockHide
+// 
+// 无用属性处理
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc ddBratzLockHide(string $charName)
+{
+ source ddSetBratzCharAttrib ;
+ 
+ ddSetBartzArmAttrib $charName "l" ;
+ ddSetBartzArmAttrib $charName "r" ;
+
+ ddSetBratzLegAttrib $charName "l" ;
+ ddSetBratzLegAttrib $charName "r" ;
+
+ ddSetBratzHBAttrib $charName ;
+
+ //nokeyable smooth属性
+ setAttr -k off ($charName+ "_Upper_Body.Smooth") ;
+ setAttr -cb true ($charName+ "_Upper_Body.Smooth") ;
+
+ select -r ($charName + "_MASTER") ;
+ ddLockJointAttrCMD ;
+ select -clear ;
+ 
+}
+
+
+global proc ddEZProxyNoRender()
+{
+	string $proxyList[],$currentObject ;
+	$proxyList = `ls "*_an_*"` ;
+
+	for ($currentObject in $proxyList)
+	{
+		setAttr ($currentObject + ".castsShadows") 0 ;
+		setAttr ($currentObject + ".receiveShadows") 0 ;
+		setAttr ($currentObject + ".motionBlur") 0 ;
+		setAttr ($currentObject + ".primaryVisibility") 0 ;
+		setAttr ($currentObject + ".smoothShading") 0 ;
+		setAttr ($currentObject + ".visibleInReflections") 0 ;
+		setAttr ($currentObject + ".visibleInRefractions") 0 ;
+	}
+}
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzCurrentCharacter
+// 
+// 返回当前选择的角色名
+//
+// Arguments:
+// Return :
+//////////////////////////////////////////////////////////
+global proc string ddBratzCurrentCharacter()
+{
+ string $SelectedChar ;
+ 
+ $SelectedChar = `optionMenuGrp -query -value ddBratzNameListField` ;
+
+ if($SelectedChar != "Other...")
+ {
+  return $SelectedChar ;
+ }
+ else
+ {
+  return "" ;
+ }
+}
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBratzSetupToolsUI
+// 
+// 用户界面
+// 
+//////////////////////////////////////////////////////////
+global proc ddBratzSetupToolsUI()
+{
+ global string $ddImagePath ;
+
+ if ((`window -ex ddBratzSetupToolsWin`) == true)
+ {
+  deleteUI ddBratzSetupToolsWin ;
+  if(`windowPref -exists ddBratzSetupToolsWin`)
+  {
+   windowPref -remove ddBratzSetupToolsWin ;
+  }
+ }
+
+ window -widthHeight 238 520
+	-title "durdur's Bratz Tools 0.02 beta"
+	ddBratzSetupToolsWin ;
+
+ columnLayout -adjustableColumn true ;
+  image -width 230
+	-height 103
+	-image ($ddImagePath+"bratzLogo.jpg") ;
+
+  separator -width 260 ;
+
+  optionMenuGrp -label "Character Name:"
+		-columnWidth 1 90
+		-columnWidth 2 140
+		ddBratzNameListField ;
+
+		menuItem -label "m001001cloe" ;
+		menuItem -label "m001008cloe" ;
+		menuItem -label "m001009cloe" ;
+		menuItem -label "m001010cloe" ;
+		menuItem -label "m001012cloe" ;
+		menuItem -label "m001015cloe" ;
+		menuItem -label "m001018cloe" ;
+		menuItem -label "m001023cloe" ;
+		menuItem -label "m001025cloehikingoutfit" ;
+		menuItem -label "m001026cloe" ;
+		menuItem -label "m001033cloe" ;
+		menuItem -label "m001040cloe" ;
+		menuItem -label "m001051cloe" ;
+		menuItem -label "m001052cloe" ;
+		menuItem -label "dvdcloem001013" ;
+		menuItem -label "dvdcloem001035" ;
+		menuItem -label "dvdcloem001041" ;
+		menuItem -label "dvdcloem001043" ;
+		menuItem -label "dvdcloem001045" ;
+
+		menuItem -label "m002001sasha" ;
+		menuItem -label "m002004sasha" ;
+		menuItem -label "m002005sasha" ;
+		menuItem -label "m002006sasha" ;
+		menuItem -label "m002007sasha" ;
+		menuItem -label "m002009sashaspaceangelz" ;
+		menuItem -label "m002010sasha" ;
+		menuItem -label "m002013sashablouseskirt" ;
+		menuItem -label "m002016sasha" ;
+		menuItem -label "m002019sasha" ;
+		menuItem -label "m002020sasha" ;
+		menuItem -label "m002021sasha" ;
+		menuItem -label "m002028sasha" ;
+		menuItem -label "m002048sasha" ;
+		menuItem -label "m002049sasha" ;
+		menuItem -label "m002050sasha" ;
+		menuItem -label "dvdsasham002008" ;
+		menuItem -label "dvdsasham002030" ;
+		menuItem -label "dvdsasham002036" ;
+		menuItem -label "dvdsasham002037" ;
+		menuItem -label "dvdsasham002040" ;
+		menuItem -label "dvdsasham002043" ;
+		menuItem -label "dvdsasham002044" ;
+
+		menuItem -label "i028004weirdwilma" ;
+
+		menuItem -label "m003001yasmin" ;
+		menuItem -label "m003004yasmin" ;
+		menuItem -label "m003005yasminjeanstshirt" ;
+		menuItem -label "m003006yasmin" ;
+		menuItem -label "m003007yasmin" ;
+		menuItem -label "m003010yasmin" ;
+		menuItem -label "m003014yasmin" ;
+		menuItem -label "m003016yasmin" ;
+		menuItem -label "m003018yasmin" ;
+		menuItem -label "m003019yasmin" ;
+		menuItem -label "m003029yasmin" ;
+		menuItem -label "m003046yasmin" ;
+		menuItem -label "m003048yasmin" ;
+		menuItem -label "m003049yasmin" ;
+		menuItem -label "dvdyasminm003011" ;
+		menuItem -label "dvdyasminm003031" ;
+		menuItem -label "dvdyasminm003036" ;
+		menuItem -label "dvdyasminm003037" ;
+		menuItem -label "dvdyasminm003039" ;
+		menuItem -label "dvdyasminm003041" ;
+
+		menuItem -label "m004001jade" ;
+		menuItem -label "m004002jade" ;
+		menuItem -label "m004005jade" ;
+		menuItem -label "m004006jade" ;
+		menuItem -label "m004008jade" ;
+		menuItem -label "m004011jade" ;
+		menuItem -label "m004018jade" ;
+		menuItem -label "m004019jade" ;
+		menuItem -label "m004020jade" ;
+		menuItem -label "m004023jade" ;
+		menuItem -label "m004028jade" ;
+		menuItem -label "m004029jade" ;
+		menuItem -label "m004045jade" ;
+		menuItem -label "m004046jade" ;
+		menuItem -label "m004047jade" ;
+		menuItem -label "dvdjadem004031" ;
+		menuItem -label "dvdjadem004037" ;
+		menuItem -label "dvdjadem004041" ;
+		menuItem -label "dvdjadem004042" ;
+
+		menuItem -label "m005006burdinehonoluluoutfit" ;
+		menuItem -label "m005008burdine" ;
+		menuItem -label "m005018burdine" ;
+		menuItem -label "dvdburdinem005001" ;
+		menuItem -label "m005024bernice" ;
+
+		menuItem -label "m006001dvdkirstee" ;
+		menuItem -label "dvdkirsteem006001" ;
+		menuItem -label "dvdkayceem007001" ;
+		menuItem -label "dvddylanm008001" ;
+		menuItem -label "m008006dylanjeanscampshirt" ;
+		menuItem -label "m008022dylan" ;
+		menuItem -label "m008023dylanballetoutfit" ;
+		menuItem -label "m008024dylan" ;
+		menuItem -label "m009001cameron" ;
+		menuItem -label "dvddamonindiai011004" ;
+		
+		menuItem -label "girlextrai001001" ;
+		menuItem -label "girlextrai002001" ;
+		menuItem -label "girlextrai003001" ;
+		menuItem -label "girlextrai004001" ;
+		menuItem -label "dvdgirlextrai001002" ;
+		menuItem -label "dvdgirlextrai002002" ;
+		menuItem -label "dvdgirlextrai003002" ;
+		menuItem -label "dvdgirlextrai004002" ;
+		menuItem -label "dvdozziei006001" ;
+		menuItem -label "dvdnigeli007002" ;
+		menuItem -label "boyextrai008001" ;
+		menuItem -label "boyextrai008002" ;
+		menuItem -label "boyextrai008003" ;
+		menuItem -label "i008009teenboyextra" ;
+		menuItem -label "i008010tnboyxtra" ;
+
+		menuItem -label "dvdlukekidnapperi009004" ;
+		menuItem -label "dvdgunkai009005" ;
+		menuItem -label "m009008cameron" ;
+		menuItem -label "dvdeitanm010001" ;
+		menuItem -label "m010007eitan" ;
+		menuItem -label "dvdbyronpowelli011001" ;
+		menuItem -label "dvdcloedadi011007" ;
+		menuItem -label "dvdgeorgie012001" ;
+		menuItem -label "dvdgirlextrai014001" ;
+		menuItem -label "dvdgirlextrai015001" ;
+		menuItem -label "dvdlondonmiltoni016001" ;
+		menuItem -label "dvdguskidnapperi017001" ;
+		menuItem -label "i017002petnapper" ;
+		menuItem -label "dvdaloncei018001" ;
+		menuItem -label "i020001chachi" ;
+		menuItem -label "dvdbigdaddyi020002" ;
+		menuItem -label "i021001alonce" ;
+		menuItem -label "dvdgertrudei021002" ;
+		menuItem -label "dvddvdrocki027001" ;
+		menuItem -label "i028002robertaremade" ;
+		menuItem -label "dvdfiannai031002" ;
+		menuItem -label "i031003fiannadresssandals" ;
+		menuItem -label "dvdroxxii032002" ;
+		menuItem -label "dvdpoliceofficeri037001" ;
+		menuItem -label "dvdpoliceofficertanuniformi037002" ;
+		menuItem -label "dvdsecurityguardi037003" ;
+		menuItem -label "dvdsnarksi039001" ;
+		menuItem -label "i039003nightwatchman" ;
+		menuItem -label "dvdwaiteri040001" ;
+		menuItem -label "dvdjadem004040" ;
+		menuItem -label "dvdshanei041001" ;
+		menuItem -label "dvdcruisei042002" ;
+		menuItem -label "dvdellaminai043001" ;
+		menuItem -label "dvdnicolei044001" ;
+		menuItem -label "i045001nicole" ;
+		menuItem -label "dvdkoni046001" ;
+		menuItem -label "i046003mrstrativary" ;
+		menuItem -label "dvdi046002sashasdad" ;
+		menuItem -label "i047001thugclone" ;
+		menuItem -label "i048001ali" ;
+		menuItem -label "dvdbrycei051002" ;
+		menuItem -label "dvdmattrocki052002" ;
+		menuItem -label "dvdevanmolesi051003" ;
+		menuItem -label "dvdrideattendanti052003" ;
+		menuItem -label "i052004icecreamvendor" ;
+		menuItem -label "i055005misshiggins" ;
+		menuItem -label "i052008electrician" ;
+		menuItem -label "i056006principalaffleck" ;
+		menuItem -label "i057003stanka" ;
+		menuItem -label "dvdbyroni058001" ;
+		menuItem -label "dvdmandyi059001" ;
+		menuItem -label "dvdmandyi059005" ;
+		menuItem -label "dvdsharidani062001" ;
+		menuItem -label "dvdsharidani062003" ;
+		menuItem -label "dvdmeli064001" ;
+		menuItem -label "dvdalfiei065001" ;
+		menuItem -label "dvdraveni066001" ;
+		menuItem -label "dvdkingmelvinoi067001" ;
+		menuItem -label "dvdbati068001" ;
+		menuItem -label "dvdpixiemalei069001" ;
+		menuItem -label "dvdpixiemalei069002" ;
+		menuItem -label "dvdpixiemalei069003" ;
+		menuItem -label "dvdpixiemalei069004" ;
+		menuItem -label "dvdpixiemalei069005" ;
+		menuItem -label "i069006headelf" ;
+		menuItem -label "dvdcymbelinei070003" ;
+		menuItem -label "dvdcymbelinei070005" ;
+		menuItem -label "dvdbreeanai071003" ;
+		menuItem -label "dvdlinai072003" ;
+		menuItem -label "dvddarkfairygirl1i073001" ;
+		menuItem -label "dvddarkfiryboy1i074001" ;
+		menuItem -label "dvdpixiefemaleli075001" ;
+		menuItem -label "dvddeei077002" ;
+		menuItem -label "dvddeei077003" ;
+		menuItem -label "dvdmayori078001" ;
+		menuItem -label "dvdcloesmomi078004" ;
+		menuItem -label "dvdmrswintersi078005" ;
+		menuItem -label "dvdi078007mrswinters" ;
+		menuItem -label "dvdhummingbirdfairyi083001" ;
+		menuItem -label "dvdclwni085001" ;
+		menuItem -label "dvdkidi086001" ;
+		menuItem -label "dvdbillybobnitroi092001" ;
+		menuItem -label "i092005billybobnitrohelmet" ;
+		menuItem -label "i093001poppycrankwell" ;
+		menuItem -label "dvdliami094001" ;
+		menuItem -label "i094002liamhelmet" ;
+		menuItem -label "i094007firefighterblond" ;
+		menuItem -label "i094008firefighterredhair" ;
+		menuItem -label "i094009astronaut" ;
+		menuItem -label "i095001dagmar" ;
+		menuItem -label "i096001msporterhouse" ;
+		menuItem -label "i097002annapracticeoutfit" ;
+		menuItem -label "i097003annaperformanceoutfit" ;
+		menuItem -label "i097004anna" ;
+		menuItem -label "i097005balletdancerextra" ;
+		menuItem -label "i097006balletdancerextra" ;
+		menuItem -label "i097007balletdancerextra" ;
+		menuItem -label "i097008balletdanceextra" ;
+		menuItem -label "i097009anna" ;
+		menuItem -label "i098001madamedemidov" ;
+		menuItem -label "i098005madamedemidovwindbreaker" ;
+		menuItem -label "i107001jules" ;
+		menuItem -label "i109001teencamperboy" ;
+		menuItem -label "i110001teencampergirl" ;
+		menuItem -label "i110002teencampergirl" ;
+		menuItem -label "i110003teencampergirl" ;
+		menuItem -label "i110004teencampergirl" ;
+		menuItem -label "i113005oldlady" ;
+		menuItem -label "i017004max" ;
+		menuItem -label "i122001drben" ;
+		menuItem -label "i123001bradley" ;
+		menuItem -label "i124001unclemarco" ;
+		menuItem -label "i128001mrswilly" ;
+		menuItem -label "i129001chadwick" ;
+		menuItem -label "i134001madamedesnootsville" ;
+		menuItem -label "t000001tempgirl" ;
+		menuItem -label "t000002tempboy" ;
+
+		menuItem -label "Other...";
+
+/*
+  rowLayout -numberOfColumns 2 
+	    -columnWidth2 200 200 ;
+
+
+   text -label "character Name" ;
+   textField ;
+  setParent .. ;
+*/
+
+  textField -editable false
+		ddBratzNameTextField ;
+
+  separator -width 260 ;
+
+  button -label "导入基本骨骼" //import base joint"
+	 -height 28
+	 -width 120
+	 -command "ddBratzBaseJoint `ddBratzCurrentCharacter`" ;
+
+
+  button -label "统一骨骼轴向"//"orient joint"
+	 -height 28
+	 -width 80
+	 -command "ddOrientBratzJoint `ddBratzCurrentCharacter`" ;
+
+  button -label "导入控制器"
+	 -height 28
+	 -width 80
+	 -command "ddBratzControlObject `ddBratzCurrentCharacter`" ;
+
+  button -label "完成手臂、腿部设置"
+	 -height 28
+	 -width 80
+	 -command "ddBratzArmLegSetup `ddBratzCurrentCharacter`" ;
+/*
+  button -label "增加手臂、腿部poleVector控制    * 测试用 *"
+	 -height 28
+	 -width 80
+	 -command "ddBratzAddArmLegPoleVecter `ddBratzCurrentCharacter`" ;
+*/
+  button -label "创建身体Set"
+	 -height 28
+	 -width 80
+	 -command "ddBratzSet `ddBratzCurrentCharacter`" ;
+
+  button -label "备份 bindPose 数据"
+	 -height 28
+	 -width 80
+	 -command "ddBratzBindPose `ddBratzCurrentCharacter`" ;
+
+  button -label "为 polygon 对象添加 smooth 节点"
+	 -height 28
+	 -width 80 
+	 -command "ddBratzAddSmooth `ddBratzCurrentCharacter`" ;
+
+  button -label "创建角色层"
+	 -height 28
+	 -width 80
+	 -command "ddBratzLayer `ddBratzCurrentCharacter`" ;
+  
+  button -label "导入bratz测试用动画"
+	 -height 28
+	 -width 80
+	 -command "ddBratz" ;
+
+  button -label "隐藏锁定无关属性"
+	 -height 28
+	 -width 80
+	 -command "ddBratzLockHide `ddBratzCurrentCharacter`" ;
+
+  button -label "测试bratz角色"
+	 -height 28
+	 -width 80
+	 -command "checkScene 2 2" ;
+
+ setParent.. ;
+
+ showWindow ddBratzSetupToolsWin ;
+}
+
+//End of file.

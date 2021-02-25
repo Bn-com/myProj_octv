@@ -1,0 +1,235 @@
+global proc zwShadingEngineIO(string $renamePrefix)
+{
+	if ($renamePrefix == ":")
+	{
+		global string $gReferenceEditorPanel;
+		string $selFileReal[] = `sceneEditor -query -selectItem $gReferenceEditorPanel`;
+		for ($i=0; $i<size($selFileReal); $i++)
+		{
+			if (`file -q -ex $selFileReal[$i]`)
+			{
+				int $usingNamespaces = `file -q -uns $selFileReal[$i]`;
+				if ($usingNamespaces )
+				{
+					string $temp = `internalVar -userTmpDir` + "zwShadingEngineIOtemp.mel";
+					sysFile -delete $temp;
+
+					string $renamePrefix = `file -q -rpr $selFileReal[$i]`;
+
+					string $node = `file -query -referenceNode $selFileReal[$i]`;
+					string $namespace = `match "([^:]+:)+" $node`;
+					$renamePrefix = $namespace + $renamePrefix;
+
+					// ÐÂ·½·¨
+					{
+						string $path = `referenceQuery -filename -withoutCopyNumber $selFileReal[$i]`;
+						int $rs = zwShadingEngineRestore($path, $renamePrefix);
+						if (!$rs)
+						{
+							string $cmd = "mayabatch -file \"" + $path + "\" -command \"source zwShadingEngineIO.mel; zwShadingEngineBackup \\\"" + $path + "\\\"\"";
+							waitCursor -state on;
+							system $cmd;
+							waitCursor -state off;
+						}
+						else
+						{
+							continue;
+						}
+						$rs = zwShadingEngineRestore($path, $renamePrefix);
+						if ($rs)
+						{
+							continue;
+						}
+					}
+
+					string $cmd = "mayabatch -file \"" + $selFileReal[$i] + "\" -command \"zwShadingEngineIO \\\"" + $renamePrefix + "\\\"\"";
+					waitCursor -state on;
+					system $cmd;
+					waitCursor -state off;
+
+					eval ("source \"" + $temp + "\"");
+					sysFile -delete $temp;
+				}
+			}
+		}
+		return;
+	}
+
+	if (`about -batch`)
+	{
+		string $temp = `internalVar -userTmpDir` + "zwShadingEngineIOtemp.mel";
+		zwShadingEngineOutput $renamePrefix $temp "mel";
+		return;
+	}
+
+	if (`window -exists zwShadingEngineIO`)
+	{
+		deleteUI zwShadingEngineIO;
+	}
+
+	string $window = `window -title "ShadingEngine IO" -resizeToFitChildren true zwShadingEngineIO`;
+		columnLayout -adjustableColumn true;
+			button -label "Backup" -command "fileBrowserDialog -mode 1 -fileType \"mel\" -fileCommand \"zwShadingEngineOutput \\\"\\\"\" -actionName \"Backup\"";
+			button -label "Restore" -command "fileBrowserDialog -mode 0 -fileType \"mel\" -fileCommand \"zwShadingEngineImport\" -actionName \"Restore\"";
+
+	showWindow $window;
+}
+
+global proc zwShadingEngineOutput(string $renamePrefix, string $fileName, string $fileType)
+{
+	string $buf[];
+
+	int $fileId = `fopen $fileName w`;
+	if (!$fileId)
+		error("Fail to open " + $fileName);
+
+	string $shadingGrps[] = `ls -type shadingEngine`;
+	for ($i=0; $i<size($shadingGrps); $i++)
+	{
+		string $objs[] = `sets -query $shadingGrps[$i]`;
+		for ($j=0; $j<size($objs); $j++)
+		{
+			tokenize $objs[$j] "." $buf;
+			string $obj = $buf[0];
+			$buf = `ls -long $obj`;
+			$objs[$j] = `substitute $obj $objs[$j] $buf[0]`;
+
+			string $str;
+			if ($renamePrefix == "")
+			{
+				$str = "catch(`evalEcho \"sets -edit -forceElement \\\"" + $shadingGrps[$i] + "\\\" \\\"" + $objs[$j] + "\\\"\"`);\n";
+			}
+			else
+			{
+				$objs[$j] = `substituteAllString $objs[$j] "|" ("|" + $renamePrefix + ":")`;
+				$objs[$j] = `substitute "^|" $objs[$j] ""`;
+				if ($shadingGrps[$i] == "initialShadingGroup")
+				{
+					$str = "catch(`evalEcho \"sets -edit -forceElement \\\"" + $shadingGrps[$i] + "\\\" \\\"" + $objs[$j] + "\\\"\"`);\n";
+				}
+				else
+				{
+					$str = "catch(`evalEcho \"sets -edit -forceElement \\\"" + $renamePrefix + ":" + $shadingGrps[$i] + "\\\" \\\"" + $objs[$j] + "\\\"\"`);\n";
+				}
+			}
+			fprint $fileId $str;
+		}
+	}
+
+	fclose $fileId;
+}
+
+global proc zwShadingEngineImport(string $fileName, string $fileType)
+{
+	eval ("source \"" + $fileName + "\"");
+}
+
+global proc int zwShadingEngineBackup(string $scenePath)
+{
+	string $txtPath = zwShadingEngineTxtPath($scenePath);
+	if ($txtPath == "")
+	{
+		return false;
+	}
+	string $temp = `internalVar -userTmpDir` + `match "[^/\\]+$" $txtPath`;
+	int $fileId = `fopen $temp w`;
+	string $shadingGrps[] = `ls -type shadingEngine`;
+	for ($i=0; $i<size($shadingGrps); $i++)
+	{
+		string $objs[] = `sets -query $shadingGrps[$i]`;
+		for ($j=0; $j<size($objs); $j++)
+		{
+			string $obj = `match "[^.]+" $objs[$j]`;
+			string $buf[] = `ls -long $obj`;
+			$objs[$j] = `substitute $obj $objs[$j] $buf[0]`;
+			fprint $fileId ($shadingGrps[$i] + "\t" + $objs[$j] + "\r\n");
+		}
+	}
+	fclose $fileId;
+	idmtFile -edit -modified $scenePath $temp;
+	zwSysFile "move" $temp $txtPath true;
+
+	return true;
+}
+
+global proc int zwShadingEngineRestore(string $scenePath, string $renamePrefix)
+{
+	string $txtPath = zwShadingEngineTxtPath($scenePath);
+	if (!`filetest -f $txtPath`)
+	{
+		return false;
+	}
+	if (!`idmtFile -compareModified $scenePath $txtPath`)
+	{
+		return false;
+	}
+	int $fileId = `fopen $txtPath r`;
+	while (!`feof $fileId`)
+	{
+		string $str = `fgetline $fileId`;
+		if ($str == "")
+		{
+			break;
+		}
+		string $buf[];
+		tokenize $str "\t\r\n" $buf;
+		string $shadingGrp = $buf[0];
+		if ($renamePrefix != "" && $shadingGrp != "initialShadingGroup")
+		{
+			$shadingGrp = $renamePrefix + ":" + $shadingGrp;
+		}
+		if (!`objExists $shadingGrp`)
+		{
+			continue;
+		}
+		string $element = $buf[1];
+		if ($renamePrefix != "")
+		{
+			$element = `substituteAllString $element "|" ("|" + $renamePrefix + ":")`;
+			$element = `substitute "^|" $element ""`;
+		}
+		if (!`objExists $element`)
+		{
+			continue;
+		}
+		string $cmd = "sets -edit -forceElement \"" + $shadingGrp + "\" \"" + $element + "\"";
+		catch(`evalEcho $cmd`);
+	}
+	fclose $fileId;
+
+	return true;
+}
+
+global proc string zwShadingEngineTxtPath(string $scenePath)
+{
+	string $project = "";
+	if (`match "/CONTENT_4_GLOBAL/PRJ_winxII/MC_winxII/scenes/" $scenePath` != "")
+	{
+		$project = "WinxClubII";
+	}
+	else if (`match "/Projects/ROMA/PRJ_roma/MC_roma/scenes/" $scenePath` != "")
+	{
+		$project = "ROMA";
+	}
+	else
+	{
+		$project = zwGetProject($scenePath);
+	}
+	if ($project == "")
+	{
+		return "";
+	}
+	string $repository = `zwGetPath "repository" $scenePath`;
+	if ($repository == "")
+	{
+		$repository = "//file-cluster/GDC/Projects/" + $project;
+	}
+	string $filename = `match "[^/\\]+$" $scenePath`;
+	$filename = `substitute "[.][^.]+$" $filename ".txt"`;
+	string $txtPath = $repository + "/Project/data/ShadingEngine/" + $filename;
+	if ($project == "ROMA")
+	{
+		$txtPath = "//file-cluster/GDC/Projects/ROMA/PRJ_roma/data/ShadingEngine/" + $filename;
+	}
+	return $txtPath;
+}

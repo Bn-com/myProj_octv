@@ -1,0 +1,132 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: ddBratzArmSetup
+//	Verision: 0.01 beta
+//	Author: Julii FreeMAN, SZ-CN
+//	Date Created: July 21 2004
+//	Changed Projcet Date: June 26 2006
+//	Last Updated: June 26 2006
+//	Update/Change this file at: Julii FreeMAN
+//	Note:Bratz 手部设置
+//
+//////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////
+// Procdures Name: ddBartzArmSetup
+// 
+// 手臂设置
+// Arguments:
+//  $charName 角色名
+//////////////////////////////////////////////////////////
+
+global proc ddBratzArmSetup(string $charName,string $side)
+{
+ float $temp[3],$tempJointPosition[3] ;
+ string $constraintName[] ;
+
+ //create arm ik and hand ik
+ ikHandle -solver ikRPsolver -sj ($charName + "_arm_" + $side) -ee ($charName + "_wrist_" + $side) -n ($charName + "_armHandle_" + $side) -s sticky ;
+ ikHandle -solver ikRPsolver -sj ($charName + "_wrist_" + $side) -ee ($charName + "_hand_" + $side) -n ($charName + "_hand_ikHandle_" + $side) -s sticky ;
+
+ //query wrist world position
+ $temp = `xform -q -ws -t ($charName + "_wrist_" + $side)` ;
+
+ //create ik control locator & amend rotate
+ spaceLocator -p 0 0 0 -n ($charName + "_world_wristCon_" + $side) ;
+ addAttr -ln twist -at double ($charName + "_world_wristCon_" + $side) ;
+ setAttr -e -keyable true ($charName + "_world_wristCon_" + $side + ".twist") ;
+ move -r $temp[0] $temp[1] $temp[2] ($charName + "_world_wristCon_" + $side) ;
+ select -r ($charName + "_wrist_" + $side) ;
+ select -tgl ($charName + "_world_wristCon_" + $side) ;
+ $constraintName = `orientConstraint -weight 1` ;
+ delete $constraintName[0] ;
+
+ //craete fk control locator
+ spaceLocator -p 0 0 0 -n ($charName + "_wristCon_" + $side) ;
+ addAttr -ln solverEnable -at bool ($charName + "_wristCon_" + $side);
+ setAttr -e -keyable true ($charName + "_wristCon_" + $side + ".solverEnable") ;
+ select -r ($charName + "_wristCon_" + $side) ;
+ group -n ($charName + "_wristCon_group_" + $side) ;
+ select -r ($charName + "_wristCon_group_" + $side) ;
+ move -r $temp[0] $temp[1] $temp[2];
+ select -r ($charName + "_wristCon_group_" + $side) ;
+ select -tgl ($charName + "_elbow_" + $side) ;
+ parent;
+ select -r ($charName + "_wrist_" + $side) ;
+ select -tgl ($charName + "_wristCon_group_" + $side) ;
+ $constraintName = `orientConstraint -weight 1 ` ;
+ delete $constraintName[0] ;
+
+ //set fk rotate control
+ select -r ($charName + "_wristCon_" + $side);
+ select -tgl ($charName + "_wrist_" + $side);
+ orientConstraint -weight 1 ;
+
+ //set ik translate and rotate control
+ select -r ($charName + "_world_wristCon_" + $side) ;
+ select -tgl ($charName + "_armHandle_" + $side);
+ pointConstraint -weight 1;
+ select -r ($charName + "_hand_ikHandle_" + $side) ;
+ select -tgl ($charName + "_world_wristCon_" + $side) ;
+ parent ;
+
+ //set switch
+ connectAttr -f ($charName + "_world_wristCon_" + $side + ".twist" ) ($charName + "_armHandle_" + $side + ".twist") ;
+ if(`attributeExists "ikBlend" ($charName + "_armHandle_" + $side)`)
+ {
+  connectAttr -f ($charName + "_wristCon_" + $side + ".solverEnable") ($charName + "_armHandle_" + $side + ".ikBlend") ;
+  connectAttr -f ($charName + "_wristCon_" + $side + ".solverEnable") ($charName + "_hand_ikHandle_" + $side + ".ikBlend") ;
+ }
+ else if(`attributeExists "solverEnable" ($charName + "_armHandle_" + $side)`)
+ {
+  connectAttr -f ($charName + "_wristCon_" + $side + ".solverEnable") ($charName + "_armHandle_" + $side + ".solverEnable") ;
+  connectAttr -f ($charName + "_wristCon_" + $side + ".solverEnable") ($charName + "_hand_ikHandle_" + $side + ".solverEnable") ;
+ }
+
+ //account poleVector position
+ $tempJointPosition = `xform -q -ws -t ($charName + "_arm_" + $side)` ;
+ $temp[0] = $tempJointPosition[0] + `getAttr ($charName + "_armHandle_" + $side + ".poleVectorX")` ;
+ $temp[1] = $tempJointPosition[1] + `getAttr ($charName + "_armHandle_" + $side + ".poleVectorY")` ;
+ $temp[2] = $tempJointPosition[2] + `getAttr ($charName + "_armHandle_" + $side + ".poleVectorZ")` ;
+
+ //create pole locator
+ spaceLocator -p 0 0 0 -n ($charName + "_poleLoc_" + $side) ;
+ select -r ($charName + "_poleLoc_" + $side) ;
+ move -r $temp[0] $temp[1] $temp[2] ;
+ select -tgl ($charName + "_arm_" + $side) ;
+ parent ;
+
+//create arm1234&forearm1234 drive expression
+/*
+expression 
+-string
+(
+$charName + "_arm1_" + $side + ".rx = " + $charName + "_arm_" + $side + ".rotateX * -0.8; \n" +
+$charName + "_arm2_" + $side + ".rx = " + $charName + "_arm_" + $side + ".rotateX * -0.6; \n" +
+$charName + "_arm3_" + $side + ".rx = " + $charName + "_arm_" + $side + ".rotateX * -0.4; \n" +
+$charName + "_arm4_" + $side + ".rx = " + $charName + "_arm_" + $side + ".rotateX * -0.2; \n" +
+$charName + "_forearm4_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rotateX * 0.8; \n" +
+$charName + "_forearm3_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rotateX * 0.6; \n" +
+$charName + "_forearm2_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rotateX * 0.4; \n" +
+$charName + "_forearm1_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rotateX * 0.2;"
+)
+
+-name ($charName + "_arm_expression_" + $side) ;
+//-ae 1 -uc all ;
+*/
+/*
+ if(`objExists ($charName + "_forearm_" + $side)`)
+ {
+  expression -string ($charName + "_forearm_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rx * 0.5 ;") -name ($charName + "_arm_expression_" + $side) ;
+ }
+
+ if(`objExists ($charName + "_forearm1_" + $side)`)
+ {
+  expression -string ($charName + "_forearm1_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rx * 0.66 ;\n" + $charName + "_forearm2_" + $side + ".rx = " + $charName + "_wrist_" + $side + ".rx * 0.33 ;") -name ($charName + "_arm_expression_" + $side) ;
+ }
+*/
+}
+
+
+//End of file.

@@ -1,0 +1,141 @@
+
+
+global proc string BUgetMaterialInfo( string $messagePlug )
+{
+	string $materialName[] = `ls $messagePlug`;
+
+	if ($materialName[0] == "")
+	{
+		// When the user changes the shader type in the attribute
+		// editor, multiple scriptjobs could be assigned to the same
+		// materialInfoNode, but only one of them would relate to the
+		// new shader. Older scriptjobs should exit silently.
+		return "";
+	}
+
+    string $connections[] = `listConnections $messagePlug`;
+
+    for ($item in $connections)
+        if (`objectType $item` == "materialInfo")
+            return $item;
+
+    return "";
+}
+
+global proc BUdisconnectInfoTexture( string $info )
+{
+    // We need to break all connection because we want to ensure the
+    // texture being displayed has a multi index of zero.
+    //
+    // Note: the connections are broken from back to front because
+    // breaking a connection at the end of the multi will not affect
+    // the connections at the start of the multi.
+
+    string $connections[];
+	// We need to specify shape because fluids textures are shape nodes
+	// as well as being textures.
+    $connections = `listConnections -connections true -shapes true ($info+".texture")`;
+	
+    for ($i = size($connections); $i > 0; $i -= 2)
+        disconnectAttr ($connections[$i-1]+".message") $connections[$i-2];
+	
+}
+
+
+
+global proc BUShowInfoTexture( string $info )
+{
+    
+
+string $connections[];
+string $contexture[];
+$connections = `listConnections -connections true -shapes true ($info+".material")`;
+$contexture=`listConnections -d off -s on  ($connections[1]+".outColor")`;
+if (`attributeExists "outColor" $contexture[0]`)
+{
+connectAttr -f ($contexture[0]+".outColor")  $connections[0];
+
+}
+
+
+}
+
+
+
+global proc BuDisplayeyeOn()
+{
+
+	string $ls[]=`ls -long -type "mesh"`;
+	for ($i in $ls)
+	{
+		//int $overOn=`getAttr ($i+".overrideEnabled")`;
+		//if ($overOn==0)
+		if (`attributeExists "overrideEnabled" $i`)
+		{
+			string $cas[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($i+".drawOverride")`;
+			for ($j=0;$j<size($cas);$j=$j+2)
+			{
+				disconnectAttr $cas[$j+1] $cas[$j];
+			}
+			clear $cas;
+			$cas = `listConnections -s 1 -d 0 -c 1 -p 1 ($i+".overrideEnabled")`;
+			for ($j=0;$j<size($cas);$j=$j+2)
+			{
+				disconnectAttr $cas[$j+1] $cas[$j];
+			}
+			
+			setAttr ($i+".overrideEnabled") 1;
+			setAttr ($i+".overrideTexturing") 0;
+		}
+	}
+
+	string $surfaceshader[]=`ls -type "surfaceShader"`;
+	for ($n in $surfaceshader)
+	{
+		string $mytexture=BUgetMaterialInfo ($n);
+		if (`size $mytexture`!=0&&`gmatch $n "*bbs*"`==0)
+		{
+			if (`gmatch $n "*bubblestorm*"`==0)
+			{
+				string $distex=BUShowInfoTexture ($mytexture);
+			}
+		//print ($texture+"\n");
+		}
+	}
+
+	string $headshader[]=`ls -materials`;
+	for ($m in $headshader)
+	{
+		if ( !`gmatch $m "*[E_e]ye*"`)
+		{
+			if (`gmatch $m "*[H_h]ead*"`==1||(`gmatch $m "*[F_f]ace*"`==1&&`gmatch $m "*surface*"`==0))
+			{
+				string $texture=BUgetMaterialInfo ($m);
+				if (`size $texture`!=0&&`gmatch $m "*bbs*"`==0)
+				{
+					if (`gmatch $m "*bubblestorm*"`==0)
+					{
+						string $distex=BUdisconnectInfoTexture ($texture);
+					}
+					//print ($texture+"\n");
+				}
+			}
+		}
+	}
+
+
+	string $ctrl[]=`ls "*:rig_ctrl" "*:*:rig_ctrl"`;
+	for ($n in $ctrl)
+	{
+		if (`attributeExists "View" $n `)
+		{
+			int $viewOn=`getAttr ($n+".View")`;
+			if ($viewOn==0)
+			{
+				setAttr ($n+".View") 1;
+			}
+		}
+	}
+}
+
+

@@ -1,0 +1,716 @@
+
+// Example : int $sel = 0; int $sel = 1 ; // 1: create scene, 0: create ep folder
+// 	string $prod = `textField -q -text s100PRCFormLayoutProd `;
+// 	string $TFEp = `textField -q -tx   s100PRCFLTFEp`;
+// 	s100PRCaskForEPNameCheckIfEpExists(0, $prod,  $TFEp);
+//
+global proc s100PRCaskForEPNameCheckIfEpExists(int $sel, string $prod, string $TFEp)
+{
+	global string $s100PRCepPath ;
+	global string $s100PRCprod;
+	global string $s100PRCseqToDo;
+	global string $s100PRCselSqArr[];
+	global string $s100PRCfiles ;
+
+	clear $s100PRCselSqArr ;
+	$s100PRCselSqArr = `textScrollList -q -selectItem s100PRCFLTSLSq `;
+	if($sel == 0 )
+		$s100PRCselSqArr = 	`s100PRCgetAllSequencesFromAFile($s100PRCfiles) `;
+
+	s100PRCaskForEPNameCheckIfEpExistsWithoutUI($sel,  $prod,  $TFEp, $s100PRCselSqArr);
+}
+
+
+global proc s100PRCaskForEPNameCheckIfEpExistsWithoutUI(int $sel, string $prod, string $TFEp,string $s100PRCselSqArr[])
+{
+	global string $s100PRCepPath ;
+	global string $s100PRCprod;
+	global string $s100PRCseqToDo;
+	global string $s100PRCselSqArr[];
+	global string $s100PRCfiles ;
+
+	$s100PRCprod = $prod;
+	$path = `s100assetManagerGetEpPath( $prod ) `;
+	$s100PRCepPath = $path ;
+	string $eps[]  = `s100ListOnlyFolder($path) `;
+
+	// finding our Episode's name from current list of folders on disk:
+	$ch = 0 ;
+	string $name ="";
+	for($i = 0 ; $i < size($eps) ; $i++)
+	{
+		$arr = stringToStringArray(	$eps[$i] , "_") ;
+		$sub = substituteAllString($arr[0] ,"Ep","") ;
+		if($sub ==$TFEp)
+		{
+			$name = $arr[1];
+			$ch = 1 ;
+			break ;
+        }
+    }
+
+	if($ch)
+	{
+		$return = `confirmDialog -title ("Folder already exists") -message ("EP"+$TFEp+"already exists, Continue anyway? ")
+		-button "Yes" -button "No" -button "Cancel" -defaultButton "Cancel"
+		-cancelButton "No" -dismissString "No"`;
+
+		if($return =="Yes")
+		{
+			s100PRCaskForEPNameUI($name,$sel);
+		}
+
+    }else{
+		s100PRCaskForEPNameUI($name,$sel);
+    }
+}
+
+// int $select = $sel;
+//
+global proc s100PRCaskForEPNameUI(string $name,int $select )
+{
+	global string $s100PRCselSqArr[];
+	string $TFEp = `textField -q -tx   s100PRCFLTFEp`;
+
+	$s100PRCselSq = "" ;
+
+	for($i = 0 ; $i < size($s100PRCselSqArr) ; $i++)
+	{
+		$s100PRCselSq += $s100PRCselSqArr[$i] ;
+		if($i <  size($s100PRCselSqArr) -1 )
+			$s100PRCselSq += ",";
+    }
+
+	if(`window -ex s100PRCaskForEPNameUI`)
+		deleteUI s100PRCaskForEPNameUI;
+	window 	s100PRCaskForEPNameUI;
+	formLayout  s100PRCaskForEPNameUIFL;
+	$text = `text -l "Add a Name to Ep"`;
+
+	$textEp = `textField -tx ("Ep" + $TFEp +"_")  -en 0 s100PRCaskForEPNameUITEP`;
+	$textName = `textField -w 200 s100PRCaskForEPNameUITFN`;
+	$sep1 = `separator -w 285`;
+
+	if($name != "")
+	{
+		textField -e -tx $name -en 0 s100PRCaskForEPNameUITFN;
+    }
+
+	$chk = `checkBox -label "create Previz Scene" -v 1 s100PRCaskForEPNameUICB ` ;
+	$chkD = `checkBox -label "Submit To Deadline" -v 0 s100PRCaskForEPNameUICBDeadline ` ;
+
+	$but = `button -c s100PRCcreateAllPreCheck -w 285 -l "Create Folder Tree And Previz Scene" `;
+	string $tSel = "create all the Episode";
+	if($select == 1 )
+		$tSel = "create sq :" + $s100PRCselSq;
+
+	$textNameInfo  = `textField -en 0 -w 280 -text $tSel `;
+	$sep2 = `separator -w 285`;
+
+
+	formLayout -e
+		-attachForm $text "top" 5
+		-attachForm $text "left" 5
+
+		-attachControl $textEp "top" 5 $text
+		-attachForm $textEp "left" 5
+
+		-attachControl $textName "top" 5 $text
+		-attachControl $textName "left" 5 $textEp
+
+		-attachControl $sep1 "top" 5 $textName
+		-attachForm $sep1 "left" 5
+
+		-attachControl $textNameInfo "top" 5 $sep1
+		-attachForm $textNameInfo "left" 5
+
+		-attachControl $sep2 "top" 5 $textNameInfo
+		-attachForm $sep2 "left" 5
+
+
+
+		-attachControl $chk "top" 5 $sep2
+		-attachForm $chk "left" 5
+
+		-attachControl $chkD "top" 5 $chk
+		-attachForm $chkD "left" 5
+
+		-attachControl $but "top" 5 $chkD
+		-attachForm $but "left" 5
+
+	s100PRCaskForEPNameUIFL ;
+
+	window -e -s 1 -w 300 -h 210 s100PRCaskForEPNameUI;
+	window -e -resizeToFitChildren 1 s100PRCaskForEPNameUI;
+	showWindow;
+}
+
+
+//s100PRCaskForEPNameCheckIfEpExists ;
+global proc s100PRCcreateAllPreCheck()
+{
+	if(`file -q -modified`)
+	{
+		if(`saveChanges("") `)
+		{
+			if(`checkBox -q -v  s100PRCaskForEPNameUICBDeadline`)
+			{
+				s100PRCcreateAllCheckToDealine;
+            }else{
+				s100PRCcreateAllCheck ;
+            }
+        }
+    }else{
+			if(`checkBox -q -v  s100PRCaskForEPNameUICBDeadline`)
+			{
+				s100PRCcreateAllCheckToDealine;
+            }else{
+				s100PRCcreateAllCheck ;
+            }
+	}
+}
+
+
+
+global proc s100PRCcreateAllCheck()
+{
+	global string $logPath  ;
+	global string $s100PRCfiles ;
+	global string  $s100PRCepPath ;
+	$TFEp = `textField -q -tx   s100PRCFLTFEp`;
+	global int  $s100PRCFileId;
+
+	if(`textField -q -tx s100PRCaskForEPNameUITFN` != "")
+	{
+		$d = `date`;
+
+		$sub = substituteAllString($d , "/" ,"_") ;
+		$sub = substituteAllString($sub , " " ,"-") ;
+		$sub = substituteAllString($sub , ":" ,"_") ;
+		$folder = ($logPath + "CreateSceneFromCSV/");
+		sysFile -makeDir $folder ;
+		$file = ($folder + "Ep_" +$TFEp+  "_" + $sub  +".txt");
+		$ch = `filetest -e $file  `;
+
+		if($ch ==0)
+		{
+			$fileId=`fopen $file "w"`;
+			fclose $fileId;
+		}
+
+		string $s;
+		$fileId=`fopen $file "w"`;
+		$s =("Studio 100 : Maya Production\ndate : " + $d   +"\nPRC : Create Ep folder and Scene From TBDL\n" );
+		$s100PRCFileId =   $fileId ;
+		fprint $fileId $s  ;
+
+		s100PRCcreateFolderTreeForEp;
+
+		$s =("\folder tree created." );
+		fprint $fileId $s  ;
+
+		if(`checkBox -q -v  s100PRCaskForEPNameUICB`)
+		{
+			s100PRCcreatePrevizSceneForEpCheck ; // checking this...(QA) - done.
+			s100PRCCheckIfAssetExistsIn3dBankFromACSVFileUI ;
+		}
+
+
+		$d = `date`;
+		$s =("\nENDED AT : " + $d  );
+		fprint $fileId $s  ;
+
+		fclose $fileId ;
+
+		system( "load " + $file ) ;
+
+		if(`window -ex s100PRCaskForEPNameUI`)
+			deleteUI s100PRCaskForEPNameUI;
+    }
+	else
+	{
+		warning "choose a name for this EP";
+    }
+}
+
+
+
+global proc s100PRCcreatePrevizSceneForEpCheck()
+{
+	s100PRCcreatePrevizSceneForEpCheckIfSceneExists;
+}
+
+
+global proc s100PRCcreatePrevizSceneForEpCheckIfSceneExists()
+{
+	s100PRCcreatePrevizSceneForEp ;
+}
+
+
+/*
+creation des fichiers ici
+*/
+
+//SUBMITTING TO DEADLINE
+
+global proc s100PRCcreateAllCheckToDealine()
+{
+	global string $logPath  ;
+	global string $s100PRCfiles ;
+	global string  $s100PRCepPath ;
+	$TFEp = `textField -q -tx   s100PRCFLTFEp`;
+	global int  $s100PRCFileId;
+
+	if(`textField -q -tx s100PRCaskForEPNameUITFN` != "")
+	{
+		$ep = `textField -q -tx s100PRCaskForEPNameUITEP`;
+		$name = `textField -q -tx s100PRCaskForEPNameUITFN`;
+		$cap = capitalizeString($name) ;
+		$allN = $ep + $cap ;
+		global string $s100PRCselSqArr[];
+		string $sq[] = $s100PRCselSqArr;
+
+		s100PRCcreateFolderTreeForEp;
+
+		if(`checkBox -q -v  s100PRCaskForEPNameUICB`)
+		{
+			progressWindow
+			 -title "Submitting to deadline"
+			 -progress 0
+			 -max `size($sq) `
+			 -status ""
+			 -isInterruptable true;
+ 			$i = 0 ;
+			//s100PRCcreatePrevizSceneForEpCheck ;
+			for($tmp in $sq)
+			{
+				progressWindow -edit
+				 -progress $i
+				 -status ("submitting: " + $tmp);
+				$ep =$allN;
+				$name = "TBDL_" + $ep + "_sq"+ $tmp;
+				$command = "s100PRCUI;s100PRCcreatePrevizSceneForEpManualStart(\\\"" + $s100PRCfiles +"\\\",\\\"" +  $tmp+"\\\" ,\\\"" +$ep  + "\\\",\\\"Maya\\\");quit -a;";
+				s100PCSubmitPythonToDeadlineNeedUI({""},$name,$name,"build", $command ) ;
+				$i++;
+       		}
+    		progressWindow -endProgress;
+		}
+
+		if(`window -ex s100PRCaskForEPNameUI`)
+			deleteUI s100PRCaskForEPNameUI;
+
+		headsUpMessage("submitting done");
+    }
+	else
+	{
+		warning "choose a name for this EP";
+    }
+}
+
+
+global proc s100PRCcreatePrevizSceneForEp()
+{
+	string $st ;
+	global string $s100PRCfiles ;
+	global string  $s100PRCepPath ;
+	global string $s100PRCprod;
+	//$s100PRCfiles = $files ;
+	global int  $s100PRCFileId;
+	global string $s100PRCselSqArr[];
+	$ep = `textField -q -tx s100PRCaskForEPNameUITEP`;
+	$name = `textField -q -tx s100PRCaskForEPNameUITFN`;
+	$cap = capitalizeString($name) ;
+	$allN = $ep + $cap ;
+	$fullPath = $s100PRCepPath + $allN +"/" ;
+
+	$st =( "\n\n--------------------------------\nepisode : " + $ep  +"\n\n");
+
+	fprint $s100PRCFileId $st  ;
+
+	string $sq[] = $s100PRCselSqArr;
+    int $amount = 0;
+
+     progressWindow
+         -title "Creating Folder Tree"
+         -progress $amount
+         -status "Progress : 0%"
+         -isInterruptable true;
+
+	$last = (size($sq)-1) ;
+
+	for( $i = 0 ; $i < size($sq) ; $i++)
+	{
+		file -f -newFile  ;
+
+		setAttr "defaultResolution.width" 1280;
+		setAttr "defaultResolution.height" 720;
+		setAttr "defaultResolution.deviceAspectRatio" 1.777;
+
+		$pad = $sq[$i] ;
+		string $pathA[] = s100FMbuildNameWithGivenArg($s100PRCprod , $allN , ("Sq" + $pad)  ,"", "_PREVIZ" ,"Tk00")	;
+		$fPath = $pathA[0] + $pathA[1] +".ma";
+		file  -rename $fPath ;
+
+		float $sf = $i;
+		float $m = size($sq) ;
+		float $testf = 	( $sf / $m  ) *100 ;
+
+		$st = ("\n\n--------------------------------\nsequence : " + $sq[$i] + "\nfile : "+ $fPath +"\n------------------------------------------\n\n" );
+		fprint $s100PRCFileId $st  ;
+		$st = "\nCamera created :" ;
+		fprint $s100PRCFileId $sf  ;
+		// $seq = $sq[$i] ; $files = $s100PRCfiles ;
+		s100PRCcreateCamForPrevizScene($sq[$i], $s100PRCfiles) ; // checking here (QA) - done
+
+		string $st = "\nAssets imported :" ;
+		fprint $s100PRCFileId $st  ;
+		s100PRCimportAssetInPrevizScene($sq[$i], $s100PRCfiles);
+		//s100PRCimportAssetInPrevizScene($sq[$i], $s100PRCfiles);
+
+		// QA : added to force rig settings on some characters or props..
+		s100FMattrs_setBestPrevizAttrs(100, 0 ) ;
+
+		string $cams[] = `ls -type camera `;
+
+		for($tmpCam in $cams)
+		{
+			if(`gmatch $tmpCam "master_camera*"`)
+			{
+
+            }else{
+				setAttr ($tmpCam+".nearClipPlane") 1;
+				setAttr ( $tmpCam +".farClipPlane") 10000;
+  	      	}
+		}
+
+		file -f -s -options "v=0;p=17" -type "mayaAscii";
+		$amount =  $testf ;
+
+        progressWindow -edit
+			-progress $amount
+			-status ("Progress: "+$amount+"%");
+    }
+    progressWindow -endProgress;
+}
+
+
+global proc s100PRCimportAssetInPrevizScene(string $seqs, string $files)
+{
+	//$files = $s100PRCfiles
+	//$seqs = "004A" ;
+	string $shotsInAll[]   = s100PRCreturnShotBySequences( $files , {$seqs} ) ;
+	if(size($shotsInAll) >0)
+	{
+		$last = size($shotsInAll) - 1 ;
+		s100PRCImportAllAssetsForMultiShot($files, $shotsInAll[0] ,$shotsInAll[$last] );
+    }else{
+		warning ("no shot in seq " + $seqs );
+    }
+}
+
+
+global proc string s100PRCCreateMasterCam(string $name)
+{
+	$camera = `camera -n $name -centerOfInterest 5 -focalLength 35 -lensSqueezeRatio 1 -cameraScale 1 -horizontalFilmAperture 1.41732 -horizontalFilmOffset 0 -verticalFilmAperture 0.94488 -verticalFilmOffset 0 -filmFit Horizontal -overscan 1 -motionBlur 0 -shutterAngle 180 -nearClipPlane 0.01 -farClipPlane 1000 -orthographic 0 -orthographicWidth 30`;
+	return $camera[0] ;
+}
+
+
+global proc string s100PRCCreateCamForShot(string $name)
+{
+	string $camPath = `s1100PRCgetPathToCamera` ;
+	string $cleanPath = substituteAllString($camPath , ";","") ;
+	//$name = "test" ;
+	$i = 1 ;
+	string $origName = $name ;
+	while(`namespace -exists $name`)
+	{
+		$pad = padNumber($i,2) ;
+		$name = $origName +"_" + $pad ;
+		$i++;
+    }
+	print $name ;
+	file -r -type "mayaAscii" -gl -loadReferenceDepth "all" -namespace $name -options "v=0" $cleanPath;
+	return ($name +":camera_cam" );
+}
+
+
+
+global proc string s1100PRCgetPathToCamera()
+{
+	global string $currentProdBank_path ;
+	global string $basePathToTools ;
+
+	$return =  $currentProdBank_path  +"_commons/camera/camera_1pnt.ma" ;
+	if(`filetest -e $return ` != 1)
+	{
+		$return = $basePathToTools +"studio100/reference_files/camera/camera_1pnt.ma";
+    }
+	return $return ;
+}
+
+// $seq = $sq[$i] ; $files = $s100PRCfiles ;
+//
+global proc s100PRCcreateCamForPrevizScene(string $seq, string $files)
+{
+	global int  $s100PRCFileId;
+
+	zooShots;
+
+	string $shotsInAll[]   = s100PRCreturnShotBySequences( $files , {$seq} ) ;
+
+	select `s100PRCCreateMasterCam("master_camera") `;
+
+	zooShotsWindowFunctions loadCamera master;
+	$name = `file -q -sn -shortName    `;
+	// shortening name of file to get base names of cams (like "Ep999_Sq001A_" out of "MA_Ep999_Sq001A_PREVIZ_Tk00.mb"
+	$nameArr= stringToStringArray($name , "_" ) ;
+	$realName ="";
+	for($i = 1 ; $i < 3; $i++)
+		$realName += $nameArr[$i] +"_" ;
+
+	int $tim = 100 ;
+	playbackOptions -minTime $tim ;
+	int $safeF = ` intField -q -v  s100PRCFormLayoutProdSafeFrame ` ;
+
+	for( $i = 0 ; $i < size($shotsInAll) ; $i++ )
+	{
+		$pad = padNumber($shotsInAll[$i] , 3) ;
+		$realName2 = $realName +  ("Sc"+ $pad +"_Cam" ) ;
+		string $s = "\ncreate Camera : " + $realName2 ;
+		fprint $s100PRCFileId $s  ;
+		select `s100PRCCreateCamForShot($realName2) `;
+		zooShotsWindowFunctions loadCamera n;
+		intField -e -v $tim zooShotsIntFieldNewStart ;
+		$time =  s100PRCgetAllInfoFromAFileByScene($files, $shotsInAll[$i], "Duration") ;
+
+		// QA addendum : now (June 22 2012) : deciding to make LAST shot one frame shorter to compensate a zooShot issue
+		//(+ taking "0 frame" case into account as well)
+		int $tempInt = $time;
+		int $t2 = ($tempInt) ;
+		if ( $i == ( size($shotsInAll)-1 ) )
+			$t2 = ($tempInt-1) ;
+		if ($tempInt<=0)
+			error ("s100PRCcreateCamForPrevizScene >> Shot \""+$realName+"Sc"+$pad+"\" asked to be  ("+$tempInt+") frame long ! stopped.");
+
+		string $s = "\ncreate Timing : " +  ($t2 +$safeF)  ;
+		fprint $s100PRCFileId $s  ;
+		$tim += ($t2 +$safeF) ;
+		zooShotsWindowFunctions createShot n;
+    }
+
+	playbackOptions -maxTime $tim ;
+	zooReorderShots ;
+
+	$var = `ls "*_Cam1"`;
+
+	for($tmp in $var)
+	{
+		$sub =substituteAllString($tmp , "_Cam1","_Cam") ;
+		rename $tmp $sub;
+    }
+}
+
+global proc s100PRCcreateFolderTreeForEp()
+{
+	global string $s100PRCfiles ;
+	global string  $s100PRCepPath ;
+	global string $s100PRCprod;
+	global string $s100PRCselSqArr[];
+
+	$ep = `textField -q -tx s100PRCaskForEPNameUITEP`;
+	$name = `textField -q -tx s100PRCaskForEPNameUITFN`;
+	$cap = capitalizeString($name) ;
+	$allN = $ep + $cap ;
+	$fullPath = $s100PRCepPath + $allN +"/" ;
+	sysFile -md  $fullPath ;
+
+     int $amount = 0;
+
+     progressWindow
+         -title "Creating Folder Tree"
+         -progress $amount
+         -status "Progress : 0%"
+         -isInterruptable true
+		 -maxValue 100;
+
+	string $sq[] =$s100PRCselSqArr;
+	string $shotsInAll[]   = s100PRCreturnShotBySequences( $s100PRCfiles , $sq ) ;
+	$last = (size($shotsInAll)-1) ;
+
+	for($i = 0 ; $i < size($sq) ; $i++)
+	{
+		string $folder = s100PRCProdManagerAddSqSt( $sq[$i] , $fullPath) ;
+		string $shotsInA[]   = s100PRCreturnShotBySequences( $s100PRCfiles , {$sq[$i]} ) ;
+		for($j = 0 ; $j < size($shotsInA) ; $j++)
+		{
+			s100PRCAddShot($folder , $shotsInA[$j], $s100PRCprod )	;
+
+			float $s = $shotsInA[$j];
+			float $m = $shotsInAll[$last] ;
+			float $testf = 	( $s / $m  ) *100 ;
+
+			$amount =  $testf ;
+
+			 progressWindow -edit
+				 -progress $amount
+				 -status ("Progress: "+$amount+"%");
+        }
+    }
+    progressWindow -endProgress;
+}
+
+
+
+global proc string  s100PRCProdManagerAddSqSt(string $num , string $path )
+{
+	//$path = $fullPath
+	//$num = 1 ;
+	//$pad = padNumber($num, 3 ) ;
+	$folder = $path + "Sq" + $num+"/" ;
+	sysFile -md $folder ;
+
+	sysFile -md ($folder + "_PREVIZ/") ;
+	return $folder ;
+}
+
+
+
+global proc s100PRCAddShot(string $path , string $sh ,string $prod)
+{
+	string $scn ;
+	global string $base_prodFilesSystem;
+	string $scn;
+	$deptScn = $base_prodFilesSystem + "prod/" + $prod + "/deptScn.txt";
+	$fileId=`fopen $deptScn "r" `;
+	$scn =`fread $fileId $scn`;
+	fclose $fileId ;
+	$scnTab = stringToStringArray($scn, "|");
+	$pad = padNumber($sh,3);
+	$path += ("Sc" + $pad+"/")  ;
+	$padding = 1 ;
+
+	for($i = 0; $i < size($scnTab);$i++)
+	{
+		$starts = startsWith($scnTab[$i],"_");
+
+		if($starts == 0)
+		{
+			$padNumber = padNumber($padding,2);
+			sysFile -md ($path  + "/" + ($padNumber + "_" + $scnTab[$i]) + "/");
+			sysFile -md ($path  + "/" + ($padNumber + "_" + $scnTab[$i]) + "/WIP_Archives/");
+			if($scnTab[$i] == "Rendering")
+				sysFile -md ($path  + "/" + ($padNumber + "_" + $scnTab[$i]) + "/Render_pass/");
+			$padding ++;
+		}
+		else
+		{
+			sysFile -md ($path   +"/" + $scnTab[$i] + "/");
+			sysFile -md ($path   +"/" + $scnTab[$i] + "/WIP_Archives/");
+		}
+	}
+}
+
+
+
+global proc s100PRCcreateNodeIfCommentExists(int $shot , string $files)
+{
+	string $comment[] = s100PRCGetCommentByShot($shot, $files) ;
+
+	if(size($comment) > 0 )
+	{
+		if(`objExists "full_grp"`)
+		{
+
+        }else{
+			group -em -n "full_grp" ;
+        }
+
+		string $string ="";
+		if(`attributeExists "comments"  "full_grp"`)
+			$string = (`getAttr -as "full_grp.comments"` );
+
+		$tmp = stringArrayToString($comment,"") ;
+		$string += ("shot : " + $shot +":" + $tmp) ;
+		creaAttrString("full_grp", "comments",($shot +":" + $string )) ;
+    }
+}
+
+
+///proc for deadline
+global proc s100PRCcreatePrevizSceneForEpManualStart(string $file, string $sqToDo,string $ep,string $prod )
+{
+	string $st ;
+	global string $s100PRCfiles ;
+	//print $s100PRCfiles = $files ;
+	global int  $s100PRCFileId;
+	global string $s100PRCselSqArr[];
+
+	$s100PRCepPath = `s100assetManagerGetEpPath( $prod ) `;
+
+	//episode a mettre complet avec le numero et le nom 004_Beware...
+	$allN = $ep;
+	$fullPath = $s100PRCepPath + $allN +"/" ;
+
+	$st =( "\n\n--------------------------------\nepisode : " + $ep  +"\n\n");
+
+	fprint $s100PRCFileId $st  ;
+
+	string $sq[] = $s100PRCselSqArr;
+    int $amount = 0;
+
+	$last = (size($sq)-1) ;
+
+	file -f -newFile  ;
+
+	setAttr "defaultResolution.width" 1280;
+	setAttr "defaultResolution.height" 720;
+	setAttr "defaultResolution.deviceAspectRatio" 1.777;
+
+	$pad = $sqToDo  ;
+	//build du nom
+  	string $pathA[] = s100FMbuildNameWithGivenArg($prod , $allN , ("Sq" + $pad )  ,"", "_PREVIZ" ,"Tk00")	;
+
+	// creation des dossiers
+	$arr = stringToStringArray($pathA[0]  , "/" ) ;
+	string $dir = "";
+	for($tmp in $arr)
+	{
+		$dir += $tmp ;
+		if(!`filetest -d $dir`)
+		{
+			sysFile -md $dir ;
+		}
+		$dir +="/";
+	}
+
+	$fPath = $pathA[0] + $pathA[1] +".ma";
+	file  -rename $fPath ;
+
+	print ("\nsqToDo =" + $sqToDo ) ;
+	print ("\nfile =" + $file ) ;
+
+
+	//import et set des cameras
+	s100PRCcreateCamForPrevizScene($sqToDo, $file ) ;
+	print "ici" ;
+
+	//import de assets
+	s100PRCimportAssetInPrevizScene($sqToDo, $file);
+
+
+	//proc de quentin pour les persos
+	s100FMattrs_setBestPrevizAttrs(100, 0 ) ;
+
+	//set attr sur camera
+	string $cams[] = `ls -type camera `;
+	for($tmpCam in $cams)
+	{
+		if(!`gmatch $tmpCam "master_camera*"`)
+		{
+			setAttr ($tmpCam+".nearClipPlane") 1;
+			setAttr ( $tmpCam +".farClipPlane") 10000;
+		}
+	}
+	file -f -s -options "v=0;p=17" -type "mayaAscii";
+}

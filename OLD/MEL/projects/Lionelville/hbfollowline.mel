@@ -1,0 +1,447 @@
+global proc hbfollowline()
+{
+
+if (`window -ex followlineWin`)
+    deleteUI -window followlineWin;
+    window -t "匹配曲线" -w 450 -h 200 followlineWin;
+     formLayout colOut;
+
+
+
+         frameLayout -label "输入名字"
+           -borderStyle "etchedOut" inputworld;
+                textField -w 100 -h 30 world;
+        setParent..;
+
+        frameLayout -label "骨骼个数"
+            -borderStyle "etchedOut"   setjointNumber;
+            intSliderGrp -l "输入个数" -f 1 -s 1 -min -0 -max 100 -v 40   setjointNumber;
+        setParent..;
+
+        frameLayout -label "生长幅度"
+            -borderStyle "etchedOut"   setScale;
+            floatSliderGrp -l "输入幅度" -f 1 -s 1 -min -0 -max 10 -v 10   setScale;
+        setParent..;
+
+       frameLayout -label "选择轴向"
+         -borderStyle "etchedOut" selectAix;
+            radioButtonGrp -nrb 3
+            -l "选择轴向" -labelArray3 "X" "Y" "Z"  selectAix;
+        setParent..;
+
+
+      button -l "确定" -c "followlinesetup;deleteUI -wnd followlineWin;" OkBtn; 
+      button -l "执行" -c "followlinesetup;" AppBtn;
+      button -l "关闭" -c "deleteUI -wnd followlineWin;" ClosBtn;
+    setParent..;
+
+formLayout -e
+        -af inputworld "top" 5
+        -af inputworld "left" 5
+        -af inputworld "right" 5
+
+        -ac setjointNumber "top" 5 inputworld
+        -af setjointNumber "left" 5
+        -af setjointNumber "right" 5
+
+
+        -ac setScale "top" 5 setjointNumber
+        -af setScale "left" 5
+        -af setScale "right" 5
+
+        -ac selectAix "top" 5 setScale
+        -af selectAix "left" 5
+        -af selectAix "right" 5
+
+        -af OkBtn "bottom" 5
+        -af OkBtn "left" 5
+        -ap OkBtn "right" 5 30
+
+        -af AppBtn "bottom" 5
+        -ac AppBtn "left" 5 OkBtn
+        -ap AppBtn "right" 5 60
+
+
+        -af ClosBtn "bottom" 5
+        -ac ClosBtn "left" 5 AppBtn
+        -ap ClosBtn "right" 5 100
+ colOut;
+
+
+
+
+  showWindow followlineWin;
+}
+hbfollowline;
+
+
+global proc followlinesetup()
+{
+float $getjointNumber=`intSliderGrp -q -v setjointNumber`;
+float $getScale=`floatSliderGrp -q -v setScale`;
+int $sxll=`radioButtonGrp -q -sl selectAix`;
+string $getName=`textField -q -tx world`;
+float $getAix=`radioButtonGrp -q -sl selectAix`;
+   if($getAix==0)
+     {		 confirmDialog  -title "警告" -message "请选择一个轴向!" -button "确认";
+		 return ;
+     }
+
+   else if($getAix==3)
+     {
+        string $selectObjname[]=`ls -sl`;
+        string $locatorNamea[]=`spaceLocator -p 0 0 0`;
+        select -r $selectObjname[0];
+        select -add $locatorNamea[0];
+          geometryConstraint -weight 1;
+        select $locatorNamea[0];
+           move -r -os -wd 0 0 -1000 ;
+
+
+       string $locatorNameb[]=`spaceLocator -p 0 0 0`;
+       select -r $selectObjname[0];
+       select -add $locatorNameb[0];
+           geometryConstraint -weight 1;
+       select $locatorNameb[0];
+           move -r -os -wd 0 0 1000 ;
+
+       float $locTranA=`getAttr ($locatorNamea[0]+".translateZ")`;
+       float $locTranB=`getAttr ($locatorNameb[0]+".translateZ")`;
+
+       select -r $selectObjname[1] ;
+         string $newLinename[]=`duplicate -rr`;
+       select -r $selectObjname[1] ;
+
+
+
+
+       float $distance=abs($locTranA-$locTranB);
+       string $cvPointname[]=`ls ($newLinename[0]+".cv[*:*]")`;
+       string $buffer2[];
+       $numTokens = `tokenize $cvPointname[0] ":" $buffer2`;
+       string $buffer[];
+       $numTokens = `tokenize $buffer2[1] "]" $buffer`;
+       print $buffer[0];
+       float $maxNumber=$buffer[0];
+       float $k=$distance/$maxNumber;
+
+            for($i=0;$i<$maxNumber+1;$i++)
+              {
+                 select -r ($newLinename[0]+".cv["+$i+"]") ;
+                 move 0 0 ($locTranB-$i*$k);
+              }
+
+            select -cl  ;
+            select -r $selectObjname[1] ;
+            select -add $newLinename[0] ;
+            string $blendNamea[]=`blendShape -frontOfChain`;
+
+
+            float $getNumber=$getjointNumber;
+            float $aaa=1/$getNumber;
+            int $i;
+            string $allPathname="";
+                for($i=1;$i<$getNumber+2;$i++)
+                     {
+                        select -cl  ;
+                         string $jointname=`joint -p 0 0 0` ;
+                         string $newJointname=`rename $jointname ($getName+"pathjoint"+$i)`;
+                         select -r $newJointname ;
+                         select -add  $newLinename[0] ;
+                         string $pathName=`pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0`;
+                        $allPathname=$allPathname+$pathName+";";
+                        disconnectAttr ($pathName+"_uValue.output") ($pathName+".uValue") ;
+                        setAttr ($pathName+".u") (($i-1)*$aaa);
+
+                           select -cl  ;
+                   };
+          select ($getName+"pathjoint*");
+          select -add $selectObjname[0];
+              SmoothBindSkin;
+
+          select -cl  ;
+          select -r  $newLinename[0];
+          setAttr ($blendNamea[0]+"."+$selectObjname[1]) 1;
+          select -cl  ;
+          select ($getName+"pathjoint*");
+          select -add $locatorNamea[0];
+          select -add $locatorNameb[0];
+          select -add $newLinename[0];
+
+
+          string $groupName=`Group`;
+            print $groupName;
+         rename group1 ($getName+"path_group");
+             setAttr ($getName+"path_group.visibility") 0;
+
+
+       select -r  ($getName+"path_group");
+
+	addAttr -ln "follow"  -at double  -min 0 -max 10 -dv $getScale ;
+	setAttr -keyable true ".follow";
+       	addAttr -ln "move"  -at double  -min 0 -max 10 -dv 0 ;
+	setAttr -keyable true ".move";
+	addAttr -ln "turn"  -at double   -dv 0 ;
+	setAttr -keyable true ".turn";
+ 
+       string $buffer2[];
+       $numTokens = `tokenize $allPathname ";" $buffer2`;
+      string $temp="";
+      string $temp2="";
+
+for($sss in $buffer2)
+   {
+         float $pathUvalue=`getAttr ($sss+".uValue")`;
+         string $expString=$sss+".uValue"+"="+$pathUvalue+"*"+$getName+"path_group.follow"+"/10+"+$getName+"path_group.move"+"/10;";
+         $temp=$temp+$expString;
+
+         string $expString2=$sss+".frontTwist"+"="+$getName+"path_group.turn"+";";
+         $temp2=$temp2+$expString2;
+
+    }
+          expression -s $temp;
+          expression -s $temp2;
+   }
+
+
+
+   else if($getAix==2)
+     {
+        string $selectObjname[]=`ls -sl`;
+        string $locatorNamea[]=`spaceLocator -p 0 0 0`;
+        select -r $selectObjname[0];
+        select -add $locatorNamea[0];
+          geometryConstraint -weight 1;
+        select $locatorNamea[0];
+           move -r -os -wd 0 -1000 0 ;
+
+
+       string $locatorNameb[]=`spaceLocator -p 0 0 0`;
+       select -r $selectObjname[0];
+       select -add $locatorNameb[0];
+           geometryConstraint -weight 1;
+       select $locatorNameb[0];
+           move -r -os -wd 0 1000 0 ;
+
+       float $locTranA=`getAttr ($locatorNamea[0]+".translateY")`;
+       float $locTranB=`getAttr ($locatorNameb[0]+".translateY")`;
+
+       select -r $selectObjname[1] ;
+         string $newLinename[]=`duplicate -rr`;
+       select -r $selectObjname[1] ;
+
+
+
+
+       float $distance=abs($locTranA-$locTranB);
+       string $cvPointname[]=`ls ($newLinename[0]+".cv[*:*]")`;
+       string $buffer2[];
+       $numTokens = `tokenize $cvPointname[0] ":" $buffer2`;
+       string $buffer[];
+       $numTokens = `tokenize $buffer2[1] "]" $buffer`;
+       print $buffer[0];
+       float $maxNumber=$buffer[0];
+       float $k=$distance/$maxNumber;
+
+            for($i=0;$i<$maxNumber+1;$i++)
+              {
+                 select -r ($newLinename[0]+".cv["+$i+"]") ;
+                 move 0 ($locTranB-$i*$k) 0;
+              }
+
+            select -cl  ;
+            select -r $selectObjname[1] ;
+            select -add $newLinename[0] ;
+            string $blendNamea[]=`blendShape -frontOfChain`;
+
+
+            float $getNumber=$getjointNumber;
+            float $aaa=1/$getNumber;
+            int $i;
+            string $allPathname="";
+                for($i=1;$i<$getNumber+2;$i++)
+                     {
+                        select -cl  ;
+                         string $jointname=`joint -p 0 0 0` ;
+                         string $newJointname=`rename $jointname ($getName+"pathjoint"+$i)`;
+                         select -r $newJointname ;
+                         select -add  $newLinename[0] ;
+                         string $pathName=`pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0`;
+                        $allPathname=$allPathname+$pathName+";";
+                        disconnectAttr ($pathName+"_uValue.output") ($pathName+".uValue") ;
+                        setAttr ($pathName+".u") (($i-1)*$aaa);
+
+                           select -cl  ;
+                   };
+          select ($getName+"pathjoint*");
+          select -add $selectObjname[0];
+              SmoothBindSkin;
+
+          select -cl  ;
+          select -r  $newLinename[0];
+          setAttr ($blendNamea[0]+"."+$selectObjname[1]) 1;
+          select -cl  ;
+          select ($getName+"pathjoint*");
+          select -add $locatorNamea[0];
+          select -add $locatorNameb[0];
+          select -add $newLinename[0];
+
+
+          string $groupName=`Group`;
+            print $groupName;
+         rename group1 ($getName+"path_group");
+             setAttr ($getName+"path_group.visibility") 0;
+
+
+       select -r  ($getName+"path_group");
+
+	addAttr -ln "follow"  -at double  -min 0 -max 10 -dv $getScale ;
+	setAttr -keyable true ".follow";
+       	addAttr -ln "move"  -at double  -min 0 -max 10 -dv 0 ;
+	setAttr -keyable true ".move";
+	addAttr -ln "turn"  -at double   -dv 0 ;
+	setAttr -keyable true ".turn";
+ 
+       string $buffer2[];
+       $numTokens = `tokenize $allPathname ";" $buffer2`;
+      string $temp="";
+      string $temp2="";
+
+for($sss in $buffer2)
+   {
+         float $pathUvalue=`getAttr ($sss+".uValue")`;
+         string $expString=$sss+".uValue"+"="+$pathUvalue+"*"+$getName+"path_group.follow"+"/10+"+$getName+"path_group.move"+"/10;";
+         $temp=$temp+$expString;
+
+         string $expString2=$sss+".frontTwist"+"="+$getName+"path_group.turn"+";";
+         $temp2=$temp2+$expString2;
+
+    }
+          expression -s $temp;
+          expression -s $temp2;
+   }
+
+   else if($getAix==1)
+     {
+        string $selectObjname[]=`ls -sl`;
+        string $locatorNamea[]=`spaceLocator -p 0 0 0`;
+        select -r $selectObjname[0];
+        select -add $locatorNamea[0];
+          geometryConstraint -weight 1;
+        select $locatorNamea[0];
+           move -r -os -wd -1000 0 0 ;
+
+
+       string $locatorNameb[]=`spaceLocator -p 0 0 0`;
+       select -r $selectObjname[0];
+       select -add $locatorNameb[0];
+           geometryConstraint -weight 1;
+       select $locatorNameb[0];
+           move -r -os -wd 1000 0 0 ;
+
+       float $locTranA=`getAttr ($locatorNamea[0]+".translateX")`;
+       float $locTranB=`getAttr ($locatorNameb[0]+".translateX")`;
+
+       select -r $selectObjname[1] ;
+         string $newLinename[]=`duplicate -rr`;
+       select -r $selectObjname[1] ;
+
+
+
+
+       float $distance=abs($locTranA-$locTranB);
+       string $cvPointname[]=`ls ($newLinename[0]+".cv[*:*]")`;
+       string $buffer2[];
+       $numTokens = `tokenize $cvPointname[0] ":" $buffer2`;
+       string $buffer[];
+       $numTokens = `tokenize $buffer2[1] "]" $buffer`;
+       print $buffer[0];
+       float $maxNumber=$buffer[0];
+       float $k=$distance/$maxNumber;
+
+            for($i=0;$i<$maxNumber+1;$i++)
+              {
+                 select -r ($newLinename[0]+".cv["+$i+"]") ;
+                 move  ($locTranB-$i*$k) 0 0;
+              }
+
+            select -cl  ;
+            select -r $selectObjname[1] ;
+            select -add $newLinename[0] ;
+            string $blendNamea[]=`blendShape -frontOfChain`;
+
+
+            float $getNumber=$getjointNumber;
+            float $aaa=1/$getNumber;
+            int $i;
+            string $allPathname="";
+                for($i=1;$i<$getNumber+2;$i++)
+                     {
+                        select -cl  ;
+                         string $jointname=`joint -p 0 0 0` ;
+                         string $newJointname=`rename $jointname ($getName+"pathjoint"+$i)`;
+                         select -r $newJointname ;
+                         select -add  $newLinename[0] ;
+                         string $pathName=`pathAnimation -fractionMode true -follow true -followAxis x -upAxis y -worldUpType "vector" -worldUpVector 0 1 0`;
+                        $allPathname=$allPathname+$pathName+";";
+                        disconnectAttr ($pathName+"_uValue.output") ($pathName+".uValue") ;
+                        setAttr ($pathName+".u") (($i-1)*$aaa);
+
+                           select -cl  ;
+                   };
+          select ($getName+"pathjoint*");
+          select -add $selectObjname[0];
+              SmoothBindSkin;
+
+          select -cl  ;
+          select -r  $newLinename[0];
+          setAttr ($blendNamea[0]+"."+$selectObjname[1]) 1;
+          select -cl  ;
+          select ($getName+"pathjoint*");
+          select -add $locatorNamea[0];
+          select -add $locatorNameb[0];
+          select -add $newLinename[0];
+
+
+          string $groupName=`Group`;
+            print $groupName;
+         rename group1 ($getName+"path_group");
+             setAttr ($getName+"path_group.visibility") 0;
+
+
+       select -r  ($getName+"path_group");
+
+	addAttr -ln "follow"  -at double  -min 0 -max 10 -dv $getScale ;
+	setAttr -keyable true ".follow";
+       	addAttr -ln "move"  -at double  -min 0 -max 10 -dv 0 ;
+	setAttr -keyable true ".move";
+	addAttr -ln "turn"  -at double   -dv 0 ;
+	setAttr -keyable true ".turn";
+ 
+       string $buffer2[];
+       $numTokens = `tokenize $allPathname ";" $buffer2`;
+      string $temp="";
+      string $temp2="";
+
+for($sss in $buffer2)
+   {
+         float $pathUvalue=`getAttr ($sss+".uValue")`;
+         string $expString=$sss+".uValue"+"="+$pathUvalue+"*"+$getName+"path_group.follow"+"/10+"+$getName+"path_group.move"+"/10;";
+         $temp=$temp+$expString;
+
+         string $expString2=$sss+".frontTwist"+"="+$getName+"path_group.turn"+";";
+         $temp2=$temp2+$expString2;
+
+    }
+          expression -s $temp;
+          expression -s $temp2;
+   }
+
+
+}
+
+
+
+
+
+

@@ -1,0 +1,269 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ’‘÷æΩ‹
+///
+/// Creation Date: 2009/03/12
+///
+/// Description: 
+///
+
+
+global proc zjGrowGrass()
+{
+	int $i;
+	string $child[];
+
+	if (`window -q -exists zjGgrassWin`)
+		deleteUI zjGgrassWin;
+
+	window -menuBar true -title "Auto Grass" -resizeToFitChildren true zjGgrassWin;
+
+				menu -label "Help";
+					menuItem -label "Help on Auto Grass..." -command "zjHelpCallback zjGrowGrass";
+
+				$i = 0;
+
+				string $formLayout = `formLayout`;
+					$child[$i++] = `textFieldGrp -columnWidth 1 60 -adjustableColumn 2 -label "Name" -text  ""`;
+					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "Boldness Map:" -editable true -text ""`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("zjGgrassbrow " + $child[0])`;
+ 					$child[$i++] = `textFieldGrp -columnWidth 1 100 -adjustableColumn 2 -label "  Length Map:" -editable true -text ""`;
+					$child[$i++] = `button -label "Browse" -w 80 -command ("zjGgrassbrow " + $child[3])`;
+					$child[$i++] = `floatFieldGrp -label "Density: " -numberOfFields 2 -value1 200 -value2 200 -columnWidth 1 60 -columnWidth 2 50 -columnWidth 3 50 zjGGwlfield`;
+					$child[$i++] = `button -label "Calculate" -ann "100*100 = 7000<>200*200 = 28000<>400*400 = 56000..." -command ("zjGrowGrassCal")`;
+					$child[$i++] = `optionMenu -label "Presets"`;
+					$child[$i++] = `	menuItem -label "Default"`;
+					$child[$i++] = `	menuItem -label "Small"`;
+					checkBox -label "Use MayaMan" -onCommand "zwGrowGrassCheckBoxUseMayaManOn" checkBoxUseMayaMan;
+					$child[$i++] = `button -label "Apply" -w 100 -command ("zjGrowGrassApply " + $child[0] + " " + $child[1] + " " + $child[3] + " " + $child[5] + " " + $child[7])`;
+					$child[$i++] = `button -label "Set light" -w 100 -command ("zjGrowGrasslight")`;
+				setParent ..;
+
+				formLayout -edit
+					-attachForm		$child[0]	"top"		10
+					-attachForm		$child[0]	"left"		40
+					-attachForm		$child[0]	"right"		100
+				
+					-attachControl		$child[1]	"top"		10	$child[0]
+					-attachForm		$child[1]	"left"		0
+					-attachControl		$child[1]	"right"		5	$child[2]
+
+					-attachControl		$child[2]	"top"		10	$child[0]
+					-attachForm		$child[2]	"right"		5
+
+					-attachControl		$child[3]	"top"		10	$child[1]
+					-attachForm		$child[3]	"left"		5
+					-attachControl		$child[3]	"right"		5	$child[4]
+					
+					-attachControl		$child[4]	"top"		10	$child[1]
+					-attachForm		$child[4]	"right"		5
+
+					-attachControl		$child[5]	"top"		20	$child[3]
+					-attachForm		$child[5]	"left"		25
+
+					-attachControl		$child[6]	"top"		20	$child[3]
+					-attachControl		$child[6]	"left"		15	$child[5]
+
+					-attachControl		$child[7]	"top"		20	$child[3]
+					-attachControl		$child[7]	"left"		15	$child[6]
+
+					-attachControl		checkBoxUseMayaMan	"top"		20	$child[3]
+					-attachControl		checkBoxUseMayaMan	"left"		15	$child[7]
+
+					-attachControl		$child[10]	"top"		10	$child[7]
+					-attachForm		$child[10]	"left"		0
+					-attachPosition		$child[10]	"right"		0	50
+				
+					-attachControl		$child[11]	"top"		10	$child[7]
+					-attachControl		$child[11]	"left"		5	$child[10]
+					-attachPosition		$child[11]	"right"		0	100
+				$formLayout;
+
+				setParent ..;
+
+	showWindow zjGgrassWin;
+}
+
+global proc zwGrowGrassCheckBoxUseMayaManOn()
+{
+	if (!`pluginInfo -query -loaded "MayaMan"`)
+	{
+		int $err = catch(`loadPlugin "MayaMan"`);
+		if ($err)
+		{
+			checkBox -edit -value false checkBoxUseMayaMan;
+		}
+	}
+}
+
+global proc zjGrowGrassCal()
+{
+	string $selectedtr[] = `ls -ni -g -sl -tr`;
+
+	if (size($selectedtr) != 1)
+		warning "please select a mesh";
+
+	float $bb[]=`xform -q -ws -bb $selectedtr[0]`;
+	floatFieldGrp -e -value1 ($bb[3]-$bb[0]) -value2 ($bb[5]-$bb[2]) zjGGwlfield;
+}
+
+global proc zjGrowGrasslight()
+{
+
+	string $selt[] = `ls -dag -sl -lights`;
+	if (size($selt) != 1)
+		error "please select a light";
+
+	string $sel[] = `ls -dag -sl -tr`;
+
+	MayaManAddLightAttributes(true, true);
+	string $left[] = `listConnections -s 1 -d 0 -type MayaManLightAtts $sel[0]`;
+	
+	setAttr ($left[0] + ".mmla_ShadowMapSamples") 16;
+	setAttr ($left[0] + ".mmla_MapResX") 0;
+	setAttr ($left[0] + ".mmla_MapResY") 0;
+	setAttr ($left[0] + ".mmla_DeepShadows") 1;
+	setAttr ($left[0] + ".mmla_VolumeInterp") 1;
+	setAttr ($left[0] + ".mmla_UseMayaManCategories") 1;
+	setAttr ($left[0] + ".mmla_PixelSamplesX") 8;
+	setAttr ($left[0] + ".mmla_PixelSamplesY") 8;
+	setAttr -type "string" ($left[0] + ".mmla_Categories") "Key";
+	
+}
+
+global proc zjGrowGrassApply(string $gname,string $bmap,string $lhmap,string $density,string $pset)
+{
+	int $useMayaMan = `checkBox -query -value checkBoxUseMayaMan`;
+	if ($useMayaMan)
+	{
+		if (!`pluginInfo -query -loaded "MayaMan"`)
+		{
+			loadPlugin "MayaMan";
+		}
+	}
+
+	if (!`pluginInfo -q -loaded -name "Fur.mll"`)
+		loadPlugin "Fur.mll";
+
+	string $selected[] = `ls -ni -dag -sl -s`;
+	string $selectedtr[] = `ls -ni -dag -sl -tr`;
+
+	if (size($selected) != 1)
+		error "please select a mesh";
+
+	//link boldness map to distribute grass
+	string $grassname = `textFieldGrp -q -fileName $gname`;
+	string $boldnessmap = `textFieldGrp -q -fileName $bmap`;
+	string $lengthmap = `textFieldGrp -q -fileName $lhmap`;
+	float $dt1 = `floatFieldGrp -q -value1 $density`;
+	float $dt2 = `floatFieldGrp -q -value2 $density`;
+	HfCreateAndAssignHD 0;
+	string $file = `shadingNode -asTexture file`;
+	string $file1 = `shadingNode -asTexture file`;
+	string $p2t = `shadingNode -asUtility place2dTexture`;
+	connectAttr -f ($p2t + ".coverage") ($file + ".coverage");
+	connectAttr -f ($p2t + ".translateFrame") ($file + ".translateFrame");
+	connectAttr -f ($p2t + ".rotateFrame") ($file + ".rotateFrame");
+	connectAttr -f ($p2t + ".mirrorU") ($file + ".mirrorU");
+	connectAttr -f ($p2t + ".mirrorV") ($file + ".mirrorV");
+	connectAttr -f ($p2t + ".stagger") ($file + ".stagger");
+	connectAttr -f ($p2t + ".wrapU") ($file + ".wrapU");
+	connectAttr -f ($p2t + ".wrapV") ($file + ".wrapV");
+	connectAttr -f ($p2t + ".repeatUV") ($file + ".repeatUV");
+	connectAttr -f ($p2t + ".offset") ($file + ".offset");
+	connectAttr -f ($p2t + ".rotateUV") ($file + ".rotateUV");
+	connectAttr -f ($p2t + ".noiseUV") ($file + ".noiseUV");
+	connectAttr -f ($p2t + ".vertexUvOne") ($file + ".vertexUvOne");
+	connectAttr -f ($p2t + ".vertexUvTwo") ($file + ".vertexUvTwo");
+	connectAttr -f ($p2t + ".vertexUvThree") ($file + ".vertexUvThree");
+	connectAttr -f ($p2t + ".vertexCameraOne") ($file + ".vertexCameraOne");
+	connectAttr ($p2t + ".outUV") ($file + ".uv");
+	connectAttr ($p2t + ".outUvFilterSize") ($file + ".uvFilterSize");
+
+	string $right[] = `listConnections -s 0 -d 1 -type FurDescription $selected[0]`;
+	connectAttr -f ($file + ".fileTextureName") ($right[0] + ".BaldnessMap[0]");
+	connectAttr -f ($file1 + ".fileTextureName") ($right[0] + ".LengthMap[0]");
+	setAttr -type "string" ($file + ".fileTextureName") $boldnessmap;
+	setAttr -type "string" ($file1 + ".fileTextureName") $lengthmap;
+
+	select -r $right[0];
+	
+	//add mayaman model attr& mayamanfurdes attr
+	if ($useMayaMan)
+	{
+		MayaManAddModelAttributes(true, true);
+		MayaManAddFurDescAttributes();
+
+		setAttr -type "string" ($right[0] + ".MapDir") "";
+		setAttr -type "string" ($right[0] + ".WigUVNDir") "";
+		setAttr -type "string" ($right[0] + ".WigDir") "";
+		
+		int $preset = `optionMenu -q -select $pset`;
+		
+		source presetMenuForDir.mel; 
+		ShowAttributeEditorOrChannelBox;
+
+		if ($preset ==1)
+			applyPresetToNode $right[0] "" "" "//file-cluster/GDC/Resource/Support/Maya/presets/attrPresets/FurDescription/RBW_GrassrDescription.mel" 1;
+		else 
+			applyPresetToNode $right[0] "" "" "//file-cluster/GDC/Resource/Support/Maya/presets/attrPresets/FurDescription/Small1.mel" 1;
+
+		float $bb[]=`xform -q -ws -bb $selectedtr[0]`;
+		float $area = ($bb[3]-$bb[0])*($bb[5]-$bb[2]);
+		float $ds;
+		if ($area<=10000)
+			$ds = 7000;
+		else if ($area>10000&&$area<40000)
+			$ds = $area/10000.0*7000;
+		else 
+			$ds = $area/20000.0*7000;
+
+		setAttr ($right[0] + ".Density") $ds;
+
+		string $left[] = `listConnections -s 1 -d 0 -type MayaManAttributes $right[0]`;
+		
+		rename $right[0] ("furDesc_" + $grassname);
+
+		setAttr ($left[0] + ".mmma_MaterialOverride") 1;
+
+		string $furSg = `sets -renderable true -noSurfaceShader true -empty`;
+		string $mmshader = `shadingNode -asShader MayaManCustomShader`;
+		string $mmSg = `sets -renderable true -noSurfaceShader true -empty`;
+		connectAttr -f ($furSg+".message") ($left[0] + ".mmma_Material");
+		connectAttr -f ($mmshader+".outColor") ($furSg + ".surfaceShader");
+		
+
+		connectAttr -f ($mmshader + ".outColor") ($mmSg + ".surfaceShader");
+		
+		source AEMayaManCustomShaderTemplate.mel;
+		AEMayaManCustomShaderBrowseFile ($mmshader + ".ShaderFile") "Z:/Resource/Support/AnimalLogic/mayaman2.0.7/shaders/prman13.5/RBW_Hairs.slo" "RenderMan Shader";
+
+		string $new[] = `listConnections -s 1 -d 0 -type MayaManCustomShader $furSg`;
+		MayaManVerifyNugget;
+		setAttr -type "string" "RBW_Hairs.ShaderFile" $new[0];
+		MayaManUpdateCustomShader $new[0] "RBW_Hairs";
+
+		setAttr ($new[0] + ".Kd") 0.75;
+		setAttr ($new[0] + ".Ka") 0;
+		setAttr ($new[0] + ".Ks") 0.1;
+		setAttr ($new[0] + ".roughness") 0.5;
+		setAttr ($new[0] + ".rootOpacity") 1;
+		setAttr ($new[0] + ".tipOpacity") 1;
+		setAttr ($new[0] + ".tipFade") 0.65;
+
+		rename $left[0] ("MM_fur_" + $grassname);
+	}
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+global proc zjGgrassbrow(string $control)
+{
+	fileBrowserDialog -mode 0  -fileCommand ("zjGgrassbrowProc " + $control) -fileType "image" -actionName "Browse" -operationMode "Reference";
+}
+
+global proc int zjGgrassbrowProc(string $control, string $filename, string $fileType)
+{
+	textFieldGrp -e -text $filename $control;
+	return true;
+}
+

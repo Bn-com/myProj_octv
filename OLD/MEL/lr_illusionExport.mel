@@ -1,0 +1,228 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ¿Ó»Ò
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+//
+//     File Name:    lr_illusionExport.mel
+//       Version:    1.0
+//   Description:    Export Maya Animation path to Illusion2
+//                   
+//    Created By:    Larry  2002.7.22
+//  
+//     
+//////////////////////////////////////////////////////////////
+
+
+global proc lr_illusionExport()
+{
+    if(`window -ex illusionExportUI`) deleteUI illusionExportUI;
+    window -title "Maya2Illusion V1.0" -sizeable 0 -widthHeight 370 400 illusionExportUI;
+        columnLayout -adj 0 -cal "center" -rs 10 ;
+            text -w 140 -label "Objects List:";
+            textScrollList -h 120 -w 360 -numberOfRows 6 -allowMultiSelection true ExportListCTL;
+       //     separator -style "none" -h 10 -w 360; 
+            rowLayout -numberOfColumns 3 -cw3 60 150 150;
+                text -label "";
+                button -w 110 -label "  Add Object" -c AddIllExportObject;
+                button -w 110 -label " Remove Object" -c RemoveIllExportObject;
+            setParent..;
+            separator -style "in" -h 10 -w 360;
+            
+            radioButtonGrp 
+                -cw3 80 110 120
+                -numberOfRadioButtons 2
+                -label "Range:"
+                -labelArray2 "TimeLine" "RenderGlobal"
+                -select 1
+                rangeCTL;
+           optionMenu -label "Export Data From Camera: " -en 1 -vis 1 camerCTL;
+                string $cameras[] = `ls -cameras`;
+	        string $cam;
+	        for($cam in $cameras)
+	        {
+                   menuItem -label (`listRelatives -p $cam`) -p camerCTL;
+	        }    
+           textFieldButtonGrp -label "Exprot To:" -text "" 
+			      -buttonLabel "    Set..    "
+			      -editable 0
+			      -cw3 80 200 80 
+			      -buttonCommand onIllSetFolder 
+			      ExportFolderCTL;
+            rowLayout -numberOfColumns 3 -cw3 60 150 150;
+                text -label "";
+                button -w 120 -label "           Export" -c OnExportIllusion;
+                button -w 120 -label "            Close" -c ("deleteUI illusionExportUI");
+            setParent..;    	    
+
+        setParent..; 
+  
+    showWindow;	
+}
+
+global proc AddIllExportObject()
+{
+   
+   if(size(`ls -sl`) != 1) 
+   {
+        warning "Select only one object to Add. \n";
+        return;   
+   }
+   
+   string $sl[] = `ls -sl`;
+   string $allitem[] = `textScrollList -q -allItems ExportListCTL`;
+   for($tmp in $allitem)
+   {
+      if(`gmatch $sl[0] $tmp`)
+      {
+      	 warning "Selectd object already added! \n";
+      	 return;
+      }
+   }
+
+   textScrollList -e -append $sl[0] ExportListCTL;
+   
+   
+   // Create Locator for selected Object
+   
+ //  matrix $pmtx[4][4] = lr_getMatirxs("World",$sl[0]);
+   string $loname[] = `spaceLocator -p 0 0 0 `;// -p $pmtx[3][0] $pmtx[3][1] $pmtx[3][2]`;
+  // xform -cp $loname;
+   parent $loname[0] $sl[0];
+   rename $loname[0] ("illexportLocator_" + $sl[0] );
+ 
+
+}
+
+global proc RemoveIllExportObject()
+{
+    string $rm[] = `textScrollList -q -si ExportListCTL`;
+   print $rm;
+    for($tmp in $rm)
+    {
+       textScrollList -e -ri $tmp ExportListCTL;
+       $loname = "illexportLocator_" + $tmp;
+       if(`objExists $loname`)
+       {
+       	  delete $loname;
+       }
+    }
+      	
+}
+
+
+global proc setExportPath(string $filename, string $fileType)
+{
+    if($filename !="")
+    {
+    	textFieldButtonGrp -e -text $filename ExportFolderCTL;
+    }
+}
+
+
+global proc onIllSetFolder()
+{
+
+    fileBrowserDialog -mode 4 -fc setExportPath -an "Select Target Path: ";		
+}
+
+global proc OnExportIllusion()
+{
+    string $objlist[] = `textScrollList -q -allItems ExportListCTL`;
+    
+    int $resX     = `getAttr "defaultResolution.width"`;
+    int $resY     = `getAttr "defaultResolution.height"`;
+    float $Aspect = `getAttr "defaultResolution.deviceAspectRatio"`;
+    string $cam = `optionMenu -q -v camerCTL`;
+    string $cam1[] = `listRelatives -s $cam`;
+    string $camshape = $cam1[0];
+    if(`getAttr ($camshape + ".orthographic")`)
+    {
+       warning "Please Select a persp camera\n";
+       return;
+    }
+     
+    float $focal  = `getAttr ($camshape + ".focalLength")`;
+    float $aperture = `getAttr ($camshape + ".horizontalFilmAperture")`;
+    
+    float $angle = (0.5 * $aperture) / ($focal * 0.03937);
+    $angle = 2.0 * atan ($angle);
+    $angle = 57.29578 * $angle; 
+    
+    matrix $camInverMatrix[4][4] = lr_getMatirxs("WorldInverse",$cam);
+    
+    // Get the time range;
+    int $st = $et = 0;
+    
+    if(`radioButtonGrp -q -select rangeCTL` == 1)
+    {
+    	 $st = `playbackOptions -q -min`;
+    	 $et = `playbackOptions -q -max`;    	
+    }else{
+    
+         $st = `getAttr defaultRenderGlobals.startFrame`;
+         $et = `getAttr defaultRenderGlobals.endFrame`;
+    }    
+    
+    string $path = `textFieldButtonGrp -q -text ExportFolderCTL`;
+    if($path == "") 
+    {
+        warning "Please select output path!";
+        return;
+    } 
+    
+    for($i=$st ;$i <= $et ; $i ++)
+    {
+        currentTime $i;
+    	
+        for($tmp in $objlist)
+        {
+            string $locator = "illexportLocator_" + $tmp;
+        
+            if(!`objExists $locator`)
+            {
+               warning ("Can not found locator for " + $tmp + "\n");
+               continue;
+            }
+        
+            matrix $loMatrix[4][4] = lr_getMatirxs("World",$locator);
+            matrix $camSpaceMtx[4][4] = lr_MatrixMult($loMatrix,$camInverMatrix);
+        
+            float $tx = $camSpaceMtx[3][0];
+            float $ty = $camSpaceMtx[3][1];
+            float $tz = $camSpaceMtx[3][2];
+        
+            float $planX = -10.0*$tx/$tz;
+            float $planY = -10.0*$ty/$tz;
+        
+            float $halfX = 10 * `tand ($angle/2.0)`;
+            float $halfY = $halfX/$Aspect;
+        
+            $planX = $planX + $halfX;
+            $planY = $planY + $halfY;
+        
+            int $outX = $resX*$planX/(2*$halfX);
+            int $outY = $resY - $resY*$planY/(2*$halfY);
+            
+          //  if(($outX > $resX)|| ($outX < 0)) continue;
+          //  if(($outY > $resY)|| ($outY < 0)) continue; 
+      
+    
+            print ("X= " + $outX + "        Y= " + $outY + "\n");
+       	    // Output to file
+       	    string $fn = $path + "/" + $tmp + "_IllPath.txt";
+       	    $fileID =`fopen $fn "a"`;
+       	    fprint $fileID ($i + "\t" + $outX + "\t" + $outY + "\n");
+       	    fclose $fileID;  	
+        }
+                    
+   }
+   
+   deleteUI illusionExportUI;
+}
+

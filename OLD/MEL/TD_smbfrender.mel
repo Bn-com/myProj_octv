@@ -1,0 +1,70 @@
+proc string[] getShapes( string $xform )
+{
+	string $shapes[];
+
+	$shapes[0] = $xform;
+
+	if ( "transform" == `nodeType $xform` )
+	// If given node is not a transform, assume it is a shape
+	// and pass it through
+	{
+		$shapes = `listRelatives -fullPath -type "mesh" $xform`;
+	}
+
+	return $shapes;
+}
+
+//test whether there is a PolySmoothFace node on given object
+proc string getsmooth(string $obj) 
+{
+	string $his[] = `listHistory -pruneDagObjects true $obj`;
+	for ($i=0;$i<size($his);$i++ )
+	{
+		if (`gmatch $his[$i] "finalSmooth*"`) 
+			return $his[$i];
+	}
+	return "";
+}
+
+//apply attribute's value to polySmooth's divisions
+proc TD_smapply(string $list[])
+{
+	for ($obj in $list)
+	{
+		$poly = getsmooth($obj); 
+		if ($poly!= "")
+		{
+			string $lS[] = `listAttr -ud -st sm_divisions $obj`;
+			if (size($lS)>0)
+			{
+				int $value = `getAttr ($obj+".sm_divisions")`;
+				setAttr ($poly+".divisions") $value $obj;
+			}
+		}
+		else
+		{
+			string $lS[] = `listAttr -ud -st sm_divisions $obj`;
+			if (size($lS)>0)
+			{
+				int $value = `getAttr ($obj+".sm_divisions")`;
+				string $shapes[] = getShapes($obj);
+				for ($shp in $shapes)
+				{
+					$plyname = `polySmooth -divisions $value -continuity 1 -keepBorder 0 -keepSelectionBorder 0 -keepTessellation 0 -constructionHistory 1 $shp`;
+					rename $plyname "finalSmooth";
+				}
+
+			}
+		}
+
+	}
+}
+
+
+//apply smooth before render
+global proc TD_smbfrender()
+{
+	string $list[] = `ls -long -type "transform"`;
+	TD_smapply($list);
+}
+

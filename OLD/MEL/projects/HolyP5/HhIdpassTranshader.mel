@@ -1,0 +1,243 @@
+global proc HHIdpassTr_Assign( string $shader)
+{
+	global string $shader;
+	string $done[];
+	clear $done;
+	string $Selectobj[] = `ls-sl`;
+	//…Ë÷√≤Œ ˝
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("production");
+	for ($i=0; $i<size($Selectobj); $i++)
+	{
+		string $NodeShape[] = `listRelatives -fullPath -shapes $Selectobj[$i]`;
+		if (size($NodeShape) == 0)
+		{
+			continue;
+		}
+		string $ShadingEngine[] = `listConnections -t "shadingEngine" $NodeShape[0]`;
+		if (size($ShadingEngine) == 0)
+		{
+			continue;
+		}
+		string $Shader[] = `listConnections ($ShadingEngine[0]+".surfaceShader")`;
+		string $Str =$Shader[0]+".transparency";
+		if (!`objExists $Str`)
+		{
+			select $Selectobj[$i];
+			HHIdpass_Assign($shader);
+			continue;
+		}
+		string $cons[]=`listConnections -plugs true -connections true -destination false $Str`;
+		if (size($cons)==0)
+		{
+			select $Selectobj[$i];
+			HHIdpass_Assign($shader);
+		}
+		else
+		{
+			string $trN=`match "[^.]+$" $cons[0]`;
+			string $tro=`match "[^_]+" $cons[1]`;
+			string $tr=`match "[^.]+" $tro`;
+			string $newshader=$tr+"_Hh"+$shader;
+			string $SG=$tr+"_Hh"+$shader+"SG";
+			if(!`objExists $SG`)
+			{
+			   sets -renderable true -noSurfaceShader true -empty -name $SG;
+			}
+			
+			if(!`objExists $newshader`)
+			{
+				shadingNode -asShader lambert -name $newshader;
+				connectAttr -f $cons[1] ($newshader+"."+$trN) ;
+				connectAttr -f ($newshader+".outColor") ($SG+".surfaceShader");
+			        
+			        
+			}
+			switch ($shader)
+				{
+					case "colorB" :
+						setAttr ($newshader+".color") -type double3 0 0 1 ;
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break;
+					case "colorR" :
+						setAttr ($newshader+".color") -type double3 1 0 0 ;
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break; 
+					case "colorG" :
+						setAttr ($newshader+".color") -type double3 0 1 0 ;
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break;
+					case "matte" :
+						setAttr ($newshader+".color") -type double3 0 0 0 ;
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break;
+					case "lambert" :
+						setAttr ($newshader+".color") -type double3 0.5 0.5 0.5 ;
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break;
+					case "Fresnel" :
+						
+						string $FreRamp="HhFresnelRamp";
+						string $FreRatio="HhFresmelRatio";
+						if(!`exists "HhFresnelRamp"`)
+						{
+						    shadingNode -asTexture ramp -name "HhFresnelRamp";
+						    setAttr ($FreRamp+".colorEntryList[0].color") -type double3 1 1 1 ;
+						    setAttr ($FreRamp+".colorEntryList[2].color") -type double3 0 0 0 ;
+						    setAttr ($FreRamp+".colorEntryList[2].position") 1;
+						    setAttr ($FreRamp+".colorEntryList[0].position") 0;
+						}
+						if(!`exists "HhFresmelRatio"`)
+						{
+						    shadingNode -asUtility samplerInfo -name $FreRatio;
+						}
+						string $con[]=`listConnections -connections true  ($FreRatio+".facingRatio")`;
+						if (`size($con)`==0)
+						{
+						    connectAttr -f ($FreRatio+".facingRatio") ($FreRamp+".uvCoord.uCoord");
+						    connectAttr -f ($FreRatio+".facingRatio") ($FreRamp+".uvCoord.vCoord");
+						}
+						string $shadercon[]=`listConnections -connections true  ($newshader+".color")`;
+						if(`size($shadercon)`==0)
+						{
+							connectAttr -f ($FreRamp+".outColor") ($newshader+".color");
+						}
+						setAttr ($newshader+".ambientColor") -type double3 1 1 1;
+						setAttr ($newshader+".diffuse") 0;
+						setAttr ($newshader+".matteOpacity") 0;
+						break;
+				 }
+					
+			select $Selectobj[$i];
+			catch(`sets -e -forceElement $SG`);
+			
+			
+		}
+	}
+	select -cl;
+}
+	
+
+global proc HHIdpass_Assign(string $shader)
+{
+	string $objs[] = `ls -sl`;
+	global string $shader;
+	string $newshader="Hh"+$shader;
+
+	if (!`objExists $newshader`)
+	{
+		switch ($shader)
+		{
+			case "colorB" :
+				shadingNode -asShader lambert -name HhcolorB;
+				setAttr "HhcolorB.color" -type double3 0 0 1 ;
+				setAttr "HhcolorB.ambientColor" -type double3 1 1 1 ;
+				setAttr "HhcolorB.diffuse" 0;
+				setAttr "HhcolorB.matteOpacity" 0;
+				break;
+			case "colorR" :
+				shadingNode -asShader lambert -name HhcolorR;
+				setAttr "HhcolorR.color" -type double3 1 0 0 ;
+				setAttr "HhcolorR.ambientColor" -type double3 1 1 1 ;
+				setAttr "HhcolorR.diffuse" 0;
+				setAttr "HhcolorR.matteOpacity" 0;
+				break;
+			case "colorG" :
+				shadingNode -asShader lambert -name HhcolorG;
+				setAttr "HhcolorG.color" -type double3 0 1 0 ;
+				setAttr "HhcolorG.ambientColor" -type double3 1 1 1 ;
+				setAttr "HhcolorG.diffuse" 0;
+				setAttr "HhcolorG.matteOpacity" 0;
+				break;
+			case "matte" :
+				shadingNode -asShader lambert -name Hhmatte;
+				setAttr "Hhmatte.color" -type double3 0 0 0 ;
+				setAttr "Hhmatte.ambientColor" -type double3 1 1 1 ;
+				setAttr "Hhmatte.diffuse" 0;
+				setAttr "Hhmatte.matteOpacity" 0;
+				break;
+			case "lambert" :
+				shadingNode -asShader lambert -name Hhlambert;
+				setAttr "Hhlambert.color" -type double3 0.5 0.5 0.5 ;
+				sets -renderable true -noSurfaceShader true -empty -name HhlambertSG;
+				connectAttr -f Hhlambert.outColor HhlambertSG.surfaceShader;
+				break;
+			case "Fresnel" :
+				shadingNode -asShader lambert -name HhFresnel;
+				string $FreRamp="HhFresnelRamp";
+				string $FreRatio="HhFresmelRatio";
+				if(!`exists $FreRamp`)
+				{
+				    shadingNode -asTexture ramp -name $FreRamp;
+				    setAttr ($FreRamp+".colorEntryList[0].color") -type double3 1 1 1 ;
+				    setAttr ($FreRamp+".colorEntryList[2].color") -type double3 0 0 0 ;
+				    setAttr ($FreRamp+".colorEntryList[2].position") 1;
+				    setAttr ($FreRamp+".colorEntryList[0].position") 0;
+				}
+				if(!`exists $FreRatio`)
+				{
+				    shadingNode -asUtility samplerInfo -name $FreRatio;
+				}
+				string $con[]=`listConnections -connections true  ($FreRatio+".facingRatio")`;
+				if(size($con)==0)
+				{
+				    connectAttr -f ($FreRatio+".facingRatio") ($FreRamp+".uvCoord.uCoord");
+				    connectAttr -f ($FreRatio+".facingRatio") ($FreRamp+".uvCoord.vCoord");
+				}
+				string $shadercon[]=`listConnections -connections true  "HhFresnel.color"`;
+				if(`size($shadercon)`==0)
+				{
+					connectAttr -f ($FreRamp+".outColor") "HhFresnel.color";
+				}
+				setAttr  "HhFresnel.ambientColor" -type double3 1 1 1;
+				setAttr "HhFresnel.diffuse" 0;
+				setAttr "HhFresnel.matteOpacity" 0;
+				break;
+
+
+
+		}
+	}
+
+	if (`objExists $objs[0]`)
+	{
+		select -r $objs;
+		switch ($shader)
+		{
+			case "colorB" :
+				hyperShade -assign HhcolorB;
+				break;
+			case "colorR" :
+				hyperShade -assign HhcolorR;
+				break;
+			case "colorG" :
+				hyperShade -assign HhcolorG;
+				break;
+			case "colorA" :
+				hyperShade -assign HhcolorA;
+				break;
+			case "matte" :
+				hyperShade -assign Hhmatte;
+				break;
+			case "lambert" :
+				hyperShade -assign Hhlambert;
+				break;
+
+			case "Fresnel" :
+				hyperShade -assign HhFresnel;
+				break;
+
+		}
+	}
+
+}

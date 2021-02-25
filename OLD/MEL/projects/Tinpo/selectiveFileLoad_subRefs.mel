@@ -1,0 +1,506 @@
+// selectiveFileLoad_subRefs.mel (c) 2006 ReelFX Creative Studios
+// Verision 1.0
+// author: Harry Michalakeas
+
+/*
+Description:
+	A version of selectiveFileLoad which will handle nested references.
+Use:
+	selectiveFileLoad_subRefs xml
+Options:
+	xml (string)	- rlc for this layer - the read xml, not the filename
+	
+Dependancies:
+
+	Other scripts that must be in the script path
+
+Documentation:
+
+Examples:
+
+Notes:
+	
+	
+Bugs:
+
+Original:	01/25/06
+Revisions:	08/28/06	Rev 1.0
+		- Created a provision to deal with custom objects in "bogus" namespaces. I.e. namespaces which don't represent a reference - that have are part of one of the assets
+		in the scene.
+
+		09/27/06	Rev 1.2
+		- Got it to work for cases where an object within a sub-reference is in a custom object, but both the sub-reference, and the parent reference is set to omit.
+				
+To-do's:
+		- Move to-do's to revisions as they are done
+*/
+// ---------------------------------------------------------------------------------------------------
+// source statements
+// 
+source parseXML.mel;
+// ---------------------------------------------------------------------------------------------------
+// global variables
+// 
+// ---------------------------------------------------------------------------------------------------
+// load all plug-ins required for this mel script
+proc loadPlugins() 
+{
+	if (!`pluginInfo -q -l "xml_parser"`)
+		loadPlugin "xml_parser";
+}
+// ---------------------------------------------------------------------------------------------------
+proc int findReference (string $namespace, string $refNode[], string $filename[])
+{
+	string $files[] = `file -q -r`;
+	clear $refNode;
+	clear $filename;
+	
+	for ($i=0;$i<size($files);$i++)
+	{
+		string $cur_ns = `file -q -ns $files[$i]`;
+		if ($cur_ns == $namespace)
+		{
+			string $cur_refNode = `file -q -rfn $files[$i]`;
+			// is there proxy sharing going on? If so we must make sure that the one we are returning is the full-res
+			// version - in our system, the first one on the list.
+			string $relatedProxies[] = getRelatedProxies ($cur_refNode);
+			if (size($relatedProxies))
+			{
+				if ($cur_refNode != $relatedProxies[0])
+					continue;	// this is the proxy version, come back later in the loop for the real deal.	
+			}
+			
+			$refNode[0] = $cur_refNode;
+			$filename[0] = $files[$i];
+			return true;	
+		}
+	}	
+	return false;	// reference not found.
+}
+// ---------------------------------------------------------------------------------------------------
+proc int findSubReference (string $namespace, string $parentfile, string $refNode[], string $filename[])
+{
+	string $allRefNodes[] = `ls -type reference`;
+	string $parentNamespace = `file -q -ns $parentfile`;
+	clear $refNode;
+	clear $filename;
+	
+	for ($i=0;$i<size($allRefNodes);$i++)
+	{
+		// is this reference node a reference itself? If it is it's a sub-part.
+		if (!`reference -q -inr $allRefNodes[$i]`)
+			continue;
+		
+		// find out what file the reference node is from.
+		string $file = `reference -q -f $allRefNodes[$i]`;
+		// if it doesn't belong to the parent file, move on
+		if ($file != $parentfile)
+			continue;
+			
+		// now find out what file is associated with this reference node
+		string $subPartFile = `reference -rfn $allRefNodes[$i] -q -filename`;
+		
+		// from that we can get the namespace - this will be the namespace relative to the parent namespace
+		string $cur_ns = `file -q -ns $subPartFile`;
+		
+		if (($parentNamespace+":"+$cur_ns) == $namespace)
+		{
+			// got it.
+			$refNode[0] = $allRefNodes[$i];
+			$filename[0] = $subPartFile;
+			return true;	
+		}
+	}	
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+proc string [] getLoadSettingsRFNs ()
+{
+	string $rfns[];
+	
+	int $numLoadSettings = `selLoadSettings -q -numSettings`;
+	$rfns[0] = "";
+	for ($i=1;$i<$numLoadSettings;$i++)
+	{
+		string $loadSettingID[];
+		$loadSettingID[0] = (string)$i;
+		string $refs[] = `selLoadSettings -q -rfn $loadSettingID`;
+		$rfns[$i] = $refs[0];	
+	}
+	return $rfns;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string getParentNamespaceInScene (string $namespace, string $namespaces_in_scene[])
+{
+	for ($i=0;$i<size($namespaces_in_scene);$i++)
+	{
+		if (startsWith ($namespace, $namespaces_in_scene[$i]))
+			return $namespaces_in_scene[$i];
+	}	
+	return "";
+}
+// ---------------------------------------------------------------------------------------------------
+global proc string getFullNamespace (string $namespace, string $ref_node)
+{
+	string $rn_namespace = getNamespaceFromString ($ref_node);
+	if ($rn_namespace == "")
+		return $namespace;
+	return ($rn_namespace+":"+$namespace);
+}
+// ---------------------------------------------------------------------------------------------------
+global proc buildLoadAndDeferList (string $xml, string $ns_to_load[], string $ns_to_defer[], string $namespaces_in_scene[], string $full_namespaces[])
+{
+	
+	// Parse the xml to decide ahead of time what namespaces to load.
+	// This is so that an X on an asset can be overruled by some of it's geometry being in a custom object which is
+	// visible.
+	
+	string $assetsXML[] = xml_getTag ($xml,"asset");
+	clear $ns_to_load;
+	clear $ns_to_defer;
+	string $customObjects[];
+	
+	// pass 1, just regular assets, no custom objects.
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		string $namespace = xml_getVar ($assetsXML[$i],"name");
+		string $renderstate = xml_getVar ($assetsXML[$i],"renderState");
+		string $type = xml_getVar ($assetsXML[$i],"assetType");	
+		
+		if ($type != "misc")
+		{
+			if ($renderstate == "omit")
+			{
+				$ns_to_defer[size($ns_to_defer)] = $namespace;	
+			}
+			else
+				$ns_to_load[size($ns_to_load)] = $namespace;	
+				
+			// do we have sub-parts?
+			string $subPartsXML[] = xml_getTag ($assetsXML[$i],"subPart");
+			for ($j=0;$j<size($subPartsXML);$j++)
+			{
+				string $subPartName = xml_getVar ($subPartsXML[$j],"name");
+				string $subPartState = xml_getVar ($subPartsXML[$j],"renderState");
+				
+				if ($subPartState == "omit")
+				{
+					$ns_to_defer[size($ns_to_defer)] = $subPartName;		
+				}
+				else
+				{
+					$ns_to_load[size($ns_to_load)] = $subPartName;	
+				}
+			}
+		}
+		else
+		{
+			$customObjects[size($customObjects)] = $assetsXML[$i];	
+		}
+	}
+	
+	// pass 2, edit the initial load/unload list, by looking at the custom objects. 
+	// If an asset is omitted, but included in a custom object which is not omitted, the asset is loaded.
+	// the exception is assets with nested references. Membership of sub-ref objects in a custom object does not over-rule
+	// the parent set being omitted.
+
+	// 09/27/06 - If a sub-reference which is omitted, has members in a custom object which is not omitted, then set to load
+	
+	for ($i=0;$i<size($customObjects);$i++)
+	{
+		string $members[] = xml_getTag($customObjects[$i],"member");
+		string $state = xml_getVar ($customObjects[$i],"renderState");
+		if ($state == "omit")
+			continue;
+		for ($j=0;$j<size($members);$j++)
+		{
+			string $memberName = xml_getVar ($members[$j],"name");
+			string $memberNamespace = getNamespaceFromString ($memberName);
+			
+			// if the namespace is among those in the scene - i.e. namespaces representing references, remove it from the defer list
+			// 09/27/06 - check against full name - customs objects of sub-refs will work.
+			//if (stringArrayFindIndex ($memberNamespace,$namespaces_in_scene) != -1)
+			if (stringArrayFindIndex ($memberNamespace,$full_namespaces) != -1)
+			{
+				// remove the namespace from the defer list, since they are needed here.
+				$ns_to_defer = stringArrayRemove ({$memberNamespace},$ns_to_defer);
+				// remove it's parent (if it has one) from the defer list
+				string $parentNs = getParentNamespaceInScene ($memberNamespace, $namespaces_in_scene);
+				if ($parentNs != $memberNamespace)
+				{
+					$ns_to_defer = stringArrayRemove ({$parentNs},$ns_to_defer);
+				}
+			}
+			else
+			{
+				// this may be a bogus namespace - a namespace inside an asset that doesn't represent a separate reference.
+				// if it has a parent namespace that is a reference, remove this namespace from the defer list
+				string $parentNamespace = getParentNamespaceInScene ($memberNamespace, $namespaces_in_scene);
+				$ns_to_defer = stringArrayRemove ({$parentNamespace},$ns_to_defer);
+			}
+		}
+	}
+	
+	print ("Load list: \n");
+	print $ns_to_load;
+	print ("\nDefer list: \n");
+	print $ns_to_defer;
+	// Now we have an accurate load and defer list
+}
+// ---------------------------------------------------------------------------------------------------
+proc string [] findLSIDsInNamespace (string $namespace, string $lsRefNodes[], string $refNodes[], string $namespaces[])
+{
+	string $lsIDs[];
+	
+	// find each occurence of namespace in namespaces
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		if ($namespaces[$i]!=$namespace)
+		{
+			continue;	
+		}	
+		// get corresponding ref node name
+		string $rn = $refNodes[$i];
+		// find this ref node in the load setting ref nodes array
+		int $index = stringArrayFindIndex ($rn,$lsRefNodes);
+		if ($index != -1)
+			$lsIDs[size($lsIDs)] = (string)$index;
+	}
+	return $lsIDs;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc int hasChildReferenceLoaded (string $ns, string $ns_to_load[])
+{
+	for ($i=0;$i<size($ns_to_load);$i++)
+	{
+		if (startsWith ($ns_to_load[$i],($ns+":")))
+			return true;
+	}
+	return false;
+}
+// ---------------------------------------------------------------------------------------------------
+global proc selectiveFileLoad_subRefs (string $file, string $xml)
+{
+	loadPlugins;
+	// open the file in build load settings mode
+	file -f -o -buildLoadSettings $file;
+	
+	// parse the file to get the namespaces - only reference node name and filenames are available when editing loadSettings
+	string $namespaces[];
+	string $refNodes[];
+	string $filenames[];
+	global int $gAbsoluteFilenames;
+	global int $gMaxReferenceDepth;
+	global int $gReturnAllInNamespace;
+	
+	$gAbsoluteFilenames = false;
+	$gMaxReferenceDepth = 2;
+	$gReturnAllInNamespace = true;
+	
+	assetListFromMa ($file,$namespaces,$refNodes,{},$filenames);	// assetListFromMa returns leaf namespaces, i.e. house:kitchen is returned as kitchen, this mirrors how they are stored
+	// in the file format
+	
+	// get full namespaces for sub-refs
+	string $fullNamespaces[];	
+	for ($i=0;$i<size($namespaces);$i++)
+		$fullNamespaces[$i] = getFullNamespace($namespaces[$i],$refNodes[$i]);
+
+
+	print ("Contents of mayaAscii:\n");
+	for ($i=0;$i<size($namespaces);$i++)
+	{
+		print ($namespaces[$i]+" ("+$fullNamespaces[$i]+")  "+$refNodes[$i]+"  "+$filenames[$i]+"\n");
+			
+	}
+	
+	// build list of ref-nodes associated with load setting id's. We can use the index into this list to find the
+	// loadSetting ID from a given RN name.
+	string $lsRefNodes[] = getLoadSettingsRFNs();
+	int $lsRefNodesVisited[];
+	
+	string $ns_to_load[],$ns_to_defer[];
+	buildLoadAndDeferList ($xml,$ns_to_load,$ns_to_defer, $namespaces, $fullNamespaces);
+
+	print ("namespaces to load: \n");
+	print ($ns_to_load);
+
+	print ("namespaces to defer: \n");
+	print ($ns_to_defer);
+	
+	string $assetsXML[] = xml_getTag ($xml,"asset");
+	
+	for ($i=0;$i<size($assetsXML);$i++)
+	{
+		string $namespace = xml_getVar ($assetsXML[$i],"name");
+		string $renderstate = xml_getVar ($assetsXML[$i],"renderState");
+		string $type = xml_getVar ($assetsXML[$i],"assetType");	
+
+		print ("xml_assetType: "+$type+"\n");
+		
+		// custom objects are not things associated with a reference, skip.
+		if ($type == "misc")
+			continue;
+		
+		
+		// get load setting id:
+		// Find the ref node from the namespace	
+		int $index = stringArrayFindIndex ($namespace, $namespaces);
+		if ($index == -1)
+		{
+			warning ("Namespace "+$namespace+" in the rlc no longer exists in the scene. Skipping..");
+			continue;	
+		}
+		string $rn = $refNodes[$index];
+		// find the load setting id from the ref node name
+		$index = stringArrayFindIndex ($rn,$lsRefNodes);
+		if ($index == -1)
+		{
+			warning ("Ref node "+$rn+" associated with namespace "+$namespace+" not found in load settings. Skipping..");
+			continue;	
+		}
+		string $lsID[];
+		$lsID[0] = (string)$index;
+		$lsRefNodesVisited[$index] = true;
+		
+		// set whether we want to load it or not.
+		// 02/07/06 - Additional check to see if the omit has not been overruled by membership in a custom object which is
+		// not omitted
+		// 09/27/06 - Load parent references, even if they are told to omit, if they have child references which are to be loaded.
+		
+		if ($renderstate == "omit")
+		{
+			if (stringArrayFindIndex ($namespace,$ns_to_defer)==-1)
+			{
+				print ($namespace+" is omitted in the rlc, but has items in a custom set which is not omited. NOT deferring this asset.\n");		
+			}
+			else if (hasChildReferenceLoaded($namespace,$ns_to_load))
+			{
+				print ($namespace+" is omitted in the rlc, but has child references which are not omitted. NOT deferring this asset.\n");
+			}
+			else
+			{
+				//print ($namespace+" is omitted in the rlc. Setting reference to deferred.\n");
+				// Set this reference and all related proxies to deferred
+				string $ids[] = findLSIDsInNamespace($namespace,$lsRefNodes,$refNodes,$namespaces);
+				for ($j = 0; $j<size($ids);$j++)
+				{
+					print ("Setting reference "+$lsRefNodes[(int)$ids[$j]]+" in namespace "+$namespace+" to DEFERRED.\n");
+					selLoadSettings -e -deferReference 1 {$ids[$j]};	
+				}
+					
+				continue;
+				// we are done with this iteration
+			}
+		}
+		// if we are here, we are to load the asset.
+		print ("Setting "+$namespace+" to LOAD.\n");
+		selLoadSettings -e -deferReference 0 $lsID;
+		
+		// is there proxy referencing going on?
+		string $proxyTags[] = `selLoadSettings -q -proxySetTags $lsID`;
+		if (size($proxyTags))
+		{
+			// if there is a proxy tag called "Full" - point caching assets are setup this way by PreLighting
+			// switch it to full, otherwise leave it alone
+			if (stringArrayFindIndex ("Full",$proxyTags)!=-1)
+			{
+				selLoadSettings -e -activeProxy "Full" $lsID;
+				print ("Setting "+$namespace+" active proxy to Full.\n");	
+			}	
+		}
+		
+		// do we have sub-parts?
+		
+		string $subPartsXML[] = xml_getTag ($assetsXML[$i],"subPart");
+		if (!size($subPartsXML))
+			continue;	// we are done, move to next asset.
+			
+		print ($namespace+" has sub-referencing. Loading/Unloading child references..\n");
+		for ($j=0;$j<size($subPartsXML);$j++)
+		{
+			// if we are not omitting this sub-part, leave it alone, it will be loaded by default once the parent asset
+			// is loaded.
+			string $subPartRenderstate = xml_getVar ($subPartsXML[$j],"renderState");
+			string $subPartNamespace = xml_getVar ($subPartsXML[$j],"name");
+			
+			// find the loadSettingsID
+
+			// find in the asset list.
+			// using custom stringArrayFindIndex...this is because the namespaces brought back by assetListFromMa
+			// do not contain the parent namespaces but the ones in the rlc do.
+			int $index = -1;
+			for ($k=0;$k<size($namespaces);$k++)
+			{
+				string $search = $namespace+":"+$namespaces[$k];
+				if ($subPartNamespace == $search)
+				{
+					$index = $k;
+					break;	
+				}
+			}
+			if ($index == -1)
+			{
+				warning ("Namespace "+$subPartNamespace+" in the rlc no longer exists in the scene. Skipping..");
+				continue;	
+			}
+			string $rn = $refNodes[$index];
+			string $shortNamespace = $namespaces[$index];
+			
+			// now look up the loadSetting ID using the ref node name.
+			$index = stringArrayFindIndex ($rn,$lsRefNodes);
+			if ($index == -1)
+			{
+				warning ("Ref node "+$rn+" associated with namespace "+$subPartNamespace+" not found in load settings. Skipping..");
+				continue;	
+			}
+			string $lsID[];
+			$lsID[0] = (string)$index;
+			$lsRefNodesVisited[$index] = true;
+			
+			
+			if ($subPartRenderstate == "omit")
+			{
+				if (stringArrayFindIndex ($subPartNamespace,$ns_to_defer)==-1)
+				{
+					print ($subPartNamespace+" is omitted in the rlc, but has items in a custom set which is not omited. Not deferring this asset.\n");
+				}
+				else
+				{
+					
+					// Set this reference and all related proxies to deferred
+					string $ids[] = findLSIDsInNamespace($shortNamespace,$lsRefNodes,$refNodes,$namespaces);
+					for ($k = 0; $k<size($ids);$k++)
+					{
+						print ("Setting reference "+$lsRefNodes[(int)$ids[$k]]+" in namespace "+$subPartNamespace+" to DEFERRED.\n");
+						selLoadSettings -e -deferReference 1 {$ids[$k]};	
+					}
+					//print ($subPartNamespace+" is omitted in the rlc. Setting reference to deferred.\n");
+					//selLoadSettings -e -deferReference 1 $lsID;
+					continue;
+				}
+			}
+			// if we got here, we need to set it to load.
+			print ("Setting "+$subPartNamespace+" to LOAD.\n");
+			selLoadSettings -e -deferReference 0 $lsID;
+			
+			// is there any proxy referencing going on in the sub-parts?..not used yet, but putting this in 
+			// for future-proofing.
+			string $proxyTags[] = `selLoadSettings -q -proxySetTags $lsID`;
+			if (size($proxyTags))
+			{
+				// if there is a proxy tag called "Full" - point caching assets are setup this way by PreLighting
+				// switch it to full, otherwise leave it alone
+				if (stringArrayFindIndex ("Full",$proxyTags)!=-1)
+				{
+					selLoadSettings -e -activeProxy "Full" $lsID;
+					print ("Setting "+$subPartNamespace+" active proxy to Full.\n");	
+				}	
+			}
+
+		}
+		
+	}
+	
+	print ("Loading scene...\n");
+	file -f -o -loadSettings "implicitLoadSettings" $file;
+}

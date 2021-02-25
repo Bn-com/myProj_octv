@@ -1,0 +1,362 @@
+/// Copyright (C) 2000-2005 IDMT. All rights reserved.
+///
+/// Author: ÕÔÖ¾½Ü
+///
+/// Creation Date: 2006/11/15
+///
+/// Description: 
+///
+
+
+// LICENSE AGREEMENT
+// 
+// 
+// PLEASE READ THIS AGREEMENT CAREFULLY.
+// 
+// ALIAS | WAVEFRONT, A DIVISION OF SILICON GRAPHICS LIMITED
+// ("ALIAS|WAVEFRONT") IS WILLING TO LICENSE THIS SOFTWARE AND ANY
+// DOCUMENTATION THAT MAY BE PROVIDED THEREWITH (THE "SOFTWARE") TO YOU
+// ONLY ON THE CONDITION THAT ALL OF THE TERMS CONTAINED IN THIS LICENSE
+// AGREEMENT ARE ACCEPTED.
+// 
+// This is a license agreement and NOT an agreement for sale.
+// Alias|Wavefront continues to own all copies of the Software and all
+// intellectual property rights therein.  Your rights to use the Software
+// are specified in this Agreement, and Alias|Wavefront retains all rights
+// not expressly granted to you.
+// 
+// Alias|Wavefront grants to you a nonöexclusive, non-transferable license
+// to use the Software, subject to the terms and conditions of this
+// Agreement. Without the prior written consent of A|W, you may not: (i)
+// copy, modify or transfer copies of the Software (except one copy for
+// backup purposes); (ii) disassemble, decompile or unlock, reverse
+// engineer or translate, or in any manner decode the Software for any
+// reason; (iii) place the Software onto a server so that it is accessible
+// via a public network such as the Internet; or (iv) sublicense, lease,
+// distribute or rent the Software.  Alias|Wavefront and/or its suppliers
+// and/or its licensors retain all right, title, and interest in and to the
+// Software (including, without limitation, all trade secrets and
+// intellectual property rights therein) furnished by Alias|Wavefront and
+// to any backup copy thereof made by you.   You shall not remove any
+// copyright or proprietary rights notice included in with the Software and
+// shall reproduce all such notices on any backup copies made of the
+// Software made by you.
+// 
+// THE SOFTWARE IS PROVIDED AS IS.  ALIAS|WAVEFRONT DOES NOT WARRANT THAT
+// THE SOFTWARE WILL MEET YOUR REQUIREMENTS OR THAT ITS OPERATION WILL BE
+// UNINTERRUPTED OR ERROR-FREE. ALIAS|WAVEFRONT MAKES NO WARRANTIES,
+// EXPRESS, IMPLIED OR ARISING BY CUSTOM OR TRADE USAGE WITH RESPECT TO THE
+// SOFTWARE, AND WITHOUT LIMITING THE GENERALITY OF THE FOREGOING, TO THE
+// EXTENT PERMITTED BY APPLICABLE LAW, SPECIFICALLY DISCLAIMS ANY IMPLIED
+// WARRANTIES OF TITLE, NONINFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A
+// PARTICULAR PURPOSE. ALIAS|WAVEFRONT SHALL HAVE NO LIABILITY IN CONTRACT,
+// TORT OR OTHERWISE ARISING OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+// THIS AGREEMENT.  NO SUPPORT OR MAINTENANCE OF ANY KIND IS PROVIDED WITH
+// RESPECT TO THE SOFTWARE.
+// 
+// This Agreement is effective until terminated.   If you breach of any of
+// your obligations hereunder, Alias|Wavefront may terminate this Agreement
+// and the license provided hereunder by giving written notice of
+// termination to you, effective immediately upon its sending.  Upon
+// termination, you must immediately cease all use of the Software and
+// destroy all copies of the Software in your possession, custody or
+// control.  This Agreement shall be governed by the substantive law of the
+// Province of Ontario, Canada, without regard to its conflicts of law
+// principles.  This Agreement shall be binding upon and enure to the
+// benefit of the parties and their respective successors, assigns and
+// legal representatives, provided, however, that your rights and
+// obligations hereunder may not be assigned, sublicensed or otherwise
+// transferred in whole or in part, without the prior written consent of
+// Alias|Wavefront.
+// 
+// Copyright (c) 2001 Alias|Wavefront, a division of Silicon Graphics
+// Limited. All rights reserved.
+//
+//
+//  Alias|Wavefront Script File
+//  MODIFY THIS AT YOUR OWN RISK
+//
+// ----------------------------------------------------------------------
+// 
+// crvOnPoly 
+// 
+// Description: creates a psuedo curve on poly from a series of connected poly edges
+// 
+// NOTE: This script will duplicate selected edges on a poly object as curves. 
+// All edges must be contiguous. A window will prompt the user to select 
+// the degree of the curve. It will then connect the resulting edge curves 
+// while maintaining history. The end result will be a single 1 2 or 3 degree 
+// curve that will be bound to the edges/vertices of the poly object. There 
+// must be at least 3 edges selected to achieve a 3 degree (cubic) curve and 
+// 2 edges selected in order to create a degree 2 curve, otherwise a linear 
+// curve will be created automatically. 
+// 
+// The purpose is to create a psuedo curve on surface for a poly object for 
+// for various uses, including paint effects strokes. All interim curves 
+// are hidden and grouped under the "edgeHistGrp" node so that history can be 
+// maintained. 
+// 
+// Caveats: 
+// 
+// * since this is setup as a local proc, just drag the script to a shelf, 
+// then select one or more contiguous poly edges and click on the script-button 
+// 
+// Author: Steven T. L. Roselle 
+// 
+// 
+// Creation Date: ( 09/10/00 ) 
+// Last Update: () 
+// 
+// Input Arguments: NONE 
+// 
+// works with Maya Versions: 3.0
+
+proc int ptCmp(float $p1[], float $p2[]) 
+{
+// read in and compare two point positions 
+// return true:1 if the points are the same 
+// 
+float $distance; 
+float $v[3]; 
+$v[0] = $p1[0] - $p2[0]; 
+$v[1] = $p1[1] - $p2[1]; 
+$v[2] = $p1[2] - $p2[2]; 
+$distance = $v[0]*$v[0] + $v[1]*$v[1] + $v[2]*$v[2]; 
+$distance = sqrt( $distance ); 
+//print ("Distance is : "+$distance+"\n"); 
+if ($distance == 0) 
+{ 
+return 1; 
+} 
+else 
+{ 
+return 0; 
+} 
+} 
+
+global proc createCrv(int $degree) 
+{ 
+// Initialize edge and curve lists and check for valid selection 
+// 
+int $error = 0; 
+string $crvs[]; 
+string $edgeList[] = `filterExpand -sm 32` ; 
+int $size = `size $edgeList`; 
+if ($size < 1) 
+{ 
+print ("\n\n\/\/ERROR: Nothing valid selected.\/\/"); 
+$error = 1; 
+}
+// Disable paint select if it was in use 
+// 
+escapeCurrentTool; 
+
+// Duplicate edges as curves and put in temporary curve list 
+// 
+int $c = 0; 
+for ($edge in $edgeList) 
+{ 
+string $tmpCrv[] = `duplicateCurve -name tmpCrv -ch 1 -rn 0 -local 0 $edge`; 
+$crvs[$c] = $tmpCrv[0]; 
+$c ++; 
+}
+
+// Get initial number of curves in list for loop 
+// and make last curve in list the attach curve 
+// 
+if ($error) 
+{ 
+$size = 0; 
+} 
+else 
+{ 
+$size = `size $crvs` - 1; 
+rename $crvs[`size $crvs` - 1] tmpAttach; 
+}
+
+// Step through list of curves and attach adjacent curves to the attach curve 
+// This is done by comparing the endpoints of all curves until a match is found 
+// 
+while ($size > 0) 
+{ 
+// Check size of list before comparison loop 
+// 
+$sizein = $size;
+// Compare attach curve to all other curves in list 
+// 
+for ($c = 0; $c < $size; $c++) 
+{ 
+// Get number of points on attach curve 
+// 
+select -r "tmpAttach.cv[*]"; 
+string $cvList[] = `filterExpand -sm 28`; 
+int $c1_lastCV = (`size($cvList)` - 1); 
+// Get number of points on curve2 
+// 
+string $tmp = $crvs[$c]+".cv[*]"; 
+select -r $tmp; 
+string $cvList[] = `filterExpand -sm 28`; 
+int $c2_lastCV = (`size($cvList)` - 1); 
+// Get positional values of endpoints for both curves 
+// 
+//print ("Compare "+$crvs[0]+" to "+$crvs[$c]+"\n"); 
+string $tmp = "tmpAttach.cv[0]"; 
+float $c1p1[] = `xform -q -t $tmp`; //attach curve endpoint1 
+string $tmp = "tmpAttach.cv["+$c1_lastCV+"]"; 
+float $c1p2[] = `xform -q -t $tmp`; //attach curve endpoint2 
+string $tmp = $crvs[$c]+".cv[0]"; 
+float $c2p1[] = `xform -q -t $tmp`; //curve2 endpoint1 
+string $tmp = $crvs[$c]+".cv["+$c2_lastCV+"]"; 
+float $c2p2[] = `xform -q -t $tmp`; //curve2 endpoint2
+// Compare pairs of endpoints looking for a match. 
+// If match is found, attach curves, replace first curve with 
+// new attached curve, rename second curve for later use 
+// 
+int $match = ptCmp($c1p1,$c2p1); 
+if ($match) 
+{ 
+attachCurve -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ; 
+rename $crvs[$c] TMPCRV; 
+} 
+else 
+{ 
+int $match = ptCmp($c1p1,$c2p2); 
+if ($match) 
+{ 
+attachCurve -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ; 
+rename $crvs[$c] TMPCRV; 
+} 
+else 
+{ 
+int $match = ptCmp($c1p2,$c2p1); 
+if ($match) 
+{ 
+attachCurve -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ; 
+rename $crvs[$c] TMPCRV; 
+} 
+else 
+{ 
+int $match = ptCmp($c1p2,$c2p2); 
+if ($match) 
+{ 
+attachCurve -ch 1 -rpo 1 -kmk 1 -m 1 -bb 0.5 -bki 0 -p 0.1 tmpAttach $crvs[$c] ; 
+rename $crvs[$c] TMPCRV; 
+} 
+} 
+} 
+} // close nested if statements 
+} // close for statement
+// select all remaining tmpCrv's and rebuild 
+// list of remaining curves to be attached 
+// 
+select -cl; 
+string $sel[] = `ls "tmpCrv*"`; 
+if (`size($sel)`) 
+{ 
+select -r $sel; 
+select -d "tmpCrv*Shape"; //remove shape nodes from selection list 
+} 
+string $sel[] = `ls -sl`; 
+$crvs = $sel; //remaining curves
+
+// Check size of new list after comparison loop. If unchanged, 
+// print ERROR message clean up temporary curves and exit. 
+// Otherwise set new size and check remaining curves. 
+// 
+$sizeout = (`size($crvs)`); 
+if (($sizeout == $sizein) && ($sizeout > 0)) 
+{ 
+print ("\n\n\/\/ERROR: All edges must be contiguous.\/\/"); 
+$error = 1; 
+delete "tmpCrv*"; 
+if( `objExists tmpAttach`) 
+delete "tmpAttach"; 
+if( `objExists TMPCRV`) 
+delete "TMPCRV*"; 
+select $edgeList; 
+$size = 0; 
+break; 
+} 
+else 
+$size = $sizeout;
+} // close while 
+// bypass this and exit if error was found, otherwise finish the job. 
+// 
+if ($error != 1) 
+{
+//Make list of tmp curves for history 
+// 
+select -cl; 
+string $sel[] = `ls "TMPCRV*"`; 
+if (`size($sel)`) 
+{ 
+select -r $sel; 
+select -d "TMPCRV*Shape"; //remove shape nodes from selection list 
+} 
+string $sel[] = `ls -sl`;
+//Rename all tmp curves in list to dupEdge and group under edgeHistGrp 
+// 
+for ($tmp in $sel) 
+{ 
+rename $tmp "dupEdge"; 
+} 
+if( `objExists edgeHistGrp`) 
+ungroup edgeHistGrp; 
+if( `objExists dupEdge`) 
+{ 
+hide "dupEdge*"; 
+select -r "dupEdge*"; 
+group -name edgeHistGrp; 
+} 
+//Get number of points on curve 
+select -r "tmpAttach.cv[*]"; 
+string $cvs[] = `filterExpand -sm 28`; 
+select -r "tmpAttach";
+//Rename tmpAttach curve to final edgeCurve 
+// 
+rename "tmpAttach" "edgeCurve";
+//Rebuild curve. Curve must have 4 or more points for rebuild 
+//Note: comment out rebuild line to generate a linear poly line instead 
+// 
+if (($degree == 3) && (`size($cvs)` >= 4)) 
+{ 
+rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 1 -kep 1 -kt 0 -s 4 -d 3 -tol 0.01; 
+print ("\nEdges duplicated successfully as a cubic curve ."); 
+} 
+else if (($degree == 2) && (`size($cvs)` >= 3)) 
+{ 
+rebuildCurve -ch 1 -rpo 1 -rt 0 -end 1 -kr 0 -kcp 1 -kep 1 -kt 0 -s 4 -d 2 -tol 0.01; 
+print ("\nEdges duplicated successfully as a 2 degree curve ."); 
+} 
+else 
+print ("\nEdges duplicated successfully as a linear curve ."); 
+}
+}
+
+
+global proc zjCrvOnPoly() 
+{ 
+//Creat UI and prompt user to determine degree of resulting curve 
+// 
+if( (`window -exists crvOnPoly`) == true ) 
+{ 
+deleteUI crvOnPoly ; 
+windowPref -remove crvOnPoly; 
+}
+window -sizeable true -widthHeight 119 152 crvOnPoly; 
+		columnLayout -adjustableColumn true;
+			menuBarLayout;
+				menu -label "Help";
+					menuItem -label "Help on curveOnPoly..." -command "zjHelpCallback zjCrvOnPoly";
+				setParent ..;
+
+rowColumnLayout -numberOfRows 5; 
+text -label "Select curve degree" ; 
+button -label " 1 " -command ("createCrv(1)"); 
+button -label " 2 " -command ("createCrv(2)"); 
+button -label " 3 " -command ("createCrv(3)"); 
+button -label " Close " -command ("deleteUI crvOnPoly;windowPref -remove crvOnPoly"); 
+showWindow crvOnPoly ; 
+}
+
+

@@ -1,0 +1,46 @@
+// Make a zDepth pass
+global proc ysAddDepthPass ()
+{
+	// Create depth shader	
+	if(!(`objExists "depthShader"`))
+	{	
+		string $sdDepth = `shadingNode -asShader p_z -name "depthShader"`;
+		string $cam[] = `listCameras -p`;
+		string $cam[] = `listRelatives -children $cam`;
+		for($item in $cam)
+		{
+			if((`getAttr ($item+".renderable")`==1)&&(`objExists ($item+".farClipPlane")`))
+			{
+				float $farClip = `getAttr ($item+".farClipPlane")`;
+				setAttr ($sdDepth+".far") $farClip;
+			} 
+		}
+	}
+	// Create normal depth channel
+	string $bufferList[] = `listConnections "miDefaultOptions.frameBufferList"`;
+	string $outputList[] = `ls -type "mentalrayOutputPass"`;
+	int $number = size($bufferList);
+	for($item in $bufferList)
+	{
+		if(!(`gmatch $item "IDMT_FB_depth*"`) && !(`gmatch $item "IDMT_FB_depthPass*"`))
+		{
+			string $camera[] = `listConnections -shapes on "mentalrayOutputPass0.message"`;			
+			createNode mentalrayUserBuffer -name "IDMT_FB_depth";
+			connectAttr -force "IDMT_FB_depth.message" ("miDefaultOptions.frameBufferList["+$number+"]");
+			createNode mentalrayOutputPass -name "IDMT_FB_depthPass";
+			connectAttr -force "IDMT_FB_depthPass.message" ($camera[0] + ".miOutputShaderList["+$number+"]");
+			connectAttr -force "IDMT_FB_depth.message" "IDMT_FB_depthPass.dataType";
+			setAttr "IDMT_FB_depthPass.fileMode" 1;
+			setAttr -type "string" IDMT_FB_depthPass.fileName "depth";
+			setAttr IDMT_FB_depth.dataType 1;
+			break;
+		}
+	}
+	string $bufferStore[] = `ls -type "buffer_store"`;
+	for($item in $bufferStore)
+	{
+		setAttr ($item + ".store_"+$number) 1;
+		connectAttr -force ("depthShader.outValue") ($item + ".inbuffer_"+$number);
+		connectAttr -force ("depthShader.outValueA") ($item + ".inbuffer_"+$number+"A");
+	}
+}

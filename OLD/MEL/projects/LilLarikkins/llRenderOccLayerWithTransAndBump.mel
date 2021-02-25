@@ -1,0 +1,85 @@
+//////////////////////////////////////////////////////////
+//
+//	Script Name: 
+//	Author: WansHoulOng
+//	Created: 2010-1-7
+//
+//	Update/Change: WansHoulOng
+//	Last Updated: 2010-1-7
+//	Description:
+//				
+//////////////////////////////////////////////////////////
+
+
+global proc llRenderOccLayerWithTransAndBump()
+{
+
+	// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	string $objShape[] = `ls -geometry`;
+	string $renderLayer = `createRenderLayer -name "Occlusion" -makeCurrent -noRecurse $objShape`;
+	
+	editRenderLayerAdjustment "defaultRenderGlobals.currentRenderer";
+	
+	//editRenderLayerAdjustment "defaultResolution.width";
+	//setAttr "defaultResolution.width" 1280;
+	//editRenderLayerAdjustment "defaultResolution.height";
+	//setAttr "defaultResolution.height" 720;
+	
+	// AO shader
+	string $aoTex = `shadingNode -asTexture mib_amb_occlusion -name "aoTexture"`;
+	setAttr ($aoTex + ".samples" ) 32;
+	setAttr ($aoTex + ".spread" ) 0.8;
+	setAttr ($aoTex + ".max_distance" ) 2.5;
+	setAttr ($aoTex + ".output_mode" ) 0;
+	setAttr ($aoTex + ".falloff" ) 1;
+	setAttr ($aoTex + ".id_inclexcl" ) 1;
+	string $aoShader = `shadingNode -asShader surfaceShader -name "aoShader"`;
+	string $aoShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($aoShader+"SG")`;
+	connectAttr -force ($aoTex + ".outValue") ($aoShader + ".outColor");
+	connectAttr -force ($aoShader + ".outColor") ($aoShaderSG + ".surfaceShader");
+	
+	// Filtering material 
+	string $allSG[] = `ls -type shadingEngine`;
+	string $eliminate [] = {"lambert1", "particleCloud1", "shaderGlow1"};
+	//string $matArray[] = stringArrayRemove ($eliminate, $mats);
+	for($item in $allSG)
+	{	
+		string $sgObjs[] = `sets -q $item`;
+		if (size($sgObjs))
+		{
+			string $shader[] = `listConnections -s 1 -d 0 ($item+".surfaceShader")`;
+			if (size($shader) && stringArrayCount($shader[0],$eliminate)==0)
+			{
+				if((`objExists ($shader[0]+".normalCamera")`)||(`objExists ($shader[0]+".transparency")`))
+				{
+					print ($item+"\n");
+					
+					string $aoBumpTransShaderSG[] = `duplicate -un $item`;
+					string $aoBumpTransShader[] = `listConnections -s 1 -d 0 ($aoBumpTransShaderSG[0]+".surfaceShader")`;
+					
+					string $colorCNS[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($aoBumpTransShader[0]+".color")`;
+					for ($i=0;$i<size($colorCNS);$i=$i+2)
+					{
+						disconnectAttr $colorCNS[$i+1] $colorCNS[$i];
+					}
+					connectAttr -f ($aoTex+".outValue") ($aoBumpTransShader[0]+".color");
+					
+					sets -e -forceElement  $aoBumpTransShaderSG[0] $sgObjs;
+					select -cl;					 
+				}
+				else 
+				{
+					sets -e -forceElement  $aoShaderSG $sgObjs;
+					select -cl;					 
+				}
+			}
+		}
+	}
+}
+

@@ -1,0 +1,346 @@
+global proc riggingCheckSmooth()
+{
+	print "Checking Smooth Node\n";
+	print "----------------------\n";
+	
+	string $polys[] =`ls -ni -type mesh`;
+	string $above[],$border[],$value[],$connect[];
+	for ($poly in $polys)
+	{
+		int $ex = 0;
+		string $hist[] = `listHistory -pdo true -gl true $poly`;
+		for ($his in $hist )
+		{
+			if (`nodeType $his` == "polySmoothFace")	
+			{
+				$ex = 1;
+				break;
+			}
+		}
+		if ($ex == 1)
+		{
+			if (`nodeType $hist[0]` != "polySmoothFace")		$above[size($above)] = "select -add " + $poly +";";
+			else if (`getAttr ($hist[0]+".keepBorder")`)		$border[size($border)] = "select -add " + $poly +";";
+			else if (`getAttr ($hist[0]+".divisions")`)		$value[size($value)] = "select -add " + $poly +";";
+			else 
+			{
+				string $con[] = `listConnections -plugs true ($hist[0]+".divisions")`;
+				if (!`objExists $con[0]` || (!endsWith($con[0],"MASTER.smooth") && !endsWith($con[0],"Upper_Body.Smooth") && !endsWith($con[0],"Upper_Body.smooth")))
+					$connect[size($connect)] = "select -add " + $poly +";";
+			}
+		}
+	}
+	if (size($above) != 0)
+	{
+		print "    以下物体的smooth节点不是最上层:----------\n      ";
+		print "select -cl;";
+		print $above;
+		print "\n";
+	}
+	if (size($border) != 0)
+	{
+		print "    以下物体的smooth节点的Keep Border属性不为off:----------\n      ";
+		print "select -cl;";
+		print $border;
+		print "\n";
+	}
+	if (size($value) != 0)
+	{
+		print "    以下物体的smooth节点的值不为0:----------\n      ";
+		print "select -cl;";
+		print $value;
+		print "\n";
+	}
+	if (size($connect) != 0)
+	{
+		print "    以下物体的smooth节点属性链接不正确:----------\n      ";
+		print "select -cl;";
+		print $connect;
+		print "\n";
+	}
+
+	check_Summary( "Checked smooth", ("Found " + (size($above)+size($border)+size($value)+size($connect)) + " wrong smooth node") );
+	print "\n";
+
+}
+
+global proc riggingCheckCluster()
+{
+	print "Checking Deform Node( cluster  &  lattice )\n";
+	print "----------------------\n";
+	
+	string $polys[] =`ls -ni -type mesh -type nurbsSurface`;
+	string $cluster[],$lattice[];
+	for ($poly in $polys)
+	{
+		int $skin = 0,$clusterPos = 0,$latticePos = 0,$tweak = 0;
+		int $i = 1;
+		string $hist[] = `listHistory -pdo true -gl true $poly`;
+		for ($his in $hist )
+		{
+			if (`nodeType $his` == "skinCluster")	$skin = $i;
+			if (`nodeType $his` == "cluster")	$clusterPos = $i;
+			if (`nodeType $his` == "ffd")		$latticePos = $i;
+			if (`nodeType $his` == "tweak")		$tweak = $i;
+			$i++;
+		}
+		if ($clusterPos != 0 && !($tweak > $clusterPos && $clusterPos > $skin))
+		{
+			$cluster[size($cluster)] = "select -add " + $poly +";";
+		}
+		if ($latticePos != 0 && !($tweak > $latticePos && $latticePos > $skin))
+		{
+			$lattice[size($lattice)] = "select -add " + $poly +";";
+		}
+	}
+	if (size($cluster) != 0)
+	{
+		print "以下物体Cluseter节点错误，请检查：---------------------------\n";
+		print "select -cl;";
+		print $cluster;
+		print "\n";
+	}
+	if (size($lattice) != 0)
+	{
+		print "以下物体Lattice节点错误，请检查：---------------------------\n";
+		print "select -cl;";
+		print $lattice;
+		print "\n";
+	}
+	check_Summary( "Checked deform", ("Found " + (size($cluster)+size($lattice)) + " wrong deform node") );
+	print "\n";
+}
+
+global proc riggingCheckJoint()
+{
+	print "Checking Joint Attribute(  stiffness  &  preferredAngle )\n";
+	print "----------------------\n";
+	
+	string $checks[] = {"stiffnessX","stiffnessY","stiffnessZ","preferredAngleX","preferredAngleY","preferredAngleZ"};
+	
+	string $joints[] =`ls -type joint`;
+	string $wrong[];
+	for ($joint in $joints)
+	{
+
+		for ($check in $checks)
+		{
+			float $angle = `getAttr ($joint+"."+$check)`;
+			if (abs($angle) >= 0.00001  || `getAttr -l ($joint+"."+$check)` == 0 )
+			{
+				$wrong[size($wrong)] = "select -add " + $joint +";";
+				break;
+			}
+		}
+	}
+	if (size($wrong) != 0)
+	{
+		print "以下骨骼stiffness或者preferredAngle属性错误，请检查：---------------------------\n";
+		print "select -cl;";
+		print $wrong;
+		print "\n";
+	}
+	check_Summary( "Checked joint", ("Found " + size($wrong) + " wrong joint") );
+	print "\n";
+}
+
+global proc riggingCheckAnModel()
+{
+	print "Checking AnModel Attribute(  visibility  &  primaryVisibility )\n";
+	print "----------------------\n";
+	
+	string $polys[] =`ls -ni -type mesh "*_an_*"`;
+	string $wrong[];
+	for ($poly in $polys)
+	{
+		if (`getAttr ($poly+".primaryVisibility")` || !`getAttr ($poly+".visibility")`)
+		{
+			$wrong[size($wrong)] = "select -add " + $poly +";";
+		}
+	}
+	if (size($wrong) != 0)
+	{
+		print "以下A模渲染显示属性错误，请检查：---------------------------\n";
+		print "select -cl;";
+		print $wrong;
+		print "\n";
+	}
+	check_Summary( "Checked AnModle Attrtibute", ("Found " + size($wrong) + " wrong AnModel") );
+	print "\n";
+}
+
+global proc riggingCheckMeshVtx()
+{
+	print "Checking MeshVtx Value\n";
+	print "----------------------\n";
+
+	string $checks[] = {"pntx","pnty","pntz"};
+	string $polys[] =`ls -ni -type mesh "*_hi_*"`;
+	string $wrong[];
+	for ($poly in $polys)
+	{
+		
+		string $hist[] = `listHistory -pdo true -gl true $poly`;
+		int $adj = 0;
+		for ($his in $hist)
+		{
+			if (`nodeType $his` == "skinCluster")
+				$adj =1;
+		}
+		if ($adj == 1)
+		{
+			int $num[] = `polyEvaluate -v $poly`;
+			for ($i=0;$i<$num[0] ;$i++ )
+			{
+				for ($check in $checks)
+				{
+					float $res = `getAttr ($poly+".pnts["+$i+"]."+$check)`;
+					if (abs($res) > 0.000001)
+					{
+						$wrong[size($wrong)] = "select -add " + ($poly+".vtx["+$i+"]") +";";
+						break;
+					}
+				}
+			}
+		}
+	}
+	if (size($wrong) != 0)
+	{
+		print "以下poly物体存在vtx点属性错误，请检查：---------------------------\n";
+		print "select -cl;";
+		print $wrong;
+		print "\n";
+	}
+	check_Summary( "Checked MeshVtx Value ", ("Found " + size($wrong) + " wrong MeshVtx ") );
+	print "\n";
+}
+
+global proc RiggingCheckObjectsHistory()
+{
+	print "Checking Object History\n";
+	print "----------------------\n";
+	
+	string $polys[] = `ls -ni -type mesh -type nurbsSurface "*_hi_*"`;
+	string $wrong[];
+	for ($poly in $polys)
+	{
+		string $hists[] = `listHistory -f true -gl true -pdo true $poly`;
+		if (`objExists $hists[0]`)
+		{
+			$wrong[size($wrong)] = "select -add " +  $poly +";";
+		}
+	}
+	if (size($wrong) != 0)
+	{
+		print "以下物体存在构造历史节点，请检查：---------------------------\n";
+		print "select -cl;";
+		print $wrong;
+		print "\n";
+	}
+	check_Summary( "Checked Objects History ", ("Found " + size($wrong) + " wrong Object History ") );
+	print "\n";
+}
+
+global proc RiggingCheckOrigin()
+{
+	print "Checking Object Position\n";
+	print "----------------------\n";
+
+	string $master[] = `ls "*MASTER"`;
+	string $attr[] = {"translateX","translateY","translateZ","rotateX","rotateY"};
+	int $adj = 0;
+	for ($temp in $attr)
+	{
+		if (`getAttr ($master[0]+"."+$temp)` != 0)
+		{
+			$adj = 1;
+			break;
+		}
+	}
+	if ($adj == 1)
+		print "角色MASTER属性没有归零，请检查------------------\n";
+
+	else 
+	{
+		string $objs[] = `ls -ni -type mesh -type nurbsSurface "*_hi_*"`;
+		float $orgin = 5 ;
+		string $wrong;
+		for ($obj in $objs )
+		{
+			string $tran[] = `listRelatives -f -parent $obj`;
+			float $bb[] = `xform -q -ws -bb $tran[0]`;
+			if ($bb[1] < $orgin)
+			{	
+				$orgin = $bb[1];
+				$wrong = "select -add " + $obj +";";
+			}
+		}
+		if (abs($orgin)>=0.01)
+		{	
+			$adj = 1;
+			print "角色不在原点，请检查-----------------\n";
+			print "select -cl;";
+			print $wrong;
+			print "\n";
+		}
+	}
+	check_Summary( "Checked Objects Position ", ("Found " +$adj+ " wrong Object Position ") );
+	print "\n";
+}
+
+
+global proc RiggingCheckWeight()
+{
+	print "Checking Object Weight\n";
+	print "----------------------\n";
+	
+	string $polys[] = `ls -type mesh "*_hi_*"`;
+	string $wrongWeight[],$wrongNum[];
+	for ($poly in $polys)
+	{
+		string $his[] = `listHistory -pdo true -gl true $poly`;
+		string $skin;
+		for ($hi in $his)
+		{
+			if (nodeType($hi) == "skinCluster")	
+			{
+				$skin = $hi;break;
+			}
+		}
+		int $num[] = `polyEvaluate -v $poly`;
+		string $tran[] = `listRelatives -parent $poly`;
+		for ($i=0;$i<$num[0] ;$i++ )
+		{
+			float $value[] = `skinPercent -q -v $skin ($tran[0]+".vtx["+$i+"]")`;
+			int $adj=0;
+			for ($val in $value)
+			{
+				if (0<$val && $val <=0.001)	
+				{
+					$wrongWeight[size($wrongWeight)] ="select -add " +  $tran[0]+".vtx["+$i+"]" +";";break;
+				}
+			}
+			for ($val in $value)
+			{
+				if ($val != 0 )	$adj++;
+			}
+			if ($adj>5)	$wrongNum[size($wrongNum)] = "select -add " + $tran[0]+".vtx["+$i+"]" +";";
+		}
+	}
+	if (size($wrongWeight) != 0)
+	{
+		print "以下物体的vtx点的权重存在过小权重，请检查-------------------\n";
+		print "select -cl;";
+		print $wrongWeight;
+		print "\n";
+	}
+	if (size($wrongNum) != 0)
+	{
+		print "以下物体的vtx点受影响的权重超过5个，请检查------------------\n";
+		print "select -cl;";
+		print $wrongNum;
+		print "\n";
+	}
+	check_Summary( "Checked Objects Weight ", ("Found " +size($wrongWeight)+size($wrongNum)+ " wrong Object Weight ") );
+	print "\n";
+}

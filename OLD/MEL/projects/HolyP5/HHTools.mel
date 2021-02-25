@@ -1,0 +1,657 @@
+global proc HHSetSwitche()
+{
+	string $refPaths[]=`file -q -r`;
+	if(size($refPaths)!=0)
+	{
+		for($ref in $refPaths)
+		{
+		    
+		    string $refRN = `file -q -rfn $ref`;
+		    string $animfile =`match "ms_notex" $ref`;
+		    if (size($animfile)!=0)
+		    {
+			string $newrefname = `substitute "notex" $ref "tex"`;
+			string $full =`workspace -expandName $newrefname`;
+			if (`filetest -f $full`)
+			{
+				file -loadReference $refRN  -type "mayaAscii" -options "v=0" $newrefname;
+			}
+		    }
+
+		}
+	}
+}
+
+global proc HHSavefile()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/Sk3/HhRenderTools.mel";
+	
+	string $source = `file -q -sn -shn`;
+
+	string $buffer[];
+	$numTokens = `tokenize $source "_" $buffer`;
+	
+	string $filename =$buffer[3]+"_"+$buffer[4];
+
+	global string $HhRender_save_File_Name;
+
+	$HhRender_save_File_Name="";
+
+       layoutDialog -ui "HhRender_save_File_UI" -t "存文件";
+	
+	if ($HhRender_save_File_Name=="")	return;
+	
+	$HhRender_save_File_Name+="";
+
+	string $fd = `workspace -q  -rootDirectory` + "scenes/";
+	string $fn = $fd + `substitute $filename $source $HhRender_save_File_Name`+"_lr_"+$buffer[4];
+       
+	//file -f -constructionHistory 0 -channels 0 -constraints 0 -expressions 0 -shader 0 -type "mayaBinary" -exportAll $fn;
+	file -force -options "v=0;p=17" -typ "mayaAscii" -pr -es $fn;
+}
+//阴天 FG设置
+global proc HHEnvEq()
+{
+   setAttr "miDefaultOptions.finalGather" 1;
+   setAttr "miDefaultOptions.finalGatherRays" 50;
+   setAttr "miDefaultOptions.finalGatherPoints" 30;
+   string $phy[]=`ls -typ mia_physicalsky `;
+   setAttr ($phy[0]+".multiplier") 0.1;
+   setAttr ($phy[0]+".rgb_unit_conversionR") 9e-005;
+   setAttr ($phy[0]+".rgb_unit_conversionG") 9e-005;
+   setAttr ($phy[0]+".rgb_unit_conversionB") 9e-005;
+   setAttr ($phy[0]+".ground_color") -type double3 0.4590.459 0.459 ;
+   setAttr ($phy[0]+".sun_disk_intensity") 0;
+   setAttr ($phy[0]+".sun_disk_scale") 0;
+   setAttr ($phy[0]+".sun_glow_intensity") 0;
+   string $light[]=`ls -lt`;
+   setAttr ($light[0]+".shadowMap") 1;
+   setAttr ($light[0]+".smapResolution") 8000;
+   setAttr ($light[0]+".smapSamples") 64;
+   setAttr ($light[0]+".smapSoftness") 1;   
+}
+//晴天 FG设置
+global proc HHEnvSun()
+{
+   setAttr "miDefaultOptions.finalGather" 1;
+   setAttr "miDefaultOptions.finalGatherRays" 50;
+   setAttr "miDefaultOptions.finalGatherPoints" 30;
+   string $phy[]=`ls -typ mia_physicalsky `;
+   setAttr ($phy[0]+".multiplier") 0.7;
+   setAttr ($phy[0]+".rgb_unit_conversionR") 0.0001;
+   setAttr ($phy[0]+".rgb_unit_conversionG") 0.0001;
+   setAttr ($phy[0]+".rgb_unit_conversionB") 0.0001;
+   setAttr ($phy[0]+".ground_color") -type double3 0.149 0.176 0.200 ;
+   setAttr ($phy[0]+".sun_disk_intensity") 1;
+   setAttr ($phy[0]+".sun_disk_scale") 4;
+   setAttr ($phy[0]+".sun_glow_intensity") 1;
+   string $light[]=`ls -lt`;
+   setAttr ($light[0]+".shadowMap") 0;
+}
+//阴天 FG设置
+global proc HHEnvEq()
+{
+   setAttr "miDefaultOptions.finalGather" 1;
+   setAttr "miDefaultOptions.finalGatherRays" 50;
+   setAttr "miDefaultOptions.finalGatherPoints" 30;
+   string $phy[]=`ls -typ mia_physicalsky `;
+   setAttr ($phy[0]+".multiplier") 0.1;
+   setAttr ($phy[0]+".rgb_unit_conversionR") 9e-005;
+   setAttr ($phy[0]+".rgb_unit_conversionG") 9e-005;
+   setAttr ($phy[0]+".rgb_unit_conversionB") 9e-005;
+   setAttr ($phy[0]+".ground_color") -type double3 0.4590.459 0.459 ;
+   setAttr ($phy[0]+".sun_disk_intensity") 0;
+   setAttr ($phy[0]+".sun_disk_scale") 0;
+   setAttr ($phy[0]+".sun_glow_intensity") 0;
+   string $light[]=`ls -lt`;
+   setAttr ($light[0]+".shadowMap") 1;
+   setAttr ($light[0]+".smapResolution") 8000;
+   setAttr ($light[0]+".smapSamples") 64;
+   setAttr ($light[0]+".smapSoftness") 64;   
+}
+//导入角色灯光
+global proc HHChalight()
+{
+	file -import -type "mayaAscii" -ra true -namespace "chalight" -options "v=0"  -pr -loadReferenceDepth "all" "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/light/chalight.ma";
+}
+//阴影设置
+global proc HHShadowSet()
+{
+	if(`window -ex HhShadowSetWin`)
+		deleteUI HhShadowSetWin;
+			window -t "HhShadow" HhShadowSetWin;
+				columnLayout;
+					button -label "产生阴影物体（如角色）" -w 300 -command "Hhshadowcha";
+					button -label "接收阴影物体（如地面）" -w 300 -command "Hhshadowground";
+			showWindow HhShadowSetWin;
+	
+}
+global proc Hhshadowcha()
+{
+	string $objselect[]=`ls -sl`;
+	for ($o in $objselect )
+	{
+		string $shape[]=`listRelatives  -shapes $o`;
+		if(`size($shape)`!=0)
+		{
+			string $pri=$shape[0]+".primaryVisibility";
+			string $cas=$shape[0]+".castsShadows";
+			if(`objExists $pri`&&`objExists $cas`)
+			{
+				setAttr $pri 0;	
+				setAttr $cas 1;
+			}
+		}
+	}
+}
+global proc Hhshadowground()
+{
+	string $objselect[]=`ls -sl`;
+	for ($o in $objselect )
+	{
+		string $shape[]=`listRelatives  -shapes $o`;
+		if(`size($shape)`!=0)
+		{
+			string $pri=$shape[0]+".primaryVisibility";
+			string $cas=$shape[0]+".castsShadows";
+			if(`objExists $pri`&&`objExists $cas`)
+			{
+				setAttr $pri 1;	
+				setAttr $cas 0;
+			}
+		}
+	}
+}
+//建层工具
+
+global proc Hh_RenderTools_Create_Layer_UI()
+{
+    // Get the dialog's formLayout.
+    string $form = `setParent -q`;
+
+    formLayout -e -width 20 $form;
+
+	string $t = `text -l "层名"`;
+    textField -w 30 "Hh_RenderTools_Create_Layer_name";
+    setFocus "Hh_RenderTools_Create_Layer_name";
+    string $b1 = `button -l "建层"    -c "Hh_RenderTools_Create_Layer_Button();layoutDialog -dismiss \"Abort\""`;
+
+	formLayout -edit
+		-attachForm            $t   "top"    5
+		-attachForm            $t   "left"   5
+		-attachNone            $t   "bottom"
+		-attachForm            $t   "right"  5   	
+		
+		-attachControl         "Hh_RenderTools_Create_Layer_name"   "top"    5 $t
+		-attachForm            "Hh_RenderTools_Create_Layer_name"   "left"   5
+		-attachNone            "Hh_RenderTools_Create_Layer_name"   "bottom"
+		-attachForm            "Hh_RenderTools_Create_Layer_name"   "right"  5
+		
+		-attachControl         $b1  "top"    5 "Hh_RenderTools_Create_Layer_name"
+		-attachForm            $b1  "left"   25
+		-attachNone            $b1  "bottom"
+		-attachForm            $b1  "right"  25 
+
+    $form;
+    
+}
+global proc Hh_RenderTools_Create_Layer_Button()
+{
+	global string $Hh_RenderTools_Create_Layer_Name;
+	$Hh_RenderTools_Create_Layer_Name=` textField -q -tx "Hh_RenderTools_Create_Layer_name"`;
+	
+}
+
+global proc Hh_RenderTools_Color()
+{
+	string $selectOBJ[]=`ls -sl -l`;
+	global string $Hh_RenderTools_Create_Layer_Name;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_Color";
+	createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name;
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+	HhObjHide();
+
+}
+global proc Hh_RenderTools_Idpass()
+{
+	string $selectOBJ[]=`ls -sl -l`;
+	global string $Hh_RenderTools_Create_Layer_Name;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_idpass";
+	createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name;
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+	HhObjHide();
+
+}
+global proc Hh_RenderTools_Depth()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhTrDepthShader.mel";
+	string $selectOBJ[]=`ls -sl -l`;
+	//layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	createRenderLayer -makeCurrent -name "depth";
+	select $selectOBJ;
+	HhDepthTranshaderN(); 
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+	HhObjHide();
+
+	
+}
+
+global proc Hh_RenderTools_RGB()
+{
+	string $selectOBJ[]=`ls -sl -l`;
+	global string $Hh_RenderTools_Create_Layer_Name;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_RGB";
+	createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name;
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+		//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+	HhObjHide();
+}
+
+global proc Hh_RenderTools_AO(string $type)
+{
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/Sk3/HhAOTranshader.mel";
+	global string $Hh_RenderTools_Create_Layer_Name;
+	string $selectOBJ[]=`ls -sl -l`;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_AO";
+	string $newLayer =`createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name`;
+	select $selectOBJ;
+	HhAOTranshader;
+	/*
+	renderLayerBuiltinPreset occlusion $newLayer;
+	string $setName[] =`listConnections -s 1 -d 0 -type shadingEngine $newLayer`;
+	string $his[]=`listHistory $setName[0]`;
+	for ($h in $his)
+	{
+		if (`objectType $h`=="mib_amb_occlusion")
+		{
+
+			setAttr ($h+".samples") 128;
+			setAttr ($h+".max_distance") 5;				
+
+		}	
+	}
+
+//	Hide objs	
+//	Hh_RenderTools_HideObjects($selectOBJ);
+*/
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	
+}
+global proc Hh_RenderTools_Fre()
+{
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhIdpassTranshader.mel";
+	global string $Hh_RenderTools_Create_Layer_Name;
+	string $selectOBJ[]=`ls -sl -l`;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_Fre";
+	string $newLayer =`createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name`;
+	select $selectOBJ;
+	HHIdpassTr_Assign("Fresnel");
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	
+}
+
+
+
+global proc Hh_RenderTools_castAO(string $type)
+{
+	global string $Hh_RenderTools_Create_Layer_Name;
+	string $selectOBJ[]=`ls -sl -l`;
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_castAO";
+	string $newLayer =`createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name`;
+	
+	renderLayerBuiltinPreset occlusion $newLayer;
+	string $setName[] =`listConnections -s 1 -d 0 -type shadingEngine $newLayer`;
+	string $his[]=`listHistory $setName[0]`;
+	for ($h in $his)
+	{
+		if (`objectType $h`=="mib_amb_occlusion")
+		{
+
+			setAttr ($h+".samples") 128;
+			setAttr ($h+".max_distance") 5;				
+
+		}	
+	}
+
+//	Hide objs	
+//	Hh_RenderTools_HideObjects($selectOBJ);
+	
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	
+}
+
+global proc ot_SetSwitche()
+{
+	string $refPaths[]=`file -q -r`;
+	if(size($refPaths)!=0)
+	{
+		for($ref in $refPaths)
+		{
+		    
+		    string $refRN = `file -q -rfn $ref`;
+		    string $animfile =`match "ms_notex" $ref`;
+		    if (size($animfile)!=0)
+		    {
+			string $newrefname = `substitute "notex" $ref "tex"`;
+			string $full =`workspace -expandName $newrefname`;
+			if (`filetest -f $full`)
+			{
+				file -loadReference $refRN  -type "mayaBinary" -options "v=0" $newrefname;
+			}
+		    }
+
+		}
+	}
+}
+
+
+global proc Hh_RenderTools_Normal()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/projects/HolyP5/HhNormalTranshader.mel";
+	global string $Hh_RenderTools_Create_Layer_Name;
+	string $selectOBJ[]=`ls -sl -l`;
+	
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_Normal";
+	string $newLayer =`createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name`;
+	
+	//renderLayerBuiltinPreset normal $newLayer;
+	select $selectOBJ;
+	HhNormalTranshader();
+
+	
+//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	
+}
+global proc Hh_RenderTools_Shadow()
+{
+	global string $Hh_RenderTools_Create_Layer_Name;
+	string $selectOBJ[]=`ls -sl -l`;
+	
+	$Hh_RenderTools_Create_Layer_Name="";
+	layoutDialog -ui "Hh_RenderTools_Create_Layer_UI" -t "创建渲染层";
+	
+	if ($Hh_RenderTools_Create_Layer_Name=="")	return;
+	
+	$Hh_RenderTools_Create_Layer_Name+="_Shadow";
+	string $newLayer =`createRenderLayer -makeCurrent -name $Hh_RenderTools_Create_Layer_Name`;
+	
+	select $selectOBJ;
+	source zzjIdPassInfo.mel;
+	zzjIDPass_Material_Assign("shadow");
+	
+//	Hide objs	
+	//Hh_RenderTools_HideObjects($selectOBJ);
+
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/zzjSetMentalrayQuality.mel";
+	zzjSetMentalrayQuality("ChinaImage");
+	
+}
+global proc Hh_RenderTools_UnlockNodes()
+{
+	source "//file-cluster/GDC/Resource/Support/Maya/scripts/cyBakeClothMain.mel";
+
+	string $allNodes[]=`ls -type mesh -type nurbsSurface -type transform -type nParticle -type fluidShape`;
+	
+	for ($a in $allNodes)
+	{
+		if (`attributeExists "overrideEnabled" $a`)
+		{
+			string $connect= `connectionInfo -sfd ($a + ".overrideEnabled")`;
+			myCBdeleteConnection ($a + ".overrideEnabled");
+			setAttr ($a + ".overrideEnabled") 0;				
+		}
+		lockNode -lock off $a;
+	}
+}
+
+
+global proc Hh_RenderTools_HideObjects(string $obj[])
+{
+	
+	string $hideGroups[]={};
+	int $i =0;
+	for ($p in $obj)
+	{
+		//if (`gmatch  $p "*brow*"`)		$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*DEFORMERS*"`)	$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*RIG*"`)		$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*drape*"`)		$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*Brow*"`)		$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*RIG*"`)		$hideGroups[$i++]=$p;
+		//if (`gmatch  $p "*RIG*"`)		$hideGroups[$i++]=$p;
+		if (`gmatch  $p "*MSH_hitan2_*"`)		$hideGroups[$i++]=$p;
+
+	}
+	
+	for ($hg in $hideGroups)
+	{
+		evalDeferred ("setAttr -lock 0  "+$hg + ".visibility");
+		evalDeferred ("setAttr -k 1  "+$hg + ".visibility");
+		CBdeleteConnection  ($hg +".v");	
+		setAttr  ($hg +".v") 0;		
+	}
+
+	
+}
+global proc HhObjHide()
+{
+	string $objs[]=`ls -tr`;
+	for($o in $objs)
+	{
+		if(`match "MSH_hitan2_" $o`!="")
+		{
+			string $v=$o+".visibility";
+			if(`objExists $v`!=0)
+			{
+				setAttr $v 0;
+			}
+
+		}
+	}
+ }
+
+ //Depth 材质
+
+ global proc HhDepthShader()
+{
+   
+        string $selectobj[]=`ls -sl`;
+
+	string $ifo = "HhDepthShader_samplerInfo";
+	string $mul = "HhDepthShader_multiplyDivide";
+	string $rng = "HhDepthShader_setRange";
+
+	if(!`objExists  $ifo`)
+	{
+		string $ifo = `shadingNode -asUtility samplerInfo -n "HhDepthShader_samplerInfo"`;
+	}
+	if(!`objExists  $mul`)
+	{
+		string $mul = `shadingNode -asUtility multiplyDivide -n "HhDepthShader_multiplyDivide"`;
+	}
+	if(!`objExists  $rng`)
+	{
+		string $rng = `shadingNode -asUtility setRange -n "HhDepthShader_setRange"`;
+	}
+	string $dep = "HhDepth_surfaceShader";
+        if (!`objExists $dep`)
+	{
+		$dep = `shadingNode -asShader lambert -name "HhDepth_surfaceShader"`;
+		string $depths[] = `ls -type lambert "*HhDepth_surfaceShader*"`; 
+	
+	//connections
+	string $comNear = $ifo+".cameraNearClipPlane";
+	if(!`objExists $comNear`)
+	{
+		addAttr -longName "cameraNearClipPlane" -attributeType "float" $ifo;
+		addAttr -longName "cameraFarClipPlane" -attributeType "float" $ifo;
+		connectAttr ($ifo+".pointCameraZ") ($mul+".input1X");
+		//设置depth值
+		setAttr ($mul+".input2X") -20.0;
+		connectAttr ($mul+".outputX") ($rng+".valueX");
+		connectAttr ($ifo+".cameraNearClipPlane") ($rng+".oldMinX");
+		connectAttr ($ifo+".cameraFarClipPlane") ($rng+".oldMaxX");
+		//setAttr ($rng+".minX") 0; 
+		//setAttr ($rng+".maxX") 1.0;
+		connectAttr ($rng+".outValueX") ($dep+".color.colorR");
+		connectAttr ($rng+".outValueX") ($dep+".color.colorG");
+		connectAttr ($rng+".outValueX") ($dep+".color.colorB");
+
+	//参数调整
+		if (!`objExists ($dep+".black")`)
+		{
+			addAttr -longName "black" -attributeType "float" $dep;
+			addAttr -longName "white" -attributeType "float" $dep;
+			string $conblack[]=`listConnections -s 1 -d 0 -c 1 -p 1($rng+".maxX")`;
+			if(size($conblack)<1)
+			{
+				connectAttr ($dep+".black") ($rng+".maxX");
+				connectAttr ($dep+".white") ($rng+".minX");
+			}
+				setAttr ($dep+".black") 0;
+				setAttr ($dep+".white") 1;
+			}
+		}
+	}
+         //赋材质给选择物体
+	
+
+
+         hyperShade -assign HhDepth_surfaceShader ;
+
+  
+       select -cl;
+
+	string $cameras[] = `listCameras`;
+	string $attrs[] = {"nearClipPlane","farClipPlane"};
+	for ($cam in $cameras)
+	{
+		for ($attr in $attrs)
+		{
+			string $connects[] = `listConnections -s 1 -d 0 -c 1 -p 1 ($cam+"."+$attr)`;
+			if (size($connects)>1)
+			{
+				for ($i=0;$i<size($connects);$i=$i+2 )
+				{
+					disconnectAttr $connects[$i+1]  $connects[$i];
+				}
+			}
+		}
+    }
+    
+  }
+
+//OCC
+global proc HhAoShader()
+{
+	string $objsect[]=`ls -sl -l`;
+	if (!`pluginInfo -query -loaded "Mayatomr.mll"`)
+	loadPlugin "Mayatomr.mll";
+	if(`objExists HhAOshader`==0)
+	{
+		shadingNode -asShader surfaceShader -name HhAOshader;
+		mrCreateCustomNode -asTexture "" mib_amb_occlusion;rename Hhocclusion;
+		setAttr "Hhocclusion.samples" 128;
+		setAttr "Hhocclusion.dark" -type double3 0.2 0.2 0.2;
+		setAttr "Hhocclusion.max_distance" 5;
+		setAttr "Hhocclusion.spread" 0.8;
+		connectAttr -force Hhocclusion.outValue HhAOshader.outColor;
+		sets -renderable true -noSurfaceShader true -empty -name HhAOshaderSG;
+		connectAttr -f HhAOshader.outColor HhAOshaderSG.surfaceShader;
+	}
+	select $objsect;
+	hyperShade -assign HhAOshader;
+}
+//normal
+global proc HhNormalShader()
+{
+	string $objsect[]=`ls -sl -l`;
+	if (!`pluginInfo -query -loaded "Mayatomr.mll"`)
+		loadPlugin "Mayatomr.mll";
+	if(`objExists Hhnormalshader`==0)
+	{
+		shadingNode -asShader surfaceShader -name Hhnormalshader;
+		mrCreateCustomNode -asTexture "" mib_amb_occlusion;rename Hhnormalshader;
+		setAttr "Hhnormalshader.samples" 128;
+		setAttr "Hhnormalshader.dark" -type double3 0.2 0.2 0.2;
+		setAttr "Hhnormalshader.max_distance" 5;
+		setAttr "Hhnormalshader.spread" 0.8;
+		connectAttr -force Hhnormalshader.outValue Hhnormalshader.outColor;
+		sets -renderable true -noSurfaceShader true -empty -name HhnormalshaderSG;
+		connectAttr -f Hhnormalshader.outColor HhnormalshaderSG.surfaceShader;	
+		setAttr "Hhnormalshader.output_mode"  2;
+	}
+	select $objsect;
+	hyperShade -assign Hhnormalshader;
+
+}
+
+global proc P5_HhProxySwitchWin()
+{
+	if (`window -exists proxy_switch_window`) deleteUI proxy_switch_window;
+	string $window=`loadUI -uiFile "//file-cluster/gdc/Resource/Support/Maya/projects/HolyP5/proxy_switch.ui"`;
+
+	/*if (`window -q -topEdge $window` < 0 || `window -q -leftEdge $window` < 0)
+	{
+		window -e -topLeftCorner 100 80 $window;
+	}*/
+	showWindow $window;
+
+}

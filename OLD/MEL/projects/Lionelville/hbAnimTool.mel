@@ -1,0 +1,188 @@
+
+/// Copyright (C) 2000-2009 IDMT. All rights reserved.
+///
+/// Author: 黄璧（重庆）
+///
+/// Creation Date: 2009/03/20
+///
+/// Description: 弄来做火车动画的
+
+
+global proc hbAnimTool() 
+{ 
+	if(`window -ex hbAnimWin`) 
+	deleteUI hbAnimWin; 
+	window -t "火车动画工具" -w 200 -h 150 hbAnimWin; 
+	columnLayout -adj 1; 
+
+
+
+	button -l "创建动画" -c "addAnim"; 
+	button -l "轨道匹配" -c "selectAll"; 
+	button -l "车厢连接" -c "addExpression"; 
+
+
+
+showWindow hbAnimWin; 
+} hbAnimTool;
+
+global proc selectAll()
+{
+	string $selectOb[]=`ls -sl`;
+	string $buffer[];
+	$numToken= `tokenize $selectOb[0] ":" $buffer`;
+	print($buffer[0]);
+	string $back1=`match "ptu0005001generaltypesteamlocomotiveandtenderA_Godnode" $selectOb[0]`;
+	string $back2=`match "ptu0005001generaltypesteamlocomotiveandtenderB_Godnode" $selectOb[0]`;
+	string $back3=`match "ptu0011001westernatlanticpassengercar1858_Godnode" $selectOb[0]`;
+	string $back0=$back1+$back2+$back3;
+
+	if($back0=="ptu0005001generaltypesteamlocomotiveandtenderA_Godnode")
+	   {   select -r $selectOb[0];
+	       select -add ($buffer[0]+":Afwheel_Godnode") ;
+	       select -add $selectOb[1];
+
+	    }
+	else if($back0=="ptu0005001generaltypesteamlocomotiveandtenderB_Godnode")
+	   {   select -r $selectOb[0];
+	       select -add ($buffer[0]+":Bfwheel_Godnode") ;
+	       select -add ($buffer[0]+":Bbwheel_Godnode") ;
+	       select -add $selectOb[1];
+	    }
+	else if($back0=="ptu0011001westernatlanticpassengercar1858_Godnode")
+
+	   {   select -r $selectOb[0];
+	       select -add ($buffer[0]+":Cfwheel_Godnode") ;
+	       select -add ($buffer[0]+":Cbwheel_Godnode") ;
+	       select -add $selectOb[1];
+	    }
+
+	addAnim;
+	select -cl  ;
+}
+
+
+global proc addAnim()
+ 
+{ 
+  string $sellObj[]=`ls -sl`;
+  int $nnn=`size($sellObj)`;
+  int $i;
+   setAttr  ($sellObj[0]+".upTwist") 180;
+    for($i=0;$i<$nnn-1;$i++)
+     {
+       select -r $sellObj[$i];
+       select -add $sellObj[($nnn-1)];
+       railAttach;
+       select -cl  ;
+       setAttr  ($sellObj[$i]+".upTwist") 180;
+    }
+} 
+
+global proc railAttach()
+{
+	string $sels[] = `ls -sl -o -type transform`;
+	string $temp[];
+	if(size($sels) != 2)
+		error "Please select the train's global control node and the rail curve!";
+	if(attributeExists("followPath_Ctrl", $sels[0]) == attributeExists("followPath_Ctrl", $sels[1]))
+		error "Please select the train's global control node and the rail curve!";
+	string $trainCtrl;
+	string $rail;
+	if(attributeExists("followPath_Ctrl", $sels[0]))
+	{
+		$trainCtrl = $sels[0];
+		$rail = $sels[1];
+	}
+	else
+	{
+		$trainCtrl = $sels[1];
+		$rail = $sels[0];
+	}
+	string $rels[] = `listRelatives -s -f $rail`;
+	if(nodeType($rels[0]) != "nurbsCurve")
+		error ($rail + " is not a nurbs curve, please select a nurbs curve as rail!");
+	string $pathShape = $rels[0]; 
+	$rels = `listRelatives -p -f $trainCtrl`;
+	if(nodeType($rels[0]) != "transform")
+		error ("The train controller " + $trainCtrl + " is corrupted, it cannot be attached to rail!");
+	string $pathFollower = $rels[0];
+	
+	//start to check the follower
+		
+	string $attrs[] = {"tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz"};
+
+	int $counter = 0;
+	int $state[];
+	for ($counter = 0; $counter < size($attrs); $counter++){
+		$state[$counter] = `getAttr -l ($pathFollower + "." + $attrs[$counter])`;
+		if($state[$counter])
+			setAttr ($pathFollower + "." + $attrs[$counter]) -l 0;
+	}
+	
+	string $clearList[];
+	string $sourcePlug = `connectionInfo -sfd ($pathFollower + ".tx")`;
+	tokenize $sourcePlug "." $temp;
+	$clearList[size($clearList)] = $temp[0];
+	string $sourcePlug = `connectionInfo -sfd ($pathFollower + ".ty")`;
+	tokenize $sourcePlug "." $temp;
+	$clearList[size($clearList)] = $temp[0];
+	string $sourcePlug = `connectionInfo -sfd ($pathFollower + ".tz")`;
+	tokenize $sourcePlug "." $temp;
+	$clearList[size($clearList)] = $temp[0];
+	string $sourcePlug = `connectionInfo -sfd ($pathFollower + ".rx")`;
+	tokenize $sourcePlug "." $temp;
+	$clearList[size($clearList)] = $temp[0];
+	if($temp[0] != "")
+	{
+		string $sourcePlug = `connectionInfo -sfd ($temp[0] + ".uValue")`;
+		tokenize $sourcePlug "." $temp;
+		$clearList[size($clearList)] = $temp[0];
+	}
+
+	string $curItem;
+	for($curItem in $clearList)
+	{
+		if($curItem != "" && objExists($curItem))
+			delete $curItem;
+	}
+	
+	//try to position the origin of pathFollower
+	float $vecBuffer[] = `xform -q -ws -piv $trainCtrl`;
+	vector $trainOrigin = <<$vecBuffer[0], $vecBuffer[1], $vecBuffer[2]>>;
+	int $error = catchQuiet(`xform -ws -piv ($trainOrigin.x) ($trainOrigin.y) ($trainOrigin.z) $pathFollower`);
+	if($error)
+		warning ("The pivot of " + $pathFollower + " cannot be moved, the action may have problem.");
+
+	//prepare the controller
+	if(!attributeExists("frontTwist", $trainCtrl))
+		addAttr -at double -ln frontTwist -k 1 -s 1 -w 1 -r 1 -h 0 $trainCtrl;
+	if(!attributeExists("upTwist", $trainCtrl))
+		addAttr -at double -ln upTwist -k 1 -s 1 -w 1 -r 1 -h 0 $trainCtrl;
+	if(!attributeExists("sideTwist", $trainCtrl))
+		addAttr -at double -ln sideTwist -k 1 -s 1 -w 1 -r 1 -h 0 $trainCtrl;
+	if(!attributeExists("motionAmp", $trainCtrl))
+	{
+		addAttr -at double -ln motionAmp -min 0.01 -k 0 -s 1 -w 1 -r 1 -h 1 $trainCtrl;
+		setAttr ($trainCtrl + ".motionAmp") 100;
+	}
+	
+	//create path motion
+	string $motionPath = `pathAnimation -c $rail -f 1 -fm 1 -fa "z" -ua "y" $pathFollower`;
+
+	//do connection
+	string $amp = `createNode multiplyDivide`;
+	setAttr ($amp + ".operation") 2;
+           string $expstr=$amp + ".input1X"+"="+$trainCtrl + ".followPath_Ctrl"+"/10";
+           expression -s $expstr;
+
+	connectAttr -f ($trainCtrl + ".motionAmp") ($amp + ".input2X");	
+	connectAttr -f ($trainCtrl + ".frontTwist") ($motionPath + ".frontTwist");	
+	connectAttr -f ($trainCtrl + ".upTwist") ($motionPath + ".upTwist");	
+	connectAttr -f ($trainCtrl + ".sideTwist") ($motionPath + ".sideTwist");
+	connectAttr -f ($amp + ".outputX") ($motionPath + ".uValue");	
+}
+
+
+
+

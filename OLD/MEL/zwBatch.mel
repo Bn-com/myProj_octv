@@ -1,0 +1,583 @@
+global proc zwBatch(string $label, string $command)
+{
+	source yuCreateGeoByNet.mel;
+
+	global string $zwBatch[];
+	clear $zwBatch;
+
+	if ($label == "")
+	{
+		$label = "右键选择命令";
+	}
+
+	if(`window -exists zwBatch`)
+	{
+		deleteUI zwBatch;
+	}
+	window -title "批处理器" -width 360 -height 360 zwBatch;
+		string $formLayout = `formLayout`;
+			string $textScrollList = `textScrollList -allowMultiSelection true`;
+			textScrollList -edit -deleteKeyCommand ("zwBatchDel \"" + $textScrollList + "\"") $textScrollList;
+			string $textField = `textField -editable false textFieldBatch`;
+				popupMenu;
+				radioMenuItemCollection;
+				string $cmd[] = {
+						"Enyo - 自动添加解算",		"zwBatchEnyoCache",
+						"Enyo - Playblast",		"zwBatchPlayblastEnyo",
+						"Winx - Playblast(DYN)",	"zwBatchPlayblastDYN",
+						"Winx - 提交网络生成cache",	"musterCheckinForWinxIICacheProc",
+						"MayaTheBee - 刷屏渲染",	"BuffalorenderMA",
+						"DOD - 立体相机刷屏渲染", "Buffalorender4DO"
+						};
+				for ($i=0; $i<size($cmd); $i+=2)
+				{
+					menuItem  -label $cmd[$i] -radioButton ($label == $cmd[$i]) -command ("zwBatchChangeCommand \"" + $cmd[$i] + "\" \"" + $cmd[$i+1] + "\"");
+				}
+			string $formLayoutConfig = `formLayout formLayoutConfig`;
+				setParent..;
+			string $buttonAdd = `button -label "添加文件" -command ("zwBatchAdd \"" + $textScrollList + "\"")`;
+			string $buttonAction = `button -label "开始执行" -command ("zwBatchAction \"" + $textScrollList + "\" \"" + $textField + "\"")`;
+
+	formLayout -edit
+		-attachForm	$textScrollList		"top"		0
+		-attachControl	$textScrollList		"bottom"	0	$textField
+		-attachForm	$textScrollList		"left"		0
+		-attachForm	$textScrollList		"right"		0
+
+		-attachControl	$textField		"bottom"	0	$formLayoutConfig
+		-attachForm	$textField		"left"		0
+		-attachForm	$textField		"right"		0
+
+		-attachControl	$formLayoutConfig	"bottom"	0	$buttonAdd
+		-attachForm	$formLayoutConfig	"left"		0
+		-attachForm	$formLayoutConfig	"right"		0
+
+		-attachForm	$buttonAdd		"left"		0
+		-attachForm	$buttonAdd		"bottom"	0
+		-attachPosition	$buttonAdd		"right"		0	50
+
+		-attachControl	$buttonAction		"left"		0	$buttonAdd
+		-attachForm	$buttonAction		"bottom"	0
+		-attachForm	$buttonAction		"right"		0
+	$formLayout;
+
+	showWindow zwBatch;
+
+	zwBatchChangeCommand $label $command;
+}
+
+global proc zwBatchChangeCommand(string $label, string $command)
+{
+	textField -edit -text $label -docTag $command textFieldBatch;
+
+	string $buf[] = `formLayout -query -childArray formLayoutConfig`;
+	for ($control in $buf)
+	{
+		deleteUI $control;
+	}
+	if ($command == "musterCheckinForWinxIICacheProc")
+	{
+	//	if (!`optionVar -exists yuWinXIICreateAllCacheLocal`)
+		//{
+			optionVar -intValue yuWinXIICreateAllCacheLocal false;
+		//}
+		checkBox -parent formLayoutConfig -label "如果DYN文件在本机里，请勾上" -value `optionVar -query yuWinXIICreateAllCacheLocal` -changeCommand "optionVar -intValue \"yuWinXIICreateAllCacheLocal\" #1";
+	}
+}
+
+global proc zwBatchAdd(string $textScrollList)
+{
+	global string $zwBatch[];
+
+	string $buf[] = `idmtFileDialog -filter "Maya Scenes (*.mb;*.ma)|*.mb;*.ma|All Files (*.*)|*.*||" -m`;
+	for ($path in $buf)
+	{
+		$path = `substituteAllString $path "\\" "/"`;
+		int $find = false;
+		int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+		for ($i=0; $i<$numberOfItems; $i++)
+		{
+			if ($path == $zwBatch[$i])
+			{
+				$find = true;
+				break;
+			}
+		}
+		if ($find)
+		{
+			continue;
+		}
+		string $filename = `match "[^/\\]+$" $path`;
+		textScrollList -edit -append $filename $textScrollList;
+		$zwBatch[$numberOfItems] = $path;
+	}
+}
+
+global proc zwBatchDel(string $textScrollList)
+{
+	global string $zwBatch[];
+
+	int $selectIndexedItem[] = `textScrollList -query -selectIndexedItem $textScrollList`;
+	for ($i=0; $i<size($selectIndexedItem); $i++)
+	{
+		textScrollList -edit -removeIndexedItem ($selectIndexedItem[$i]-$i) $textScrollList;
+		int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+		for ($j=$selectIndexedItem[$i]-$i-1; $j<$numberOfItems; $j++)
+		{
+			$zwBatch[$j] = $zwBatch[$j+1];
+		}
+		$zwBatch[$numberOfItems] = "";
+	}
+}
+
+global proc zwBatchAction(string $textScrollList, string $textField)
+{
+	global string $zwBatch[];
+
+	string $cmd = `textField -query -docTag $textField`;
+	if ($cmd == "")
+	{
+		return;
+	}
+
+	int $numberOfItems = `textScrollList -query -numberOfItems $textScrollList`;
+	for ($i=0; $i<$numberOfItems; $i++)
+	{
+		catch(`eval ($cmd + " \"" + $zwBatch[$i] + "\"")`);
+	}
+}
+
+global proc zwBatchEnyoCache(string $path)
+{
+	file -force -open $path;
+	catch(`zwSceneOpened`);
+	catch(`yuCreateCache`);
+}
+
+global proc zwBatchPlayblastEnyo(string $path)
+{
+	file -force -open $path;
+	catch(`zwSceneOpened`);
+
+	string $cameras[] = `ls "CAM*:*_baked"`;
+	if (size($cameras) == 0)
+	{
+		string $sceneName = `file -query -sceneName -shortName`;
+		string $buf[];
+		tokenize $sceneName "_" $buf;
+		eval "source zwCameraImportExport.mel";
+		zwGetCameraUIGetCamera $buf[0] $buf[1] $buf[3];
+	}
+	$cameras = `ls "CAM*:*_baked"`;
+	if (size($cameras) == 0)
+	{
+		return;
+	}
+	zwSetAttrFloat ($cameras[0] + ".nearClipPlane") 1.0;
+	zwSetAttrFloat ($cameras[0] + ".farClipPlane") 10000.0;
+
+	catch(`zwBatchShadingEngine`);
+
+//	setUIComponentVisibility "Attribute Editor" false;
+//	setUIComponentVisibility "Channel Box / Layer Editor" false;
+	setNamedPanelLayout "Single Perspective View";
+//	refresh;
+//	currentTime -e `currentTime -q`;
+
+	string $modelPanel = `getPanel -withFocus`;
+	if (`getPanel -typeOf $modelPanel` != "modelPanel")
+	{
+		return;
+	}
+
+	modelEditor -edit -camera $cameras[0] $modelPanel;
+	modelEditor -edit -allObjects true $modelPanel;
+	isolateSelect -state false $modelPanel;
+	modelEditor -edit -grid 0 -hud 1 $modelPanel;
+//	DisplayShadedAndTextured;
+	DisplayShaded;
+	select -clear;
+
+	string $filename = `file -query -sceneName -shortName`;
+	$filename = `match "[^.]+" $filename`;
+	zwHeadsUpDisplay 0;
+	zwHeadsUpDisplay 8001;
+	playblast -forceOverwrite -format movie -filename $filename -clearCache 1 -viewer 0 -showOrnaments 1 -fp 4 -percent 100 -compression none -widthHeight 960 540;
+	zwHeadsUpDisplay 0;
+}
+
+global proc zwBatchPlayblastDYN(string $path)
+{
+	string $workspace = `substitute "/scenes/.*$" $path ""`;
+	if ($workspace != $path)
+	{
+		setProject $workspace;
+	}
+	file -force -open $path;
+	catch(`zwSceneOpened`);
+
+	string $cameras[];
+	string $cameraShapes[] = `ls -long -cameras`;
+	for ($cameraShape in $cameraShapes)
+	{
+		string $parent[] = `listRelatives -fullPath -parent $cameraShape`;
+		string $camera = `match "[^|]+$" $parent[0]`;
+		if (`match "cam_" $camera` != "")
+		{
+			$cameras[size($cameras)] = $parent[0];
+			break;
+		}
+	}
+	if (size($cameras) == 0)
+	{
+		return;
+	}
+
+	setNamedPanelLayout "Single Perspective View";
+
+	string $modelPanel = `getPanel -withFocus`;
+	if (`getPanel -typeOf $modelPanel` != "modelPanel")
+	{
+		return;
+	}
+
+	modelEditor -edit -camera $cameras[0] $modelPanel;
+	modelEditor -edit -allObjects false $modelPanel;
+	modelEditor -edit -polymeshes true $modelPanel;
+	modelEditor -edit -nurbsSurfaces true $modelPanel;
+	modelEditor -edit -strokes true $modelPanel;
+	modelEditor -edit -fluids true $modelPanel;
+	isolateSelect -state false $modelPanel;
+	modelEditor -edit -grid 0 $modelPanel;
+	DisplayShadedAndTextured;
+//	DisplayShaded;
+	select -clear;
+
+	string $filename = `file -query -sceneName -shortName`;
+	$filename = `match "[^.]+" $filename`;
+	if (`match "^finishing_" $filename` != "")
+	{
+		playblast -forceOverwrite -format movie -filename $filename -clearCache 1 -viewer 0 -showOrnaments 0 -fp 4 -percent 100 -compression none -widthHeight 1024 436;
+	}
+	else
+	{
+		playblast -forceOverwrite -format image -filename $filename -clearCache 1 -viewer 0 -showOrnaments 0 -fp 4 -percent 100 -widthHeight 1024 436;
+	}
+}
+
+global proc zwBatchShadingEngine()
+{
+	eval "source zwShadingEngineIO.mel";
+
+	string $references[] = `file -query -reference`;
+	for ($reference in $references)
+	{
+		string $renamePrefix = `file -q -rpr $reference`;
+
+		string $node = `file -query -referenceNode $reference`;
+		string $namespace = `match "([^:]+:)+" $node`;
+		$renamePrefix = $namespace + $renamePrefix;
+
+		string $path = `referenceQuery -filename -withoutCopyNumber $reference`;
+		if (`match "/Animation/" $path` != "" || `match "/scenes/" $path` == "")
+		{
+			continue;
+		}
+
+		currentTime -edit `playbackOptions -q -min`;
+
+		file -unloadReference $node $reference;
+		file -loadReference $node $path;
+
+		int $rs = zwShadingEngineRestore($path, $renamePrefix);
+		if (!$rs)
+		{
+			string $cmd = "mayabatch -file \"" + $path + "\" -command \"source zwShadingEngineIO.mel; zwShadingEngineBackup \\\"" + $path + "\\\"\"";
+			waitCursor -state on;
+			system $cmd;
+			waitCursor -state off;
+		}
+		else
+		{
+			continue;
+		}
+		$rs = zwShadingEngineRestore($path, $renamePrefix);
+	}
+}
+
+global proc BuffalorenderMA(string $path)
+{
+	string $workspace = `substitute "/scenes/.*" $path ""`;
+	if ($workspace != $path)
+	{
+		setProject $workspace;
+	}
+	file -force -open $path;
+	catch(`zwSceneOpened`);
+
+	string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+//	int $all = false;
+//	if (size($buf) > 1)
+//	{
+//		string $rs = `confirmDialog -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -defaultButton "Current Layer" -cancelButton "Current Layer"`;
+//		if ($rs == "dismiss")
+//		{
+//			return;
+//		}
+//		$all = ($rs == "All Renderable Layers");
+//	}
+	int $all = true;
+
+	string $layers[];
+	if ($all)
+	{
+		for ($layer in $buf)
+		{
+			if (`getAttr ($layer + ".renderable")`)
+			{
+				$layers[size($layers)] = $layer;
+			}
+		}
+	}
+	else
+	{
+		$layers[size($layers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+	}
+
+	string $imgDir = `workspace -query -renderTypeEntry "images"`;
+	string $fullPath = `workspace -expandName $imgDir`;
+
+	string $camera = "";
+	string $cameras[] = `ls -cameras`;
+	for ($i=0; $i<size($cameras); $i++)
+	{
+		if (`getAttr ($cameras[$i] + ".renderable")` && !`camera -query -startupCamera $cameras[$i]`)
+		{
+			$camera = $cameras[$i];
+		}
+	}
+
+	for ($layer in $layers)
+	{
+		if (!`getAttr ($layer + ".renderable")`)
+		{
+			continue;
+		}
+
+	    //$layer = $layers[0]
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != $layer)
+		{
+			editRenderLayerGlobals -currentRenderLayer $layer;
+			//renderLayerButton -edit -select false -current false $currentRenderLayer;
+			//renderLayerButton -edit -select true -current true $layer;
+		}
+
+		int $s = `getAttr defaultRenderGlobals.startFrame`;
+		int $e = `getAttr defaultRenderGlobals.endFrame`;
+		int $i;
+			
+		global string $gMainProgressBar;
+		progressBar -edit -beginProgress -isInterruptable true -status "BuffaloRender ..." -maxValue $e $gMainProgressBar;
+
+		for ($i=$s; $i<=$e; $i++)
+		{
+			if (`progressBar -query -isCancelled $gMainProgressBar`)
+			{
+				progressBar -edit -endProgress $gMainProgressBar;
+				return;
+			}
+
+			currentTime $i ;
+
+			int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+			setAttr "defaultRenderGlobals.startFrame" $i;
+			string $images[] = `renderSettings -firstImageName`;
+			setAttr "defaultRenderGlobals.startFrame" $startFrame;
+
+			string $path = $fullPath + "/" + $images[0];
+
+			progressBar -edit -step 1 $gMainProgressBar;
+
+			//renderWindowRender redoPreviousRender renderView;
+			renderWindowRenderCamera redoPreviousRender renderView $camera;
+			setAttr defaultRenderGlobals.imfkey -type "string" "";
+
+	//		if (`filetest -f $path`)
+	//		{
+	//			sysFile -delete $path;
+	//		}
+
+	//	//	renderWindowSaveImageCallback "renderView" $path "image";	// modified by huangzhongwei@idmt.com.cn, 20100519, due to 2011
+	//		renderWindowEditor -edit -writeImage $path "renderView";
+	
+			// modified by huangzhongwei@idmt.com.cn, 20100803
+			string $renderedImageName = `optionVar -query "renderedImageName"`;
+			sysFile -move $path $renderedImageName;
+
+			print ("\nBuffaloRender " + $path + "\n");
+		}
+
+		progressBar -edit -endProgress $gMainProgressBar;
+	}
+}
+
+//===================add to dod4 stereoCamera batch buffalorender====zhangben 20121222=================
+global proc Buffalorender4DO(string $path)
+{
+	python("import idmt.maya.DOD.DODIV.Maya.commonProperties as docp");
+	python("reload(docp)");
+	python("from maya.app.stereo import stereoCameraCustomPanel");
+	python("import idmt.maya.DOD.DODIV.Maya.Rnd_Scen_Def_Mat as rsdm");
+	python("reload(rsdm)");
+	
+
+	string $workspace = `substitute "/scenes/.*" $path ""`;
+	if ($workspace != $path)
+	{
+		setProject $workspace;
+	}
+	file -force -open $path;
+	catch(`zwSceneOpened`);
+	string $sn_shn = `match "[^/]*$" $path`;
+	string $buffer[];
+	$num = `tokenize $sn_shn "_" $buffer`;
+	if (`match "[(sd)(SD)(ly)(LY)]+" $buffer[3]` != "")
+	{
+		python("rsdm.renderSceneByLambert(saveAs=False,rndSwitch=False)");
+		
+	}
+	setAttr "mentalrayGlobals.exportMessages" 0;
+	setAttr "mentalrayGlobals.exportVerbosity" 0;
+	setAttr "mentalrayGlobals.renderVerbosity" 0;
+	setAttr -type "string" defaultRenderGlobals.preMel "cycleCheck -e off";
+
+	dynPref -rf 2;
+	dynPref -sr off;
+	
+	setTestResolutionVar(1);
+	string $ptcls[] = `ls -type "particle" -l`;
+
+	for ($i=0;$i<size($ptcls);$i++)
+	{
+	    if (`match "do4_s401001PoloHouse" $ptcls[0]` != "")
+	    {
+	        setAttr ($ptcls[$i] + ".isDynamic") 0;
+	    }
+
+	}
+	
+	
+	string $buf[] = `listConnections "renderLayerManager.renderLayerId"`;
+//	int $all = false;
+//	if (size($buf) > 1)
+//	{
+//		string $rs = `confirmDialog -message "Which Option?" -button "Current Layer" -button "All Renderable Layers" -defaultButton "Current Layer" -cancelButton "Current Layer"`;
+//		if ($rs == "dismiss")
+//		{
+//			return;
+//		}
+//		$all = ($rs == "All Renderable Layers");
+//	}
+	int $all = true;
+	string $layers[];
+	if ($all)
+	{
+		for ($layer in $buf)
+		{
+			if (`getAttr ($layer + ".renderable")`)
+			{
+				$layers[size($layers)] = $layer;
+			}
+		}
+	}
+	else
+	{
+		$layers[size($layers)] = `editRenderLayerGlobals -query -currentRenderLayer`;
+	}
+
+	string $imgDir = `workspace -query -renderTypeEntry "images"`;
+	string $fullPath = `workspace -expandName $imgDir`;
+
+	for ($layer in $layers)
+	{
+	    //$layer = $layers[0]
+		string $currentRenderLayer = `editRenderLayerGlobals -query -currentRenderLayer`;
+		if ($currentRenderLayer != $layer)
+		{
+			editRenderLayerGlobals -currentRenderLayer $layer;
+			//renderLayerButton -edit -select false -current false $currentRenderLayer;
+			//renderLayerButton -edit -select true -current true $layer;
+		}
+		int $s = `getAttr defaultRenderGlobals.startFrame`;
+		int $e = `getAttr defaultRenderGlobals.endFrame`;
+		int $i;
+			
+		global string $gMainProgressBar;
+		progressBar -edit -beginProgress -isInterruptable true -status "BuffaloRender ..." -maxValue $e $gMainProgressBar;
+
+		for ($i=$s; $i<=$e; $i++)
+		{
+			if (`progressBar -query -isCancelled $gMainProgressBar`)
+			{
+				progressBar -edit -endProgress $gMainProgressBar;
+				return;
+			}
+            string $rnd_cams[] = python("docp.get_crrent_rnd_camera()");
+
+            for ($eachCame in $rnd_cams)
+            {
+    			currentTime $i ;
+    			
+    			int $startFrame = `getAttr "defaultRenderGlobals.startFrame"`;
+    			setAttr "defaultRenderGlobals.startFrame" $i;
+    			
+			    
+			    //string $img_gnms[] = `renderSettings -fp`;
+			    string $cameraFolder = `match "[^|]+$" $eachCame`;
+			    string $cameraFolder = `match "[^:]+$" $cameraFolder`;
+			    
+			    string $images[] = `renderSettings -firstImageName`;
+			    
+			    string $image_shn = `match "[^/]+$" $images[0]` ;
+			    
+			    
+    			setAttr "defaultRenderGlobals.startFrame" $startFrame;
+                
+			string $image_folderPath = $fullPath + "/" + $layer + "/" + $cameraFolder;
+			sysFile -md $image_folderPath;
+    			string $path =  $image_folderPath+ "/" + $image_shn;
+    			
+    			progressBar -edit -step 1 $gMainProgressBar;
+//================set model panel display nothing =============================
+			string $cur_panel = python("docp.get_currentActivViewPanel()");
+    			if ($cur_panel == "StereoPanel") modelEditor -e -allObjects 0 StereoPanelEditor;
+    			else modelEditor -e -allObjects 0 $cur_panel;
+//======================================================================
+			python("docp.lookThroughRndCame(\"" + $eachCame + "\")");
+			renderWindowRenderCamera render renderView  $eachCame;
+
+    			//renderWindowRender redoPreviousRender renderView $eachCame;
+    			setAttr defaultRenderGlobals.imfkey -type "string" "";
+    
+    	//		if (`filetest -f $path`)
+    	//		{
+    	//			sysFile -delete $path;
+    	//		}
+    
+    	//	//	renderWindowSaveImageCallback "renderView" $path "image";	// modified by huangzhongwei@idmt.com.cn, 20100519, due to 2011
+    	//		renderWindowEditor -edit -writeImage $path "renderView";
+    	
+    			// modified by huangzhongwei@idmt.com.cn, 20100803
+    			string $renderedImageName = `optionVar -query "renderedImageName"`;
+    			sysFile -move $path $renderedImageName;
+    
+    			print ("\nBuffaloRender " + $path + "\n");
+			}
+			
+			
+		}
+
+		progressBar -edit -endProgress $gMainProgressBar;
+	}
+}

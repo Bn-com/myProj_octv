@@ -1,0 +1,119 @@
+// Create normal  render layer 
+global proc ysNormalRenderLayer()
+{
+		// turn default render layer off
+	string $Array[] = `listConnections "renderLayerManager.renderLayerId"`;
+	for($item in $Array)
+	{
+		if((`gmatch $item "*:*defaultRenderLayer*"`)||(`gmatch $item "*defaultRenderLayer*"`))
+		setAttr ($item + ".renderable") 0;
+	}	
+	createRenderLayer -name "normal";
+	// Put All geometry into render layers
+	string $allLayers[] = `ls -type renderLayer`;
+	string $defaultLayer[] = {"defaultRenderLayer"};
+	string $layers[] = stringArrayRemove($defaultLayer, $allLayers);
+	string $objShape[] = `ls -geometry`;
+	
+	int $i = 0;
+	int $layerCount = size($layers);
+	for($i; $i<$layerCount; $i++)
+	{
+		editRenderLayerMembers -noRecurse $layers[$i] $objShape `ls -lights`;
+	}
+	
+	editRenderLayerGlobals -currentRenderLayer "normal";
+	// normal shader
+	string $norTex = `shadingNode -asTexture mib_amb_occlusion -name "norTexture"`;
+	setAttr ($norTex + ".output_mode" ) 2;
+	string $norShader = `shadingNode -asShader surfaceShader -name "norShader"`;
+	string $norShaderSG = `sets -renderable true -noSurfaceShader true -empty -name ($norShader+"SG")`;
+	connectAttr -force ($norTex + ".outValue") ($norShader + ".outColor");
+	connectAttr -force ($norShader + ".outColor") ($norShaderSG + ".surfaceShader");
+	
+	// Filtering material 
+	string $mats[] = `ls -materials`;
+	string $eliminate [] = {"lambert1", "particleCloud1", "shaderGlow1"};
+	string $matArray[] = stringArrayRemove ($eliminate, $mats);
+	global string $objs[];
+	global string $allObjs[];
+	for($item in $matArray)
+	{	
+		if((`objExists ($item+".normalCamera")`)&&(`objExists ($item+".transparency")`))
+		{
+			$bumpMap = `listConnections -plugs on ($item + ".normalCamera")`;
+			$bumpNode = $bumpMap;
+			$transMap = `listConnections -s on ($item+".transparency")`;
+			$transMapOut = `listConnections -plugs on ($item+".transparency")`;
+			$transNode = $transMap;
+			$transNodeOut = $transMapOut;
+			
+			// Set up normal with bump map
+			if((size($bumpNode)!=0)&&(size($transNode)==0))
+			{
+				string $norTexBump = `shadingNode -asTexture mib_amb_occlusion -name "norTextureBump"`;
+				setAttr ($norTexBump + ".output_mode" ) 2;
+				string $norShaderBump = `shadingNode -asShader lambert -name "norShaderBump"`;
+				string $norShaderBumpSG = `sets -renderable true -noSurfaceShader true -empty -name norShaderBumpSG`;
+				setAttr ($norShaderBump+".diffuse") 0;
+				setAttr ($norShaderBump+".color") -type double3 0 0 0; 
+				connectAttr -force  ($norTexBump + ".outValue") ($norShaderBump + ".incandescence");
+				connectAttr -force  ($norShaderBump + ".outColor") ($norShaderBumpSG + ".surfaceShader");
+				connectAttr -force $bumpNode ($norShaderBump+".normalCamera");
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement  $norShaderBumpSG;
+				select -cl;					 
+			}
+			
+			// Set up normal with transparency
+			if((size($transNode)!=0)&&(size($bumpNode)==0))
+			{
+				string $multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1X");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Y");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Z");
+				
+				string $norTexTrans = `shadingNode -asTexture mib_amb_occlusion -name "norTextureTrans"`;
+				setAttr ($norTexTrans + ".output_mode" ) 2;
+				string $norShaderTrans = `shadingNode -asShader surfaceShader -name "norShaderTrans"`;
+				string $norShaderTransSG = `sets -renderable true -noSurfaceShader true -empty -name ($norShaderTrans+"SG")`;
+				connectAttr -force  ($norShaderTrans + ".outColor") ($norShaderTransSG + ".surfaceShader");
+				connectAttr -force ($norTexTrans + ".outValue") ($multiplyDivide + ".input2");
+				connectAttr -force ($multiplyDivide + ".output") ($norShaderTrans + ".outColor");
+				//connectAttr -force ($transNode[0]+".outTransparency") ($norShaderTrans + ".outTransparency");			
+				connectAttr -force $transNodeOut ($norShaderTrans + ".outTransparency");				
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement  $norShaderTransSG;
+				select -cl;	
+			}
+			
+			// Setp up normal with transparency and bump
+			if((size($transNode)!=0)&&(size($bumpNode)!=0))
+			{
+				string $multiplyDivide = `shadingNode -asUtility multiplyDivide`;
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1X");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Y");
+				connectAttr -force ($transNode[0]+".outAlpha") ($multiplyDivide+".input1Z");					
+				string $norTransBump = `shadingNode -asTexture mib_amb_occlusion -name "norTransBump"`;
+				setAttr ($norTransBump + ".output_mode" ) 2;
+				string $norTransBumpShader = `shadingNode -asShader lambert -name "norTransBumpShader"`;
+				string $norTransBumpShaderSG = `sets -renderable true -noSurfaceShader true -empty -name norTransBumpShaderSG`;
+				setAttr ($norTransBumpShader+".diffuse") 0;
+				setAttr ($norTransBumpShader+".color") -type double3 0 0 0; 
+				connectAttr -force ($norTransBump+".outValue") ($multiplyDivide+".input2");
+				connectAttr -force ($multiplyDivide+".output") ($norTransBumpShader+".incandescence");
+				connectAttr -force ($transNode[0]+".outTransparency") ($norTransBumpShader+".transparency");
+				connectAttr -force  ($norTransBumpShader + ".outColor") ($norTransBumpShaderSG + ".surfaceShader");
+				connectAttr -force $bumpNode ($norTransBumpShader+".normalCamera");
+				string $objs[] = `hyperShade -objects $item`; 
+				sets -e -forceElement   $norTransBumpShaderSG;
+				select -cl;		
+			}
+		}
+			
+		// normal for others 
+		string $objs[] = `hyperShade -objects $item`; 
+		sets -e -forceElement $norShaderSG;
+		select -cl;	
+	}		
+}
