@@ -27,9 +27,10 @@ import pysideuic as uic
 class QptTxEdt(QWidget):
     def __init__(self,*args,**kwargs):
         super(QptTxEdt, self).__init__(*args,**kwargs)
-        self.output = QptTxEdt(self)
-        self.layout = QtGui.QHBoxLayout()
+        self.output = QTextEdit(self)
+        self.layout = QHBoxLayout()
         self.layout.addWidget(self.output)
+        self.setLayout(self.layout)
         self.initUI()
 
     def initUI(self):
@@ -47,7 +48,7 @@ class QptTxEdt(QWidget):
     def dataReady(self):
         cursor = self.output.textCursor()
         cursor.movePosition(cursor.End)
-        cursor.insertText(str(self.process.readAll(),"utf-8"))
+        cursor.insertText(str(self.process.readAll()).dncode('u8'))
         self.output.ensureCursorVisible()
 
     def callProgram(self,cmd):
@@ -60,8 +61,11 @@ class QptTxEdt(QWidget):
 #Function Main Start
 def main():
     app = QApplication(sys.argv)
-    ui=gui()
+    ui=QptTxEdt()
     ui.show()
+    bat = os.path.join(os.path.dirname(os.path.realpath(__file__)),'exec','maya2016.bat')
+    print(bat)
+    ui.callProgram(bat)
     sys.exit(app.exec_())
 #Function Main END
 
