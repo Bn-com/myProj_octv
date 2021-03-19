@@ -9,18 +9,26 @@ __description__:
     code is far away from bugs with the god animal protecting
     I love animals. They taste delicious.
 """
-import sys,copy,yaml
-from PySide.QtGui import *
-from PySide.QtCore import *
-from PySide.QtUiTools import QUiLoader
-import pysideuic as uic
-
+import sys,re,os,copy,inspect,random,yaml,io
+import logging
+logger = logging.getLogger(__name__)
+if sys.version_info <=(3,0):
+    from PySide.QtGui import *
+    from PySide.QtCore import *
+    from PySide.QtUiTools import QUiLoader
+    import pysideuic as uic
+else:
+    from PySide2.QtWidgets import *
+    from PySide2.QtGui import *
+    from PySide2.QtCore import *
+    # from PySide2.QtUiTools import QUiLoader
+    # import pyside2uic as uic
 
 class PermissionsManager_UI(QMainWindow):
     def __init__(self, parent=None):
         super(PermissionsManager_UI, self).__init__(parent)
         self.setObjectName('PermissionsManager_mainWin')
-        self.setWindowTitle("Yaml File Manager")
+        self.setWindowTitle("YML File Manager")
         # self.setStyleSheet("background-color:#5a5d63")
         self.centralwidget = QWidget(self)
         self.v_layout = QVBoxLayout(self.centralwidget)
@@ -29,12 +37,18 @@ class PermissionsManager_UI(QMainWindow):
         self.v_layout_2 = QVBoxLayout(self.widget)
         self.v_layout_2.setObjectName('v_layout_2')
         #add button
+        self.pbtn_new = QPushButton(self.widget)
+        self.pbtn_new.setText("New yml file...")
+        self.v_layout_2.addWidget(self.pbtn_new)
         self.pbtn = QPushButton(self.widget)
-        self.pbtn.setText("select yml file....")
+        self.pbtn.setText("Load yml file....")
         self.v_layout_2.addWidget(self.pbtn)
         self.pbtn_save = QPushButton(self.widget)
         self.pbtn_save.setText("Save yml file.....")
         self.v_layout_2.addWidget(self.pbtn_save)
+        self.pbtn_add = QPushButton(self.widget)
+        self.pbtn_add.setText("add under selected group....")
+        self.v_layout_2.addWidget(self.pbtn_add)
         # frame
         self.frame = QFrame(self.widget)
         self.frame.setFrameShape(QFrame.StyledPanel)
@@ -65,38 +79,129 @@ class PermissionsManager_UI(QMainWindow):
 
         self.setCentralWidget(self.centralwidget)
 
-        self.pbtn.clicked.connect(self.addOneItem)
-        self.pbtn_save.clicked.connect(self.saving)
-
-        # self.tstButton = QPushButton(self.widget)
-        # self.tstButton.setText("TEST BUTTON CLICKED")
-        # self.tstButton.clicked.connect(lambda x='a': self.fn_test(x))
-        # self.v_layout_2.addWidget(self.tstButton)
-
         # self.setStyleSheet("background-color:#51555a")
-        # self.setStyleSheet("background-color:#5c666d")
+        self.pbtn_new.clicked.connect(self.newFile)
+        self.pbtn.clicked.connect(self._fn_loading)
+        self.pbtn_save.clicked.connect(self.saving)
+        self.pbtn_add.clicked.connect(self.addOneElement)
+
+        # button1.setStyleSheet("background-color: red");
+        # button2.setStyleSheet("background-color:#ff0000;");
+        # button3.setStyleSheet("background-color:rgb(255,0,0)");
+        self.pbtn_new.setStyleSheet("background-color: #5D5D5D;}")
+        self.pbtn.setStyleSheet("background-color: #5D5D5D;}")
+        self.pbtn_save.setStyleSheet("background-color: #5D5D5D;}")
+        self.pbtn_add.setStyleSheet("background-color: #5D5D5D;}")
         #=======================================================
         self._addedElements = []
         self._ReadYMLdata = {}
-        self._profile = None
+        self._profiles = None
         self._ControlTier = {}
         self._DATA_DICT={}
         self._titleTier = "root"
+        self.resize(300,500)
+        # self.setupUi2()
+        # self._fn_popmenu()
+        self.setAcceptDrops(True)
+    @property
+    def profiles(self):
+        return self._profiles
+    @profiles.setter
+    def profiles(self,fpath):
+        self._profiles = fpath
     def setupUi2(self):
-        print("ok")
-    def fn_test(self,txt='aaa'):
-        print("......................")
+        pass
 
-        print(txt)
+    def dragEnterEvent(self, event):
+        print('drag-enter')
+        if event.mimeData().hasUrls():
+            print('has urls')
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        url = event.mimeData().urls()[-1]
+        filePath = url.toLocalFile()
+        if filePath.endswith('.yml'):
+            self.profiles = filePath
+            self.loadFromYml()
+
+    def addOneElement(self):
+        self._fn_titleAndGroup()
+
+        addDialog = QInputDialog()
+        self.add_item, addOrNot = addDialog.getText(self, "add an Item","add what?", QLineEdit.Normal,"Enter .....")
+        add2wd = self
+        for e_tier in self.add_item.split('.'):
+            if e_tier in self.titleNgroup:
+                add2wd = self.titleNgroup[e_tier]
+            else:
+                addOne = AddAGroup(e_tier,parent = add2wd)
+                add2wd._addGroup(addOne)
+                add2wd = addOne
+        self._fn_titleAndGroup()
+    def _fn_titleAndGroup(self):
+        self.titleNgroup = {}
+        for egrp in self.findChildren(QGroupBox):
+            g_t = egrp.title()
+            self.titleNgroup.update({g_t: egrp})
+
+        # oneGrp = AddAGroup(key, parent=parent)
+        # self.focusNextPrevChild(True)
+        # widget = QApplication.focusWidget()
+        # print(widget)
+
+    #     self.frame.setContextMenuPolicy(Qt.CustomContextMenu)
+    #     self.frame.customContextMenuRequested.connect(self.on_context_menu)
+    #     self._fn_popmenu()
+    # def _fn_popmenu(self):
+    #     self.popMenu = QMenu(self)
+    #     self.popMenu.addAction(QAction("Add Single Item",self))
+    #     self.popMenu.addAction(QAction("Add Multiple Items",self))
+    #     # self.popMenu.exec_()
+    # def on_context_menu(self,point):
+    #     # print(self.popMenu.pos())
+    #     self.popMenu.exec_(self.frame.mapToGlobal(point))
+    #     # print(self.popMenu.pos())
+    #
+    #     widget = QApplication.focusWidget()
+    #     print(widget)
+    #
+    # def eventFilter(self, obj, event):
+    #     if event.type() == QEvent.FocusIn:
+    #         # if obj == self.lineEdit:
+    #         #     print("lineedit")
+    #         # elif obj == self.pushButton:
+    #         #     print("pushbutton")
+    #         # elif obj == self.comboBox:
+    #         #     print("combobox")
+    #         # el
+    #         print(obj)
+    #     return super(PermissionsManager_UI, self).eventFilter(obj, event)
+    #
+
+
+    #====================================================================================
+    def newFile(self):
+        self._resetUI()
+        self.profiles = None
+        print("ready for a new yml file..>>{0}".format(self.profiles))
     def saving(self):
         """
             save date
         :return:
         """
         self.fn_via_ui_save_data()
-        opr = self.warMSG()
-        if not opr: return
-        self._fn_control_yml(self._profile,'w',self._DATA_DICT)
+        if not self.profiles:
+            name = QFileDialog.getSaveFileName(self, 'Save File')
+            if not name[0]:return
+            self.profiles = name[0]
+        else:
+            opr = self.warMSG()
+            if not opr: return
+        self._fn_control_yml(self._profiles,'w',self._DATA_DICT)
+        self.profiles = None
     def fn_via_ui_save_data(self):
         """
             via ui save data to dictionary
@@ -110,11 +215,21 @@ class PermissionsManager_UI(QMainWindow):
             tiers = e_lst._titleTier.split('.')[1:]
             data = self._fn_obtainWidgetData(e_lst)
             self.nested_set(self._DATA_DICT, tiers, data)
-    def addOneItem(self):
-        fname = QFileDialog.getOpenFileName(self, 'select yml config file','', "yml files (*.yml)")
+        for e_grp in self.findChildren(QGroupBox):
+            # e_grp = xx.findChildren(QGroupBox)[0]
+            if (e_grp.findChildren(QGroupBox) or e_grp.findChildren(QListView) or e_grp.findChildren(QLineEdit)): continue
+            tiers = e_grp._titleTier.split('.')[1:]
+            self.nested_set(self._DATA_DICT, tiers, None)
+
+    def _fn_loading(self):
+        searchDir = os.path.dirname(self.profiles) if self.profiles else ""
+        fname = QFileDialog.getOpenFileName(self, 'select yml config file', searchDir, "yml files (*.yml)")
         if not fname[0]: return
-        self._profile = fname[0]
-        self._ReadYMLdata = self._fn_control_yml(self._profile,'r')
+        self.profiles = fname[0]
+        self.loadFromYml()
+    def loadFromYml(self):
+        # if not self.profiles:
+        self._ReadYMLdata = self._fn_control_yml(self.profiles,'r')
         ymldata = copy.deepcopy(self._ReadYMLdata)
         self._resetUI()
         self._set_all_elements(self,ymldata)
@@ -139,6 +254,7 @@ class PermissionsManager_UI(QMainWindow):
         elif mode in ['wr','w']:
             with open(filepath,'w') as wf:
                 yaml.dump(data,wf)
+            print("Save File <{}>".format(filepath))
     def _addGroup(self,groupObj):
         # oneGrp = AddAGroup(self)
         self.v_layout_4.addWidget(groupObj)
@@ -155,12 +271,24 @@ class PermissionsManager_UI(QMainWindow):
         for key, valuse in _configData.items():
             if isinstance(valuse, dict):
                 oneGrp = AddAGroup(key,parent=parent)
-                # print(oneGrp._titleTier)
+                print(oneGrp._titleTier)
                 parentControl._addGroup(oneGrp)
                 self._set_all_elements(oneGrp,valuse)
             elif isinstance(valuse,(str,int,float,list)):
                 add_elem = parentControl._addElements(key)
                 add_elem._method_addItems(valuse)
+            else:
+                if sys.version_info < (3,0):
+                    if isinstance(valuse,unicode):
+                        add_elem = parentControl._addElements(key)
+                        add_elem._method_addItems(valuse)
+                    else:
+                        oneGrp = AddAGroup(key, parent=parent)
+                        parentControl._addGroup(oneGrp)
+                else:
+                    oneGrp = AddAGroup(key,parent=parent)
+                    parentControl._addGroup(oneGrp)
+
     @staticmethod
     def _listData(e_lstw):
         """
@@ -197,6 +325,7 @@ class PermissionsManager_UI(QMainWindow):
         returnValue = msgBox.exec_()
         if returnValue == QMessageBox.Ok: return True
         else: return None
+
 
     def _parse_data(self,qObj, data=None):
         if not data: data = qObj.text() if isinstance(qObj, QLineEdit) else self._listData(qObj)
@@ -267,11 +396,72 @@ class AddAGroup(QGroupBox):
     def __init__(self,*args,**kwargs):
         super(AddAGroup,self).__init__(*args,**kwargs)
         self.v_layout = QVBoxLayout(self)
+        self.h_layout = QHBoxLayout()
+        self.h_layout.setObjectName("h_layout")
+        spacerItem = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.h_layout.addItem(spacerItem)
+        self.btn_del = QPushButton(self)
+        self.btn_del.setText("Del.")
+        self.btn_del.setMaximumWidth(35)
+        self.h_layout.addWidget(self.btn_del)
+        self.v_layout.addLayout(self.h_layout)
         self._titleTier = self._fn_get_titletier()
         self.setCheckable(True)
         # self.toggled.connect(self.coolapseGroup)
         self.toggled.connect(self.group_box_size_change)
+        self.btn_del.clicked.connect(self.deleteLater)
         self._height = None
+        self.setupUi2()
+        self.setStyleSheet("QGroupBox:title {color: #80C8FA;}")
+    def setupUi2(self):
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.on_context_menu)
+        # self.popMenu.exec_()
+    def on_context_menu(self,point):
+        curPos = QCursor.pos()
+        # print(curPos)
+        p_wgt = QApplication.widgetAt(curPos)
+        p_wgt_nm = str(p_wgt.objectName())
+        self.popMenu = QMenu(self)
+        self.popMenu.addSeparator()
+        self.popMenu.addAction(QAction("Add A Group",self))
+        self.popMenu.addSeparator()
+        self.popMenu.addAction(QAction("Add Single Item", self))
+        self.popMenu.addAction(QAction("Add Multiple Items", self))
+        self.popMenu.triggered[QAction].connect(lambda q, x=p_wgt_nm: self._fn_popActionRun(q, x))  # lambda  第一个参数是控件action 自身
+        # print(self.popMenu.pos())
+        # widget = QApplication.focusWidget()
+        # print(widget)
+        self.popMenu.exec_(self.mapToGlobal(point))
+    def _fn_popActionRun(self,q,name):
+        addDialog = QInputDialog()
+        self.add_item, addOrNot = addDialog.getText(self, "Item Title", "add what?", QLineEdit.Normal, ".....")
+        if not self.add_item:return
+        if q.text() == "Add A Group":
+            addAGrp = AddAGroup(self.add_item, parent=self)
+            self._addGroup(addAGrp)
+        else:
+            add_elemt = self._addElements(self.add_item)
+
+            if q.text() == 'Add Single Item':
+                add_elemt._method_addItems("..")
+            else:
+                add_elemt._method_addItems([])
+        # print(name)
+        # print(self._titleTier)
+        self.sg_titleTier.emit(self._titleTier)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.FocusIn:
+            # if obj == self.lineEdit:
+            #     print("lineedit")
+            # elif obj == self.pushButton:
+            #     print("pushbutton")
+            # elif obj == self.comboBox:
+            #     print("combobox")
+            # el
+            print(obj)
+        return super(PermissionsManager_UI, self).eventFilter(obj, event)
     # @property
     # def titleTier(self):
     #     if not self._titleTier:
@@ -296,33 +486,49 @@ class AddAGroup(QGroupBox):
         # self.sg_titleTier.emmit("{}{}")
         return groupObj
     def coolapseGroup(self,state):
-        # print(state)
+        print(state)
         if not state:
             self._height = self.size().height()
-            # self.setSize
+            self.setSize
 
     def group_box_size_change(self):
         duration = 200
         self.animaiton_gb = QPropertyAnimation(self, b"size")
         self.animaiton_gb.setDuration(duration)
-
         self.animaiton_gb.setStartValue(QSize(self.width(), self.height()))
-
         if self.isChecked():
             self.animaiton_gb.setEndValue(
                 QSize(self.width(), self.sizeHint().height()))
         else:
             self.animaiton_gb.setEndValue(QSize(self.width(), 49))
-
         self.animaiton_gb.start()
+
+
+
 class AddAFrame(QGroupBox):
-    KVPair = Signal(dict)
+    # KVPair = Signal(dict)
     def __init__(self,*args,**kwargs):
         super(AddAFrame,self).__init__(*args,**kwargs)
-        self.horizontalLayout = QHBoxLayout(self)
+        self.vLayout = QVBoxLayout(self)
+        self.horizontalLayout_2 = QHBoxLayout()
+        self.horizontalLayout_2.setObjectName("horizontalLayout_2")
+        spacerItem = QSpacerItem(40, 20,QSizePolicy.Expanding,QSizePolicy.Minimum)
+        self.horizontalLayout_2.addItem(spacerItem)
+        self.btn_del = QPushButton(self)
+        self.btn_del.setText("Del.")
+        self.btn_del.setMaximumWidth(35)
+        self.horizontalLayout_2.addWidget(self.btn_del)
+        self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName("horizontalLayout")
-        self.setLayout(self.horizontalLayout)
+        self.vLayout.addLayout(self.horizontalLayout_2)
+        self.vLayout.addLayout(self.horizontalLayout)
+        # self.setLayout(self.horizontalLayout)
+        self.setLayout(self.vLayout)
+        self.oneItemHeigth = 22
         self._titleTier = "{}.{}".format(self.parent()._titleTier, self.title()) if getattr(self.parent(),'_titleTier',None) else self.title()
+        self.btn_del.clicked.connect(self.deleteLater)
+        # self.setStyleSheet("QGroupBox:title {color: rgb(1, 130, 153);}")
+        self.setStyleSheet("QGroupBox:title {color: #ff5a54;}")
         # self._titleTier = "{}.{}".format(self.parent()._titleTier, self.title())
     def _add_singleLine(self,lineText=""):
         self.line_e = T_QLineEdit(self)
@@ -331,7 +537,6 @@ class AddAFrame(QGroupBox):
     def _add_list(self):
         self.lstwidget = T_QListWidget(self)
         self.horizontalLayout.addWidget(self.lstwidget)
-        self.oneItemHeigth = 22
         self.lstwidget.setFixedHeight(0)
         self.bt_add = QPushButton(self)
         self.bt_add.setObjectName("addItem_pb")
@@ -343,27 +548,21 @@ class AddAFrame(QGroupBox):
         self.horizontalLayout.addWidget(self.bt_minus)
         # self.show()
         self.lstwidget.itemDoubleClicked.connect(self._handelDoubleClicked)
-        self.bt_add.clicked.connect(self._button_addItem)
+        self.bt_add.clicked.connect(self._method_addItem)
         self.bt_minus.clicked.connect(self._method_minusItem)
     def _handelDoubleClicked(self,item):
         item.setFlags(item.flags()|Qt.ItemIsEditable)
     def _method_addItems(self,itemOrItemList):
         if isinstance(itemOrItemList,list):
             self._add_list()
+            itemOrItemList.sort()
             for e_itm in itemOrItemList:
                 self._method_addItem(e_itm)
         else:
             self._add_singleLine(itemOrItemList)
-    def _method_addItem(self,itemtxt):
-        add_1itm = QListWidgetItem(self.lstwidget)
-        add_1itm.setText(itemtxt)
+    def _method_addItem(self,itemText=''):
+        add_1itm = QListWidgetItem(itemText)
         add_1itm.setSizeHint(QSize(add_1itm.sizeHint().width(),self.oneItemHeigth))
-        self.lstwidget.addItem(add_1itm)
-        self._listHeight()
-    def _button_addItem(self):
-        add_1itm = QListWidgetItem(self.lstwidget)
-        add_1itm.setText('...')
-        add_1itm.setSizeHint(QSize(add_1itm.sizeHint().width(), self.oneItemHeigth))
         self.lstwidget.addItem(add_1itm)
         self._listHeight()
     def _method_minusItem(self):
@@ -376,7 +575,6 @@ class AddAFrame(QGroupBox):
         set_h = rowCnt*self.oneItemHeigth
         self.lstwidget.setFixedHeight(set_h+5)
 
-
 class T_QListWidget(QListWidget):
     def __init__(self,*args,**kwargs):
         super(T_QListWidget,self).__init__(*args,**kwargs)
@@ -386,7 +584,10 @@ class T_QLineEdit(QLineEdit):
     def __init__(self,*args,**kwargs):
         super(T_QLineEdit,self).__init__(*args,**kwargs)
         self._titleTier = self.parent()._titleTier
-
+        palette = QPalette()
+        palette.setColor(QPalette.Base, Qt.black)
+        palette.setColor(QPalette.Text, Qt.white)
+        self.setPalette(palette)
 class T_QWidget(QWidget):
     def __init__(self,*args,**kwargs):
         super(T_QWidget,self).__init__(*args,**kwargs)
@@ -400,32 +601,61 @@ class T_QWidget(QWidget):
     #     self.layout().addWidget(elem_frame)
     #     return elem_frame
 def main_ui():
+    if os.getenv('username') not in ['renhj','weij','yangh','dengtao','zhangben']:
+        logger.error(u'您没有权限使用该功能，请联系技术部 Sorry! You have no permission to use this function! Contact Tech Section Please!')
+        return
     for widget in qApp.allWidgets():
         if hasattr(widget, "objectName"):
             # if widget.objectName() == '****':
-            if widget.objectName() == "permissionsManager_mainWin": #'Ui_MainWindow'
+            if widget.objectName() == "PermissionsManager_mainWin": #'Ui_MainWindow'
                 widget.close()
     view = PermissionsManager_UI()
+    # view.profiles = profpth
     view.show()
+    view.loadFromYml()
 if __name__ == '__main__':
     import sys
-    """
-import sys
-sys.append("")
-from PySide2.QtWidgets import *
-sys.path.append(r'')
-import permissionsManager as xxx;reload(xxx)
-#xxx.main_ui()
-for widget in qApp.allWidgets():
-    if hasattr(widget, "objectName"):
-        if widget.objectName() == "permissionsManager_mainWin":
-            widget.close()
-xx = xxx.permissionsManager_UI(xxx.getMayaWindow())
-xx.show()
+    r"""
+    import sys
+    from PySide2.QtWidgets import *
+    sys.path.append(r'F:\Development\octProj\oct\maya_sixteen\Python\OCT_Pipeline\scripts\utility')
+    import permissionsManager as xxx;reload(xxx)
+    #xxx.main_ui()
+    for widget in qApp.allWidgets():
+        if hasattr(widget, "objectName"):
+            if widget.objectName() == "PermissionsManager_mainWin":
+                widget.close()
+    xx = xxx.PermissionsManager_UI(xxx.getMayaWindow())
+    xx.show()
     """
     app = QApplication(sys.argv)
+
+    # ===========================================
+    # app = QApplication([])
+    # Force the style to be the same on all OSs:
+    app.setStyle("Fusion")
+
+    # Now use a palette to switch to dark colors:
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor(33, 33, 33))
+    palette.setColor(QPalette.WindowText,QColor(255,128,0))
+    # palette.setColor(QPalette.Base, QColor(25, 25, 25))
+    palette.setColor(QPalette.Base, QColor(0, 0, 0))
+    palette.setColor(QPalette.AlternateBase, QColor(53, 53, 53))
+    palette.setColor(QPalette.ToolTipBase, Qt.black)
+    palette.setColor(QPalette.ToolTipText, Qt.white)
+    palette.setColor(QPalette.Text, QColor(255,128,0))
+    # palette.setColor(QPalette.Button, QColor(0, 0, 0))
+    palette.setColor(QPalette.ButtonText, QColor(255, 130, 27))
+    palette.setColor(QPalette.BrightText, Qt.red)
+    palette.setColor(QPalette.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.HighlightedText, QColor(127, 235, 255))
+    app.setPalette(palette)
+    # =====================================
+
+
     # view = UI()
     view = PermissionsManager_UI()
     view.show()
     sys.exit(app.exec_())
-

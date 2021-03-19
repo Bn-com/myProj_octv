@@ -12,9 +12,18 @@ __description__:
 import sys,re,os,copy,inspect,random,yaml,io
 import logging
 logger = logging.getLogger(__name__)
-from PySide2.QtWidgets import *
-from PySide2.QtGui import *
-from PySide2.QtCore import *
+try:
+    from PySide.QtGui import *
+    from PySide.QtCore import *
+    from PySide.QtUiTools import QUiLoader
+    import pysideuic as uic
+
+except:
+    from PySide2.QtWidgets import *
+    from PySide2.QtGui import *
+    from PySide2.QtCore import *
+    from PySide2.QtUiTools import QUiLoader
+    import pyside2uic as uic
 class PermissionsManager_UI(QMainWindow):
     def __init__(self, parent=None):
         super(PermissionsManager_UI, self).__init__(parent)
