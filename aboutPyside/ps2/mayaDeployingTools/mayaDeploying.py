@@ -114,9 +114,12 @@ class MayaDeploying_Ui(QMainWindow):
         QObject.connect(self.rb_old,SIGNAL("toggled(bool)"),self.chbx_oth.setChecked(False))
         QMetaObject.connectSlotsByName(self)
         #==setup ui
+        self.output.executeObject.connect(self._setExecBat)
         self.setupUI()
         #=============================
         self.resDia = None
+        self.executeObject = None
+
     def retranslateUi(self):
         self.pb_run.setText(u"配置")
         self.chbx_16.setText("Maya2106")
@@ -150,6 +153,10 @@ class MayaDeploying_Ui(QMainWindow):
         self.setPalette(palette)
     def cmd_bt_run(self):
         # self._show_resDialog()
+        if self.executeObject:
+            self.output.initUI_process()
+            self.output.callProgram(self.executeObject)
+            return
         mode_dict = {-2:'new',-3:'obsolete',-4:'default'}
         mode = mode_dict[self.btgrp.checkedId()]
         if mode == 'obsolete':
@@ -192,7 +199,9 @@ class MayaDeploying_Ui(QMainWindow):
             cursor.insertText(text)
         self.output.output.setTextCursor(cursor)
         self.output.output.ensureCursorVisible()
-
+    @Slot()
+    def _setExecBat(self,q):
+        self.executeObject = q
 
     # def _show_resDialog(self,redirect=True,close=None,clear=None):
     #     if not self.resDia:
