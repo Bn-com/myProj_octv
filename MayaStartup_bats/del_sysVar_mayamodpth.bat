@@ -1,0 +1,1 @@
+wmic ENVIRONMENT where "name='MAYA_MODULE_PATH'" delete
