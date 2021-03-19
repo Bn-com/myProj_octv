@@ -28,11 +28,18 @@ except:
 # from PySide.QtCore import *
 # from PySide.QtUiTools import QUiLoader
 # import pysideuic as uic
-import deployProc,resultDialog
+import deployProc,optTxtEdt
 
 
 #  ============= ===live template require variables =====================
 #  m  ayaDeploying M MayaDeploying || MayaDeploying  ayadeploying
+class Stream(QObject):
+    newText = Signal(str)
+    # def __init__(self):
+    #     super(Stream,self).__init__()
+    def write(self, text):
+        self.newText.emit(str(text))
+
 class MayaDeploying_Ui(QMainWindow):
     def __init__(self,parent=None):
         super(MayaDeploying_Ui,self).__init__(parent)
@@ -50,6 +57,7 @@ class MayaDeploying_Ui(QMainWindow):
         self.frame.setFrameShape(QFrame.StyledPanel)
         self.frame.setFrameShadow(QFrame.Plain)
         self.frame.setObjectName("frame")
+        self.frame.setMaximumHeight(36)
         self.horizontalLayout = QHBoxLayout(self.frame)
         self.horizontalLayout.setObjectName("horizontalLayout")
         self.chbx_16 = QCheckBox(self.frame)
@@ -81,15 +89,15 @@ class MayaDeploying_Ui(QMainWindow):
         self.gridLayout.addWidget(self.frame_2, 0, 0, 1, 2)
         self.frame_3 = QFrame(self.centralwidget)
         self.frame_3.setFrameShape(QFrame.StyledPanel)
-        self.frame_3.setFrameShadow(QFrame.Raised)
+        self.frame_3.setFrameShadow(QFrame.Sunken)
         self.frame_3.setObjectName("frame_3")
+        self.verticalLayout_bottom = QVBoxLayout(self.frame_3)
+        self.output = optTxtEdt.OptTxEdt(parent = self.frame_3)
+        self.verticalLayout_bottom.addWidget(self.output)
         self.gridLayout.addWidget(self.frame_3, 3, 0, 1, 2)
-
-
         self.btgrp.addButton(self.rb_new)
         self.btgrp.addButton(self.rb_old)
         self.btgrp.addButton(self.rb_def)
-
 
         self.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(self)
@@ -141,42 +149,78 @@ class MayaDeploying_Ui(QMainWindow):
         palette.setColor(QPalette.HighlightedText, QColor(127, 235, 255))
         self.setPalette(palette)
     def cmd_bt_run(self):
-        self._show_resDialog()
+        # self._show_resDialog()
         mode_dict = {-2:'new',-3:'obsolete',-4:'default'}
         mode = mode_dict[self.btgrp.checkedId()]
-        if self.chbx_16.isChecked():
+        if mode == 'obsolete':
             mayaversion = '2016'
             dpl = deployProc.DeployProc(mayaversion)
             dpl.mode = mode
-            dpl.run()
-        print("??")
-    def _show_resDialog(self,redirect=True,close=None,clear=None):
-        if not self.resDia:
-            self.resDia =resultDialog.ResultDialog(self.frame_3)
-            if redirect:
-                if isinstance(redirect,int):
-                    self.resDia.redirectOPT()
-                elif isinstance(redirect,(str)):
-                    self.resDia.opt2txt(redirect)
-            self.resDia.resize(500,400)
-            self.resDia.move(600,300)
-            self.resDia.show()
+            self.output.initUI_process()
+            self.output.callProgram(dpl._implementCmd())
+        elif mode == 'new':
+            mayaversion = 'all'
+            if self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'all'
+            if not self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'other'
+            if self.chbx_16.isChecked() and not self.chbx_oth.isChecked(): mayaversion = '2016'
+            if mayaversion == '2016':
+                dpl = deployProc.DeployProc(mayaversion)
+                dpl.mode = mode
+                self.output.initUI_process()
+                self.output.callProgram(dpl._implementCmd())
+            elif mayaversion == 'all':
+                self.redirectOPT()
+                dpl = deployProc.DeployProc(mayaversion)
+                dpl.mode = mode
+                dpl._implementCmd()
+    # redirect sys.stdout to textedit
+    def redirectOPT(self):
+        # sys.stdout = Log(self.txtedit)
+        sys.stdout = Stream()
+        sys.stdout.newText.connect(self.opt2txt)
+        sys.stderr = Stream()
+        sys.stderr.newText.connect(self.opt2txt)
+    def opt2txt(self, text,color=None):
+        # print("get Message ....{}".format(text))
+        cursor = self.output.output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        if color or text.startswith('#'):
+            text = self.richTxt(text)
+            cursor.insertHtml(str(text,'utf-8'))
+            # cursor.insertText(os.linesep)
         else:
-            if clear:
-                self.resDia.txtedit.clear()
-                return
-            if close:
-                self.resDia.close()
-                self.resDia.deleteLater()
-                self.resDia = None
-            else:
-                if self.resDia.isClosed: self.resDia._showing()
-                if redirect:
-                    if isinstance(redirect, int):
-                        self.resDia.redirectOPT()
-                    elif isinstance(redirect, (str, unicode)):
-                        # self.resDia.txtedit.clear()
-                        self.resDia.opt2txt(redirect)
+            cursor.insertText(text)
+        self.output.output.setTextCursor(cursor)
+        self.output.output.ensureCursorVisible()
+
+
+    # def _show_resDialog(self,redirect=True,close=None,clear=None):
+    #     if not self.resDia:
+    #         self.resDia =resultDialog.ResultDialog(self.frame_3)
+    #         if redirect:
+    #             if isinstance(redirect,int):
+    #                 self.resDia.redirectOPT()
+    #             elif isinstance(redirect,(str)):
+    #                 self.resDia.opt2txt(redirect)
+    #         self.resDia.resize(500,400)
+    #         self.resDia.move(600,300)
+    #         self.resDia.show()
+    #     else:
+    #         if clear:
+    #             self.resDia.txtedit.clear()
+    #             return
+    #         if close:
+    #             self.resDia.close()
+    #             self.resDia.deleteLater()
+    #             self.resDia = None
+    #         else:
+    #             if self.resDia.isClosed: self.resDia._showing()
+    #             if redirect:
+    #                 if isinstance(redirect, int):
+    #                     self.resDia.redirectOPT()
+    #                 elif isinstance(redirect, (str, unicode)):
+    #                     # self.resDia.txtedit.clear()
+    #                     self.resDia.opt2txt(redirect)
 def main_ui():
     # for widget in qApp.allWidgets():
     #     if hasattr(widget, "objectName"):

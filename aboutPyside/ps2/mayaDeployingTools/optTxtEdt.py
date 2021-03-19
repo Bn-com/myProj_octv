@@ -24,16 +24,16 @@ import pysideuic as uic
 #  o  utputTxtplan O OutputTxtplan || OutputTxtplan  utputtxtplan
 
 
-class QptTxEdt(QWidget):
+class OptTxEdt(QWidget):
     def __init__(self,*args,**kwargs):
-        super(QptTxEdt, self).__init__(*args,**kwargs)
+        super(OptTxEdt, self).__init__(*args,**kwargs)
         self.output = QTextEdit(self)
         self.layout = QHBoxLayout()
         self.layout.addWidget(self.output)
         self.setLayout(self.layout)
-        self.initUI()
+        # self.initUI()
 
-    def initUI(self):
+    def initUI_process(self):
         # Layout are better for placing widgets
         # QProcess object for external app
         self.process = QProcess(self)
@@ -48,8 +48,9 @@ class QptTxEdt(QWidget):
     def dataReady(self):
         cursor = self.output.textCursor()
         cursor.movePosition(cursor.End)
-        cursor.insertText(str(self.process.readAll()).dncode('u8'))
+        cursor.insertText(unicode(self.process.readAll(),'gbk'))
         self.output.ensureCursorVisible()
+
 
     def callProgram(self,cmd):
         # run the process
@@ -61,7 +62,7 @@ class QptTxEdt(QWidget):
 #Function Main Start
 def main():
     app = QApplication(sys.argv)
-    ui=QptTxEdt()
+    ui=OptTxEdt()
     ui.show()
     bat = os.path.join(os.path.dirname(os.path.realpath(__file__)),'exec','maya2016.bat')
     print(bat)

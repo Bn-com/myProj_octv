@@ -2,7 +2,7 @@
 
 # Form implementation generated from reading ui file 'mayaDeploy_ui.ui'
 #
-# Created: Wed Mar 17 18:02:07 2021
+# Created: Thu Mar 18 11:27:42 2021
 #      by: pyside-uic 0.2.15 running on PySide 1.2.4
 #
 # WARNING! All changes made in this file will be lost!
@@ -12,7 +12,7 @@ from PySide import QtCore, QtGui
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(310, 388)
+        MainWindow.resize(314, 465)
         self.centralwidget = QtGui.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
         self.gridLayout = QtGui.QGridLayout(self.centralwidget)
@@ -56,12 +56,12 @@ class Ui_MainWindow(object):
         self.gridLayout.addWidget(self.frame_2, 0, 0, 1, 2)
         self.frame_3 = QtGui.QFrame(self.centralwidget)
         self.frame_3.setFrameShape(QtGui.QFrame.StyledPanel)
-        self.frame_3.setFrameShadow(QtGui.QFrame.Raised)
+        self.frame_3.setFrameShadow(QtGui.QFrame.Sunken)
         self.frame_3.setObjectName("frame_3")
         self.gridLayout.addWidget(self.frame_3, 3, 0, 1, 2)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtGui.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 310, 23))
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 314, 23))
         self.menubar.setObjectName("menubar")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtGui.QStatusBar(MainWindow)

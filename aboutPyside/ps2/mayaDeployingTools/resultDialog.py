@@ -88,8 +88,8 @@ class ResultDialog(QDialog):
         cursor.movePosition(QTextCursor.End)
         if color or text.startswith('#'):
             text = self.richTxt(text)
-            cursor.insertHtml(text)
-            cursor.insertText(os.linesep)
+            cursor.insertHtml(str(text,'utf-8'))
+            # cursor.insertText(os.linesep)
         else:
             cursor.insertText(text)
         self.txtedit.setTextCursor(cursor)
