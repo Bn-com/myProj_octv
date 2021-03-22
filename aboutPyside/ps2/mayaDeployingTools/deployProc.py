@@ -47,16 +47,13 @@ class DeployProc(object):
         self._exec_bat = os.path.abspath(os.path.join(self.currendDir,'exec/Maya_{}_{}.bat'.format(self.mayaVersion,self.mode)))
         return self._exec_bat
 
-    def _implementCmd(self):
-        if self._mode == 'obsolete':
-            return self.exec_bat
-        elif self._mode == 'default':
+    def _do_something_then_return_bat(self):
+        if self._mode == 'default':
             if os.path.exists(self.mayaDoc):
                 timeSuffix = time.strftime('%y%m%d%H%M%S')
                 print(timeSuffix)
         elif self.mode == 'new':
-          if self.mayaVersion == '2016':
-              print(self.exec_bat)
-              # return self.exec_bat
-              print(os.environ['maya_module_path'])
+          if self.mayaVersion == 'all':
+              print('...all set new mode....')
+        return self.exec_bat
 

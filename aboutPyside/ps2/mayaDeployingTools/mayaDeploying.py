@@ -109,9 +109,12 @@ class MayaDeploying_Ui(QMainWindow):
         self.setStatusBar(self.statusbar)
 
         self.retranslateUi()
-        QObject.connect(self.chbx_oth, SIGNAL("toggled(bool)"), self.rb_old.setDisabled)
-        QObject.connect(self.rb_old, SIGNAL("toggled(bool)"), self.chbx_oth.setDisabled)
-        QObject.connect(self.rb_old,SIGNAL("toggled(bool)"),self.chbx_oth.setChecked(False))
+        # QObject.connect(self.chbx_oth, SIGNAL("toggled(bool)"), self.rb_old.setDisabled)
+        # QObject.connect(self.rb_old, SIGNAL("toggled(bool)"), self.chbx_oth.setDisabled)
+        # QObject.connect(self.rb_old,SIGNAL("toggled(bool)"),self.chbx_oth.setChecked(False))
+        QObject.connect(self.rb_old, SIGNAL("toggled(bool)"),self.con_radioGroup)
+        # QObject.connect(self.chbx_oth, SIGNAL("stateChanged(bool)"),self.con_otherChkbox)
+        self.chbx_oth.stateChanged.connect(self.con_otherChkbox)
         QMetaObject.connectSlotsByName(self)
         #==setup ui
         self.output.executeObject.connect(self._setExecBat)
@@ -131,6 +134,7 @@ class MayaDeploying_Ui(QMainWindow):
     def setupUI(self):
         self.pb_run.clicked.connect(self.cmd_bt_run)
         self._setPlatter()
+        self.redirectOPT()
     def _setPlatter(self):
         # self.setStyle("Windows")
         # self.setStyle(QStyleFactory.create('Windows'))
@@ -152,34 +156,19 @@ class MayaDeploying_Ui(QMainWindow):
         palette.setColor(QPalette.HighlightedText, QColor(127, 235, 255))
         self.setPalette(palette)
     def cmd_bt_run(self):
-        # self._show_resDialog()
-        if self.executeObject:
-            self.output.initUI_process()
-            self.output.callProgram(self.executeObject)
-            return
         mode_dict = {-2:'new',-3:'obsolete',-4:'default'}
         mode = mode_dict[self.btgrp.checkedId()]
-        if mode == 'obsolete':
-            mayaversion = '2016'
-            dpl = deployProc.DeployProc(mayaversion)
-            dpl.mode = mode
-            self.output.initUI_process()
-            self.output.callProgram(dpl._implementCmd())
-        elif mode == 'new':
-            mayaversion = 'all'
-            if self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'all'
-            if not self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'other'
-            if self.chbx_16.isChecked() and not self.chbx_oth.isChecked(): mayaversion = '2016'
-            if mayaversion == '2016':
-                dpl = deployProc.DeployProc(mayaversion)
-                dpl.mode = mode
-                self.output.initUI_process()
-                self.output.callProgram(dpl._implementCmd())
-            elif mayaversion == 'all':
-                self.redirectOPT()
-                dpl = deployProc.DeployProc(mayaversion)
-                dpl.mode = mode
-                dpl._implementCmd()
+        mayaversion = 'all'
+        if self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'all'
+        if not self.chbx_16.isChecked() and self.chbx_oth.isChecked(): mayaversion = 'other'
+        if self.chbx_16.isChecked() and not self.chbx_oth.isChecked(): mayaversion = '2016'
+        dpl = deployProc.DeployProc(mayaversion)
+        dpl.mode = mode
+        exec_bat = dpl._do_something_then_return_bat()
+        print(exec_bat)
+
+
+
     # redirect sys.stdout to textedit
     def redirectOPT(self):
         # sys.stdout = Log(self.txtedit)
@@ -202,34 +191,22 @@ class MayaDeploying_Ui(QMainWindow):
     @Slot()
     def _setExecBat(self,q):
         self.executeObject = q
+    def con_radioGroup(self,q):
+        # print(q)
+        rb_id  = self.btgrp.checkedId()
+        if rb_id == -2:
+            self.chbx_16.setChecked(True)
+            self.chbx_oth.setChecked(True)
+        elif rb_id in [-3,-4]:
+            self.chbx_16.setChecked(True)
+            self.chbx_oth.setChecked(False)
+    def con_otherChkbox(self,q):
+        # self.rb_old.setEnabled(bool(1-q))
+        if q:
+            if self.rb_old.isChecked():
+                self.rb_old.setChecked(False)
+                self.rb_new.setChecked(True)
 
-    # def _show_resDialog(self,redirect=True,close=None,clear=None):
-    #     if not self.resDia:
-    #         self.resDia =resultDialog.ResultDialog(self.frame_3)
-    #         if redirect:
-    #             if isinstance(redirect,int):
-    #                 self.resDia.redirectOPT()
-    #             elif isinstance(redirect,(str)):
-    #                 self.resDia.opt2txt(redirect)
-    #         self.resDia.resize(500,400)
-    #         self.resDia.move(600,300)
-    #         self.resDia.show()
-    #     else:
-    #         if clear:
-    #             self.resDia.txtedit.clear()
-    #             return
-    #         if close:
-    #             self.resDia.close()
-    #             self.resDia.deleteLater()
-    #             self.resDia = None
-    #         else:
-    #             if self.resDia.isClosed: self.resDia._showing()
-    #             if redirect:
-    #                 if isinstance(redirect, int):
-    #                     self.resDia.redirectOPT()
-    #                 elif isinstance(redirect, (str, unicode)):
-    #                     # self.resDia.txtedit.clear()
-    #                     self.resDia.opt2txt(redirect)
 def main_ui():
     # for widget in qApp.allWidgets():
     #     if hasattr(widget, "objectName"):

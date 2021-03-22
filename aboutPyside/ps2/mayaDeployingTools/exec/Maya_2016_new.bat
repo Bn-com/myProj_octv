@@ -1,6 +1,7 @@
 @echo off
 ::或许maya2016注册表的安装目录
 setlocal enabledelayedexpansion
+set BATSDIR=%~dp0
 set MAYA_VERSION=2016
 set KEY_NAME=HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Autodesk Maya %MAYA_VERSION%
 set VALUE_NAME=InstallLocation
@@ -53,8 +54,11 @@ if exist %MAYA_DOC_SHELFS%\shelf_OCTPipeline.mel (
 	del %MAYA_DOC_SHELFS%\shelf_OCTPipeline.mel
 	)
 echo ...Final STEP set maya module path
-set MAYA_MODULE_PATH_OLD=%MAYA_MODULE_PATH%
-set MAYA_MODULE_PATH_NEW=\\octvision.com\CG\Tech\maya_dev\moudules\maya_%MAYA_VERSION%
-setx MAYA_MODULE_PATH %MAYA_MODULE_PATH_OLD%;%MAYA_MODULE_PATH_NEW%
+:: set MAYA_MODULE_PATH
+set MAYA_19_MOD_PATH=%OCTV_TECH%\maya_nineteen\moudules
+set MAYA_16_MOD_PATH=%OCTV_TECH%\maya_dev\moudules\maya2016
+setx MAYA_MODULE_PATH "%MAYA_19_MOD_PATH%;%MAYA_16_MOD_PATH%"
+echo -----------------------------------------------------------------------------
 setX MAYA_UI_LANGUAGE en_US
+echo -----------------------------------------------------------------------------
 
