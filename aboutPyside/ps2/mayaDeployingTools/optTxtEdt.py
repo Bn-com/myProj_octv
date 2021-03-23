@@ -30,13 +30,17 @@ class OptTxEdt(QWidget):
         super(OptTxEdt, self).__init__(*args,**kwargs)
         self.output = QTextEdit(self)
         self.layout = QVBoxLayout()
+        # self.frame = QFrame(self)
+        self.hlayout = QHBoxLayout()
         self.bt_clr = QPushButton(self)
         self.bt_clr.setText("clear...")
         self.bt_run = QPushButton(self)
         self.bt_run.setText("run bat")
+        self.hlayout.addWidget(self.bt_clr)
+        self.hlayout.addWidget(self.bt_run)
+        # self.frame.setLayout(self.hlayout)
         self.layout.addWidget(self.output)
-        self.layout.addWidget(self.bt_clr)
-        self.layout.addWidget(self.bt_run)
+        self.layout.addLayout(self.hlayout)
         self.setLayout(self.layout)
         # self.initUI()
         self.executeBat = None
@@ -61,6 +65,7 @@ class OptTxEdt(QWidget):
         cursor = self.output.textCursor()
         cursor.movePosition(cursor.End)
         cursor.insertText(unicode(self.process.readAll(),'gbk'))
+        self.output.setTextCursor(cursor)
         self.output.ensureCursorVisible()
 
 

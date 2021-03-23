@@ -48,27 +48,6 @@ class MayaDeploying_Ui(QMainWindow):
         self.centralwidget.setObjectName("centralwidget")
         self.gridLayout = QGridLayout(self.centralwidget)
         self.gridLayout.setObjectName("gridLayout")
-        self.pb_run = QPushButton(self.centralwidget)
-        self.pb_run.setObjectName("pb_run")
-        self.gridLayout.addWidget(self.pb_run, 2, 1, 1, 1)
-        spacerItem = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.gridLayout.addItem(spacerItem, 2, 0, 1, 1)
-        self.frame = QFrame(self.centralwidget)
-        self.frame.setFrameShape(QFrame.StyledPanel)
-        self.frame.setFrameShadow(QFrame.Plain)
-        self.frame.setObjectName("frame")
-        self.frame.setMaximumHeight(36)
-        self.horizontalLayout = QHBoxLayout(self.frame)
-        self.horizontalLayout.setObjectName("horizontalLayout")
-        self.chbx_16 = QCheckBox(self.frame)
-        self.chbx_16.setChecked(True)
-        self.chbx_16.setObjectName("chbx_16")
-        self.horizontalLayout.addWidget(self.chbx_16)
-        self.chbx_oth = QCheckBox(self.frame)
-        self.chbx_oth.setChecked(True)
-        self.chbx_oth.setObjectName("chbx_oth")
-        self.horizontalLayout.addWidget(self.chbx_oth)
-        self.gridLayout.addWidget(self.frame, 1, 0, 1, 2)
         self.frame_2 = QFrame(self.centralwidget)
         self.frame_2.setFrameShape(QFrame.StyledPanel)
         self.frame_2.setFrameShadow(QFrame.Sunken)
@@ -86,7 +65,36 @@ class MayaDeploying_Ui(QMainWindow):
         self.rb_def = QRadioButton()
         self.rb_def.setObjectName("rb_def")
         self.verticalLayout.addWidget(self.rb_def)
-        self.gridLayout.addWidget(self.frame_2, 0, 0, 1, 2)
+        self.gridLayout.addWidget(self.frame_2, 0, 0, 1, 3)
+        #---------------------------------------------------------------
+        self.frame = QFrame(self.centralwidget)
+        self.frame.setFrameShape(QFrame.StyledPanel)
+        self.frame.setFrameShadow(QFrame.Plain)
+        self.frame.setObjectName("frame")
+        self.frame.setMaximumHeight(36)
+        self.horizontalLayout = QHBoxLayout(self.frame)
+        self.horizontalLayout.setObjectName("horizontalLayout")
+        self.chbx_16 = QCheckBox(self.frame)
+        self.chbx_16.setChecked(True)
+        self.chbx_16.setObjectName("chbx_16")
+        self.horizontalLayout.addWidget(self.chbx_16)
+        self.chbx_oth = QCheckBox(self.frame)
+        self.chbx_oth.setChecked(True)
+        self.chbx_oth.setObjectName("chbx_oth")
+        self.horizontalLayout.addWidget(self.chbx_oth)
+        self.gridLayout.addWidget(self.frame, 1, 0, 1, 3)
+        #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        spacerItem = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.gridLayout.addItem(spacerItem, 2, 0, 1, 1)
+        self.pb_open = QPushButton(self.centralwidget)
+        self.pb_open.setObjectName("pb_open")
+        # self.gridLayout.addItem(self.pb_open, 2, 2, 1, 1)
+        self.gridLayout.addWidget(self.pb_open, 2, 1, 1, 1)
+        self.pb_run = QPushButton(self.centralwidget)
+        self.pb_run.setObjectName("pb_run")
+        self.gridLayout.addWidget(self.pb_run, 2, 2, 1, 1)
+        # #=---------------------------------------------------------
+
         self.frame_3 = QFrame(self.centralwidget)
         self.frame_3.setFrameShape(QFrame.StyledPanel)
         self.frame_3.setFrameShadow(QFrame.Sunken)
@@ -94,11 +102,11 @@ class MayaDeploying_Ui(QMainWindow):
         self.verticalLayout_bottom = QVBoxLayout(self.frame_3)
         self.output = optTxtEdt.OptTxEdt(parent = self.frame_3)
         self.verticalLayout_bottom.addWidget(self.output)
-        self.gridLayout.addWidget(self.frame_3, 3, 0, 1, 2)
+        self.gridLayout.addWidget(self.frame_3, 3, 0, 1, 3)
+        #------------------------------------------------------------------------------
         self.btgrp.addButton(self.rb_new)
         self.btgrp.addButton(self.rb_old)
         self.btgrp.addButton(self.rb_def)
-
         self.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(self)
         self.menubar.setGeometry(QRect(0, 0, 211, 23))
@@ -129,12 +137,15 @@ class MayaDeploying_Ui(QMainWindow):
         self.chbx_oth.setText(u"其他版本")
         self.rb_new.setText(u"新配置方式（所有版本maya)")
         self.rb_old.setText(u"旧配置方式(只适用于2016)")
-        self.rb_def.setText(u"maya 默认配置\n备份当前maya配置文件夹\n并配置为默认环境")
+        self.rb_def.setText(u"maya 默认配置\n备份当前maya配置文件夹\n并清空maya配置文件夹")
+        self.pb_open.setText(u'打开我的文档')
         self.setWindowTitle(u"Maya 配置")
     def setupUI(self):
         self.pb_run.clicked.connect(self.cmd_bt_run)
+        self.pb_open.clicked.connect(self.cmd_open)
         self._setPlatter()
         self.redirectOPT()
+        # self.sizeHint(QSize(300,168))
     def _setPlatter(self):
         # self.setStyle("Windows")
         # self.setStyle(QStyleFactory.create('Windows'))
@@ -166,8 +177,8 @@ class MayaDeploying_Ui(QMainWindow):
         dpl.mode = mode
         exec_bat = dpl._do_something_then_return_bat()
         print(exec_bat)
-
-
+        self.output.initUI_process()
+        self.output.callProgram(exec_bat)
 
     # redirect sys.stdout to textedit
     def redirectOPT(self):
@@ -206,6 +217,9 @@ class MayaDeploying_Ui(QMainWindow):
             if self.rb_old.isChecked():
                 self.rb_old.setChecked(False)
                 self.rb_new.setChecked(True)
+    def cmd_open(self):
+        userdocuments = os.path.join(os.getenv("userprofile"),'documents')
+        os.startfile(userdocuments)
 
 def main_ui():
     # for widget in qApp.allWidgets():
@@ -245,5 +259,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     # view = UI()
     view = MayaDeploying_Ui()
+    view.resize(555,500)
+    # view.move(500,200)
     view.show()
     sys.exit(app.exec_())
